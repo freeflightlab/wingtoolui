@@ -1,0 +1,2893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paraglider Design Tool</title>
+<style>/* Palette note: the geometry colours are the AutoCAD Color Index values the
+   handbook's own panel subroutine writes into its DXF (2 yellow, 3 green,
+   4 cyan, 5 blue, 6 magenta), tempered for a dark screen. Anyone who has
+   opened a .dxf from that program will recognise the wing immediately. */
+
+:root {
+  --ink:        #0d1317;
+  --panel:      #141d23;
+  --panel-2:    #1b262e;
+  --rule:       #26343d;
+  --rule-soft:  #1e2a32;
+  --text:       #ccd8de;
+  --text-dim:   #7b8f9b;
+  --text-faint: #4e6270;
+
+  --aci-cyan:    #35d6e8;
+  --aci-green:   #5fd97a;
+  --aci-magenta: #e85bc4;
+  --aci-yellow:  #e8c547;
+  --aci-blue:    #6e8bff;
+  --aci-red:     #ff5e5e;
+
+  --grid:       #1a252c;
+  --grid-major: #223039;
+
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.wordmark {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text);
+  white-space: nowrap;
+}
+.wordmark b { color: var(--aci-cyan); font-weight: 600; }
+
+.wingname {
+  font-family: var(--mono);
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  color: var(--aci-yellow);
+  padding: 4px 8px;
+  border-radius: 3px;
+  width: 150px;
+  font-size: 12px;
+}
+
+.readout {
+  display: flex;
+  gap: 16px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.stat { display: flex; flex-direction: column; gap: 1px; min-width: 62px; }
+.stat .k {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.stat .v { font-family: var(--mono); font-size: 13px; color: var(--text); }
+.stat .v.hot { color: var(--aci-cyan); }
+.stat .v.warn { color: var(--aci-red); }
+
+/* ---------- body ---------- */
+
+.body {
+  display: grid;
+  grid-template-columns: 288px 1fr;
+  overflow: hidden;
+}
+
+.controls {
+  border-right: 1px solid var(--rule);
+  background: var(--panel);
+  overflow-y: auto;
+  padding-bottom: 40px;
+}
+
+.stage {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+  background: var(--ink);
+}
+
+.viewports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--rule-soft);
+  overflow: hidden;
+}
+
+.vp {
+  position: relative;
+  background: var(--ink);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.vp > svg { display: block; width: 100%; height: 100%; }
+
+.vp-label {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.vp-note {
+  position: absolute;
+  bottom: 8px;
+  left: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+/* ---------- control groups ---------- */
+
+.group { border-bottom: 1px solid var(--rule-soft); }
+
+.group > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 11px 14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary:hover { color: var(--text); background: var(--panel-2); }
+.group > summary::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .15s ease;
+  flex: none;
+}
+.group[open] > summary::before { transform: rotate(45deg); }
+.group[open] > summary { color: var(--text); }
+
+.group-body { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+.field { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; }
+.field label {
+  font-size: 11px;
+  color: var(--text-dim);
+  grid-column: 1;
+}
+.field output {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--aci-yellow);
+  text-align: right;
+  grid-column: 2;
+}
+.field input[type=range] { grid-column: 1 / -1; }
+
+.field.row { grid-template-columns: 1fr 84px; }
+.field.row input[type=number], .field.row select {
+  grid-column: 2;
+  width: 100%;
+}
+
+input[type=number], select, input[type=text] {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--ink);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 4px 6px;
+}
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--aci-cyan);
+  outline-offset: 1px;
+}
+
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+  width: 100%;
+  margin: 0;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 2px; background: var(--rule); border-radius: 2px;
+}
+input[type=range]::-moz-range-track {
+  height: 2px; background: var(--rule); border-radius: 2px;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--aci-cyan);
+  margin-top: -4.5px;
+  border: none;
+}
+input[type=range]::-moz-range-thumb {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--aci-cyan); border: none;
+}
+
+.btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 7px 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.btn:hover { border-color: var(--aci-cyan); color: var(--aci-cyan); }
+.btn.primary { border-color: var(--aci-cyan); color: var(--aci-cyan); }
+
+.btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.btn-grid .btn { text-align: center; }
+
+.hint {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.check { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-dim); cursor: pointer; }
+.check input { accent-color: var(--aci-cyan); }
+
+/* ---------- balance table ---------- */
+
+.tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+.tbl td { padding: 3px 0; }
+.tbl td:last-child { text-align: right; color: var(--aci-yellow); }
+.tbl td:first-child { color: var(--text-dim); }
+.tbl tr.em td:last-child { color: var(--aci-cyan); }
+
+/* ---------- status bar ---------- */
+
+.statusbar {
+  border-top: 1px solid var(--rule);
+  background: var(--panel);
+  padding: 7px 14px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+  min-height: 32px;
+}
+.statusbar .sep { color: var(--rule); }
+.statusbar .ok { color: var(--aci-green); }
+.statusbar .bad { color: var(--aci-red); }
+
+.legend { display: flex; gap: 12px; margin-left: auto; flex-wrap: wrap; }
+.legend i {
+  font-style: normal;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.legend i::before {
+  content: "";
+  width: 10px; height: 2px; border-radius: 2px;
+  background: currentColor;
+}
+.legend i.c { color: var(--aci-cyan); }
+.legend i.g { color: var(--aci-green); }
+.legend i.m { color: var(--aci-magenta); }
+.legend i.y { color: var(--aci-yellow); }
+.legend i.b { color: var(--aci-blue); }
+
+/* ---------- safety notice ---------- */
+
+.notice {
+  margin: 12px 14px;
+  padding: 10px 11px;
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--aci-red);
+  border-radius: 3px;
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  background: var(--panel-2);
+}
+.notice b { color: var(--aci-red); font-weight: 600; display: block; margin-bottom: 3px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .controls { border-right: none; border-bottom: 1px solid var(--rule); max-height: 42vh; }
+  .viewports { grid-template-columns: 1fr; grid-template-rows: repeat(4, minmax(220px, 1fr)); overflow-y: auto; }
+  .readout { width: 100%; margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="masthead">
+    <div class="wordmark"><b>LE</b> Paraglider Design Tool</div>
+    <input class="wingname" id="wingName" value="gnu-01" aria-label="Wing name">
+    <div class="readout" id="readout"></div>
+  </header>
+
+  <div class="body">
+
+    <aside class="controls">
+
+      <details class="group" open>
+        <summary>Planform</summary>
+        <div class="group-body" id="g-planform"></div>
+      </details>
+
+      <details class="group">
+        <summary>Section</summary>
+        <div class="group-body" id="g-airfoil"></div>
+      </details>
+
+      <details class="group" open>
+        <summary>Arc &amp; twist</summary>
+        <div class="group-body" id="g-lobe"></div>
+      </details>
+
+      <details class="group">
+        <summary>Balance</summary>
+        <div class="group-body" id="g-balance"></div>
+      </details>
+
+      <details class="group">
+        <summary>Panels &amp; cutting</summary>
+        <div class="group-body" id="g-panels"></div>
+      </details>
+
+      <details class="group">
+        <summary>Files</summary>
+        <div class="group-body" id="g-files"></div>
+      </details>
+
+      <div class="notice">
+        <b>Before you fly anything</b>
+        This tool implements published design geometry. It does not certify a
+        wing, predict how one behaves at the edge of its envelope, or replace
+        load testing. A paraglider is an aircraft and a failure of one is
+        usually not survivable. Treat any output as a starting point for
+        analysis and testing by someone qualified to do it.
+      </div>
+    </aside>
+
+    <main class="stage">
+      <div class="viewports">
+        <div class="vp"><div class="vp-label">Plan — flat</div><svg id="vp-plan"></svg><div class="vp-note" id="note-plan"></div></div>
+        <div class="vp"><div class="vp-label">Front — arc</div><svg id="vp-front"></svg><div class="vp-note" id="note-front"></div></div>
+        <div class="vp"><div class="vp-label">Section — balance</div><svg id="vp-section"></svg><div class="vp-note" id="note-section"></div></div>
+        <div class="vp"><div class="vp-label">Cutting layout</div><svg id="vp-cut"></svg><div class="vp-note" id="note-cut"></div></div>
+      </div>
+
+      <div class="statusbar">
+        <span id="status">Ready</span>
+        <div class="legend">
+          <i class="c">upper</i><i class="g">lower</i><i class="m">arc</i><i class="y">ribs</i><i class="b">lines</i>
+        </div>
+      </div>
+    </main>
+
+  </div>
+</div>
+
+<script>
+/* ===== num.js ===== */
+/* num.js — small numeric helpers shared by the core modules. */
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+const deg = (r) => (r * 180) / Math.PI;
+const rad = (d) => (d * Math.PI) / 180;
+const lerp = (a, b, t) => a + (b - a) * t;
+
+/** Composite Simpson integration. n is forced even. */
+function simpson(f, a, b, n = 200) {
+  if (n % 2) n += 1;
+  const h = (b - a) / n;
+  let sum = f(a) + f(b);
+  for (let i = 1; i < n; i++) sum += f(a + i * h) * (i % 2 ? 4 : 2);
+  return (sum * h) / 3;
+}
+const dist3 = (p, q) =>
+  Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+const dist2 = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+
+/**
+ * Solve f(x)=0 on a bracketing interval by bisection.
+ * Chosen over Newton because every root we need here is bracketed and
+ * monotonic, and bisection cannot diverge on a user-supplied input.
+ */
+function bisect(f, lo, hi, tol = 1e-12, maxIter = 200) {
+  let flo = f(lo);
+  let fhi = f(hi);
+  if (flo === 0) return lo;
+  if (fhi === 0) return hi;
+  if (flo * fhi > 0) throw new Error('bisect: root is not bracketed');
+  for (let i = 0; i < maxIter; i++) {
+    const mid = (lo + hi) / 2;
+    const fmid = f(mid);
+    if (fmid === 0 || (hi - lo) / 2 < tol) return mid;
+    if (flo * fmid < 0) { hi = mid; fhi = fmid; } else { lo = mid; flo = fmid; }
+  }
+  return (lo + hi) / 2;
+}
+
+/** Cumulative arc length along a polyline of [x,y] or [x,y,z] points. */
+function cumulativeLength(pts) {
+  const out = [0];
+  for (let i = 1; i < pts.length; i++) {
+    const d = pts[0].length === 3 ? dist3(pts[i - 1], pts[i]) : dist2(pts[i - 1], pts[i]);
+    out.push(out[i - 1] + d);
+  }
+  return out;
+}
+
+/** Linear interpolation of a point at arc length s along a polyline. */
+function pointAtLength(pts, cum, s) {
+  if (s <= 0) return pts[0].slice();
+  const last = cum[cum.length - 1];
+  if (s >= last) return pts[pts.length - 1].slice();
+  let i = 1;
+  while (cum[i] < s) i++;
+  const f = (s - cum[i - 1]) / (cum[i] - cum[i - 1]);
+  return pts[i - 1].map((v, k) => lerp(v, pts[i][k], f));
+}
+
+/* ===== planform.js ===== */
+/* planform.js — Chapter 1: Paraglider planform.
+ *
+ * Coordinate convention used throughout this project:
+ *   y  spanwise, 0 at the centre rib, positive toward the right tip (metres)
+ *   x  chordwise, 0 at the centre-rib leading edge, positive aft (metres)
+ *   z  vertical, positive up (metres)
+ *
+ * The handbook (1.2.1) defines each edge as an ellipse plus a linear term:
+ *   leading  edge:  x = x1 + b1 * sqrt(1 - (y/a1)^2) + k1 * y
+ *   trailing edge:  x = x2 - b2 * sqrt(1 - (y/a2)^2) + k2 * y
+ * The handbook writes these with (x,y) swapped relative to our axes; the
+ * structure is identical. Chord at station y is xTE(y) - xLE(y).
+ *
+ * The handbook's 1.2.2 "discrete method" — an explicit list of
+ * (y, xLE, xTE) triplets — is supported as an alternative source.
+ */
+
+/** Analytic edge evaluation. Returns chordwise position of one edge. */
+function edge(y, { a, b, k, x0 }, sign) {
+  const t = clamp(Math.abs(y) / a, 0, 1);
+  return x0 + sign * b * Math.sqrt(1 - t * t) + k * Math.abs(y);
+}
+
+/**
+ * Build a planform from analytic parameters.
+ * @param {object} p
+ * @param {number} p.span      full flat span, tip to tip (m)
+ * @param {object} p.le        {a,b,k,x0} leading-edge ellipse params
+ * @param {object} p.te        {a,b,k,x0} trailing-edge ellipse params
+ */
+function analyticPlanform(p) {
+  const halfSpan = p.span / 2;
+  return {
+    kind: 'analytic',
+    span: p.span,
+    halfSpan,
+    params: { le: p.le, te: p.te },
+    xLE: (y) => edge(y, p.le, +1),
+    xTE: (y) => edge(y, p.te, -1),
+    chord: (y) => edge(y, p.te, -1) - edge(y, p.le, +1),
+  };
+}
+
+/**
+ * Derive analytic parameters from the numbers a designer actually thinks in:
+ * span, root chord, tip chord, how far the tip is swept back, and how
+ * elliptical each edge is.
+ *
+ * ellipticityLE / ellipticityTE run 0..1. At 1 the edge is a pure ellipse
+ * reaching the tip; at 0 it is a straight taper. Intermediate values blend,
+ * which is the "modified ellipse" the handbook recommends for real wings.
+ */
+function planformFromDesignInputs({
+  span = 10.25,
+  rootChord = 2.6,
+  tipChord = 0.9,
+  tipSweep = 1.1,
+  ellipticityLE = 0.85,
+  ellipticityTE = 0.95,
+}) {
+  const s = span / 2;
+  // Leading edge: starts at x=0 at the centre, ends at x=tipSweep at the tip.
+  // Elliptical part carries `ellipticityLE` of that travel, linear part the rest.
+  const bLE = tipSweep * ellipticityLE;
+  const kLE = (tipSweep * (1 - ellipticityLE)) / s;
+  const le = { a: s, b: -bLE, k: kLE, x0: bLE };
+  // so xLE(0) = bLE - bLE = 0, xLE(s) = bLE + kLE*s = tipSweep. Correct.
+
+  // Trailing edge: from rootChord at centre to tipSweep+tipChord at the tip.
+  const teTravel = tipSweep + tipChord - rootChord;
+  const bTE = teTravel * ellipticityTE;
+  const kTE = (teTravel * (1 - ellipticityTE)) / s;
+  const te = { a: s, b: bTE, k: kTE, x0: rootChord + bTE };
+  // xTE(0) = rootChord + bTE - bTE = rootChord. xTE(s) = rootChord + bTE + kTE*s.
+
+  return analyticPlanform({ span, le, te });
+}
+
+/** Planform from an explicit table of stations (handbook 1.2.2). */
+function discretePlanform(rows) {
+  const ys = rows.map((r) => r.y);
+  const span = 2 * Math.max(...ys);
+  const interp = (y, key) => {
+    const t = Math.abs(y);
+    if (t <= ys[0]) return rows[0][key];
+    for (let i = 1; i < rows.length; i++) {
+      if (t <= ys[i]) {
+        const f = (t - ys[i - 1]) / (ys[i] - ys[i - 1]);
+        return rows[i - 1][key] + f * (rows[i][key] - rows[i - 1][key]);
+      }
+    }
+    return rows[rows.length - 1][key];
+  };
+  return {
+    kind: 'discrete',
+    span,
+    halfSpan: span / 2,
+    rows,
+    xLE: (y) => interp(y, 'xLE'),
+    xTE: (y) => interp(y, 'xTE'),
+    chord: (y) => interp(y, 'xTE') - interp(y, 'xLE'),
+  };
+}
+
+/**
+ * Rib (profile) stations across the half wing.
+ * `distribution` biases stations toward the tip, where chord changes fastest.
+ *   'uniform'  equal spacing
+ *   'cosine'   denser near the tip
+ */
+function ribStations(planform, nCells, distribution = 'cosine') {
+  // nCells counts cells in the HALF wing; there are nCells+1 ribs including
+  // the centre rib at y=0.
+  const out = [];
+  for (let i = 0; i <= nCells; i++) {
+    const u = i / nCells;
+    const t = distribution === 'cosine' ? Math.sin((u * Math.PI) / 2) : u;
+    out.push(t * planform.halfSpan);
+  }
+  return out;
+}
+
+/** Flat area of the whole wing (both halves), by Simpson integration. */
+function flatArea(planform, n = 400) {
+  return 2 * simpson((y) => planform.chord(y), 0, planform.halfSpan, n);
+}
+
+/** Summary numbers from handbook Table 1: area, span, chords, AR, centroid. */
+function planformMetrics(planform, n = 400) {
+  const s = planform.halfSpan;
+  const area = flatArea(planform, n);
+  const span = planform.span;
+
+  let maxch = -Infinity;
+  let minch = Infinity;
+  for (let i = 0; i <= n; i++) {
+    const c = planform.chord((i / n) * s);
+    if (c > maxch) maxch = c;
+    if (c < minch) minch = c;
+  }
+
+  // Centroid of the half planform. By symmetry the full-wing centroid sits on
+  // the centreline, so only the chordwise coordinate is reported (handbook 1.3
+  // notes designers correlate this with centre-of-pressure position).
+  const denom = simpson((y) => planform.chord(y), 0, s, n);
+  const numX = simpson(
+    (y) => planform.chord(y) * (planform.xLE(y) + planform.chord(y) / 2),
+    0, s, n,
+  );
+  const numY = simpson((y) => planform.chord(y) * y, 0, s, n);
+
+  // Mean aerodynamic chord — not in the handbook, but standard and useful
+  // for sanity-checking a design against published wings.
+  const mac = simpson((y) => planform.chord(y) ** 2, 0, s, n) / denom;
+
+  return {
+    area,
+    span,
+    maxChord: maxch,
+    meanChord: area / span,
+    minChord: minch,
+    aspectRatio: (span * span) / area,
+    mac,
+    centroidX: numX / denom,
+    centroidY: numY / denom,
+  };
+}
+
+/** Closed outline of the full planform, for drawing. */
+function planformOutline(planform, n = 120) {
+  const s = planform.halfSpan;
+  const pts = [];
+  for (let i = -n; i <= n; i++) {
+    const y = (i / n) * s;
+    pts.push([y, planform.xLE(y)]);
+  }
+  for (let i = n; i >= -n; i--) {
+    const y = (i / n) * s;
+    pts.push([y, planform.xTE(y)]);
+  }
+  return pts;
+}
+
+/* ===== airfoil.js ===== */
+/* airfoil.js — Chapter 2: Aerofoils.
+ *
+ * An airfoil here is a unit-chord section: an ordered list of [x, y] points
+ * running from the trailing edge over the upper surface, round the leading
+ * edge at x=0, and back along the lower surface to the trailing edge
+ * (Selig order — the convention used by XFOIL and XFLR5, which the handbook
+ * points designers toward in 2.8 and 2.9).
+ *
+ * Paraglider-specific attributes from 2.7 — air-intake extent, line-anchor
+ * positions, internal rib holes — ride along on the same object because they
+ * are properties of the section, and downstream modules need them.
+ */
+
+/** Cosine-spaced x stations, dense at both LE and TE where curvature is high. */
+function cosineSpacing(n) {
+  const xs = [];
+  for (let i = 0; i <= n; i++) xs.push(0.5 * (1 - Math.cos((Math.PI * i) / n)));
+  return xs;
+}
+
+/**
+ * NACA 4-digit section (handbook 2.6).
+ * @param {string} code e.g. '4415' — m=4%, p=40%, t=15%
+ * @param {number} n    points per surface
+ */
+function naca4(code, n = 80) {
+  const m = parseInt(code[0], 10) / 100;
+  const p = parseInt(code[1], 10) / 10;
+  const t = parseInt(code.slice(2), 10) / 100;
+
+  const yt = (x) =>
+    5 * t * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x
+      + 0.2843 * x ** 3 - 0.1015 * x ** 4);
+
+  const camber = (x) => {
+    if (m === 0 || p === 0) return { yc: 0, dy: 0 };
+    if (x < p) {
+      return {
+        yc: (m / (p * p)) * (2 * p * x - x * x),
+        dy: ((2 * m) / (p * p)) * (p - x),
+      };
+    }
+    const q = (1 - p) ** 2;
+    return {
+      yc: (m / q) * (1 - 2 * p + 2 * p * x - x * x),
+      dy: ((2 * m) / q) * (p - x),
+    };
+  };
+
+  const xs = cosineSpacing(n);
+  const upper = [];
+  const lower = [];
+  for (const x of xs) {
+    const { yc, dy } = camber(x);
+    const th = Math.atan(dy);
+    const s = Math.sin(th);
+    const c = Math.cos(th);
+    upper.push([x - yt(x) * s, yc + yt(x) * c]);
+    lower.push([x + yt(x) * s, yc - yt(x) * c]);
+  }
+
+  const pts = upper.slice().reverse().concat(lower.slice(1));
+  return finalise({
+    name: `NACA ${code}`,
+    points: pts,
+    intake: { start: 0.012, end: 0.055 },
+    anchors: { A: 0.085, B: 0.30, C: 0.53, D: 0.78 },
+  });
+}
+
+/**
+ * Parse a coordinate file. Accepts Selig format (name line then x y pairs)
+ * and bare "x y" lists. The handbook links several paraglider sections in
+ * this form (Table 2.1).
+ */
+function parseAirfoilText(text, fallbackName = 'imported') {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let name = fallbackName;
+  const pts = [];
+  for (const line of lines) {
+    const nums = line.split(/[\s,]+/).map(Number);
+    if (nums.length >= 2 && nums.every((v) => Number.isFinite(v))) {
+      pts.push([nums[0], nums[1]]);
+    } else if (pts.length === 0) {
+      name = line;
+    }
+  }
+  if (pts.length < 10) throw new Error('Not enough coordinate pairs to read a section.');
+  return finalise({
+    name,
+    points: normaliseToUnitChord(pts),
+    intake: { start: 0.012, end: 0.055 },
+    anchors: { A: 0.085, B: 0.30, C: 0.53, D: 0.78 },
+  });
+}
+
+/** Shift and scale an arbitrary point list so the chord runs 0..1 along x. */
+function normaliseToUnitChord(pts) {
+  const xmin = Math.min(...pts.map((p) => p[0]));
+  const xmax = Math.max(...pts.map((p) => p[0]));
+  const c = xmax - xmin;
+  return pts.map(([x, y]) => [(x - xmin) / c, y / c]);
+}
+
+/**
+ * Split into upper and lower polylines, both running LE -> TE.
+ * This is step 3 of the flat-development method (handbook 5.2): the two
+ * surfaces are developed separately, and intakes are excluded from the curves.
+ */
+function splitSurfaces(af) {
+  const pts = af.points;
+  // The leading edge is the point of minimum x.
+  let iLE = 0;
+  for (let i = 1; i < pts.length; i++) if (pts[i][0] < pts[iLE][0]) iLE = i;
+  const upper = pts.slice(0, iLE + 1).reverse(); // TE->LE reversed = LE->TE
+  const lower = pts.slice(iLE);
+  return { upper, lower };
+}
+
+/** Resample a surface polyline to n points, evenly spaced in arc length. */
+function resampleSurface(poly, n) {
+  const cum = [0];
+  for (let i = 1; i < poly.length; i++) {
+    cum.push(cum[i - 1] + Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]));
+  }
+  const total = cum[cum.length - 1];
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const s = (k / (n - 1)) * total;
+    if (s <= 0) { out.push(poly[0].slice()); continue; }
+    if (s >= total) { out.push(poly[poly.length - 1].slice()); continue; }
+    let i = 1;
+    while (cum[i] < s) i++;
+    const f = (s - cum[i - 1]) / (cum[i] - cum[i - 1]);
+    out.push([lerp(poly[i - 1][0], poly[i][0], f), lerp(poly[i - 1][1], poly[i][1], f)]);
+  }
+  return out;
+}
+
+/** Geometric parameters listed in handbook 2.4, as fractions of chord. */
+function airfoilMetrics(af) {
+  const { upper, lower } = splitSurfaces(af);
+  const at = (poly, x) => {
+    for (let i = 1; i < poly.length; i++) {
+      if (poly[i][0] >= x) {
+        const f = (x - poly[i - 1][0]) / (poly[i][0] - poly[i - 1][0] || 1);
+        return lerp(poly[i - 1][1], poly[i][1], clamp(f, 0, 1));
+      }
+    }
+    return poly[poly.length - 1][1];
+  };
+  let maxT = 0, maxTx = 0, maxC = 0, maxCx = 0;
+  for (let i = 0; i <= 400; i++) {
+    const x = i / 400;
+    const u = at(upper, x);
+    const l = at(lower, x);
+    const th = u - l;
+    const cm = (u + l) / 2;
+    if (th > maxT) { maxT = th; maxTx = x; }
+    if (Math.abs(cm) > Math.abs(maxC)) { maxC = cm; maxCx = x; }
+  }
+  return {
+    maxThickness: maxT,
+    maxThicknessAt: maxTx,
+    maxCamber: maxC,
+    maxCamberAt: maxCx,
+    perimeterUpper: afPolyLength(upper),
+    perimeterLower: afPolyLength(lower),
+  };
+}
+
+function afPolyLength(poly) {
+  let s = 0;
+  for (let i = 1; i < poly.length; i++) {
+    s += Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]);
+  }
+  return s;
+}
+
+function finalise(af) {
+  af.metrics = airfoilMetrics(af);
+  return af;
+}
+
+/** Built-in sections. The paraglider entries reproduce the shape family in
+ *  handbook Table 2.1 as NACA-like approximations, not as copies of the
+ *  linked coordinate files — import those directly if you want the originals. */
+const LIBRARY = {
+  'NACA 4412': () => naca4('4412'),
+  'NACA 4415': () => naca4('4415'),
+  'NACA 2414': () => naca4('2414'),
+  'NACA 4418': () => naca4('4418'),
+};
+
+/* ===== lobe.js ===== */
+/* lobe.js — Chapter 3: Main lobe ("voute").
+ *
+ * The lobe is the front view of the canopy: the reference line of the flat
+ * planform, bent in the YZ plane. The flat half-span is laid along the arc,
+ * so arc length on the lobe equals spanwise station on the flat planform.
+ * That is what makes the wing developable back to flat panels later.
+ *
+ * Each lobe type is defined as a curve sampled densely, then re-parameterised
+ * by arc length. Sampling first and inverting numerically keeps every lobe
+ * type — circle, ellipse, bionic, or an imported point list — on one code
+ * path, and avoids closed-form arc length for the ellipse, which has none.
+ *
+ * Output at a station: position (y, z) and dihedral angle beta, the angle of
+ * the local tangent from horizontal. beta is what rotates each rib into the
+ * plane normal to the lobe (handbook 3.4, step 2).
+ */
+
+const SAMPLES = 2000;
+
+function buildFromSampler(sampleFn, halfSpan) {
+  // Sample generously past the needed arc length, then trim by arc length.
+  const pts = [];
+  for (let i = 0; i <= SAMPLES; i++) pts.push(sampleFn(i / SAMPLES));
+  const cum = cumulativeLength(pts);
+  const total = cum[cum.length - 1];
+  if (total < halfSpan) {
+    throw new Error('Lobe curve is shorter than the half span — increase its size.');
+  }
+  return {
+    /** Point on the lobe at arc length s from the centre. */
+    at(s) {
+      const p = pointAtLength(pts, cum, s);
+      const h = Math.max(1e-6, total * 1e-4);
+      const p1 = pointAtLength(pts, cum, Math.max(0, s - h));
+      const p2 = pointAtLength(pts, cum, Math.min(total, s + h));
+      const beta = Math.atan2(-(p2[1] - p1[1]), p2[0] - p1[0]);
+      return { y: p[0], z: p[1], beta };
+    },
+    totalLength: total,
+    samples: pts,
+  };
+}
+
+/**
+ * @param {object} spec
+ * @param {'circle'|'ellipse'|'bionic'|'discrete'} spec.type
+ * @param {number} halfSpan  flat half span (m) — arc length to be laid on the lobe
+ */
+function buildLobe(spec, halfSpan) {
+  const t = spec.type || 'circle';
+
+  if (t === 'circle') {
+    // Handbook 3.1(a): single circle, centre above the mid-point of the
+    // main carabiners. Radius is given directly, or derived from the
+    // desired ratio of projected span to flat span.
+    const R = spec.radius ?? radiusForProjectedRatio(halfSpan, spec.projectedRatio ?? 0.88);
+    const maxAngle = Math.min(Math.PI / 2, (halfSpan / R) * 1.2);
+    return buildFromSampler(
+      (u) => {
+        const phi = u * maxAngle;
+        return [R * Math.sin(phi), -R * (1 - Math.cos(phi))];
+      },
+      halfSpan,
+    );
+  }
+
+  if (t === 'ellipse') {
+    // Handbook 3.1(c): semi-axes a and b, 2a the projected span and b the
+    // total sail arrow (rise from tip to centre).
+    const a = spec.a ?? halfSpan * 0.88;
+    const b = spec.b ?? halfSpan * 0.42;
+    return buildFromSampler(
+      (u) => {
+        const phi = (u * Math.PI) / 2;
+        return [a * Math.sin(phi), -b * (1 - Math.cos(phi))];
+      },
+      halfSpan,
+    );
+  }
+
+  if (t === 'bionic') {
+    // Handbook 3.1(d): flatter centre, tips turned up more sharply.
+    // Modelled as an ellipse whose curvature is redistributed by an exponent:
+    // exponent > 1 flattens the centre and tightens the tip.
+    const a = spec.a ?? halfSpan * 0.88;
+    const b = spec.b ?? halfSpan * 0.42;
+    const n = spec.exponent ?? 1.6;
+    return buildFromSampler(
+      (u) => {
+        const phi = (u * Math.PI) / 2;
+        const sy = Math.sin(phi);
+        return [a * sy, -b * Math.pow(1 - Math.cos(phi), n) / Math.pow(1, n)];
+      },
+      halfSpan,
+    );
+  }
+
+  if (t === 'discrete') {
+    // Handbook 3.1(e): any symmetric form given as (y,z) coordinates.
+    const rows = spec.points;
+    return buildFromSampler((u) => {
+      const idx = u * (rows.length - 1);
+      const i = Math.min(rows.length - 2, Math.floor(idx));
+      const f = idx - i;
+      return [
+        rows[i][0] + f * (rows[i + 1][0] - rows[i][0]),
+        rows[i][1] + f * (rows[i + 1][1] - rows[i][1]),
+      ];
+    }, halfSpan);
+  }
+
+  throw new Error(`Unknown lobe type: ${t}`);
+}
+
+/** Circle radius that turns a flat half-span into a given projected fraction. */
+function radiusForProjectedRatio(halfSpan, ratio) {
+  // Projected half span = R * sin(halfSpan/R). Solve R*sin(s/R)/s = ratio.
+  const f = (R) => (R * Math.sin(halfSpan / R)) / halfSpan - ratio;
+  return bisect(f, halfSpan * 0.55, halfSpan * 400);
+}
+
+/** Front-view metrics: projected span, arrow (rise), tip dihedral. */
+function lobeMetrics(lobe, halfSpan) {
+  const tip = lobe.at(halfSpan);
+  const root = lobe.at(0);
+  return {
+    projectedSpan: 2 * tip.y,
+    arrow: root.z - tip.z,
+    tipDihedralDeg: deg(tip.beta),
+    flatSpan: 2 * halfSpan,
+    spanRatio: (2 * tip.y) / (2 * halfSpan),
+  };
+}
+
+/**
+ * Washin distribution (handbook 3.3). Positive angles at the tip, centre at 0.
+ * The handbook notes 4-5 degrees total is usual, distributed either in
+ * proportion to distance from the centre or in proportion to chord.
+ */
+function washinAt(y, halfSpan, { total = 4.5, mode = 'linear', planform } = {}) {
+  const t = Math.abs(y) / halfSpan;
+  if (mode === 'chord' && planform) {
+    const cRoot = planform.chord(0);
+    const cTip = planform.chord(halfSpan);
+    const c = planform.chord(y);
+    const f = (cRoot - c) / (cRoot - cTip || 1);
+    return total * f;
+  }
+  if (mode === 'quadratic') return total * t * t;
+  return total * t;
+}
+
+/* ===== wing3d.js ===== */
+/* wing3d.js — Chapter 3.4: profile insertion, building the 3D wing.
+ *
+ * For each rib the handbook prescribes two rotations before placement:
+ *   1. rotate the section by its relative incidence alpha, about a rotation
+ *      point RP on the chord;
+ *   2. rotate the plane of the section by beta, to stand normal to the lobe.
+ * Then the reference point RL is moved onto its point on the lobe curve.
+ *
+ * Both rotations are applied here in that order. The result is a set of ribs,
+ * each a list of 3D points in the same order as the source airfoil, which is
+ * exactly the input the flat-development method needs.
+ */
+
+
+
+
+/**
+ * @param {object} cfg
+ * @param {object} cfg.planform
+ * @param {object} cfg.lobe
+ * @param {object} cfg.airfoil        unit-chord section
+ * @param {number} cfg.cells          cells per half wing
+ * @param {number} cfg.RL             reference-line position, fraction of chord
+ * @param {number} cfg.RP             rotation point, fraction of chord
+ * @param {object} cfg.washin         {total, mode}
+ * @param {number} cfg.pointsPerSurface resampling density for panel work
+ */
+function buildWing(cfg) {
+  const {
+    planform, lobe, airfoil, cells = 24,
+    RL = 0.5, RP = 0.25,
+    washin = { total: 4.5, mode: 'linear' },
+    pointsPerSurface = 60,
+    distribution = 'cosine',
+  } = cfg;
+
+  const stations = ribStations(planform, cells, distribution);
+  const { upper, lower } = splitSurfaces(airfoil);
+  const upperN = resampleSurface(upper, pointsPerSurface);
+  const lowerN = resampleSurface(lower, pointsPerSurface);
+
+  const ribs = stations.map((y, i) => {
+    const chord = planform.chord(y);
+    const xLE = planform.xLE(y);
+    const alphaDeg = washinAt(y, planform.halfSpan, { ...washin, planform });
+    const { y: ly, z: lz, beta } = lobe.at(y);
+
+    const place = (poly) => poly.map((p) => toWorld(p, {
+      chord, xLE, alphaDeg, RL, RP, ly, lz, beta,
+    }));
+
+    return {
+      index: i,
+      station: y,
+      chord,
+      xLE,
+      alphaDeg,
+      betaDeg: (beta * 180) / Math.PI,
+      lobePoint: [ly, lz],
+      upper: place(upperN),
+      lower: place(lowerN),
+    };
+  });
+
+  return { ribs, stations, cfg: { RL, RP, cells, pointsPerSurface } };
+}
+
+/**
+ * Map one unit-chord section point into world coordinates.
+ * p = [u, v] with u the chord fraction from the LE and v the ordinate.
+ */
+function toWorld(p, { chord, xLE, alphaDeg, RL, RP, ly, lz, beta }) {
+  // Scale to real chord.
+  let u = p[0] * chord;
+  let v = p[1] * chord;
+
+  // Rotation 1: incidence alpha about the rotation point RP.
+  // Positive alpha is washin — trailing edge down, nose up relative to the
+  // centre rib — so the rotation carries aft points to negative v.
+  const a = rad(alphaDeg);
+  const ru = RP * chord;
+  const du = u - ru;
+  const dv = v;
+  u = ru + du * Math.cos(a) + dv * Math.sin(a);
+  v = -du * Math.sin(a) + dv * Math.cos(a);
+
+  // The reference point RL after the same rotation — this is the point that
+  // gets pinned to the lobe.
+  const dru = RL * chord - ru;
+  const rlU = ru + dru * Math.cos(a);
+  const rlV = -dru * Math.sin(a);
+
+  // Offset from the reference point.
+  const qU = u - rlU;
+  const qV = v - rlV;
+
+  // Rotation 2: stand the section plane normal to the lobe, then translate
+  // the reference point onto the lobe curve. The chordwise axis stays global
+  // X; the in-plane normal tilts by beta within the YZ plane.
+  return [
+    xLE + RL * chord + qU,
+    ly - qV * Math.sin(beta),
+    lz + qV * Math.cos(beta),
+  ];
+}
+
+/** Projected area from the front view (what actually carries load in flight). */
+function projectedArea(wing) {
+  let area = 0;
+  const r = wing.ribs;
+  for (let i = 0; i < r.length - 1; i++) {
+    const dy = Math.abs(r[i + 1].lobePoint[0] - r[i].lobePoint[0]);
+    area += dy * ((r[i].chord + r[i + 1].chord) / 2);
+  }
+  return 2 * area;
+}
+
+/** All rib outlines as closed 3D loops, for drawing and export. */
+function ribLoops(wing) {
+  return wing.ribs.map((r) => r.upper.slice().reverse().concat(r.lower.slice(1)));
+}
+
+/** Mirror the half wing to the left side for display. */
+function mirrorRib(loop) {
+  return loop.map(([x, y, z]) => [x, -y, z]);
+}
+
+/* ===== flatdev.js ===== */
+/* flatdev.js — Chapter 5: flat development of panels.
+ *
+ * Direct implementation of the Laboratori d'envol method and its FORTRAN
+ * reference subroutine (handbook 5.3, 5.4).
+ *
+ * Two consecutive ribs give two polylines, L and R, of N points each.
+ * Take points i and i+1 on both: they form a quadrilateral that is very
+ * nearly planar because the points are close together. Split it on a
+ * diagonal into two triangles, whose side lengths are known exactly from the
+ * 3D coordinates, and lay those triangles flat, hinged on the shared
+ * diagonal. Step along the surface repeating this, carrying the running
+ * origin and angle forward, and the whole panel unrolls.
+ *
+ * Naming follows the handbook: for the quadrilateral L1-R1-R2-L2,
+ *   a = |L1 R1|   b = |L1 R2|   c = |R1 R2|
+ *   d = |L2 R1|   e = |L1 L2|   f = |L2 R2|
+ * with a1R/a2R/hR describing triangle L1-R1-R2 and a1L/a2L/hL triangle
+ * L1-R1-L2.
+ *
+ * One deliberate departure from the published FORTRAN: the running angle uses
+ * atan2 rather than atan. The original loses the quadrant and flips the panel
+ * whenever the step direction crosses vertical, which happens on strongly
+ * arced wings. Results are identical wherever the original was well behaved.
+ */
+
+/**
+ * Unroll one panel between two rib polylines.
+ * @param {number[][]} L left rib polyline, N 3D points
+ * @param {number[][]} R right rib polyline, N 3D points
+ * @returns {{left: number[][], right: number[][], seamLengths: object}}
+ */
+function developPanel(L, R) {
+  if (L.length !== R.length) throw new Error('Rib polylines must have equal point counts.');
+  const n = L.length;
+
+  const left = [];
+  const right = [];
+
+  let x0 = 0;
+  let y0 = 0;
+  let theta = 0;
+  let maxClosureGap = 0;
+
+  for (let i = 0; i < n - 1; i++) {
+    const a = dist3(L[i], R[i]);
+    if (a < 1e-12) throw new Error('Coincident rib points — panel width is zero.');
+
+    // The handbook derives a1/a2/h from the six edge lengths via the law of
+    // cosines: a2r = (a^2 - b^2 + c^2) / (2a), and so on. That form is exact
+    // in real arithmetic but ill-conditioned in floating point when the ribs
+    // are close together: a^2 becomes tiny while b^2 and c^2 stay large, so
+    // the numerator is a difference of nearly equal numbers, and dividing by
+    // the small 2a amplifies whatever error survives. On a 12-cell wing that
+    // already showed up as ~10 micrometres of seam-length drift.
+    //
+    // These are the same quantities written as a projection and a
+    // perpendicular distance, computed directly from the vectors. Both are
+    // algebraically identical to the handbook's expressions and neither
+    // subtracts nearly equal quantities.
+    const ax = R[i][0] - L[i][0];
+    const ay = R[i][1] - L[i][1];
+    const az = R[i][2] - L[i][2];
+
+    // Triangle L1-R1-L2: project L1->L2 onto L1->R1.
+    const lx = L[i + 1][0] - L[i][0];
+    const ly = L[i + 1][1] - L[i][1];
+    const lz = L[i + 1][2] - L[i][2];
+    const a1l = (ax * lx + ay * ly + az * lz) / a;
+    const hl = crossNorm(ax, ay, az, lx, ly, lz) / a;
+
+    // Triangle L1-R1-R2: project R1->R2 onto R1->L1, measured back from R1.
+    const rx = R[i + 1][0] - R[i][0];
+    const ry = R[i + 1][1] - R[i][1];
+    const rz = R[i + 1][2] - R[i][2];
+    const a2r = -(ax * rx + ay * ry + az * rz) / a;
+    const a1r = a - a2r;
+    const hr = crossNorm(ax, ay, az, rx, ry, rz) / a;
+
+    const ct = Math.cos(theta);
+    const st = Math.sin(theta);
+
+    const l1 = [x0, y0];
+    const r1 = [a * ct + x0, a * st + y0];
+    const l2 = [a1l * ct - hl * st + x0, a1l * st + hl * ct + y0];
+    const r2 = [a1r * ct - hr * st + x0, a1r * st + hr * ct + y0];
+
+    if (i === 0) { left.push(l1); right.push(r1); }
+    else {
+      // r1 of this step and r2 of the previous step are images of the same
+      // 3D point, but the method does not force them together: each step
+      // preserves a, c, e and the two diagonals b and d, and lets the fourth
+      // side f absorb the fact that the quadrilateral is not planar. So the
+      // right-hand seam can open by a hair at every station while the
+      // left-hand seam is exact by construction. Track the worst gap — it is
+      // a direct measure of how non-developable the surface is here.
+      maxClosureGap = Math.max(maxClosureGap,
+        Math.hypot(r1[0] - right[right.length - 1][0], r1[1] - right[right.length - 1][1]));
+    }
+    left.push(l2);
+    right.push(r2);
+
+    x0 = l2[0];
+    y0 = l2[1];
+    theta = Math.atan2(r2[1] - l2[1], r2[0] - l2[0]);
+  }
+
+  return {
+    left,
+    right,
+    maxClosureGap,
+    seamLengths: {
+      left: polyLength(left),
+      right: polyLength(right),
+      leftSource: polyLength3(L),
+      rightSource: polyLength3(R),
+    },
+  };
+}
+
+/**
+ * Develop every panel of the half wing, upper and lower surfaces.
+ * Panel k lies between rib k and rib k+1.
+ */
+function developWing(wing) {
+  const out = [];
+  for (let i = 0; i < wing.ribs.length - 1; i++) {
+    const Lr = wing.ribs[i];
+    const Rr = wing.ribs[i + 1];
+    out.push({
+      cell: i + 1,
+      surface: 'upper',
+      panel: developPanel(Lr.upper, Rr.upper),
+    });
+    out.push({
+      cell: i + 1,
+      surface: 'lower',
+      panel: developPanel(Lr.lower, Rr.lower),
+    });
+  }
+  return out;
+}
+
+/**
+ * Distortion check. The unrolled panel preserves the two seam lengths exactly
+ * by construction; what it cannot preserve is the diagonal. Comparing the
+ * developed diagonal against the true 3D diagonal measures how far the
+ * surface is from developable at that station. Large values mean the panel
+ * will need easing into place, or that the lobe and washin are fighting
+ * each other.
+ */
+function developmentError(L, R) {
+  let worst = 0;
+  let sum = 0;
+  let count = 0;
+  const dev = developPanel(L, R);
+  for (let i = 0; i < L.length - 1; i++) {
+    const trueDiag = dist3(L[i], R[i + 1]);
+    const dl = dev.left[i];
+    const dr = dev.right[i + 1];
+    const flatDiag = Math.hypot(dr[0] - dl[0], dr[1] - dl[1]);
+    const rel = Math.abs(flatDiag - trueDiag) / (trueDiag || 1);
+    worst = Math.max(worst, rel);
+    sum += rel;
+    count++;
+  }
+  return { worstRelative: worst, meanRelative: sum / count };
+}
+
+/** Magnitude of the cross product of two 3D vectors. */
+function crossNorm(ax, ay, az, bx, by, bz) {
+  return Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
+}
+
+function polyLength(p) {
+  let s = 0;
+  for (let i = 1; i < p.length; i++) s += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
+  return s;
+}
+
+function polyLength3(p) {
+  let s = 0;
+  for (let i = 1; i < p.length; i++) s += dist3(p[i - 1], p[i]);
+  return s;
+}
+
+/* ===== ovalization.js ===== */
+/* ovalization.js — Chapter 6: ovalization (billow).
+ *
+ * Cells are textile and pressurised, so the panel between two ribs bows out
+ * into a near-cylindrical arc. Measurements quoted in the handbook put cell
+ * width in flight around 5-6% less than the flat panel width, so panels must
+ * be cut wider than the rib spacing to end up the right size inflated.
+ *
+ * Geometry of the arc (handbook Fig 6.2), with:
+ *   S  arc length  = the panel width as cut
+ *   L  chord of the arc = the rib-to-rib spacing in flight
+ *   R  arc radius, alpha the subtended angle, f the sagitta (bulge depth)
+ *
+ *   S = R * alpha
+ *   L = 2 * R * sin(alpha/2)
+ *   f = R * (1 - cos(alpha/2))
+ *
+ * Note: the handbook prints these as "L = 2 sin(alpha/2)" and
+ * "R = f + L cos(alpha/2)". The first is missing its factor of R and the
+ * second is dimensionally inconsistent — both are typographic slips in the
+ * source. The relations implemented here are the correct circular-segment
+ * ones, and they reduce to the handbook's intent.
+ */
+
+/**
+ * Solve the arc from arc length S and chord L.
+ * S/L = (alpha/2) / sin(alpha/2) is monotonic in alpha on (0, 2pi), so the
+ * root is bracketed and bisection is safe for any physical input.
+ */
+function solveArc(S, L) {
+  if (S <= L) return { alpha: 0, R: Infinity, f: 0, ratio: S / L };
+  const ratio = S / L;
+  const g = (alpha) => (alpha / 2) / Math.sin(alpha / 2) - ratio;
+  const alpha = bisect(g, 1e-9, Math.PI * 1.999);
+  const R = S / alpha;
+  const f = R * (1 - Math.cos(alpha / 2));
+  return { alpha, R, f, ratio };
+}
+
+/** Inverse: given the flight chord L and a widening fraction, get the arc. */
+function arcFromWidening(L, wideningFraction) {
+  return solveArc(L * (1 + wideningFraction), L);
+}
+
+/**
+ * Default transition points from handbook Table 6.4, as fractions of the
+ * developed panel length measured from each end. Ovalization is faded out
+ * near the leading and trailing edges to keep tension there.
+ */
+const DEFAULT_TRANSITIONS = {
+  upper: { fromLE: 0.10, fromTE: 0.15 },
+  lower: { fromLE: 0.10, fromTE: 0.25 },
+};
+
+/**
+ * Widening profile along a panel: 0 at each end, full value in the middle,
+ * linear transitions between (handbook Fig 6.6).
+ * @param {number} t normalised position along the panel, 0 at LE, 1 at TE
+ */
+function wideningProfile(t, { fromLE, fromTE }) {
+  if (t <= 0 || t >= 1) return 0;
+  if (t < fromLE) return t / fromLE;
+  if (t > 1 - fromTE) return (1 - t) / fromTE;
+  return 1;
+}
+
+/**
+ * Apply ovalization to a developed panel by pushing the two seams apart.
+ * `amount` is the total extra width as a fraction of panel width — the
+ * handbook's guidance is about 6% total, 3% on each side, tuned per model.
+ *
+ * The offset is applied along the local seam normal so that the widening is
+ * perpendicular to the seam rather than to the global axes; on a curved
+ * developed panel those differ enough to matter at the tips.
+ */
+function applyOvalization(panel, {
+  amount = 0.06,
+  transitions = DEFAULT_TRANSITIONS.upper,
+} = {}) {
+  const { left, right } = panel;
+  const n = left.length;
+  const half = amount / 2;
+
+  const outL = [];
+  const outR = [];
+
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const scale = wideningProfile(t, transitions) * half;
+    const width = Math.hypot(right[i][0] - left[i][0], right[i][1] - left[i][1]);
+    const push = width * scale;
+
+    // Unit vector from left seam to right seam at this station.
+    const ux = width > 1e-12 ? (right[i][0] - left[i][0]) / width : 1;
+    const uy = width > 1e-12 ? (right[i][1] - left[i][1]) / width : 0;
+
+    outL.push([left[i][0] - ux * push, left[i][1] - uy * push]);
+    outR.push([right[i][0] + ux * push, right[i][1] + uy * push]);
+  }
+
+  return { left: outL, right: outR, seamLengths: panel.seamLengths, ovalized: true };
+}
+
+/**
+ * Seam-length mismatch around the leading edge (handbook 6.3).
+ * Two curvatures meet there — the billow and the LE curve itself — and the
+ * resulting surface is not developable. The handbook's fix is deliberate
+ * micro-gathering where the top panel meets the rib. This reports how much
+ * length has to be absorbed, so it can be distributed rather than discovered
+ * at the sewing machine.
+ */
+function seamEasing(panelBefore, panelAfter) {
+  const len = (p) => {
+    let s = 0;
+    for (let i = 1; i < p.length; i++) s += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
+    return s;
+  };
+  return {
+    leftDelta: len(panelAfter.left) - len(panelBefore.left),
+    rightDelta: len(panelAfter.right) - len(panelBefore.right),
+    leftPct: (len(panelAfter.left) / len(panelBefore.left) - 1) * 100,
+    rightPct: (len(panelAfter.right) / len(panelBefore.right) - 1) * 100,
+  };
+}
+
+/** Add a uniform seam allowance around a developed panel outline. */
+function addSeamAllowance(panel, mm = 10) {
+  const a = mm / 1000;
+  const n = panel.left.length;
+  const L = [];
+  const R = [];
+  for (let i = 0; i < n; i++) {
+    const dx = panel.right[i][0] - panel.left[i][0];
+    const dy = panel.right[i][1] - panel.left[i][1];
+    const w = Math.hypot(dx, dy) || 1;
+    L.push([panel.left[i][0] - (dx / w) * a, panel.left[i][1] - (dy / w) * a]);
+    R.push([panel.right[i][0] + (dx / w) * a, panel.right[i][1] + (dy / w) * a]);
+  }
+  // Extend the ends along the seam direction too.
+  const ext = (p, q) => {
+    const dx = p[0] - q[0];
+    const dy = p[1] - q[1];
+    const m = Math.hypot(dx, dy) || 1;
+    return [p[0] + (dx / m) * a, p[1] + (dy / m) * a];
+  };
+  L[0] = ext(L[0], L[1]); R[0] = ext(R[0], R[1]);
+  L[n - 1] = ext(L[n - 1], L[n - 2]); R[n - 1] = ext(R[n - 1], R[n - 2]);
+  return { left: L, right: R, allowanceMM: mm };
+}
+
+/* ===== equilibrium.js ===== */
+/* equilibrium.js — Chapter 4: longitudinal equilibrium.
+ *
+ * Solves the 2D static balance of the wing about its central section and
+ * returns the calage — the chordwise position of the pilot's suspension
+ * point, which is what sets relative line lengths and therefore how the
+ * glider flies.
+ *
+ * The three equilibrium conditions (handbook 4.2):
+ *   sum of moments about the leading edge = 0
+ *   sum of vertical forces = 0
+ *   sum of horizontal forces = 0
+ *
+ * The force equations are solved directly: the horizontal balance gives the
+ * glide angle, the vertical balance gives dynamic pressure and hence speed.
+ * The moment equation is then linear in sigma (the calage), so it is solved
+ * in closed form rather than iterated — the handbook describes an iterative
+ * search, but the unknown appears only linearly, so iteration is unnecessary.
+ *
+ * ---------------------------------------------------------------------------
+ * On `legacySpreadsheet`
+ * ---------------------------------------------------------------------------
+ * The handbook's section 4.4 worked example is marked by its authors as still
+ * in development. Reproducing it term by term shows that its moment sum omits
+ * two terms that section 4.2 includes: the moment of wing drag about the LE,
+ * and the aerodynamic moment itself. With those two dropped, its five printed
+ * moments reproduce exactly and sum to the printed 0.17.
+ *
+ * Both behaviours are available. `legacySpreadsheet: true` reproduces the 2012
+ * example (calage 0.433 m); the default applies the equations as published in
+ * 4.2 and returns a slightly further-aft calage. The difference is real and
+ * worth understanding before trusting either on a prototype — see
+ * docs/validation.md.
+ */
+const DEFAULT_INPUTS = {
+  name: 'LAB_example',
+  area: 25.70,          // S, m^2
+  span: 10.25,          // b, m
+  chord: 3.00,          // l, central chord, m
+  lineLength: 6.00,     // L, m
+  pilotMass: 80.0,      // mp, kg
+  wingMass: 5.0,        // ma, kg
+  g: 9.81,
+  rho: 1.11,            // kg/m^3
+  oswald: 0.90,         // e
+  cxPilot: 0.015,       // Cxp
+  cxLines: 0.020,       // Cxs
+  alphaDeg: 5.0,        // angle of attack
+  cz: 0.900,            // 2D lift coefficient at alpha
+  cx0a: 0.009,          // wing profile + friction drag
+  cm: -0.042,           // pitching moment coefficient
+  apply3D: true,        // apply finite-span correction to lift
+  legacySpreadsheet: false,
+};
+
+/**
+ * Finite-span lift correction. Lifting-line: a = a0 / (1 + a0/(pi*AR*e)),
+ * with a0 = 2*pi per radian. Returns the factor applied to the 2D Cz.
+ *
+ * The handbook's example prints 0.624 for AR 4.09; that value corresponds to
+ * this formula with e about 0.80 rather than the 0.90 listed elsewhere in the
+ * same sheet. Using the sheet's own e of 0.90 gives 0.648.
+ */
+function lift3DFactor(aspectRatio, e) {
+  const a0 = 2 * Math.PI;
+  return 1 / (1 + a0 / (Math.PI * aspectRatio * e));
+}
+function solveEquilibrium(input = {}) {
+  const p = { ...DEFAULT_INPUTS, ...input };
+  const {
+    area: S, span: b, chord: l, lineLength: L,
+    pilotMass: mp, wingMass: ma, g, rho, oswald: e,
+    cxPilot: Cxp, cxLines: Cxs, cz: Cz2D, cx0a: Cxoa, cm: Cm,
+  } = p;
+
+  const alpha = rad(p.alphaDeg);
+  const AR = (b * b) / S;
+
+  // Lift actually available from a finite wing.
+  //
+  // The 2012 example sheet prints its finite-span factor as a literal 0.624
+  // rather than deriving it, and that value does not fall out of the sheet's
+  // own aspect ratio and Oswald factor (which give 0.648). Legacy mode
+  // therefore uses the printed number, so the rest of the sheet reproduces;
+  // the default derives it. `lift3DOverride` exposes the same escape hatch
+  // for anyone matching a wing against measured data.
+  const f3D = p.lift3DOverride ?? (p.legacySpreadsheet ? 0.624
+    : p.apply3D ? lift3DFactor(AR, e) : 1);
+  const Cz = Cz2D * f3D;
+
+  // Induced drag. The handbook's formula [6] uses Cz(alpha), and its worked
+  // example feeds the 2D value in here; keeping that reproduces the example.
+  const CzForInduced = p.legacySpreadsheet ? Cz2D : Cz;
+  const Cxi = (CzForInduced * CzForInduced) / (Math.PI * AR * e);
+
+  const Cxa = Cxoa + Cxi;
+  const CxT = Cxa + Cxs + Cxp;
+
+  // [3] horizontal balance -> glide angle.
+  const gamma = Math.atan(CxT / Cz);
+  const glideRatio = Cz / CxT;
+
+  // [2] vertical balance -> dynamic pressure, then speed.
+  // Note the handbook folds wing area into q0: q0 = 0.5 * rho * S * V^2.
+  const q0 = (g * (mp + ma)) / (Cz * Math.cos(gamma) + CxT * Math.sin(gamma));
+  const V = Math.sqrt((2 * q0) / (rho * S));
+
+  // [10] gamma = alpha + theta.
+  const theta = gamma - alpha;
+
+  // Centre of pressure. Cma = Cm0 - Cl/4 gives Xcp/c = 0.25 - Cm/Cz.
+  const xcpFraction = 0.25 - Cm / Cz2D;
+  const delta = xcpFraction * l;
+
+  // [1] moment balance about the LE, linear in sigma.
+  //   const  +  sigma * coeff = 0
+  const ct = Math.cos(theta);
+  const st = Math.sin(theta);
+  const ca = Math.cos(alpha);
+  const sa = Math.sin(alpha);
+
+  const mLift = q0 * Cz * delta * ca;
+  const mWingDrag = q0 * Cxa * delta * sa;
+  const mLines = q0 * Cxs * (L / 3) * ca;
+  const mPilotDrag = q0 * Cxp * L * ca;
+  const mPilotWeight = -mp * g * L * st;
+  const mWingWeight = -(l / 3) * ma * g * ct;
+  const mAero = -q0 * Cm;
+
+  const sigmaLines = q0 * Cxs * sa;
+  const sigmaPilotDrag = q0 * Cxp * sa;
+  const sigmaPilotWeight = -mp * g * ct;
+
+  const useAll = !p.legacySpreadsheet;
+  const constTerm =
+    mLift
+    + (useAll ? mWingDrag : 0)
+    + mLines
+    + mPilotDrag
+    + mPilotWeight
+    + mWingWeight
+    + (useAll ? mAero : 0);
+
+  const sigmaCoeff = sigmaLines + sigmaPilotDrag + sigmaPilotWeight;
+  const sigma = -constTerm / sigmaCoeff;
+
+  // Report the individual moments at the solved sigma, in the sign convention
+  // the handbook's example prints (positive nose-up on the pilot side).
+  const moments = {
+    resultantAero: -mLift,
+    wingDrag: -mWingDrag,
+    lines: -(mLines + sigmaLines * sigma),
+    pilotDrag: -(mPilotDrag + sigmaPilotDrag * sigma),
+    pilotWeight: -(mPilotWeight + sigmaPilotWeight * sigma),
+    wingWeight: -mWingWeight,
+    aerodynamic: -mAero,
+  };
+  const residual = useAll
+    ? Object.values(moments).reduce((a, v) => a + v, 0)
+    : moments.resultantAero + moments.lines + moments.pilotDrag
+      + moments.pilotWeight + moments.wingWeight;
+
+  return {
+    aspectRatio: AR,
+    lift3DFactor: f3D,
+    cz3D: Cz,
+    cxi: Cxi,
+    cxa: Cxa,
+    cxTotal: CxT,
+    dragBreakdown: {
+      profile: Cxoa / CxT,
+      induced: Cxi / CxT,
+      pilot: Cxp / CxT,
+      lines: Cxs / CxT,
+    },
+    gammaRad: gamma,
+    gammaDeg: deg(gamma),
+    thetaDeg: deg(theta),
+    glideRatio,
+    q0,
+    speedMS: V,
+    speedKMH: V * 3.6,
+    xcpFraction,
+    cpMetres: delta,
+    calageMetres: sigma,
+    calageFraction: sigma / l,
+    moments,
+    momentResidual: residual,
+    mode: p.legacySpreadsheet ? 'legacy-2012-spreadsheet' : 'handbook-4.2-full',
+  };
+}
+
+/**
+ * Simplified graphical method (handbook 4.5). Given an assumed glide ratio
+ * and angle of attack, place the pilot below the centre of pressure and drop
+ * a perpendicular to the chord to find the calage. Useful as a first cut and
+ * as a cross-check on the full solve.
+ */
+function simplifiedCalage({
+  glideRatio = 8, alphaDeg = 5, chord = 3.0, xcpFraction = 0.30,
+}) {
+  const gamma = Math.atan(1 / glideRatio);
+  const theta = gamma - rad(alphaDeg);
+  const cp = xcpFraction * chord;
+  // Pilot hangs vertically below Cp; calage is the foot of the perpendicular
+  // from the pilot to the chord line, which is Cp shifted by the chord's tilt.
+  const sigma = cp * Math.cos(theta) * Math.cos(theta);
+  return {
+    gammaDeg: deg(gamma),
+    thetaDeg: deg(theta),
+    cpMetres: cp,
+    calageMetres: sigma,
+    calageFraction: sigma / chord,
+  };
+}
+
+/** Glide angle for a given glide ratio — the handbook's 4.5 lookup table. */
+function glideAngleTable(ratios = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+  return ratios.map((gr) => ({ gr, gammaDeg: deg(Math.atan(1 / gr)) }));
+}
+
+/** Sweep angle of attack to find best glide and to plot the polar. */
+function polarSweep(input, alphas, czFn, cmFn) {
+  return alphas.map((a) => {
+    const r = solveEquilibrium({ ...input, alphaDeg: a, cz: czFn(a), cm: cmFn ? cmFn(a) : input.cm });
+    return {
+      alphaDeg: a,
+      glideRatio: r.glideRatio,
+      speedKMH: r.speedKMH,
+      sinkMS: r.speedMS * Math.sin(r.gammaRad),
+      calageFraction: r.calageFraction,
+    };
+  });
+}
+
+/* ===== lines.js ===== */
+/* lines.js — Chapter 8: line geometry.
+ *
+ * The handbook's method, in one sentence: a line starting at point 1 and
+ * branching to N anchor points on the canopy runs along the direction from 1
+ * toward G, where G is the centre of gravity of those N anchor points. The
+ * branch point 2 is placed on that 1-G segment, at a distance chosen by the
+ * designer — near 1 gives long branches, near G gives short ones.
+ *
+ * Applying that recursively from the riser down to the canopy produces the
+ * whole cascade. The handbook's author is candid that this is an empirical
+ * intuition rather than a proved result, but that it works in practice.
+ *
+ * Load weighting (handbook cases 0 and 1):
+ *   case 0  every anchor carries the same load — plain arithmetic centroid
+ *   case 1  anchors carry the published row shares (A 35, B 35, C 20, D 10)
+ *           scaled by the chord of the rib they sit on, so bigger sections
+ *           take more load. This is the more realistic of the two.
+ */
+
+const DEFAULT_ROW_SHARES = { A: 0.35, B: 0.35, C: 0.20, D: 0.10 };
+
+/**
+ * Anchor points on the canopy, derived from the built wing.
+ * Anchors sit on the lower surface at the chord fractions carried on the
+ * airfoil (handbook 2.7).
+ */
+function canopyAnchors(wing, airfoil, { rows = ['A', 'B', 'C', 'D'], everyNthRib = 2 } = {}) {
+  const anchors = [];
+  wing.ribs.forEach((rib, i) => {
+    if (i % everyNthRib !== 0) return;
+    for (const row of rows) {
+      const frac = airfoil.anchors?.[row];
+      if (frac == null) continue;
+      anchors.push({
+        row,
+        ribIndex: i,
+        station: rib.station,
+        chord: rib.chord,
+        point: pointOnLowerSurface(rib, frac),
+      });
+    }
+  });
+  return anchors;
+}
+
+/** Interpolate a point at a chord fraction along a rib's lower surface. */
+function pointOnLowerSurface(rib, frac) {
+  const poly = rib.lower;
+  const n = poly.length;
+  const idx = Math.min(n - 2, Math.max(0, Math.floor(frac * (n - 1))));
+  const f = frac * (n - 1) - idx;
+  return [
+    poly[idx][0] + f * (poly[idx + 1][0] - poly[idx][0]),
+    poly[idx][1] + f * (poly[idx + 1][1] - poly[idx][1]),
+    poly[idx][2] + f * (poly[idx + 1][2] - poly[idx][2]),
+  ];
+}
+
+/** Load carried by one anchor, under the chosen weighting case. */
+function anchorLoad(anchor, mode, rowShares = DEFAULT_ROW_SHARES) {
+  if (mode === 0) return 1;
+  return (rowShares[anchor.row] ?? 0.25) * anchor.chord;
+}
+
+/** Weighted centroid G of a set of anchors. */
+function centroid(anchors, mode, rowShares) {
+  let wx = 0, wy = 0, wz = 0, wsum = 0;
+  for (const a of anchors) {
+    const w = anchorLoad(a, mode, rowShares);
+    wx += a.point[0] * w;
+    wy += a.point[1] * w;
+    wz += a.point[2] * w;
+    wsum += w;
+  }
+  return [wx / wsum, wy / wsum, wz / wsum];
+}
+
+/**
+ * Build the cascade.
+ *
+ * @param {object[]} anchors  canopy anchor points
+ * @param {number[]} origin   riser attachment point (maillon), 3D
+ * @param {object} opts
+ * @param {number[]} opts.levels  fraction along 1->G at which each level
+ *                                branches, outermost level first
+ * @param {(a)=>string} opts.groupBy  how anchors are split at each level
+ */
+function buildCascade(anchors, origin, {
+  levels = [0.55, 0.6],
+  mode = 1,
+  rowShares = DEFAULT_ROW_SHARES,
+} = {}) {
+  const segments = [];
+
+  // Level 0: split by row (A, B, C, D risers).
+  const byRow = groupBy(anchors, (a) => a.row);
+
+  for (const [row, rowAnchors] of Object.entries(byRow)) {
+    const G0 = centroid(rowAnchors, mode, rowShares);
+    const P1 = origin;
+    const P2 = along(P1, G0, levels[0] ?? 0.55);
+    segments.push({ level: 0, row, from: P1, to: P2, count: rowAnchors.length });
+
+    // Level 1: split that row's anchors into spanwise groups.
+    const groups = splitSpanwise(rowAnchors, guessGroupCount(rowAnchors.length));
+    for (const g of groups) {
+      if (g.length === 1) {
+        segments.push({ level: 1, row, from: P2, to: g[0].point, count: 1, terminal: true, anchor: g[0] });
+        continue;
+      }
+      const G1 = centroid(g, mode, rowShares);
+      const P3 = along(P2, G1, levels[1] ?? 0.6);
+      segments.push({ level: 1, row, from: P2, to: P3, count: g.length });
+      for (const a of g) {
+        segments.push({ level: 2, row, from: P3, to: a.point, count: 1, terminal: true, anchor: a });
+      }
+    }
+  }
+
+  return {
+    segments,
+    totalLength: segments.reduce((s, seg) => s + dist(seg.from, seg.to), 0),
+    lengths: segments.map((s) => ({
+      level: s.level,
+      row: s.row,
+      length: dist(s.from, s.to),
+      terminal: !!s.terminal,
+      ribIndex: s.anchor?.ribIndex,
+    })),
+  };
+}
+
+/**
+ * Brake cascade (handbook 8.2). Same construction, run from the brake handle
+ * to anchors on the trailing edge, with an optional non-uniform distribution
+ * that lengthens branches in chosen spanwise zones so braking bites in some
+ * areas before others.
+ */
+function brakeAnchors(wing, { everyNthRib = 2 } = {}) {
+  const out = [];
+  wing.ribs.forEach((rib, i) => {
+    if (i % everyNthRib !== 0) return;
+    out.push({
+      row: 'BR',
+      ribIndex: i,
+      station: rib.station,
+      chord: rib.chord,
+      point: rib.lower[rib.lower.length - 1].slice(),
+    });
+  });
+  return out;
+}
+
+/**
+ * Apply a brake distribution: extra length in centimetres added to the branch
+ * reaching each station, as a function of normalised span position.
+ */
+function applyBrakeDistribution(cascade, distributionFn, halfSpan) {
+  return cascade.lengths.map((seg) => {
+    if (!seg.terminal) return seg;
+    const t = (seg.station ?? 0) / halfSpan;
+    return { ...seg, length: seg.length + (distributionFn(t) || 0) / 100 };
+  });
+}
+
+/** Total line length by row — the number that decides line drag and cost. */
+function lineBudget(cascade) {
+  const byRow = {};
+  for (const s of cascade.lengths) {
+    byRow[s.row] = (byRow[s.row] || 0) + s.length;
+  }
+  return { byRow, total: cascade.totalLength };
+}
+
+// helpers -------------------------------------------------------------------
+
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+const along = (a, b, t) => [
+  a[0] + (b[0] - a[0]) * t,
+  a[1] + (b[1] - a[1]) * t,
+  a[2] + (b[2] - a[2]) * t,
+];
+
+function groupBy(arr, fn) {
+  const out = {};
+  for (const x of arr) (out[fn(x)] ||= []).push(x);
+  return out;
+}
+
+function splitSpanwise(anchors, n) {
+  const sorted = anchors.slice().sort((a, b) => a.station - b.station);
+  const per = Math.ceil(sorted.length / n);
+  const out = [];
+  for (let i = 0; i < sorted.length; i += per) out.push(sorted.slice(i, i + per));
+  return out;
+}
+
+function guessGroupCount(n) {
+  if (n <= 2) return 1;
+  if (n <= 6) return 2;
+  return Math.round(Math.sqrt(n));
+}
+
+/* ===== export.js ===== */
+/* export.js — DXF and SVG output.
+ *
+ * DXF is the format the handbook's own FORTRAN subroutine writes, and it is
+ * what plotters and cutting tables in this trade actually read. The writer
+ * here emits minimal ASCII DXF R12 entities: LINE, LWPOLYLINE and TEXT, on
+ * named layers. R12 is chosen deliberately — it is the most widely readable
+ * DXF revision, and nothing here needs anything newer.
+ *
+ * Layer colours follow the AutoCAD Color Index used in the handbook listing
+ * (2 yellow, 3 green, 4 cyan, 5 blue, 6 magenta).
+ */
+
+const ACI = { red: 1, yellow: 2, green: 3, cyan: 4, blue: 5, magenta: 6, white: 7 };
+function dxfDocument() {
+  const out = [];
+  const push = (code, value) => { out.push(String(code)); out.push(String(value)); };
+
+  push(0, 'SECTION');
+  push(2, 'ENTITIES');
+
+  return {
+    polyline(points, { layer = 'default', color = ACI.white, closed = false } = {}) {
+      push(0, 'LWPOLYLINE');
+      push(8, layer);
+      push(62, color);
+      push(100, 'AcDbPolyline');
+      push(90, points.length);
+      push(70, closed ? 1 : 0);
+      for (const p of points) { push(10, fmt(p[0])); push(20, fmt(p[1])); }
+      return this;
+    },
+    line(p1, p2, { layer = 'default', color = ACI.white } = {}) {
+      push(0, 'LINE');
+      push(8, layer);
+      push(62, color);
+      push(10, fmt(p1[0])); push(20, fmt(p1[1]));
+      push(11, fmt(p2[0])); push(21, fmt(p2[1]));
+      return this;
+    },
+    text(str, at, { layer = 'notes', height = 0.02, color = ACI.white } = {}) {
+      push(0, 'TEXT');
+      push(8, layer);
+      push(62, color);
+      push(10, fmt(at[0])); push(20, fmt(at[1]));
+      push(40, fmt(height));
+      push(1, str);
+      return this;
+    },
+    toString() {
+      const tail = [...out];
+      tail.push('0', 'ENDSEC', '0', 'EOF');
+      return tail.join('\n');
+    },
+  };
+}
+
+const fmt = (n) => Number(n).toFixed(6);
+
+/**
+ * Lay developed panels out on a nesting grid and write a single cutting file.
+ * Panels are rotated so their long axis runs along the roll, and stacked in
+ * rows with a gap. Fabric comes on a roll of fixed width, so the roll width
+ * is the binding constraint, not the length.
+ */
+function nestPanels(panels, {
+  rollWidth = 1.4, gap = 0.03, binSize = 0.01, angleStep = 10, candidates = 10,
+} = {}) {
+  // Developed paraglider panels are strongly curved — a mid-span panel fills
+  // barely a third of its own bounding box, and a tip panel far less. Packing
+  // bounding boxes therefore wastes most of the roll. Three things help:
+  //
+  //   1. Consider many rotations of each panel, not just the axis-aligned one.
+  //   2. Place panels against a skyline built from their real outlines rather
+  //      than their boxes, so curved shapes nest into each other.
+  //   3. Choose the rotation by how well it actually packs against the work
+  //      already placed, not by which one has the smallest box in isolation.
+  //
+  // This is a bottom-left-fill heuristic, not an optimal nest — that is a
+  // genuinely hard problem and a later phase. It is fast enough to rerun on
+  // every edit and recovers most of the easily available saving.
+
+  const usableWidth = rollWidth - gap;
+  if (usableWidth <= 0) throw new Error('Gap between panels is wider than the roll.');
+  const nBins = Math.max(1, Math.ceil(rollWidth / binSize));
+  const skyline = new Float64Array(nBins);
+  const placed = [];
+
+  // Largest first: big panels placed early leave gaps small ones can fill.
+  const order = panels
+    .map((item) => ({ item, pts: outlineOf(item) }))
+    .sort((a, b) => bboxArea(b.pts) - bboxArea(a.pts));
+
+  for (const { item, pts } of order) {
+    const options = orientations(pts, usableWidth, angleStep, candidates);
+    if (!options.length) {
+      throw new Error(
+        `Panel ${item.surface} cell ${item.cell} does not fit across a ${rollWidth} m roll in any orientation.`,
+      );
+    }
+
+    let best = null;
+    for (const o of options) {
+      const bandCount = Math.min(nBins, Math.max(1, Math.ceil((o.height + gap) / binSize)));
+      for (let s = 0; s + bandCount <= nBins; s++) {
+        let x = 0;
+        for (let k = 0; k < bandCount; k++) {
+          const lp = o.leftProfile[k];
+          if (lp === Infinity) continue;
+          const need = skyline[s + k] - lp + gap;
+          if (need > x) x = need;
+        }
+        const right = x + o.width;
+        if (!best || right < best.right - 1e-9) {
+          best = { o, start: s, dx: x, right, bandCount };
+        }
+      }
+    }
+
+    const { o, start, dx, bandCount } = best;
+    const dy = start * binSize;
+    const move = (p) => {
+      const q = o.rot(p);
+      return [q[0] - o.minX + dx, q[1] - o.minY + dy];
+    };
+
+    placed.push({
+      ...item,
+      outline: pts.map(move),
+      left: item.panel.left.map(move),
+      right: item.panel.right.map(move),
+      angleDeg: o.angleDeg,
+      width: o.width,
+      height: o.height,
+    });
+
+    for (let k = 0; k < bandCount; k++) {
+      const rp = o.rightProfile[k];
+      if (rp === -Infinity) continue;
+      const band = start + k;
+      if (band >= nBins) continue;
+      const reach = rp + dx;
+      if (reach > skyline[band]) skyline[band] = reach;
+    }
+  }
+
+  const all = placed.flatMap((p) => p.outline);
+  return { placed, extent: bounds(all), rollWidth };
+}
+
+/**
+ * Candidate rotations that fit across the roll, with their edge profiles
+ * precomputed so the placement search is cheap array arithmetic.
+ * Angles run the full circle: a panel and its 180-degree turn have the same
+ * box but opposite curvature, and that is exactly what lets bananas interlock.
+ */
+function orientations(pts, usableWidth, angleStep, keep) {
+  const out = [];
+  for (let a = 0; a < 360; a += angleStep) {
+    const t = (a * Math.PI) / 180;
+    const c = Math.cos(t);
+    const sn = Math.sin(t);
+    const rot = (p) => [p[0] * c - p[1] * sn, p[0] * sn + p[1] * c];
+    const rp = pts.map(rot);
+    const bb = bounds(rp);
+    const height = bb.maxY - bb.minY;
+    if (height > usableWidth) continue;
+    out.push({ angleDeg: a, rot, rpts: rp, bb, height, width: bb.maxX - bb.minX,
+      minX: bb.minX, minY: bb.minY });
+  }
+  out.sort((p, q) => p.width - q.width);
+  const chosen = out.slice(0, keep);
+  for (const o of chosen) {
+    const bandCount = Math.max(1, Math.ceil(o.height / BIN) + 1);
+    o.leftProfile = new Float64Array(bandCount).fill(Infinity);
+    o.rightProfile = new Float64Array(bandCount).fill(-Infinity);
+    scanBands(o.rpts, o.minX, o.minY, BIN, bandCount, (k, x) => {
+      if (x < o.leftProfile[k]) o.leftProfile[k] = x;
+      if (x > o.rightProfile[k]) o.rightProfile[k] = x;
+    });
+  }
+  return chosen;
+}
+
+const BIN = 0.01;
+
+/** Walk the outline's edges, sampling them into bands across the roll. */
+function scanBands(pts, minX, minY, binSize, bandCount, visit) {
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    const steps = Math.max(1, Math.ceil(Math.abs(q[1] - p[1]) / (binSize / 2)));
+    for (let s = 0; s <= steps; s++) {
+      const f = s / steps;
+      const x = p[0] + (q[0] - p[0]) * f - minX;
+      const y = p[1] + (q[1] - p[1]) * f - minY;
+      const k = Math.floor(y / binSize);
+      if (k >= 0 && k < bandCount) visit(k, x);
+    }
+  }
+}
+
+function outlineOf(item) {
+  return item.panel.left.concat(item.panel.right.slice().reverse());
+}
+
+function bboxArea(pts) {
+  const b = bounds(pts);
+  return (b.maxX - b.minX) * (b.maxY - b.minY);
+}
+function panelsToDXF(panels, { rollWidth = 1.4, gap = 0.03, labels = true } = {}) {
+  const nested = nestPanels(panels, { rollWidth, gap });
+  const doc = dxfDocument();
+
+  for (const p of nested.placed) {
+    const layer = `${p.surface}-cell-${p.cell}`;
+    doc.polyline(p.outline, { layer, color: p.surface === 'upper' ? ACI.cyan : ACI.green, closed: true });
+    if (labels) {
+      const c = centroidOf(p.outline);
+      doc.text(`${p.surface[0].toUpperCase()}${p.cell}`, c, { height: 0.03, color: ACI.yellow });
+    }
+  }
+
+  // Roll edges, as a reminder of the usable width.
+  doc.line([nested.extent.minX, 0], [nested.extent.maxX, 0], { layer: 'roll', color: ACI.magenta });
+  doc.line([nested.extent.minX, rollWidth], [nested.extent.maxX, rollWidth], { layer: 'roll', color: ACI.magenta });
+
+  return doc.toString();
+}
+function ribsToDXF(wing) {
+  const doc = dxfDocument();
+  wing.ribs.forEach((rib) => {
+    // Ribs are cut flat, so export each in its own plane: chordwise x against
+    // the section ordinate, recovered from the unit section times the chord.
+    const loop = rib.upper.slice().reverse().concat(rib.lower.slice(1));
+    const flat = flattenRib(loop, rib);
+    doc.polyline(flat, { layer: `rib-${rib.index}`, color: ACI.cyan, closed: true });
+    doc.text(`R${rib.index}  c=${rib.chord.toFixed(3)}m  a=${rib.alphaDeg.toFixed(2)}deg`,
+      [flat[0][0], flat[0][1] + 0.05], { height: 0.02, color: ACI.yellow });
+  });
+  return doc.toString();
+}
+
+/** Project a rib's 3D loop back into its own plane for flat cutting. */
+function flattenRib(loop, rib) {
+  const b = (rib.betaDeg * Math.PI) / 180;
+  const oy = rib.lobePoint[0];
+  const oz = rib.lobePoint[1];
+  return loop.map(([x, y, z]) => {
+    const dy = y - oy;
+    const dz = z - oz;
+    const v = -dy * Math.sin(b) + dz * Math.cos(b);
+    return [x, v];
+  });
+}
+function panelsToSVG(panels, { rollWidth = 1.4, gap = 0.03, scale = 200 } = {}) {
+  const nested = nestPanels(panels, { rollWidth, gap });
+  const { minX, maxX } = nested.extent;
+  const w = (maxX - minX) * scale;
+  const h = rollWidth * scale;
+  const parts = nested.placed.map((p) => {
+    const d = p.outline.map((pt, i) =>
+      `${i ? 'L' : 'M'}${((pt[0] - minX) * scale).toFixed(2)} ${(h - pt[1] * scale).toFixed(2)}`).join(' ');
+    return `<path d="${d} Z" fill="none" stroke="${p.surface === 'upper' ? '#00b4d8' : '#4caf50'}" stroke-width="0.6"/>`;
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(0)}" height="${h.toFixed(0)}" viewBox="0 0 ${w.toFixed(0)} ${h.toFixed(0)}">
+<rect width="100%" height="100%" fill="#fff"/>
+${parts.join('\n')}
+</svg>`;
+}
+
+function bounds(pts) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [x, y] of pts) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+function centroidOf(pts) {
+  const s = pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1]], [0, 0]);
+  return [s[0] / pts.length, s[1] / pts.length];
+}
+
+/** Fabric consumption estimate, in linear metres of roll. */
+function fabricEstimate(panels, { rollWidth = 1.4, gap = 0.03 } = {}) {
+  const nested = nestPanels(panels, { rollWidth, gap });
+  const linear = nested.extent.maxX - nested.extent.minX;
+  const panelArea = panels.reduce((sum, p) => sum + polygonArea(
+    p.panel.left.concat(p.panel.right.slice().reverse()),
+  ), 0);
+  return {
+    linearMetres: linear,
+    rollWidth,
+    rollArea: linear * rollWidth,
+    panelArea,
+    utilisation: panelArea / (linear * rollWidth),
+  };
+}
+
+function polygonArea(pts) {
+  let a = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  }
+  return Math.abs(a / 2);
+}
+/* app.js — UI layer. Owns the design state, renders the controls, redraws the
+ * four viewports, and writes the export files. All geometry comes from the
+ * core modules; nothing is recomputed here. */
+
+const S = {
+  name: 'gnu-01',
+  // planform
+  span: 10.25, rootChord: 2.60, tipChord: 0.90, tipSweep: 1.10,
+  ellipticityLE: 0.85, ellipticityTE: 0.95,
+  cells: 24, distribution: 'cosine',
+  // section
+  airfoilCode: '4415', airfoilCustom: null,
+  intakeStart: 1.2, intakeEnd: 5.5,
+  anchorA: 8.5, anchorB: 27.5, anchorC: 53.0, anchorD: 78.5,
+  // arc and twist
+  lobeType: 'circle', projectedRatio: 0.88, lobeA: 4.5, lobeB: 2.1, bionic: 1.6,
+  washinTotal: 4.5, washinMode: 'linear',
+  RL: 0.50, RP: 0.25,
+  // balance
+  pilotMass: 80, wingMass: 5.0, lineLength: 6.5, alphaDeg: 5.0,
+  cz: 0.90, cx0a: 0.009, cm: -0.042, rho: 1.11, oswald: 0.90,
+  cxPilot: 0.015, cxLines: 0.020, legacy: false,
+  // panels
+  ovalAmount: 6.0, seamAllowance: 10, pointsPerSurface: 50,
+  rollWidth: 1.40, panelGap: 3.0, applyOval: true,
+};
+
+let M = {}; // derived model, rebuilt on every change
+
+/* ---------------------------------------------------------------- model -- */
+
+function rebuild() {
+  const t0 = performance.now();
+  try {
+    const planform = planformFromDesignInputs({
+      span: S.span, rootChord: S.rootChord, tipChord: S.tipChord,
+      tipSweep: S.tipSweep,
+      ellipticityLE: S.ellipticityLE, ellipticityTE: S.ellipticityTE,
+    });
+
+    const lobeSpec = S.lobeType === 'circle'
+      ? { type: 'circle', projectedRatio: S.projectedRatio }
+      : S.lobeType === 'ellipse'
+        ? { type: 'ellipse', a: S.lobeA, b: S.lobeB }
+        : { type: 'bionic', a: S.lobeA, b: S.lobeB, exponent: S.bionic };
+
+    const lobe = buildLobe(lobeSpec, planform.halfSpan);
+
+    const airfoil = S.airfoilCustom || naca4(S.airfoilCode);
+    airfoil.intake = { start: S.intakeStart / 100, end: S.intakeEnd / 100 };
+    airfoil.anchors = {
+      A: S.anchorA / 100, B: S.anchorB / 100,
+      C: S.anchorC / 100, D: S.anchorD / 100,
+    };
+
+    const wing = buildWing({
+      planform, lobe, airfoil,
+      cells: S.cells,
+      RL: S.RL, RP: S.RP,
+      washin: { total: S.washinTotal, mode: S.washinMode },
+      pointsPerSurface: S.pointsPerSurface,
+      distribution: S.distribution,
+    });
+
+    const metrics = planformMetrics(planform);
+    const lobeM = lobeMetrics(lobe, planform.halfSpan);
+    const projArea = projectedArea(wing);
+
+    let panels = developWing(wing);
+    if (S.applyOval) {
+      panels = panels.map((p) => ({
+        ...p,
+        panel: applyOvalization(p.panel, {
+          amount: S.ovalAmount / 100,
+          transitions: DEFAULT_TRANSITIONS[p.surface],
+        }),
+      }));
+    }
+
+    const balance = solveEquilibrium({
+      area: metrics.area, span: S.span, chord: S.rootChord,
+      lineLength: S.lineLength, pilotMass: S.pilotMass, wingMass: S.wingMass,
+      rho: S.rho, oswald: S.oswald, cxPilot: S.cxPilot, cxLines: S.cxLines,
+      alphaDeg: S.alphaDeg, cz: S.cz, cx0a: S.cx0a, cm: S.cm,
+      legacySpreadsheet: S.legacy,
+    });
+
+    const anchors = canopyAnchors(wing, airfoil, { everyNthRib: 2 });
+    const riserOrigin = [balance.calageMetres, 0, -S.lineLength];
+    const cascade = buildCascade(anchors, riserOrigin, { mode: 1 });
+
+    // Nesting is the one expensive step — a few hundred milliseconds on a
+    // big wing — so it is deferred rather than run on every slider frame.
+    // The other three viewports stay live; the cutting layout catches up
+    // once the input settles.
+
+    // Worst-case development error tells you where the surface is fighting
+    // the flat pattern — the number that decides whether a panel sews cleanly.
+    let worstDev = 0;
+    for (let i = 0; i < wing.ribs.length - 1; i++) {
+      worstDev = Math.max(worstDev,
+        developmentError(wing.ribs[i].upper, wing.ribs[i + 1].upper).worstRelative);
+    }
+
+    M = {
+      planform, lobe, airfoil, wing, metrics, lobeM, projArea,
+      panels, balance, cascade, anchors, worstDev,
+      nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
+      nestStale: true,
+      ms: performance.now() - t0,
+    };
+    setStatus(null);
+    scheduleNest();
+  } catch (err) {
+    setStatus(err.message);
+    return;
+  }
+  draw();
+}
+
+let nestTimer = null;
+function scheduleNest() {
+  clearTimeout(nestTimer);
+  nestTimer = setTimeout(() => {
+    try {
+      const opts = { rollWidth: S.rollWidth, gap: S.panelGap / 100 };
+      M.nested = nestPanels(M.panels, opts);
+      M.fabric = fabricEstimate(M.panels, opts);
+      M.fabricError = null;
+    } catch (e) {
+      M.nested = null; M.fabric = null; M.fabricError = e.message;
+    }
+    M.nestStale = false;
+    drawCut();
+  }, 180);
+}
+
+/* ------------------------------------------------------------- controls -- */
+
+function slider(host, key, label, min, max, step, fmt = (v) => v.toFixed(2), unit = '') {
+  const wrap = el('div', 'field');
+  const lab = el('label', null, label);
+  const out = el('output', null, fmt(S[key]) + unit);
+  const inp = el('input');
+  inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = S[key];
+  inp.setAttribute('aria-label', label);
+  inp.addEventListener('input', () => {
+    S[key] = parseFloat(inp.value);
+    out.textContent = fmt(S[key]) + unit;
+    rebuild();
+  });
+  wrap.append(lab, out, inp);
+  host.append(wrap);
+  return inp;
+}
+
+function numberField(host, key, label, step = 0.01) {
+  const wrap = el('div', 'field row');
+  const lab = el('label', null, label);
+  const inp = el('input');
+  inp.type = 'number'; inp.step = step; inp.value = S[key];
+  inp.setAttribute('aria-label', label);
+  inp.addEventListener('change', () => { S[key] = parseFloat(inp.value); rebuild(); });
+  wrap.append(lab, inp);
+  host.append(wrap);
+}
+
+function selectField(host, key, label, options) {
+  const wrap = el('div', 'field row');
+  const lab = el('label', null, label);
+  const sel = el('select');
+  sel.setAttribute('aria-label', label);
+  for (const [v, t] of options) {
+    const o = el('option', null, t); o.value = v;
+    if (S[key] === v) o.selected = true;
+    sel.append(o);
+  }
+  sel.addEventListener('change', () => { S[key] = sel.value; rebuild(); buildControls(); });
+  wrap.append(lab, sel);
+  host.append(wrap);
+}
+
+function checkField(host, key, label) {
+  const l = el('label', 'check');
+  const inp = el('input'); inp.type = 'checkbox'; inp.checked = S[key];
+  inp.addEventListener('change', () => { S[key] = inp.checked; rebuild(); });
+  l.append(inp, document.createTextNode(label));
+  host.append(l);
+}
+
+function button(host, text, fn, cls = 'btn') {
+  const b = el('button', cls, text);
+  b.addEventListener('click', fn);
+  host.append(b);
+  return b;
+}
+
+function hint(host, text) { host.append(el('div', 'hint', text)); }
+
+function buildControls() {
+  const P = clear('g-planform');
+  slider(P, 'span', 'Flat span', 4, 16, 0.05, (v) => v.toFixed(2), ' m');
+  slider(P, 'rootChord', 'Root chord', 0.8, 4, 0.01, (v) => v.toFixed(2), ' m');
+  slider(P, 'tipChord', 'Tip chord', 0.1, 2.5, 0.01, (v) => v.toFixed(2), ' m');
+  slider(P, 'tipSweep', 'Tip sweep back', 0, 3, 0.01, (v) => v.toFixed(2), ' m');
+  slider(P, 'ellipticityLE', 'Leading edge — elliptical', 0, 1, 0.01, (v) => (v * 100).toFixed(0), '%');
+  slider(P, 'ellipticityTE', 'Trailing edge — elliptical', 0, 1, 0.01, (v) => (v * 100).toFixed(0), '%');
+  slider(P, 'cells', 'Cells per half wing', 4, 40, 1, (v) => v.toFixed(0));
+  selectField(P, 'distribution', 'Rib spacing', [['cosine', 'Denser at tip'], ['uniform', 'Even']]);
+
+  const A = clear('g-airfoil');
+  selectField(A, 'airfoilCode', 'NACA 4-digit', [
+    ['4415', 'NACA 4415'], ['4412', 'NACA 4412'],
+    ['2414', 'NACA 2414'], ['4418', 'NACA 4418'], ['0012', 'NACA 0012'],
+  ]);
+  hint(A, 'Or load a coordinate file in Selig or plain "x y" format — the sections linked from the handbook work directly.');
+  const imp = el('input'); imp.type = 'file'; imp.accept = '.dat,.txt,.csv';
+  imp.style.fontSize = '10px'; imp.style.color = 'var(--text-dim)';
+  imp.addEventListener('change', async () => {
+    const f = imp.files[0]; if (!f) return;
+    try {
+      S.airfoilCustom = parseAirfoilText(await f.text(), f.name);
+      setStatus(null); rebuild();
+    } catch (e) { setStatus(`Could not read ${f.name}: ${e.message}`); }
+  });
+  A.append(imp);
+  if (S.airfoilCustom) {
+    button(A, 'Clear imported section', () => { S.airfoilCustom = null; rebuild(); buildControls(); });
+  }
+  slider(A, 'intakeStart', 'Intake starts', 0, 8, 0.1, (v) => v.toFixed(1), '% c');
+  slider(A, 'intakeEnd', 'Intake ends', 0.5, 15, 0.1, (v) => v.toFixed(1), '% c');
+  slider(A, 'anchorA', 'Anchor A', 2, 20, 0.1, (v) => v.toFixed(1), '% c');
+  slider(A, 'anchorB', 'Anchor B', 15, 45, 0.1, (v) => v.toFixed(1), '% c');
+  slider(A, 'anchorC', 'Anchor C', 40, 70, 0.1, (v) => v.toFixed(1), '% c');
+  slider(A, 'anchorD', 'Anchor D', 60, 95, 0.1, (v) => v.toFixed(1), '% c');
+
+  const L = clear('g-lobe');
+  selectField(L, 'lobeType', 'Arc shape', [
+    ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['bionic', 'Bionic'],
+  ]);
+  if (S.lobeType === 'circle') {
+    slider(L, 'projectedRatio', 'Projected / flat span', 0.70, 0.99, 0.005, (v) => (v * 100).toFixed(1), '%');
+  } else {
+    slider(L, 'lobeA', 'Semi-axis a (half projected span)', 1, 8, 0.05, (v) => v.toFixed(2), ' m');
+    slider(L, 'lobeB', 'Semi-axis b (arrow)', 0.3, 5, 0.05, (v) => v.toFixed(2), ' m');
+    if (S.lobeType === 'bionic') slider(L, 'bionic', 'Tip turn-up', 1, 3, 0.05);
+  }
+  slider(L, 'washinTotal', 'Washin at tip', 0, 10, 0.1, (v) => v.toFixed(1), '°');
+  selectField(L, 'washinMode', 'Washin distribution', [
+    ['linear', 'With span'], ['quadratic', 'Quadratic'], ['chord', 'With chord'],
+  ]);
+  slider(L, 'RL', 'Reference line', 0.1, 0.9, 0.01, (v) => (v * 100).toFixed(0), '% c');
+  slider(L, 'RP', 'Rotation point', 0.0, 0.9, 0.01, (v) => (v * 100).toFixed(0), '% c');
+  hint(L, 'The reference line is the chord point laid along the arc; the rotation point is what washin turns about.');
+
+  const B = clear('g-balance');
+  slider(B, 'pilotMass', 'Pilot + gear', 40, 140, 1, (v) => v.toFixed(0), ' kg');
+  slider(B, 'wingMass', 'Wing mass', 1, 12, 0.1, (v) => v.toFixed(1), ' kg');
+  slider(B, 'lineLength', 'Line length', 3, 9, 0.05, (v) => v.toFixed(2), ' m');
+  slider(B, 'alphaDeg', 'Angle of attack', 0, 15, 0.1, (v) => v.toFixed(1), '°');
+  numberField(B, 'cz', 'Cz at alpha', 0.01);
+  numberField(B, 'cx0a', 'Cx0 wing', 0.001);
+  numberField(B, 'cm', 'Cm', 0.001);
+  numberField(B, 'rho', 'Air density', 0.01);
+  numberField(B, 'oswald', 'Oswald e', 0.01);
+  numberField(B, 'cxPilot', 'Cx pilot', 0.001);
+  numberField(B, 'cxLines', 'Cx lines', 0.001);
+  checkField(B, 'legacy', 'Match the 2012 example sheet');
+  hint(B, 'The default applies the moment equation as published in 4.2. The checkbox drops the aerodynamic and wing-drag moments, which is what the handbook\u2019s own worked example does.');
+  const balanceHost = el('div');
+  balanceHost.id = 'balanceTable';
+  B.append(balanceHost);
+
+  const N = clear('g-panels');
+  checkField(N, 'applyOval', 'Add ovalization');
+  slider(N, 'ovalAmount', 'Total widening', 0, 12, 0.1, (v) => v.toFixed(1), '%');
+  slider(N, 'seamAllowance', 'Seam allowance', 0, 25, 1, (v) => v.toFixed(0), ' mm');
+  slider(N, 'pointsPerSurface', 'Points per surface', 20, 120, 5, (v) => v.toFixed(0));
+  slider(N, 'rollWidth', 'Fabric roll width', 0.8, 2.0, 0.01, (v) => v.toFixed(2), ' m');
+  slider(N, 'panelGap', 'Gap between panels', 0, 10, 0.5, (v) => v.toFixed(1), ' cm');
+
+  const F = clear('g-files');
+  const grid = el('div', 'btn-grid');
+  button(grid, 'Panels DXF', () => save(`${S.name}-panels.dxf`,
+    panelsToDXF(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn primary');
+  button(grid, 'Ribs DXF', () => save(`${S.name}-ribs.dxf`, ribsToDXF(M.wing)), 'btn');
+  button(grid, 'Panels SVG', () => save(`${S.name}-panels.svg`,
+    panelsToSVG(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn');
+  button(grid, 'Line lengths', () => save(`${S.name}-lines.csv`, linesCSV()), 'btn');
+  button(grid, 'Save project', () => save(`${S.name}.pgd.json`, JSON.stringify(S, null, 2)), 'btn');
+  const load = el('button', 'btn', 'Open project');
+  const fi = el('input'); fi.type = 'file'; fi.accept = '.json'; fi.style.display = 'none';
+  fi.addEventListener('change', async () => {
+    const f = fi.files[0]; if (!f) return;
+    try {
+      Object.assign(S, JSON.parse(await f.text()));
+      document.getElementById('wingName').value = S.name;
+      buildControls(); rebuild();
+    } catch (e) { setStatus(`Could not open project: ${e.message}`); }
+  });
+  load.addEventListener('click', () => fi.click());
+  grid.append(load, fi);
+  F.append(grid);
+  hint(F, 'DXF is written as R12 with one layer per panel, the same convention the handbook\u2019s own subroutine uses.');
+}
+
+function seamed() {
+  if (!S.seamAllowance) return M.panels;
+  return M.panels.map((p) => ({ ...p, panel: { ...addSeamAllowance(p.panel, S.seamAllowance), seamLengths: p.panel.seamLengths } }));
+}
+
+/* --------------------------------------------------------------- render -- */
+
+function draw() {
+  drawReadout();
+  drawPlan();
+  drawFront();
+  drawSection();
+  drawCut();
+  drawBalanceTable();
+}
+
+function drawReadout() {
+  const r = document.getElementById('readout');
+  r.innerHTML = '';
+  const m = M.metrics, b = M.balance;
+  const items = [
+    ['flat area', m.area.toFixed(2) + ' m²'],
+    ['proj area', M.projArea.toFixed(2) + ' m²'],
+    ['flat AR', m.aspectRatio.toFixed(2)],
+    ['proj AR', ((M.lobeM.projectedSpan ** 2) / M.projArea).toFixed(2)],
+    ['proj span', M.lobeM.projectedSpan.toFixed(2) + ' m'],
+    ['cells', String(S.cells * 2)],
+    ['speed', b.speedKMH.toFixed(1) + ' km/h', 'hot'],
+    ['glide', b.glideRatio.toFixed(2), 'hot'],
+    ['calage', (b.calageFraction * 100).toFixed(1) + '% c', 'hot'],
+    ['wing load', ((S.pilotMass + S.wingMass) / M.projArea).toFixed(2) + ' kg/m²'],
+  ];
+  for (const [k, v, cls] of items) {
+    const s = el('div', 'stat');
+    s.append(el('span', 'k', k), el('span', 'v' + (cls ? ' ' + cls : ''), v));
+    r.append(s);
+  }
+}
+
+/** Minimal SVG helper: builds a fitted viewBox and returns draw primitives. */
+function canvas(id, pts, pad = 0.10) {
+  const svg = document.getElementById(id);
+  svg.innerHTML = '';
+  const rect = svg.getBoundingClientRect();
+  const W = Math.max(160, rect.width);
+  const H = Math.max(120, rect.height);
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [x, y] of pts) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  if (!isFinite(minX)) { minX = 0; maxX = 1; minY = 0; maxY = 1; }
+  const dx = (maxX - minX) || 1, dy = (maxY - minY) || 1;
+  const scale = Math.min(W / (dx * (1 + pad * 2)), H / (dy * (1 + pad * 2)));
+  const ox = W / 2 - ((minX + maxX) / 2) * scale;
+  const oy = H / 2 + ((minY + maxY) / 2) * scale;
+
+  const X = (x) => ox + x * scale;
+  const Y = (y) => oy - y * scale;
+
+  const add = (tag, attrs) => {
+    const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    svg.append(n);
+    return n;
+  };
+
+  return {
+    svg, W, H, scale, X, Y, add,
+    path(points, stroke, width = 1, opts = {}) {
+      if (!points.length) return;
+      const d = points.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(2)} ${Y(p[1]).toFixed(2)}`).join('');
+      add('path', {
+        d: d + (opts.close ? 'Z' : ''),
+        fill: opts.fill || 'none',
+        stroke, 'stroke-width': width,
+        'stroke-opacity': opts.opacity ?? 1,
+        'stroke-dasharray': opts.dash || '',
+        'stroke-linejoin': 'round',
+      });
+    },
+    dot(p, color, r = 2) { add('circle', { cx: X(p[0]), cy: Y(p[1]), r, fill: color }); },
+    text(str, p, color, size = 9, anchor = 'start') {
+      const t = add('text', {
+        x: X(p[0]), y: Y(p[1]), fill: color, 'font-size': size,
+        'font-family': 'ui-monospace, monospace', 'text-anchor': anchor,
+      });
+      t.textContent = str;
+    },
+    grid(step) {
+      const gx0 = Math.floor(minX / step) * step, gx1 = Math.ceil(maxX / step) * step;
+      const gy0 = Math.floor(minY / step) * step, gy1 = Math.ceil(maxY / step) * step;
+      for (let x = gx0; x <= gx1 + 1e-9; x += step) {
+        add('line', { x1: X(x), y1: Y(gy0), x2: X(x), y2: Y(gy1),
+          stroke: Math.abs(x) < 1e-9 ? '#2c3d47' : '#1a252c', 'stroke-width': 1 });
+      }
+      for (let y = gy0; y <= gy1 + 1e-9; y += step) {
+        add('line', { x1: X(gx0), y1: Y(y), x2: X(gx1), y2: Y(y),
+          stroke: Math.abs(y) < 1e-9 ? '#2c3d47' : '#1a252c', 'stroke-width': 1 });
+      }
+    },
+  };
+}
+
+function drawPlan() {
+  const outline = planformOutline(M.planform, 140).map(([y, x]) => [y, -x]);
+  const c = canvas('vp-plan', outline);
+  c.grid(1);
+  c.path(outline, '#35d6e8', 1.4, { close: true });
+
+  // Ribs, both halves.
+  for (const rib of M.wing.ribs) {
+    const y = rib.station;
+    for (const sgn of [1, -1]) {
+      c.path([[sgn * y, -rib.xLE], [sgn * y, -(rib.xLE + rib.chord)]], '#e8c547', 0.7, { opacity: 0.55 });
+    }
+  }
+  // Reference line — the line that gets bent into the arc.
+  const ref = [];
+  for (let i = -60; i <= 60; i++) {
+    const y = (i / 60) * M.planform.halfSpan;
+    ref.push([y, -(M.planform.xLE(y) + S.RL * M.planform.chord(y))]);
+  }
+  c.path(ref, '#e85bc4', 1.1, { dash: '4 3' });
+
+  document.getElementById('note-plan').textContent =
+    `${M.metrics.area.toFixed(2)} m²  ·  AR ${M.metrics.aspectRatio.toFixed(2)}  ·  MAC ${M.metrics.mac.toFixed(2)} m  ·  1 m grid`;
+}
+
+function drawFront() {
+  const half = [];
+  const N = 120;
+  for (let i = 0; i <= N; i++) {
+    const s = (i / N) * M.planform.halfSpan;
+    const p = M.lobe.at(s);
+    half.push([p.y, p.z]);
+  }
+  const full = half.slice().reverse().map(([y, z]) => [-y, z]).concat(half);
+  const c = canvas('vp-front', full.concat([[0, -S.lineLength]]));
+  c.grid(1);
+
+  // Rib sections seen from the front: draw each rib's projected extent.
+  for (const rib of M.wing.ribs) {
+    const proj = rib.upper.map(([, y, z]) => [y, z]);
+    const projL = proj.map(([y, z]) => [-y, z]);
+    c.path(proj, '#35d6e8', 0.6, { opacity: 0.35 });
+    c.path(projL, '#35d6e8', 0.6, { opacity: 0.35 });
+    const projLo = rib.lower.map(([, y, z]) => [y, z]);
+    c.path(projLo, '#5fd97a', 0.6, { opacity: 0.3 });
+    c.path(projLo.map(([y, z]) => [-y, z]), '#5fd97a', 0.6, { opacity: 0.3 });
+  }
+
+  c.path(full, '#e85bc4', 1.6);
+
+  // Line cascade, projected onto the front view.
+  for (const seg of M.cascade.segments) {
+    const a = [seg.from[1], seg.from[2]];
+    const b = [seg.to[1], seg.to[2]];
+    c.path([a, b], '#6e8bff', 0.5, { opacity: 0.5 });
+    c.path([[-a[0], a[1]], [-b[0], b[1]]], '#6e8bff', 0.5, { opacity: 0.5 });
+  }
+  c.dot([0, -S.lineLength], '#ff5e5e', 3);
+
+  document.getElementById('note-front').textContent =
+    `proj span ${M.lobeM.projectedSpan.toFixed(2)} m  ·  arrow ${M.lobeM.arrow.toFixed(2)} m  ·  tip dihedral ${M.lobeM.tipDihedralDeg.toFixed(1)}°`;
+}
+
+function drawSection() {
+  const b = M.balance;
+  const chord = S.rootChord;
+  const theta = -(b.thetaDeg * Math.PI) / 180;
+  const rot = ([x, y]) => [x * Math.cos(theta) - y * Math.sin(theta), x * Math.sin(theta) + y * Math.cos(theta)];
+
+  const af = M.airfoil.points.map(([x, y]) => rot([x * chord, y * chord]));
+  const pilot = rot([b.calageMetres, 0]);
+  const pilotPt = [pilot[0], pilot[1] - S.lineLength];
+
+  const c = canvas('vp-section', af.concat([pilotPt, [0, 0]]));
+  c.grid(0.5);
+
+  // Chord line and the section itself.
+  c.path([rot([0, 0]), rot([chord, 0])], '#4e6270', 0.8, { dash: '5 4' });
+  c.path(af, '#35d6e8', 1.5, { close: true });
+
+  // Intake, drawn on the lower surface where it actually sits.
+  const { lower } = splitSurfaces(M.airfoil);
+  const intake = lower
+    .filter((p) => p[0] >= M.airfoil.intake.start && p[0] <= M.airfoil.intake.end)
+    .map(([x, y]) => rot([x * chord, y * chord]));
+  if (intake.length > 1) c.path(intake, '#ff5e5e', 2.4);
+
+  // Anchor points.
+  for (const [row, frac] of Object.entries(M.airfoil.anchors)) {
+    const near = lower.reduce((best, p) => Math.abs(p[0] - frac) < Math.abs(best[0] - frac) ? p : best, lower[0]);
+    const q = rot([near[0] * chord, near[1] * chord]);
+    c.dot(q, '#6e8bff', 2.2);
+    c.text(row, [q[0], q[1] - 0.06], '#6e8bff', 8, 'middle');
+    c.path([q, pilotPt], '#6e8bff', 0.5, { opacity: 0.45 });
+  }
+
+  // Centre of pressure and calage.
+  const cp = rot([b.cpMetres, 0]);
+  c.dot(cp, '#e8c547', 3);
+  c.text('Cp', [cp[0] + 0.05, cp[1] + 0.05], '#e8c547', 9);
+  const cal = rot([b.calageMetres, 0]);
+  c.dot(cal, '#e85bc4', 3);
+  c.text('C', [cal[0] + 0.05, cal[1] - 0.14], '#e85bc4', 9);
+  c.path([cal, pilotPt], '#e85bc4', 0.9, { dash: '3 3' });
+  c.dot(pilotPt, '#ff5e5e', 3.5);
+
+  // Horizon and glide path.
+  c.path([[-chord * 0.3, 0], [chord * 1.3, 0]], '#26343d', 0.8);
+  const g = (b.gammaDeg * Math.PI) / 180;
+  c.path([[0, 0], [chord * 1.3, -chord * 1.3 * Math.tan(g)]], '#5fd97a', 0.8, { dash: '6 4' });
+
+  document.getElementById('note-section').textContent =
+    `α ${S.alphaDeg.toFixed(1)}°  ·  θ ${b.thetaDeg.toFixed(2)}°  ·  γ ${b.gammaDeg.toFixed(2)}°  ·  calage ${b.calageMetres.toFixed(3)} m`;
+}
+
+function drawCut() {
+  const note = document.getElementById('note-cut');
+  if (M.fabricError || !M.nested) {
+    canvas('vp-cut', [[0, 0], [1, 1]]);
+    note.textContent = M.fabricError || 'Laying out panels…';
+    return;
+  }
+  const all = M.nested.placed.flatMap((p) => p.outline);
+  const c = canvas('vp-cut', all.concat([[0, 0], [0, S.rollWidth]]));
+  // Roll edges.
+  const x0 = Math.min(...all.map((p) => p[0])), x1 = Math.max(...all.map((p) => p[0]));
+  c.path([[x0, 0], [x1, 0]], '#e85bc4', 1, { opacity: 0.7 });
+  c.path([[x0, S.rollWidth], [x1, S.rollWidth]], '#e85bc4', 1, { opacity: 0.7 });
+
+  for (const p of M.nested.placed) {
+    c.path(p.outline, p.surface === 'upper' ? '#35d6e8' : '#5fd97a', 0.8, { close: true });
+  }
+
+  const f = M.fabric;
+  note.textContent =
+    `${M.nested.placed.length} panels  ·  ${f.linearMetres.toFixed(2)} m of ${S.rollWidth.toFixed(2)} m roll  ·  ${(f.utilisation * 100).toFixed(0)}% used`
+    + (M.nestStale ? '  ·  updating…' : '');
+}
+
+function drawBalanceTable() {
+  const host = document.getElementById('balanceTable');
+  if (!host) return;
+  const b = M.balance;
+  const rows = [
+    ['Speed', b.speedKMH.toFixed(2) + ' km/h', true],
+    ['Sink', (b.speedMS * Math.sin(b.gammaRad)).toFixed(2) + ' m/s'],
+    ['Glide ratio', b.glideRatio.toFixed(2), true],
+    ['Glide angle γ', b.gammaDeg.toFixed(2) + '°'],
+    ['Chord angle θ', b.thetaDeg.toFixed(2) + '°'],
+    ['Cz 3D', b.cz3D.toFixed(3)],
+    ['CxT', b.cxTotal.toFixed(4)],
+    ['— induced', (b.dragBreakdown.induced * 100).toFixed(1) + '%'],
+    ['— lines', (b.dragBreakdown.lines * 100).toFixed(1) + '%'],
+    ['— pilot', (b.dragBreakdown.pilot * 100).toFixed(1) + '%'],
+    ['— profile', (b.dragBreakdown.profile * 100).toFixed(1) + '%'],
+    ['Centre of pressure', (b.xcpFraction * 100).toFixed(1) + '% c'],
+    ['Calage', b.calageMetres.toFixed(3) + ' m', true],
+    ['Calage fraction', (b.calageFraction * 100).toFixed(1) + '% c', true],
+  ];
+  const t = el('table', 'tbl');
+  for (const [k, v, em] of rows) {
+    const tr = el('tr', em ? 'em' : null);
+    tr.append(el('td', null, k), el('td', null, v));
+    t.append(tr);
+  }
+  host.innerHTML = '';
+  host.append(t);
+}
+
+/* --------------------------------------------------------------- output -- */
+
+function linesCSV() {
+  const out = ['row,level,terminal,rib_index,length_m'];
+  for (const s of M.cascade.lengths) {
+    out.push([s.row, s.level, s.terminal ? 1 : 0, s.ribIndex ?? '', s.length.toFixed(4)].join(','));
+  }
+  const budget = lineBudget(M.cascade);
+  out.push('');
+  out.push('# total by row');
+  for (const [row, len] of Object.entries(budget.byRow)) out.push(`${row},,,,${len.toFixed(3)}`);
+  out.push(`TOTAL,,,,${budget.total.toFixed(3)}`);
+  return out.join('\n');
+}
+
+function save(filename, text) {
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setStatus(null, `Saved ${filename}`);
+}
+
+/* ---------------------------------------------------------------- misc  -- */
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function clear(id) {
+  const n = document.getElementById(id);
+  n.innerHTML = '';
+  return n;
+}
+
+function setStatus(error, msg) {
+  const s = document.getElementById('status');
+  if (error) { s.innerHTML = `<span class="bad">${error}</span>`; return; }
+  const dev = M.worstDev != null ? (M.worstDev * 100).toFixed(3) + '%' : '—';
+  const ok = (M.worstDev ?? 0) < 0.01;
+  s.innerHTML =
+    `<span class="${ok ? 'ok' : 'bad'}">●</span> ${msg || 'Model current'}` +
+    `<span class="sep"> · </span>worst panel distortion ${dev}` +
+    `<span class="sep"> · </span>rebuilt in ${(M.ms || 0).toFixed(0)} ms`;
+}
+
+/* ----------------------------------------------------------------- boot -- */
+
+document.getElementById('wingName').addEventListener('input', (e) => { S.name = e.target.value || 'wing'; });
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(draw, 120);
+});
+
+buildControls();
+rebuild();
+
+</script>
+</body>
+</html>
