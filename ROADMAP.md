@@ -21,14 +21,34 @@ Everything needed to go from numbers to a cutting file.
 - [x] Flat development: triangle-pair unrolling, distortion reporting *(ch.5)*
 - [x] Ovalization: billow geometry, tapered widening, seam easing *(ch.6)*
 - [x] Lines: weighted-centroid cascade, both load cases *(ch.8.1–8.2)*
-- [x] Export: DXF R12, SVG, CSV, project save/load
+- [x] Export: true R12 DXF, true-scale SVG, CSV, project save/load
+- [x] Closed trailing edge, Selig and Lednicer import
 - [x] Nesting with orientation search and skyline packing
 - [x] Four live viewports
-- [x] 101-test validation suite
+- [x] Third rotation about the vertical, aligning ribs to the glide path,
+      with phi/chi diagnostics *(2021 study, supersedes ch.3.4)*
+- [x] Line weight in the balance *(2020 equilibrium revisit)*
+- [x] Laboratori d'envol .txt import, with intake read from the file header
+- [x] Scale-invariant arc definition
+- [x] 152-test validation suite and a benchmark with regression budgets
 
 ---
 
 ## Phase 2 — accuracy and the missing chapters
+
+Newly identified from the author's wider site, which carries a decade of
+material published after the handbook:
+
+- [ ] **3D shaping of the leading edge** — a four-part study on forming the
+      nose in ripstop, including negative shaping. Changes panel geometry near
+      the LE and is standard on modern wings.
+- [ ] **LEP file interoperability** — read and write `leparagliding.txt`, so
+      designs move between this tool and the author's reference implementation.
+      This is the single highest-value integration available.
+- [ ] **Reference wings from the gnuLAB / gnuA / BHL series** — dozens of
+      complete published designs with airfoils and areas, usable as both
+      starting points and validation cases.
+
 
 The parts the source describes but Phase 1 skipped, plus the accuracy work the
 validation notes flagged.
@@ -41,6 +61,8 @@ validation notes flagged.
       makes the balance solve a curve over the speed range rather than a point.
 - [ ] **Trimmers and the accelerated polar.** Re-solve equilibrium across the
       speed system's travel and plot speed against sink.
+- [ ] **NACA 5-digit and modified 4-digit sections**, matching the generator
+      this project was cross-checked against.
 - [ ] **Airfoil aerodynamics.** Right now Cz, Cx and Cm are typed in by hand.
       A thin-airfoil or panel-method estimate would let the section drive the
       balance directly, and make the polar sweep meaningful.

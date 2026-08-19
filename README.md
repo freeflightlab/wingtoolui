@@ -13,9 +13,13 @@ drive: change a number, see the wing change, and export cutting files.
 
 ## Status
 
-**Phase 1 complete.** The geometry pipeline runs end to end, from design
-parameters to nested DXF cutting files, and is covered by 101 tests including
-the handbook's own worked example. See `ROADMAP.md` for what is next.
+**Phase 1 complete and reviewed.** The geometry pipeline runs end to end, from
+design parameters to nested DXF cutting files. It is covered by **152 tests**
+and a **benchmark with regression budgets**. Validation includes the handbook's
+worked example, the author's 2021 rotation study, a real published airfoil
+checked against the handbook's own table, and a cross-check of the section
+generator against an independent NACA generator. See `docs/validation.md` for
+every discrepancy found, and `ROADMAP.md` for what is next.
 
 ---
 
@@ -28,8 +32,9 @@ double-clicking works, no server needed.
 To rebuild after changing the source:
 
 ```bash
-python3 build.py          # bundles src/ into dist/paraglider-design-tool.html
-node tests/run-tests.js   # 101 checks against known geometry and the handbook
+python3 build.py           # bundles src/ into dist/paraglider-design-tool.html
+node tests/run-tests.js    # 152 checks against known geometry and the sources
+node tests/benchmark.js    # timings, scaling, and budget regressions
 ```
 
 There is no package manager, no build toolchain and nothing to install. Node is
@@ -65,7 +70,7 @@ src/core/          the maths — pure functions, no DOM, individually testable
   planform.js      ch.1  elliptical + linear edges, areas, AR, centroid
   airfoil.js       ch.2  NACA 4-digit, coordinate import, surface splitting
   lobe.js          ch.3  arc types, arc-length parameterisation, washin
-  wing3d.js        ch.3.4 rib rotation and placement onto the arc
+  wing3d.js        ch.3.4 + 2021 study: three rotations, flow-alignment angles
   equilibrium.js   ch.4  longitudinal balance, calage, speed, glide
   flatdev.js       ch.5  triangle-pair unrolling of panels
   ovalization.js   ch.6  billow geometry and panel widening
@@ -74,6 +79,7 @@ src/core/          the maths — pure functions, no DOM, individually testable
 
 src/ui/            index.html + style.css + app.js  (shell, controls, viewports)
 tests/run-tests.js validation suite
+tests/benchmark.js performance, scaling and budgets
 docs/              source mapping and validation notes
 build.py           bundler
 dist/              the built tool
@@ -110,11 +116,13 @@ so a wing on screen and the same wing opened from a `.dxf` look alike.
 
 ## Exports
 
-- **Panels DXF** — nested cutting file, R12, one layer per panel, seam
-  allowance applied
+- **Panels DXF** — nested cutting file, true R12 (`POLYLINE`/`VERTEX`/`SEQEND`,
+  `$ACADVER = AC1009`, units in metres), one layer per panel, seam allowance
+  applied
 - **Ribs DXF** — every rib projected flat into its own plane, labelled with
   chord and washin
-- **Panels SVG** — same layout for plotting or inspection
+- **Panels SVG** — same layout, dimensioned in millimetres so it plots at
+  true size
 - **Line lengths CSV** — every cascade segment with its length, plus totals by
   row
 - **Project JSON** — every input, reloadable
