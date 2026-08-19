@@ -129,7 +129,7 @@ html, body {
 .viewports {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
+  grid-template-rows: repeat(3, 1fr);
   gap: 1px;
   background: var(--rule-soft);
   overflow: hidden;
@@ -356,13 +356,29 @@ input[type=range]::-moz-range-thumb {
 @media (max-width: 900px) {
   .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .controls { border-right: none; border-bottom: 1px solid var(--rule); max-height: 42vh; }
-  .viewports { grid-template-columns: 1fr; grid-template-rows: repeat(4, minmax(220px, 1fr)); overflow-y: auto; }
+  .viewports { grid-template-columns: 1fr; grid-template-rows: repeat(6, minmax(220px, 1fr)); overflow-y: auto; }
   .readout { width: 100%; margin-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+
+/* ---------- environment flags ---------- */
+
+.flag {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: 3px;
+  border-left: 2px solid;
+  background: var(--panel-2);
+}
+.flag.warn  { border-color: var(--aci-yellow); color: var(--aci-yellow); }
+.flag.error { border-color: var(--aci-red);    color: var(--aci-red); }
+.flag.ok    { border-color: var(--aci-green);  color: var(--aci-green); }
 </style>
 </head>
 <body>
@@ -391,6 +407,11 @@ input[type=range]::-moz-range-thumb {
       <details class="group" open>
         <summary>Arc &amp; twist</summary>
         <div class="group-body" id="g-lobe"></div>
+      </details>
+
+      <details class="group" open>
+        <summary>Environment</summary>
+        <div class="group-body" id="g-env"></div>
       </details>
 
       <details class="group">
@@ -424,6 +445,8 @@ input[type=range]::-moz-range-thumb {
         <div class="vp"><div class="vp-label">Front — arc</div><svg id="vp-front"></svg><div class="vp-note" id="note-front"></div></div>
         <div class="vp"><div class="vp-label">Section — balance</div><svg id="vp-section"></svg><div class="vp-note" id="note-section"></div></div>
         <div class="vp"><div class="vp-label">Cutting layout</div><svg id="vp-cut"></svg><div class="vp-note" id="note-cut"></div></div>
+        <div class="vp"><div class="vp-label">Polar</div><svg id="vp-polar"></svg><div class="vp-note" id="note-polar"></div></div>
+        <div class="vp"><div class="vp-label">Atmosphere</div><svg id="vp-atmos"></svg><div class="vp-note" id="note-atmos"></div></div>
       </div>
 
       <div class="statusbar">
@@ -950,6 +973,683 @@ const LIBRARY = {
   'NACA 2414': () => naca4('2414'),
   'NACA 4418': () => naca4('4418'),
 };
+
+/* ------------------------------------------------------------------ reflex -- */
+
+/**
+ * Add reflex to any section.
+ *
+ * A reflexed section turns its camber line back up near the trailing edge.
+ * That costs a little lift and buys a positive pitching moment, which is what
+ * makes a wing want to hold its own angle of attack instead of tucking — the
+ * reason reflex profiles appear on paragliders at all, and the reason this is
+ * a design parameter rather than a shape preference.
+ *
+ * The section is decomposed into a camber line and a thickness distribution,
+ * the camber line is modified aft of `start`, and the two are recombined. That
+ * works on an imported section as well as a generated one, and it leaves the
+ * thickness distribution — and therefore the structural depth and the rib
+ * geometry — untouched.
+ *
+ * @param {object} af
+ * @param {number} amount   trailing-edge rise, fraction of chord (0.01 = 1%)
+ * @param {number} start    chord fraction where reflex begins
+ * @param {number} exponent shape of the rise; 2 is a smooth parabolic blend
+ */
+function applyReflex(af, { amount = 0.012, start = 0.65, exponent = 2.0 } = {}) {
+  if (amount === 0) return af;
+  const { upper, lower } = splitSurfaces(af);
+
+  const sample = (poly, x) => {
+    for (let i = 1; i < poly.length; i++) {
+      if (poly[i][0] >= x) {
+        const span = poly[i][0] - poly[i - 1][0] || 1;
+        const f = clamp((x - poly[i - 1][0]) / span, 0, 1);
+        return poly[i - 1][1] + f * (poly[i][1] - poly[i - 1][1]);
+      }
+    }
+    return poly[poly.length - 1][1];
+  };
+
+  const n = 120;
+  const xs = [];
+  for (let i = 0; i <= n; i++) xs.push(0.5 * (1 - Math.cos((Math.PI * i) / n)));
+
+  // Rise applied to the camber line, zero ahead of `start` and rising
+  // smoothly to `amount` at the trailing edge. The exponent keeps the
+  // gradient continuous at the blend point, which matters: a kink there
+  // shows up as a pressure spike and is exactly what reflex is meant to avoid.
+  const rise = (x) => (x <= start ? 0 : amount * Math.pow((x - start) / (1 - start), exponent));
+
+  const up = [];
+  const lo = [];
+  for (const x of xs) {
+    const yu = sample(upper, x);
+    const yl = sample(lower, x);
+    const camber = (yu + yl) / 2 + rise(x);
+    const half = (yu - yl) / 2;
+    up.push([x, camber + half]);
+    lo.push([x, camber - half]);
+  }
+
+  const pts = up.slice().reverse().concat(lo.slice(1));
+  return finalise({
+    ...af,
+    name: `${af.name} reflex ${(amount * 100).toFixed(1)}%`,
+    points: pts,
+    reflex: { amount, start, exponent },
+  });
+}
+
+/* ===== atmosphere.js ===== */
+/* atmosphere.js — operating environment.
+ *
+ * U.S. Standard Atmosphere 1976, which is identical to the ICAO standard
+ * atmosphere and ISO 2533 up to 32 km and continues to 86 km. That covers the
+ * 50 km ceiling this tool is asked to explore with a single referenced model
+ * rather than a patchwork.
+ *
+ * Two things are easy to get wrong here and both are handled explicitly:
+ *
+ * 1. **Geopotential vs geometric altitude.** The layer table is defined in
+ *    geopotential altitude H, which absorbs the variation of gravity with
+ *    height so the hydrostatic equation keeps a constant g0. Users think in
+ *    geometric altitude z. The two differ by 400 m at 50 km — enough to move
+ *    the pressure by 1.3%. Input here is geometric; conversion is internal.
+ *
+ * 2. **Base pressures are computed, not transcribed.** Each layer's base
+ *    pressure follows from integrating the one below it. Hard-coding the
+ *    published values invites a transcription error that no test would catch,
+ *    because the test would be written from the same table. Instead they are
+ *    derived and then *checked* against the published values.
+ */
+
+const G0 = 9.80665;          // standard gravity, m/s^2
+const R_STAR = 8.31432;      // universal gas constant used by the 1976 model
+const M_AIR = 0.0289644;     // molar mass of dry air, kg/mol
+const R_AIR = R_STAR / M_AIR; // specific gas constant, ~287.053 J/(kg K)
+const GAMMA = 1.4;
+const EARTH_R = 6356766;     // effective earth radius for geopotential, m
+const BETA_S = 1.458e-6;     // Sutherland's law coefficient
+const S_SUTH = 110.4;        // Sutherland's temperature, K
+const SIGMA_AIR = 3.65e-10;  // effective collision diameter, m
+const N_AVOGADRO = 6.022169e23;
+
+/** Layer bases: geopotential altitude (m), base temperature (K), lapse (K/m). */
+const LAYERS = [
+  { H: 0, T: 288.15, L: -0.0065 },
+  { H: 11000, T: 216.65, L: 0.0 },
+  { H: 20000, T: 216.65, L: 0.001 },
+  { H: 32000, T: 228.65, L: 0.0028 },
+  { H: 47000, T: 270.65, L: 0.0 },
+  { H: 51000, T: 270.65, L: -0.0028 },
+  { H: 71000, T: 214.65, L: -0.002 },
+  { H: 84852, T: 186.946, L: 0.0 },
+];
+
+// Derive each layer's base pressure by integrating upward from sea level.
+const P0 = 101325;
+LAYERS[0].P = P0;
+for (let i = 1; i < LAYERS.length; i++) {
+  const b = LAYERS[i - 1];
+  const dH = LAYERS[i].H - b.H;
+  LAYERS[i].P = b.L === 0
+    ? b.P * Math.exp((-G0 * dH) / (R_AIR * b.T))
+    : b.P * Math.pow(b.T / (b.T + b.L * dH), (G0) / (R_AIR * b.L));
+}
+
+/** Geometric altitude z (m) -> geopotential altitude H (m). */
+const geopotential = (z) => (EARTH_R * z) / (EARTH_R + z);
+
+/** Geopotential altitude H (m) -> geometric altitude z (m). */
+const geometric = (H) => (EARTH_R * H) / (EARTH_R - H);
+
+/**
+ * Atmospheric state at a geometric altitude.
+ * @param {number} z geometric altitude, metres (0 to 86000)
+ * @param {object} opts
+ * @param {number} opts.deltaISA temperature offset from standard, K
+ */
+function atmosphere(z, { deltaISA = 0 } = {}) {
+  const H = geopotential(z);
+  if (H < -5000 || H > 84852) {
+    throw new Error(
+      `Altitude ${(z / 1000).toFixed(1)} km is outside the 1976 model's range of -5 to 86 km.`,
+    );
+  }
+
+  let i = 0;
+  while (i < LAYERS.length - 1 && H >= LAYERS[i + 1].H) i++;
+  const b = LAYERS[i];
+  const dH = H - b.H;
+
+  // Standard temperature drives the pressure integral; the offset is applied
+  // afterwards to density and the transport properties. Adding it before would
+  // make a non-standard day change the pressure at altitude, which it does not
+  // in the way this parameter is meant.
+  const Tstd = b.T + b.L * dH;
+  const P = b.L === 0
+    ? b.P * Math.exp((-G0 * dH) / (R_AIR * b.T))
+    : b.P * Math.pow(b.T / Tstd, G0 / (R_AIR * b.L));
+
+  const T = Tstd + deltaISA;
+  const rho = P / (R_AIR * T);
+  const a = Math.sqrt(GAMMA * R_AIR * T);
+  const mu = (BETA_S * Math.pow(T, 1.5)) / (T + S_SUTH);
+  const nu = mu / rho;
+
+  // Number density and mean free path, which decide whether treating the air
+  // as a continuous fluid is still legitimate.
+  const n = (P * N_AVOGADRO) / (R_STAR * T);
+  const meanFreePath = 1 / (Math.SQRT2 * Math.PI * SIGMA_AIR * SIGMA_AIR * n);
+
+  return {
+    geometricAltitude: z,
+    geopotentialAltitude: H,
+    layer: i,
+    temperature: T,
+    temperatureStd: Tstd,
+    pressure: P,
+    density: rho,
+    speedOfSound: a,
+    dynamicViscosity: mu,
+    kinematicViscosity: nu,
+    numberDensity: n,
+    meanFreePath,
+    densityRatio: rho / 1.225,
+    pressureRatio: P / P0,
+    gravity: G0 * Math.pow(EARTH_R / (EARTH_R + z), 2),
+  };
+}
+
+/** Sea-level standard values, for ratios and equivalent airspeed. */
+const SEA_LEVEL = atmosphere(0);
+
+/**
+ * Non-dimensional groups for a wing at a given state.
+ *
+ * These are what decide whether the aerodynamic model is even applicable, so
+ * they are computed alongside warnings rather than reported bare.
+ *
+ * @param {object} p
+ * @param {number} p.speed      true airspeed, m/s
+ * @param {number} p.chord      reference chord, m
+ * @param {object} p.atm        result of atmosphere()
+ */
+function nonDimensional({ speed, chord, atm, span = null }) {
+  const Re = (atm.density * speed * chord) / atm.dynamicViscosity;
+  const Mach = speed / atm.speedOfSound;
+  // Knudsen from the same reference length as the Reynolds number, so the
+  // three are consistent: Kn = M/Re * sqrt(gamma*pi/2).
+  const Kn = atm.meanFreePath / chord;
+  const q = 0.5 * atm.density * speed * speed;
+  const EAS = speed * Math.sqrt(atm.density / SEA_LEVEL.density);
+
+  const flags = [];
+  // Continuum mechanics stops describing the flow before the molecules do.
+  if (Kn > 0.01) flags.push({ level: 'error', text: 'Kn > 0.01 — slip and rarefaction; continuum aerodynamics does not apply.' });
+  else if (Kn > 1e-3) flags.push({ level: 'warn', text: 'Kn > 0.001 — approaching slip flow at the surface.' });
+
+  if (Mach > 0.8) flags.push({ level: 'error', text: 'M > 0.8 — transonic; incompressible and Prandtl-Glauert models both fail.' });
+  else if (Mach > 0.3) flags.push({ level: 'warn', text: 'M > 0.3 — compressibility matters; a Prandtl-Glauert correction is applied.' });
+
+  if (Re < 3e4) flags.push({ level: 'error', text: 'Re < 30,000 — below the range where these viscous correlations mean anything.' });
+  else if (Re < 2e5) flags.push({ level: 'warn', text: 'Re < 200,000 — low-Reynolds regime; separation bubbles dominate and drag is underestimated.' });
+
+  return {
+    reynolds: Re,
+    mach: Mach,
+    knudsen: Kn,
+    dynamicPressure: q,
+    trueAirspeed: speed,
+    equivalentAirspeed: EAS,
+    aspectRatioSpan: span,
+    // Prandtl-Glauert factor, valid only in the subsonic range flagged above.
+    compressibilityFactor: Mach < 0.95 ? 1 / Math.sqrt(1 - Mach * Mach) : Infinity,
+    flags,
+  };
+}
+
+/**
+ * Speed a wing must fly to hold a given lift coefficient at this state.
+ * This is the number that makes high altitude concrete: lift scales with
+ * density, so the required speed scales with 1/sqrt(density), and at 50 km
+ * that is a factor of about thirty.
+ */
+function speedForLift({ mass, gravity, area, cl, atm }) {
+  const W = mass * (gravity ?? atm.gravity);
+  return Math.sqrt((2 * W) / (atm.density * area * cl));
+}
+
+/** Altitude at which a given density occurs — the inverse lookup. */
+function altitudeForDensity(rho, { hi = 86000 } = {}) {
+  let lo = -5000;
+  let h = hi;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + h) / 2;
+    if (atmosphere(mid).density > rho) lo = mid; else h = mid;
+  }
+  return (lo + h) / 2;
+}
+
+/** A profile through the atmosphere, for plotting. */
+function profile({ from = 0, to = 50000, steps = 50, deltaISA = 0 } = {}) {
+  const out = [];
+  for (let i = 0; i <= steps; i++) {
+    const z = from + ((to - from) * i) / steps;
+    out.push({ z, ...atmosphere(z, { deltaISA }) });
+  }
+  return out;
+}
+
+/** The published base values, exposed so tests can check the derivation. */
+const LAYER_TABLE = LAYERS.map((l) => ({ ...l }));
+const CONSTANTS = { G0, R_AIR, GAMMA, EARTH_R, M_AIR, R_STAR };
+
+/* ===== aero.js ===== */
+/* aero.js — section and wing aerodynamics.
+ *
+ * Three layers, deliberately separated because they have very different
+ * levels of trustworthiness:
+ *
+ *   1. **Thin-airfoil theory** for zero-lift angle and pitching moment from
+ *      the camber line. This is exact potential-flow theory for a thin
+ *      section, and it is what makes reflex quantitative rather than a
+ *      feeling — a reflexed camber line has a positive Cm0 and you can read
+ *      the number off.
+ *
+ *   2. **Lifting line** for the 3D behaviour. Prandtl's monoplane equation
+ *      solved as a Fourier series over the real planform and twist, giving
+ *      the span loading, the induced drag, and the Oswald factor as results
+ *      rather than as assumptions. This replaces the single hand-typed
+ *      Oswald number the equilibrium solver has been using.
+ *
+ *   3. **A viscous drag correlation** — flat-plate skin friction with a form
+ *      factor and a crude laminar run. This is the weak layer, and it is
+ *      labelled as such everywhere it appears. It is an estimate to design
+ *      against, not an answer. For real numbers, export to XFOIL (see
+ *      xfoil.js) and import the polar back; the wing analysis will then use
+ *      measured section data and only layers 1 and 2 remain modelled.
+ */
+
+
+
+/* ------------------------------------------------------- camber geometry -- */
+
+/**
+ * Mean camber line of any section, sampled in the cosine-spaced coordinate
+ * thin-airfoil theory is written in: x = (1 - cos t)/2.
+ */
+function camberLine(airfoil, n = 200) {
+  const { upper, lower } = splitSurfaces(airfoil);
+  const at = (poly, x) => {
+    for (let i = 1; i < poly.length; i++) {
+      if (poly[i][0] >= x) {
+        const span = poly[i][0] - poly[i - 1][0] || 1;
+        const f = clamp((x - poly[i - 1][0]) / span, 0, 1);
+        return poly[i - 1][1] + f * (poly[i][1] - poly[i - 1][1]);
+      }
+    }
+    return poly[poly.length - 1][1];
+  };
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = (Math.PI * i) / n;
+    const x = (1 - Math.cos(t)) / 2;
+    pts.push({ t, x, y: (at(upper, x) + at(lower, x)) / 2 });
+  }
+  return pts;
+}
+
+/**
+ * Thin-airfoil theory results for a camber line.
+ *
+ *   alpha_L0 = -(1/pi) * integral_0^pi (dyc/dx)(cos t - 1) dt
+ *   Cm_c/4   =  (pi/4) * (A2 - A1),  An = (2/pi) * integral (dyc/dx) cos(nt) dt
+ *            =  (1/2)  * integral_0^pi (dyc/dx)(cos 2t - cos t) dt
+ *
+ * Both integrals are in the cosine coordinate, where the leading-edge
+ * singularity in dyc/dx is integrable — which is the whole reason the theory
+ * is written this way.
+ *
+ * Note the 1/2 on the moment, not 1/4: the (pi/4) prefactor multiplies
+ * coefficients that each already carry a 2/pi. Checked against the standard
+ * worked example for NACA 2412, which gives alpha_L0 = -2.07 deg and
+ * Cm_c/4 = -0.0531.
+ *
+ * These are inviscid, zero-thickness results. Thin-airfoil theory reliably
+ * overpredicts the magnitude of Cm for a real section — measured Cm for
+ * NACA 4412 is about -0.093 against a theoretical -0.106 — so treat the
+ * moment as an upper bound and use XFOIL when the number matters.
+ */
+function thinAirfoil(airfoil, n = 400) {
+  const cl = camberLine(airfoil, n);
+  const slope = (i) => {
+    const a = cl[Math.max(0, i - 1)];
+    const b = cl[Math.min(cl.length - 1, i + 1)];
+    return (b.y - a.y) / (b.x - a.x || 1e-12);
+  };
+
+  let iA = 0;
+  let iM = 0;
+  for (let i = 1; i < cl.length; i++) {
+    const dt = cl[i].t - cl[i - 1].t;
+    const s0 = slope(i - 1);
+    const s1 = slope(i);
+    const f0 = s0 * (Math.cos(cl[i - 1].t) - 1);
+    const f1 = s1 * (Math.cos(cl[i].t) - 1);
+    iA += ((f0 + f1) / 2) * dt;
+    const g0 = s0 * (Math.cos(2 * cl[i - 1].t) - Math.cos(cl[i - 1].t));
+    const g1 = s1 * (Math.cos(2 * cl[i].t) - Math.cos(cl[i].t));
+    iM += ((g0 + g1) / 2) * dt;
+  }
+
+  const alphaL0 = -iA / Math.PI;      // radians
+  const cmQuarter = iM / 2;
+
+  return {
+    alphaL0Rad: alphaL0,
+    alphaL0Deg: deg(alphaL0),
+    cm0: cmQuarter,
+    liftSlopePerRad: 2 * Math.PI,
+    camber: cl,
+  };
+}
+
+/* --------------------------------------------------------- section polar -- */
+
+/**
+ * Skin-friction based profile drag. Mixed laminar/turbulent flat plate with a
+ * thickness form factor.
+ *
+ * This is a correlation, not a boundary-layer solution. It has no notion of a
+ * separation bubble, which is exactly what dominates a paraglider section at
+ * the Reynolds numbers it actually flies. Treat it as a floor.
+ */
+function profileDrag({ reynolds, thickness, transition = 0.35 }) {
+  const Re = Math.max(1e3, reynolds);
+  const cfLam = 1.328 / Math.sqrt(Re);
+  const cfTurb = 0.455 / Math.pow(Math.log10(Re), 2.58);
+  const cf = transition * cfLam + (1 - transition) * cfTurb;
+  const tc = thickness;
+  const formFactor = 1 + 2 * tc + 60 * Math.pow(tc, 4);
+  const wetted = 2.02;                 // wetted area / planform area
+  return cf * formFactor * wetted;
+}
+
+/**
+ * A 2D section polar from theory plus correlation. `source: 'estimated'`
+ * marks it so nothing downstream can mistake it for measured data.
+ */
+function estimateSectionPolar(airfoil, { reynolds, mach = 0, alphas = null }) {
+  const ta = thinAirfoil(airfoil);
+  const t = airfoil.metrics.maxThickness;
+  const cd0 = profileDrag({ reynolds, thickness: t });
+
+  // Maximum lift falls off with Reynolds number. This is a rough fit to the
+  // usual behaviour of cambered sections, not a prediction.
+  const clMax = clamp(1.10 + 0.35 * Math.log10(reynolds / 1e6), 0.55, 1.75)
+    + 6 * Math.abs(ta.cm0);
+
+  const beta = mach < 0.95 ? Math.sqrt(1 - mach * mach) : NaN;
+  const slope = (2 * Math.PI) / (beta || 1);
+
+  const list = alphas || Array.from({ length: 41 }, (_, i) => -6 + i * 0.5);
+  const points = list.map((aDeg) => {
+    const clLinear = slope * (rad(aDeg) - ta.alphaL0Rad);
+    const cl = clamp(clLinear, -clMax, clMax);
+    const stalled = Math.abs(clLinear) > clMax;
+    // Viscous drag rise away from the minimum-drag lift.
+    const cd = cd0 * (1 + 1.4 * Math.pow(cl - 0.25, 2)) + (stalled ? 0.05 : 0);
+    return { alphaDeg: aDeg, cl, cd, cm: ta.cm0, stalled };
+  });
+
+  return {
+    source: 'estimated',
+    reynolds,
+    mach,
+    alphaL0Deg: ta.alphaL0Deg,
+    cm0: ta.cm0,
+    clMax,
+    cd0,
+    liftSlopePerRad: slope,
+    points,
+  };
+}
+
+/* ----------------------------------------------------------- lifting line -- */
+
+/**
+ * Prandtl's lifting line, solved as a Fourier series.
+ *
+ * The monoplane equation at spanwise station theta, with y = -(b/2) cos t:
+ *
+ *   sum_n A_n sin(n t) [ 4b/(a0 c(t)) + n / sin t ] = alpha(t) - alpha_L0(t)
+ *
+ * Only odd harmonics appear for a symmetric wing. Collocating at N points
+ * gives an N x N system; N is small, so a direct solve is fine and avoids the
+ * convergence questions an iterative method would raise.
+ *
+ * Returns the span loading, the induced drag, and the Oswald factor — the
+ * last of which the equilibrium solver has until now been taking on trust as
+ * a typed-in number.
+ */
+function liftingLine({
+  planform, alphaDeg, twistAt = null, alphaL0Rad = 0, liftSlope = 2 * Math.PI, N = 24,
+}) {
+  const b = planform.span;
+  const halfSpan = planform.halfSpan;
+  const area = 2 * simpson((y) => planform.chord(y), 0, halfSpan, 400);
+  const AR = (b * b) / area;
+
+  const theta = [];
+  for (let k = 1; k <= N; k++) theta.push((k * Math.PI) / (2 * N));
+
+  const A = [];
+  const rhs = [];
+  for (let k = 0; k < N; k++) {
+    const t = theta[k];
+    const y = halfSpan * Math.cos(t);       // station from centre
+    const c = Math.max(1e-6, planform.chord(y));
+    const mu = (4 * b) / (liftSlope * c);
+    const row = [];
+    for (let j = 0; j < N; j++) {
+      const n = 2 * j + 1;
+      row.push(Math.sin(n * t) * (mu + n / Math.sin(t)));
+    }
+    A.push(row);
+    const twist = twistAt ? rad(twistAt(y)) : 0;
+    rhs.push(rad(alphaDeg) + twist - alphaL0Rad);
+  }
+
+  const coeff = solve(A, rhs);
+
+  const A1 = coeff[0];
+  let sumN = 0;
+  for (let j = 0; j < N; j++) sumN += (2 * j + 1) * coeff[j] * coeff[j];
+
+  const CL = Math.PI * AR * A1;
+  const CDi = Math.PI * AR * sumN;
+  const e = sumN > 0 ? (A1 * A1) / sumN : 1;
+
+  // Span loading: local lift coefficient at each station.
+  const loading = [];
+  const M = 60;
+  for (let i = 0; i <= M; i++) {
+    const t = 1e-6 + ((Math.PI / 2 - 2e-6) * i) / M;
+    const y = halfSpan * Math.cos(t);
+    let s = 0;
+    for (let j = 0; j < N; j++) s += coeff[j] * Math.sin((2 * j + 1) * t);
+    const c = Math.max(1e-9, planform.chord(y));
+    loading.push({ y, eta: y / halfSpan, chord: c, cl: (4 * b * s) / c, gamma: s });
+  }
+  loading.reverse();
+
+  return { CL, CDi, e, AR, area, coefficients: coeff, loading, delta: 1 / e - 1 };
+}
+
+/** Gaussian elimination with partial pivoting. */
+function solve(Ain, bin) {
+  const n = bin.length;
+  const A = Ain.map((r, i) => [...r, bin[i]]);
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+    if (Math.abs(A[piv][col]) < 1e-14) throw new Error('Lifting-line system is singular.');
+    [A[col], A[piv]] = [A[piv], A[col]];
+    for (let r = col + 1; r < n; r++) {
+      const f = A[r][col] / A[col][col];
+      for (let c = col; c <= n; c++) A[r][c] -= f * A[col][c];
+    }
+  }
+  const x = new Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) {
+    let s = A[r][n];
+    for (let c = r + 1; c < n; c++) s -= A[r][c] * x[c];
+    x[r] = s / A[r][r];
+  }
+  return x;
+}
+
+/* -------------------------------------------------------------- wing polar -- */
+
+/**
+ * Full wing polar at a given atmospheric state.
+ *
+ * Section data comes either from `estimateSectionPolar` or from an imported
+ * XFOIL polar; `sectionPolar.source` says which, and that is carried through
+ * to the result so the interface can be honest about it.
+ *
+ * Parasitic drag from the lines and the pilot is added as an area-referenced
+ * coefficient, the same convention chapter 4 uses.
+ */
+function wingPolar({
+  planform, airfoil, atm, mass, area = null, chordRef = null,
+  twistAt = null, cxLines = 0.020, cxPilot = 0.015,
+  alphaRange = [-4, 16], step = 0.5, sectionPolar = null, N = 24,
+}) {
+  const S = area ?? 2 * simpson((y) => planform.chord(y), 0, planform.halfSpan, 400);
+  const cRef = chordRef ?? S / planform.span;
+  const AR = (planform.span * planform.span) / S;
+
+  const points = [];
+  let best = null;
+  let minSink = null;
+
+  for (let a = alphaRange[0]; a <= alphaRange[1] + 1e-9; a += step) {
+    // Speed and section Reynolds number depend on the lift being produced,
+    // which depends on the speed. One pass of fixed-point iteration from the
+    // previous point is enough at this step size.
+    let V = points.length ? points[points.length - 1].speed : 10;
+    let sp = sectionPolar;
+    let ll = null;
+    let nd = null;
+
+    for (let iter = 0; iter < 6; iter++) {
+      nd = nonDimensional({ speed: V, chord: cRef, atm, span: planform.span });
+      if (!sectionPolar) {
+        sp = estimateSectionPolar(airfoil, { reynolds: nd.reynolds, mach: nd.mach });
+      }
+      ll = liftingLine({
+        planform, alphaDeg: a, twistAt,
+        alphaL0Rad: rad(sp.alphaL0Deg),
+        liftSlope: sp.liftSlopePerRad ?? 2 * Math.PI,
+        N,
+      });
+      if (ll.CL <= 0.01) break;
+      const Vnew = Math.sqrt((2 * mass * atm.gravity) / (atm.density * S * ll.CL));
+      if (!Number.isFinite(Vnew)) break;
+      if (Math.abs(Vnew - V) / Vnew < 1e-4) { V = Vnew; break; }
+      V = Vnew;
+    }
+
+    // Profile drag integrated across the span at each station's own local
+    // lift coefficient, rather than assuming the whole wing works at the
+    // wing-average Cl. The tips of a tapered wing run at a different Cl.
+    let cdProfile = 0;
+    let wsum = 0;
+    for (const st of ll.loading) {
+      const cd = sectionCd(sp, st.cl);
+      cdProfile += cd * st.chord;
+      wsum += st.chord;
+    }
+    cdProfile = wsum > 0 ? cdProfile / wsum : sp.cd0;
+
+    const CD = cdProfile + ll.CDi + cxLines + cxPilot;
+    const glide = ll.CL > 0 ? ll.CL / CD : 0;
+    const sink = ll.CL > 0 ? V / Math.sqrt(1 + glide * glide) * 1 : NaN;
+    const sinkRate = ll.CL > 0 ? V * (CD / Math.sqrt(ll.CL * ll.CL + CD * CD)) : NaN;
+
+    const pt = {
+      alphaDeg: a,
+      CL: ll.CL,
+      CDi: ll.CDi,
+      CDprofile: cdProfile,
+      CD,
+      glideRatio: glide,
+      speed: V,
+      speedKMH: V * 3.6,
+      sinkRate,
+      oswald: ll.e,
+      reynolds: nd.reynolds,
+      mach: nd.mach,
+      loading: ll.loading,
+      stalled: ll.loading.some((s) => Math.abs(s.cl) > sp.clMax * 0.995),
+    };
+    points.push(pt);
+    if (!pt.stalled && ll.CL > 0) {
+      if (!best || glide > best.glideRatio) best = pt;
+      if (!minSink || sinkRate < minSink.sinkRate) minSink = pt;
+    }
+  }
+
+  return {
+    source: sectionPolar ? sectionPolar.source : 'estimated',
+    area: S,
+    aspectRatio: AR,
+    chordRef,
+    points,
+    bestGlide: best,
+    minSink,
+    atm,
+  };
+}
+
+/** Interpolate a section polar's drag at a given lift coefficient. */
+function sectionCd(sp, cl) {
+  const pts = sp.points;
+  let lo = pts[0];
+  let hi = pts[pts.length - 1];
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].cl >= cl) { lo = pts[i - 1]; hi = pts[i]; break; }
+  }
+  const d = hi.cl - lo.cl;
+  if (Math.abs(d) < 1e-9) return lo.cd;
+  const f = clamp((cl - lo.cl) / d, 0, 1);
+  return lo.cd + f * (hi.cd - lo.cd);
+}
+
+/**
+ * Sweep the polar across altitude. This is the question the environment tab
+ * exists to answer: what happens to this wing as the air thins?
+ */
+function altitudeSweep({ planform, airfoil, mass, altitudes, atmosphereFn, ...rest }) {
+  return altitudes.map((z) => {
+    const atm = atmosphereFn(z);
+    const p = wingPolar({ planform, airfoil, atm, mass, ...rest });
+    const bg = p.bestGlide;
+    return {
+      altitude: z,
+      density: atm.density,
+      bestGlide: bg ? bg.glideRatio : NaN,
+      speedAtBestGlide: bg ? bg.speed : NaN,
+      machAtBestGlide: bg ? bg.mach : NaN,
+      reynoldsAtBestGlide: bg ? bg.reynolds : NaN,
+      minSinkRate: p.minSink ? p.minSink.sinkRate : NaN,
+      flyable: bg ? bg.mach < 0.3 : false,
+    };
+  });
+}
 
 /* ===== lobe.js ===== */
 /* lobe.js — Chapter 3: Main lobe ("voute").
@@ -2179,6 +2879,659 @@ function guessGroupCount(n) {
   return Math.round(Math.sqrt(n));
 }
 
+/* ===== lineplan.js ===== */
+/* lineplan.js — risers and the line cascade, as production wings actually do it.
+ *
+ * The handbook's chapter 8 builds one cascade per anchor row. Real wings are
+ * not built that way, and three production line sets make the difference plain:
+ *
+ *   - **Rows and risers are not the same thing.** A wing can carry four anchor
+ *     rows (A B C D) on three risers, with the D lines cascading into the C
+ *     riser. Assuming one riser per row gets the riser count wrong and the
+ *     load split wrong with it.
+ *   - **Levels are encoded in the names.** `A1` is an upper line reaching the
+ *     canopy, `AM1` a middle line, `AR1` the line off the riser. `KMU`/`KML`
+ *     and `CRU`/`CRL` split a level into upper and lower where a pulley or a
+ *     rear-riser control needs it.
+ *   - **A line serves several anchors.** Quantities run in pairs because the
+ *     wing is symmetric, and one length often covers several named lines.
+ *
+ * The naming convention decoded here — row letter, optional level suffix,
+ * index — is common to the production files this was built against, and the
+ * topology can be recovered from lengths alone: for each anchor, the total
+ * cascade length minus the upper line's length leaves the shared part of the
+ * path, and those remainders collapse into exactly as many distinct values as
+ * there are branches. That is what `inferTopology` does, and it is a strong
+ * check: if the names and the lengths disagree, the remainders scatter.
+ */
+
+const ROWS = ['A', 'B', 'C', 'D', 'E'];
+const BRAKE = 'K';
+const COLLAPSE = 'Z';
+
+/**
+ * Decode a line name.
+ *   A1     -> row A, level 'upper',  index 1
+ *   AM6    -> row A, level 'middle', index 6
+ *   AR3    -> row A, level 'riser',  index 3
+ *   KMU2   -> row K, level 'middle', side 'upper', index 2
+ *   CRL4   -> row C, level 'riser',  side 'lower', index 4
+ */
+function parseLineName(name) {
+  const m = String(name).trim().match(/^([A-Z])(R|M)?(U|L)?(\d+)([a-z])?$/);
+  if (!m) return null;
+  const [, row, levelCode, side, idx, variant] = m;
+  const level = levelCode === 'R' ? 'riser' : levelCode === 'M' ? 'middle' : 'upper';
+  return {
+    name: String(name).trim(),
+    row,
+    level,
+    side: side ? (side === 'U' ? 'upper' : 'lower') : null,
+    index: parseInt(idx, 10),
+    variant: variant || null,
+    isBrake: row === BRAKE,
+    isCollapse: row === COLLAPSE,
+  };
+}
+
+/**
+ * Read a line table exported from a production spreadsheet as CSV or TSV.
+ *
+ * The layout these files use is a sequence of material blocks, each headed by
+ * a material code, then a `Name No. Sewn ...` header, then rows. A name cell
+ * may list several lines that share a length ("C12, K6"), with the quantity
+ * counting all of them.
+ *
+ * Anything that is not recognisable as a line row is skipped rather than
+ * guessed at, and what was skipped is reported.
+ */
+function parseLineTable(text) {
+  // Decide the delimiter once for the whole file rather than accepting either
+  // at every character. These tables routinely carry several line names in one
+  // cell — "C12, K6" for two lines that share a length — and splitting a
+  // tab-separated file on commas as well tears that cell in half, dropping
+  // both lines silently.
+  const hasTabs = /\t/.test(text);
+  const split = hasTabs
+    ? (l) => l.split('\t')
+    : (l) => l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+
+  const rows = text.split(/\r?\n/).map((l) => split(l).map((c) => c.replace(/^"|"$/g, '').trim()));
+  const lines = [];
+  const totals = [];
+  const skipped = [];
+  let material = null;
+
+  for (const r of rows) {
+    const first = (r[0] || '').trim();
+    if (!first && !r.some(Boolean)) continue;
+
+    // The totals columns share physical rows with the material and column
+    // headers of the inventory beside them, so they must be read before
+    // those rows are skipped — otherwise half the cascade totals vanish and
+    // the topology inference silently works from a partial wing.
+
+    // A cascade-total row: an integer anchor index followed by per-row totals.
+    // These sit in their own columns alongside the inventory.
+    //
+    // Column position carries the meaning — the first value is row A, the
+    // second row B, and so on — so blanks must be preserved as holes. Toward
+    // the tip the shorter rows run out (an A row may stop at anchor 14 while C
+    // continues to 15), and compacting the row there silently shifts C's
+    // length into A's column.
+    const idxCol = r.findIndex((c, i) => i > 5 && /^\d+$/.test(c) && Number(c) < 200);
+    if (idxCol >= 0) {
+      const raw = r.slice(idxCol + 1).map((c) => {
+        const v = Number(c);
+        return c !== '' && Number.isFinite(v) ? v : null;
+      });
+      const present = raw.filter((v) => v != null);
+      // Two values is enough to recognise the matrix starting; once it has,
+      // a single value is a legitimate continuation. Toward the tip the
+      // shorter rows drop out one by one, so the last anchor of the longest
+      // row often stands alone — requiring two values there silently loses
+      // the outermost anchor of the row that reaches furthest.
+      const minValues = totals.length ? 1 : 2;
+      if (present.length >= minValues && present.every((v) => v > 500)) {
+        // Trim trailing holes only; interior holes are meaningful.
+        while (raw.length && raw[raw.length - 1] == null) raw.pop();
+        totals.push({ anchor: parseInt(r[idxCol], 10), lengths: raw });
+      }
+    }
+
+
+    if (/^LIN[-_]/i.test(first)) { material = first; continue; }
+    if (/^name$/i.test(first)) continue;
+
+    const qty = Number(r[1]);
+    const sewn = Number(r[2]);
+    if (!Number.isFinite(qty) || !Number.isFinite(sewn) || sewn <= 0) {
+      if (first && !/^\*/.test(first) && !/^\d+$/.test(first)) skipped.push(first);
+      continue;
+    }
+
+    const names = first.split(/\s*,\s*/).filter(Boolean);
+    const parsed = names.map(parseLineName).filter(Boolean);
+    if (!parsed.length) { if (first) skipped.push(first); continue; }
+
+    for (const p of parsed) {
+      lines.push({
+        ...p,
+        quantity: qty / parsed.length,
+        lengthMM: sewn,
+        adjustedMM: Number.isFinite(Number(r[3])) ? Number(r[3]) : null,
+        material,
+        comment: r[5] || null,
+      });
+    }
+  }
+
+  return { lines, totals, skipped: [...new Set(skipped)] };
+}
+
+/** Group a parsed line set by row and level. */
+function summarise(lineSet) {
+  const byRow = {};
+  for (const l of lineSet.lines) {
+    const r = (byRow[l.row] ||= { row: l.row, upper: [], middle: [], riser: [] });
+    r[l.level].push(l);
+  }
+  for (const r of Object.values(byRow)) {
+    for (const k of ['upper', 'middle', 'riser']) r[k].sort((a, b) => a.index - b.index);
+  }
+
+  const rows = Object.values(byRow).sort((a, b) => a.row.localeCompare(b.row));
+  const mainRows = rows.filter((r) => ROWS.includes(r.row));
+  const risers = mainRows.filter((r) => r.riser.length > 0);
+
+  const totalLength = lineSet.lines.reduce((s, l) => s + l.lengthMM * l.quantity, 0) / 1000;
+
+  return {
+    rows,
+    rowLetters: rows.map((r) => r.row),
+    anchorRows: mainRows.map((r) => r.row),
+    riserRows: risers.map((r) => r.row),
+    riserCount: risers.length,
+    // A row with anchors but no riser lines hangs off a neighbouring riser —
+    // the usual arrangement for D on a three-riser wing.
+    dependentRows: mainRows.filter((r) => r.riser.length === 0 && r.upper.length > 0)
+      .map((r) => r.row),
+    lineCount: lineSet.lines.reduce((s, l) => s + l.quantity, 0),
+    distinctLengths: new Set(lineSet.lines.map((l) => l.lengthMM)).size,
+    totalLengthM: totalLength,
+    materials: [...new Set(lineSet.lines.map((l) => l.material).filter(Boolean))],
+    levels: {
+      upper: lineSet.lines.filter((l) => l.level === 'upper').length,
+      middle: lineSet.lines.filter((l) => l.level === 'middle').length,
+      riser: lineSet.lines.filter((l) => l.level === 'riser').length,
+    },
+  };
+}
+
+/**
+ * Recover which branch feeds each anchor, from lengths alone.
+ *
+ * For anchor i on row X, the published cascade total is
+ *
+ *     total_i = riser + (riser-level line) + (middle line) + X_i
+ *
+ * so `total_i - X_i` is the part of the path shared with its neighbours.
+ * Anchors sharing a branch give the same remainder, so the remainders collapse
+ * into one value per branch — and the grouping falls out without any topology
+ * being assumed. If the names and lengths are inconsistent the remainders
+ * scatter instead, which is the failure this is designed to expose.
+ *
+ * @param {object} lineSet   from parseLineTable
+ * @param {number[]} totals  cascade totals for this row, indexed by anchor
+ * @param {string} row       row letter
+ */
+function inferTopology(lineSet, totals, row, { tolerance = 12 } = {}) {
+  const upper = new Map();
+  for (const l of lineSet.lines) {
+    if (l.row === row && l.level === 'upper') upper.set(l.index, l.lengthMM);
+  }
+
+  const rows = [];
+  for (const [i, total] of totals.entries()) {
+    const anchor = i + 1;
+    const up = upper.get(anchor);
+    if (up == null || total == null || !Number.isFinite(total)) continue;
+    rows.push({ anchor, total, upper: up, remainder: total - up });
+  }
+  if (!rows.length) return { row, branches: [], consistent: false, reason: 'no matching lines' };
+
+  // Cluster remainders.
+  const sorted = [...rows].sort((a, b) => a.remainder - b.remainder);
+  const branches = [];
+  for (const r of sorted) {
+    const b = branches.find((x) => Math.abs(x.remainder - r.remainder) <= tolerance);
+    if (b) { b.anchors.push(r.anchor); b.remainder = (b.remainder * (b.anchors.length - 1) + r.remainder) / b.anchors.length; }
+    else branches.push({ remainder: r.remainder, anchors: [r.anchor] });
+  }
+  for (const b of branches) b.anchors.sort((a, c) => a - c);
+
+  // Equal remainders mean equal shared path length — which is necessary for
+  // two anchors to hang from the same branch, but not sufficient. Two
+  // genuinely separate branches can come out the same length, and on the
+  // wings this was built against they routinely do: on the Geo 7 the branch
+  // serving anchors 1-4 and the one serving 9-10 agree to within a
+  // millimetre. Merging them would claim a six-anchor branch that does not
+  // exist.
+  //
+  // A cascade branch serves neighbouring anchors, so splitting each cluster
+  // into contiguous runs separates the coincidences from the real sharing.
+  const split = [];
+  for (const b of branches) {
+    let run = [b.anchors[0]];
+    for (let i = 1; i < b.anchors.length; i++) {
+      if (b.anchors[i] === b.anchors[i - 1] + 1) run.push(b.anchors[i]);
+      else { split.push({ remainder: b.remainder, anchors: run }); run = [b.anchors[i]]; }
+    }
+    split.push({ remainder: b.remainder, anchors: run });
+  }
+  branches.length = 0;
+  branches.push(...split);
+  branches.sort((a, b) => a.anchors[0] - b.anchors[0]);
+
+  // A cascade should have far fewer branches than anchors. If every anchor
+  // lands in its own branch, the lengths are not describing a cascade.
+  const consistent = branches.length < rows.length;
+
+  // How many middle-level lines the file actually declares. Where the
+  // inference finds fewer branches than there are middle lines, two adjacent
+  // branches have come out the same length and cannot be told apart from
+  // lengths alone — on the Geo 7, AM1 and AM2 are both 1921 mm and serve
+  // anchors 1-2 and 3-4, so they read as a single four-anchor branch. That is
+  // a limit of the method, not an error in the file, and it is reported
+  // rather than hidden.
+  const middleCount = lineSet.lines
+    .filter((l) => l.row === row && l.level === 'middle').length;
+
+  return {
+    row,
+    anchors: rows.length,
+    branches,
+    branchCount: branches.length,
+    middleLineCount: middleCount,
+    mergedBranches: middleCount > branches.length ? middleCount - branches.length : 0,
+    consistent,
+    meanAnchorsPerBranch: rows.length / branches.length,
+  };
+}
+
+/**
+ * Solve for the riser length implied by a set of branches.
+ *
+ * remainder = riser + riserLine + middleLine, and the riser length is the one
+ * quantity shared by every branch. Trying each combination of riser-level and
+ * middle-level line against each branch and keeping the value that explains
+ * the most branches recovers it without being told.
+ */
+function inferRiserLength(lineSet, topology, row) {
+  const risers = lineSet.lines.filter((l) => l.row === row && l.level === 'riser');
+  const middles = lineSet.lines.filter((l) => l.row === row && l.level === 'middle');
+  if (!risers.length) return null;
+
+  const candidates = [];
+  for (const b of topology.branches) {
+    for (const r of risers) {
+      candidates.push({ value: b.remainder - r.lengthMM, branch: b, riser: r, middle: null });
+      for (const m of middles) {
+        candidates.push({ value: b.remainder - r.lengthMM - m.lengthMM, branch: b, riser: r, middle: m });
+      }
+    }
+  }
+  const plausible = candidates.filter((c) => c.value > 50 && c.value < 1200);
+  if (!plausible.length) return null;
+
+  let best = null;
+  for (const c of plausible) {
+    const agree = plausible.filter((o) => Math.abs(o.value - c.value) <= 15);
+    const branches = new Set(agree.map((o) => o.branch));
+    if (!best || branches.size > best.branches) {
+      best = {
+        riserLengthMM: agree.reduce((s, o) => s + o.value, 0) / agree.length,
+        branches: branches.size,
+        spreadMM: Math.max(...agree.map((o) => o.value)) - Math.min(...agree.map((o) => o.value)),
+        paths: agree.map((o) => ({
+          anchors: o.branch.anchors,
+          riser: o.riser.name,
+          middle: o.middle ? o.middle.name : null,
+        })),
+      };
+    }
+  }
+  return best;
+}
+
+/** Cut list grouped by material, in the shape production files use. */
+function cutList(lineSet) {
+  const byMaterial = {};
+  for (const l of lineSet.lines) {
+    (byMaterial[l.material || 'unspecified'] ||= []).push(l);
+  }
+  const out = [];
+  for (const [mat, ls] of Object.entries(byMaterial)) {
+    ls.sort((a, b) => a.lengthMM - b.lengthMM);
+    out.push({
+      material: mat,
+      lines: ls,
+      count: ls.reduce((s, l) => s + l.quantity, 0),
+      totalMM: ls.reduce((s, l) => s + l.lengthMM * l.quantity, 0),
+    });
+  }
+  return out.sort((a, b) => b.totalMM - a.totalMM);
+}
+
+/** Write a cut list back out as CSV. */
+function cutListToCSV(lineSet) {
+  const out = ['material,name,row,level,index,quantity,length_mm'];
+  for (const g of cutList(lineSet)) {
+    for (const l of g.lines) {
+      out.push([g.material, l.name, l.row, l.level, l.index, l.quantity, l.lengthMM].join(','));
+    }
+  }
+  return out.join('\n');
+}
+
+/* ------------------------------------------------------------ generation -- */
+
+/**
+ * Riser layouts. Three risers carrying four anchor rows is the ordinary
+ * arrangement on a modern wing — the D row cascades into the C riser rather
+ * than earning a riser of its own, which is what all three of the production
+ * wings this was built against do.
+ */
+const RISER_LAYOUTS = {
+  'A/B/C+D': [
+    { name: 'A', rows: ['A'] },
+    { name: 'B', rows: ['B'] },
+    { name: 'C', rows: ['C', 'D'] },
+  ],
+  'A/B+C': [
+    { name: 'A', rows: ['A'] },
+    { name: 'B', rows: ['B', 'C'] },
+  ],
+  'A/B/C/D': [
+    { name: 'A', rows: ['A'] },
+    { name: 'B', rows: ['B'] },
+    { name: 'C', rows: ['C'] },
+    { name: 'D', rows: ['D'] },
+  ],
+  'single': [{ name: 'A', rows: ['A', 'B', 'C', 'D'] }],
+};
+
+/**
+ * Build a named, riser-based line plan from a wing.
+ *
+ * The geometry is the handbook's construction — a branch runs from its parent
+ * toward the centre of gravity of the anchors it serves. What this adds is the
+ * rigging: which riser carries which rows, how anchors group onto branches,
+ * and the names a builder can actually work to.
+ *
+ * Lengths come out as carabiner-to-canopy totals, the same quantity the
+ * production sheets tabulate, so a generated plan and a real one can be put
+ * side by side.
+ */
+function buildLinePlan({
+  wing,
+  airfoil,
+  layout = RISER_LAYOUTS['A/B/C+D'],
+  everyNthRib = 2,
+  groupSize = 2,
+  riserLengthMM = 500,
+  lineLengthM = 6.5,
+  karabinerSeparationM = 0.42,
+  // Where each junction sits, as a fraction of the distance still to run
+  // from the parent node to the anchors it serves.
+  //
+  // These are not guesses. On the Geo 7 MS the A row measures 6951 mm from
+  // carabiner to canopy, made of riser 527, AR1 3948, AM1 1921 and A1 556.
+  // So the first junction sits 64% of the way up, and the second covers 78%
+  // of what remains, leaving the upper lines the last 22%. The other rows and
+  // the other two wings agree closely. An earlier default of 0.55 and 0.30
+  // put both junctions barely a third of the way up, which made the top-level
+  // lines several times longer than any real wing's.
+  levelFractions = [0.64, 0.78],
+  loadMode = 1,
+  tipDirectAnchors = 2,
+} = {}) {
+  const fractions = airfoil?.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const maillon = [0, karabinerSeparationM / 2, -lineLengthM];
+
+  const lines = [];
+  const risers = [];
+
+  for (const riser of layout) {
+    const carried = [];
+    for (const row of riser.rows) {
+      const frac = fractions[row];
+      if (frac == null) continue;
+
+      const anchors = [];
+      wing.ribs.forEach((rib, i) => {
+        if (i % everyNthRib !== 0) return;
+        anchors.push({
+          anchor: anchors.length + 1,
+          ribIndex: i,
+          chord: rib.chord,
+          point: pointOnSurface(rib.lower, frac),
+        });
+      });
+      if (!anchors.length) continue;
+
+      // Real wings shorten the cascade at the tip: the outermost anchors get
+      // one long line straight to the riser level instead of passing through
+      // the middle cascade. It is plain in the production data — on the Geo 7,
+      // A13 and A14 are 1205 mm and 977 mm where the inboard A lines are all
+      // around 300-500 mm, and they have no middle line above them. Forcing
+      // every anchor through all three levels makes the tip lines far too
+      // long and the tip trim wrong.
+      const direct = tipDirectAnchors > 0 ? anchors.slice(-tipDirectAnchors) : [];
+      const cascaded = tipDirectAnchors > 0 ? anchors.slice(0, -tipDirectAnchors) : anchors;
+
+      // Build downward from the maillon: first the riser-level junctions,
+      // then the middle ones, then the upper lines out to the anchors. Going
+      // this way each junction is placed along the path to the centre of
+      // gravity of everything above it, which is the handbook's construction.
+      const groups = chunkBy(cascaded, groupSize);
+      const riserGroups = chunkBy(groups, groupSize);
+
+      const riserNodePoints = riserGroups.map((rg) => {
+        const all = rg.flat();
+        const g = weightedCentroid(all, loadMode);
+        return { point: lerp3(maillon, g, levelFractions[0]), groups: rg };
+      });
+
+      const midNodes = [];
+      const riserNodes = riserNodePoints.map((rn) => {
+        const children = rn.groups.map((grp) => {
+          const g = weightedCentroid(grp, loadMode);
+          const node = lerp3(rn.point, g, levelFractions[1]);
+          midNodes.push({ point: node, anchors: grp.map((a) => a.anchor), parent: rn.point });
+          return { point: node, anchors: grp.map((a) => a.anchor), group: grp };
+        });
+        return { point: rn.point, children, anchors: rn.groups.flat().map((a) => a.anchor) };
+      });
+
+      // Upper lines: from each middle node out to its anchors.
+      for (const rn of riserNodes) {
+        for (const child of rn.children) {
+          for (const a of child.group) {
+            lines.push({
+              row, level: 'upper', index: a.anchor, name: `${row}${a.anchor}`,
+              riser: riser.name, ribIndex: a.ribIndex,
+              from: child.point, to: a.point, lengthMM: mm(child.point, a.point),
+              anchors: [a.anchor],
+            });
+          }
+        }
+      }
+
+      // Middle lines: from each riser node to its middle nodes.
+      for (const rn of riserNodes) {
+        for (const child of rn.children) {
+          const index = lines.filter((l) => l.row === row && l.level === 'middle').length + 1;
+          lines.push({
+            row, level: 'middle', index, name: `${row}M${index}`,
+            riser: riser.name,
+            from: rn.point, to: child.point, lengthMM: mm(rn.point, child.point),
+            anchors: child.anchors,
+          });
+        }
+      }
+
+      const unusedMidNodes = groups.map((grp) => {
+        const g = weightedCentroid(grp, loadMode);
+        const node = lerp3(maillon, g, levelFractions[0]);
+        return { point: node };
+      });
+      void unusedMidNodes;
+
+      // Riser level. Only the row that owns the riser gets R lines; a
+      // cascaded row continues in M numbering and joins the same maillon.
+      const owns = riser.rows[0] === row;
+
+      // The direct tip anchors join the outermost riser node.
+      if (direct.length && riserNodes.length) {
+        const host = riserNodes[riserNodes.length - 1];
+        for (const a of direct) {
+          lines.push({
+            row, level: 'upper', index: a.anchor, name: `${row}${a.anchor}`,
+            riser: riser.name, ribIndex: a.ribIndex, direct: true,
+            from: host.point, to: a.point, lengthMM: mm(host.point, a.point),
+            anchors: [a.anchor],
+          });
+          host.anchors.push(a.anchor);
+        }
+      }
+
+      riserNodes.forEach((node, k) => {
+        const index = owns
+          ? k + 1
+          : lines.filter((l) => l.row === row && l.level === 'middle').length + 1;
+        lines.push({
+          row,
+          level: owns ? 'riser' : 'middle',
+          index,
+          name: `${row}${owns ? 'R' : 'M'}${index}`,
+          riser: riser.name,
+          from: maillon, to: node.point, lengthMM: mm(maillon, node.point),
+          anchors: node.anchors,
+        });
+      });
+
+      carried.push(row);
+    }
+    risers.push({ name: riser.name, rows: carried, maillon });
+  }
+
+  const plan = { lines, risers, riserLengthMM, maillon };
+  plan.totals = planTotals(plan);
+  plan.totalLengthM = lines.reduce((s, l) => s + (l.lengthMM * 2) / 1000, 0);
+  return plan;
+}
+
+/** Carabiner-to-canopy length for every anchor, by walking the tree back. */
+function planTotals(plan) {
+  const byNode = new Map();
+  for (const l of plan.lines) byNode.set(nodeKey(l.to), l);
+
+  const totals = {};
+  for (const l of plan.lines) {
+    if (l.level !== 'upper') continue;
+    let length = l.lengthMM;
+    let node = l.from;
+    for (let guard = 0; guard < 12; guard++) {
+      const parent = byNode.get(nodeKey(node));
+      if (!parent) break;
+      length += parent.lengthMM;
+      node = parent.from;
+    }
+    (totals[l.index] ||= {})[l.row] = Math.round(length + plan.riserLengthMM);
+  }
+  return totals;
+}
+
+const nodeKey = (p) => p.map((v) => v.toFixed(6)).join(',');
+
+/**
+ * Compare a generated plan with a real one, anchor by anchor.
+ *
+ * The useful comparison is not absolute length — that depends on line length
+ * and wing size — but the *shape* of the distribution across the span, which
+ * is what determines trim. So both are reported: the raw difference, and the
+ * difference after removing the mean offset.
+ */
+function comparePlans(planTotals, reference) {
+  const diffs = [];
+  for (const [anchorStr, rows] of Object.entries(reference)) {
+    const anchor = Number(anchorStr);
+    for (const [row, refMM] of Object.entries(rows)) {
+      const got = planTotals[anchor]?.[row];
+      if (got == null || refMM == null) continue;
+      diffs.push({ anchor, row, referenceMM: refMM, planMM: got, deltaMM: got - refMM });
+    }
+  }
+  if (!diffs.length) return { count: 0 };
+  const deltas = diffs.map((d) => d.deltaMM);
+  const mean = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  const spread = diffs.map((d) => Math.abs(d.deltaMM - mean));
+  return {
+    diffs,
+    count: diffs.length,
+    meanOffsetMM: mean,
+    worstAbsMM: Math.max(...deltas.map(Math.abs)),
+    worstShapeMM: Math.max(...spread),
+    meanShapeMM: spread.reduce((a, b) => a + b, 0) / spread.length,
+  };
+}
+
+/** Reference totals from a parsed production table, keyed as comparePlans wants. */
+function referenceTotals(lineSet, rowOrder = ['A', 'B', 'C', 'D', 'K']) {
+  const out = {};
+  for (const t of lineSet.totals) {
+    const rows = {};
+    t.lengths.forEach((v, i) => { if (v != null && rowOrder[i]) rows[rowOrder[i]] = v; });
+    if (Object.keys(rows).length) out[t.anchor] = rows;
+  }
+  return out;
+}
+
+const mm = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000);
+const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
+function chunkBy(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
+function weightedCentroid(anchors, mode) {
+  let x = 0; let y = 0; let z = 0; let w = 0;
+  for (const a of anchors) {
+    const q = mode === 0 ? 1 : a.chord;
+    x += a.point[0] * q; y += a.point[1] * q; z += a.point[2] * q; w += q;
+  }
+  return [x / w, y / w, z / w];
+}
+
+function centroid3(pts) {
+  const s = pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1], a[2] + p[2]], [0, 0, 0]);
+  return s.map((v) => v / pts.length);
+}
+
+function pointOnSurface(poly, frac) {
+  const n = poly.length;
+  const i = Math.min(n - 2, Math.max(0, Math.floor(frac * (n - 1))));
+  const f = frac * (n - 1) - i;
+  return [
+    poly[i][0] + f * (poly[i + 1][0] - poly[i][0]),
+    poly[i][1] + f * (poly[i + 1][1] - poly[i][1]),
+    poly[i][2] + f * (poly[i + 1][2] - poly[i][2]),
+  ];
+}
+
 /* ===== export.js ===== */
 /* export.js — DXF and SVG output.
  *
@@ -3139,6 +4492,265 @@ function designToLep(model, template = null) {
   const doc = template || blankLepDocument(model.wing.ribs.length);
   return writeLep(applyDesignToLep(doc, model));
 }
+
+/* ===== xfoil.js ===== */
+/* xfoil.js — XFOIL interoperability.
+ *
+ * The built-in section model in aero.js is thin-airfoil theory plus a
+ * flat-plate drag correlation. It is fine for comparing designs and useless
+ * for predicting a number, because it has no boundary layer and therefore no
+ * separation bubble — which is precisely what governs a paraglider section at
+ * the Reynolds numbers it actually flies.
+ *
+ * XFOIL does have a boundary layer. It is not something that can be
+ * reimplemented honestly in a browser, so this module does the next best
+ * thing: it writes the two files XFOIL needs, at the exact Reynolds and Mach
+ * number the environment model computes, and reads the polar back.
+ *
+ * The workflow follows the standard batch harness:
+ *
+ *     xfoil.exe < xfoil_input.cmd > xfoil_output.out
+ *
+ * Once a polar is imported, `wingPolar` uses measured section data and the
+ * only things still modelled are the camber-line theory and the lifting line.
+ */
+
+/**
+ * Airfoil geometry in the normalised Selig ordering XFOIL expects: trailing
+ * edge, over the upper surface, round the nose, back along the lower surface
+ * to the trailing edge.
+ */
+function airfoilToDat(airfoil, name = null) {
+  const label = (name || airfoil.name || 'airfoil').replace(/\s+/g, '_');
+  const lines = [label];
+  for (const [x, y] of airfoil.points) {
+    lines.push(`  ${x.toFixed(6).padStart(10)}  ${y.toFixed(6).padStart(10)}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * XFOIL command script for a viscous polar sweep.
+ *
+ * @param {object} o
+ * @param {string} o.datFile     geometry file to load
+ * @param {number} o.reynolds    from the environment model
+ * @param {number} o.mach        from the environment model
+ * @param {number} o.nCrit       transition criterion; 9 is the default, but
+ *                               a sailcloth wing in free air is closer to 5-7
+ * @param {number[]} o.alphaRange [start, end]
+ */
+function commandScript({
+  datFile = 'airfoil.dat',
+  polarFile = 'AIRFOIL_POLARS.dat',
+  reynolds = 1e6,
+  mach = 0,
+  nCrit = 9,
+  alphaRange = [-4, 14],
+  alphaStep = 0.5,
+  panels = 200,
+  iterations = 200,
+  xtrTop = 1.0,
+  xtrBot = 1.0,
+  smooth = true,
+} = {}) {
+  const L = [];
+  L.push(`LOAD ${datFile}`);
+  L.push('');
+  if (smooth) {
+    // Re-panel before analysis. XFOIL's boundary layer is sensitive to panel
+    // distribution, and an imported section — especially one that came from a
+    // manufacturer's cutting file — is rarely panelled the way it wants.
+    L.push('PPAR');
+    L.push(`N ${panels}`);
+    L.push('');
+    L.push('');
+    L.push('PANE');
+  }
+  L.push('OPER');
+  L.push(`VISC ${reynolds.toFixed(0)}`);
+  L.push(`MACH ${mach.toFixed(4)}`);
+  L.push(`ITER ${iterations}`);
+  L.push('VPAR');
+  L.push(`N ${nCrit.toFixed(2)}`);
+  L.push('XTR');
+  L.push(`${xtrTop.toFixed(3)}`);
+  L.push(`${xtrBot.toFixed(3)}`);
+  L.push('');
+  // Converge at a low angle before starting the sweep, so the first viscous
+  // solution has an easy initial state to march from.
+  L.push(`ALFA ${alphaRange[0].toFixed(2)}`);
+  L.push('INIT');
+  L.push('ALFA 0.00');
+  L.push('PACC');
+  L.push(polarFile);
+  L.push('');
+  L.push(`ASEQ ${alphaRange[0].toFixed(1)} ${alphaRange[1].toFixed(1)} ${alphaStep.toFixed(2)}`);
+  L.push('PACC');
+  L.push('');
+  L.push('QUIT');
+  return L.join('\n') + '\n';
+}
+
+/**
+ * Parse an XFOIL polar accumulation file.
+ *
+ * The header carries the Reynolds and Mach numbers the run was actually made
+ * at. Those are checked against the state the wing is being analysed at,
+ * because a polar computed for the wrong altitude looks perfectly valid and
+ * silently gives the wrong answer.
+ */
+function parsePolar(text) {
+  const lines = text.split(/\r?\n/);
+  let reynolds = null;
+  let mach = null;
+  let nCrit = null;
+  let name = null;
+
+  for (const line of lines) {
+    const nm = line.match(/Calculated polar for:\s*(.+?)\s*$/i);
+    if (nm) name = nm[1];
+    // "Mach =   0.000     Re =     1.000 e 6     Ncrit =   9.000"
+    const m = line.match(/Mach\s*=\s*([\d.eE+-]+)/);
+    if (m) mach = parseFloat(m[1]);
+    const r = line.match(/Re\s*=\s*([\d.]+)\s*e\s*([\d]+)/i);
+    if (r) reynolds = parseFloat(r[1]) * Math.pow(10, parseInt(r[2], 10));
+    else {
+      const r2 = line.match(/Re\s*=\s*([\d.eE+-]+)/);
+      if (r2 && !/e\s/i.test(line)) reynolds = parseFloat(r2[1]);
+    }
+    const nc = line.match(/Ncrit\s*=\s*([\d.]+)/i);
+    if (nc) nCrit = parseFloat(nc[1]);
+  }
+
+  const points = [];
+  for (const line of lines) {
+    const f = line.trim().split(/\s+/);
+    if (f.length < 5) continue;
+    const v = f.map(Number);
+    if (!v.slice(0, 5).every(Number.isFinite)) continue;
+    // Guard against the dashed rule under the header parsing as numbers.
+    if (/^-+$/.test(f[0])) continue;
+    points.push({
+      alphaDeg: v[0], cl: v[1], cd: v[2], cdp: v[3], cm: v[4],
+      topXtr: v[5], botXtr: v[6],
+    });
+  }
+  if (!points.length) throw new Error('No polar data rows found — is this an XFOIL polar file?');
+  points.sort((a, b) => a.alphaDeg - b.alphaDeg);
+
+  // Zero-lift angle and Cm0 by interpolation through Cl = 0.
+  let alphaL0Deg = points[0].alphaDeg;
+  let cm0 = points[0].cm;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i - 1].cl <= 0 && points[i].cl >= 0) {
+      const d = points[i].cl - points[i - 1].cl || 1;
+      const f = -points[i - 1].cl / d;
+      alphaL0Deg = points[i - 1].alphaDeg + f * (points[i].alphaDeg - points[i - 1].alphaDeg);
+      cm0 = points[i - 1].cm + f * (points[i].cm - points[i - 1].cm);
+      break;
+    }
+  }
+
+  // Lift slope from a least-squares fit over the linear range.
+  const lin = points.filter((p) => Math.abs(p.cl) < 0.9);
+  let slope = 2 * Math.PI;
+  if (lin.length > 3) {
+    const n = lin.length;
+    const sx = lin.reduce((s, p) => s + p.alphaDeg, 0);
+    const sy = lin.reduce((s, p) => s + p.cl, 0);
+    const sxy = lin.reduce((s, p) => s + p.alphaDeg * p.cl, 0);
+    const sxx = lin.reduce((s, p) => s + p.alphaDeg * p.alphaDeg, 0);
+    slope = ((n * sxy - sx * sy) / (n * sxx - sx * sx)) * (180 / Math.PI);
+  }
+
+  return {
+    source: 'xfoil',
+    name,
+    reynolds,
+    mach,
+    nCrit,
+    alphaL0Deg,
+    cm0,
+    clMax: Math.max(...points.map((p) => p.cl)),
+    cd0: Math.min(...points.map((p) => p.cd)),
+    liftSlopePerRad: slope,
+    points,
+  };
+}
+
+/**
+ * Check an imported polar against the conditions the wing is being analysed
+ * at. A polar run at sea level tells you nothing useful about 20 km, but it
+ * loads without complaint, so the mismatch has to be surfaced.
+ */
+function checkPolarMatch(polar, { reynolds, mach }, { reTol = 0.35, machTol = 0.05 } = {}) {
+  const issues = [];
+  if (polar.reynolds && reynolds) {
+    const ratio = polar.reynolds / reynolds;
+    if (ratio < 1 - reTol || ratio > 1 + reTol) {
+      issues.push({
+        level: 'warn',
+        text: `Polar was run at Re ${polar.reynolds.toExponential(2)} but the wing is at Re ${reynolds.toExponential(2)}`
+          + ` (${((ratio - 1) * 100).toFixed(0)}% off). Re-run XFOIL at this condition.`,
+      });
+    }
+  }
+  if (polar.mach != null && mach != null && Math.abs(polar.mach - mach) > machTol) {
+    issues.push({
+      level: 'warn',
+      text: `Polar was run at M ${polar.mach.toFixed(3)} but the wing is at M ${mach.toFixed(3)}.`,
+    });
+  }
+  return issues;
+}
+
+/**
+ * Everything needed for one XFOIL run, as a set of named files.
+ * The caller writes them out; the tool has no shell to run XFOIL itself.
+ */
+function runPackage(airfoil, { reynolds, mach, nCrit = 7, alphaRange, alphaStep }) {
+  const base = (airfoil.name || 'airfoil').replace(/\s+/g, '_');
+  const datFile = `${base}.dat`;
+  const polarFile = `${base}_polar.dat`;
+  return {
+    files: [
+      { name: datFile, content: airfoilToDat(airfoil) },
+      {
+        name: 'xfoil_input.cmd',
+        content: commandScript({ datFile, polarFile, reynolds, mach, nCrit, alphaRange, alphaStep }),
+      },
+      {
+        name: 'README_xfoil.txt',
+        content: [
+          `XFOIL run package for ${airfoil.name || 'airfoil'}`,
+          '',
+          `Reynolds number : ${reynolds.toExponential(3)}`,
+          `Mach number     : ${mach.toFixed(4)}`,
+          `Ncrit           : ${nCrit}`,
+          '',
+          'Both numbers come from the operating environment set in the tool',
+          '(altitude, temperature offset, and the speed the wing trims at).',
+          'Re-run this whenever the altitude or the wing loading changes —',
+          'a polar is only valid at the condition it was computed for.',
+          '',
+          'Run with:',
+          '',
+          '    xfoil < xfoil_input.cmd > xfoil_output.out',
+          '',
+          `then import ${polarFile} back into the tool.`,
+          '',
+          'Ncrit note: 9 is the wind-tunnel default. Free air with a sailcloth',
+          'surface is closer to 5-7, which moves transition forward and raises',
+          'drag. If you do not know, run both and treat the spread as the',
+          'uncertainty band.',
+        ].join('\n'),
+      },
+    ],
+    datFile,
+    polarFile,
+  };
+}
 /* app.js — UI layer. Owns the design state, renders the controls, redraws the
  * four viewports, and writes the export files. All geometry comes from the
  * core modules; nothing is recomputed here. */
@@ -3149,8 +4761,11 @@ const S = {
   span: 10.25, rootChord: 2.60, tipChord: 0.90, tipSweep: 1.10,
   ellipticityLE: 0.85, ellipticityTE: 0.95,
   cells: 24, distribution: 'cosine',
+  // operating environment
+  altitudeM: 1000, deltaISA: 0, nCrit: 7,
   // section
   airfoilCode: '4415', airfoilCustom: null,
+  reflex: 0.0, reflexStart: 65,
   intakeStart: 1.2, intakeEnd: 5.5,
   anchorA: 8.5, anchorB: 27.5, anchorC: 53.0, anchorD: 78.5,
   // arc and twist
@@ -3169,6 +4784,7 @@ const S = {
 
 let M = {}; // derived model, rebuilt on every change
 let LEP = null; // imported LEparagliding document, kept as the export template
+let XPOLAR = null; // imported XFOIL section polar, when there is one
 
 /* ---------------------------------------------------------------- model -- */
 
@@ -3195,7 +4811,16 @@ function rebuild() {
 
     const lobe = imported ? null : buildLobe(lobeSpec, planform.halfSpan);
 
-    const airfoil = S.airfoilCustom || naca4(S.airfoilCode);
+    const atm = atmosphere(S.altitudeM, { deltaISA: S.deltaISA });
+
+    let airfoil = S.airfoilCustom || naca4(S.airfoilCode);
+    // Reflex turns the camber line back up near the trailing edge, trading a
+    // little lift for a positive pitching moment. It is applied before
+    // anything downstream so the ribs, panels and section theory all see the
+    // same shape.
+    if (S.reflex > 0) {
+      airfoil = applyReflex(airfoil, { amount: S.reflex / 100, start: S.reflexStart / 100 });
+    }
     airfoil.intake = { start: S.intakeStart / 100, end: S.intakeEnd / 100 };
     airfoil.anchors = {
       A: S.anchorA / 100, B: S.anchorB / 100,
@@ -3243,6 +4868,24 @@ function rebuild() {
       legacySpreadsheet: S.legacy,
     });
 
+    // Wing polar at the current atmospheric state. Uses an imported XFOIL
+    // section polar when one is loaded, and says which in `polar.source`.
+    const sectionSource = XPOLAR || null;
+    const polar = wingPolar({
+      planform, airfoil, atm, mass: S.pilotMass + S.wingMass + S.lineMass,
+      area: metrics.area, chordRef: metrics.mac,
+      twistAt: (y) => washinAt(y, planform.halfSpan,
+        { total: S.washinTotal, mode: S.washinMode, planform }),
+      cxLines: S.cxLines, cxPilot: S.cxPilot,
+      alphaRange: [-2, 14], step: 1, sectionPolar: sectionSource,
+    });
+    const trim = polar.bestGlide || polar.points[polar.points.length - 1];
+    const nd = nonDimensional({
+      speed: trim ? trim.speed : 10, chord: metrics.mac, atm, span: S.span,
+    });
+    const thin = thinAirfoil(airfoil);
+    const polarIssues = XPOLAR ? checkPolarMatch(XPOLAR, nd) : [];
+
     const anchors = canopyAnchors(wing, airfoil, { everyNthRib: 2 });
     const riserOrigin = [balance.calageMetres, 0, -S.lineLength];
     const cascade = buildCascade(anchors, riserOrigin, { mode: 1 });
@@ -3263,6 +4906,7 @@ function rebuild() {
     M = {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported,
+      atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
       error: null,
@@ -3400,6 +5044,9 @@ function buildControls() {
   if (S.airfoilCustom) {
     button(A, 'Clear imported section', () => { S.airfoilCustom = null; rebuild(); buildControls(); });
   }
+  slider(A, 'reflex', 'Reflex (TE rise)', 0, 3, 0.05, (v) => v.toFixed(2), '% c');
+  slider(A, 'reflexStart', 'Reflex begins at', 40, 90, 1, (v) => v.toFixed(0), '% c');
+  hint(A, 'Reflex raises the trailing edge of the camber line, trading lift for a positive pitching moment — the section stabilises its own angle of attack instead of tucking.');
   slider(A, 'intakeStart', 'Intake starts', 0, 8, 0.1, (v) => v.toFixed(1), '% c');
   slider(A, 'intakeEnd', 'Intake ends', 0.5, 15, 0.1, (v) => v.toFixed(1), '% c');
   slider(A, 'anchorA', 'Anchor A', 2, 20, 0.1, (v) => v.toFixed(1), '% c');
@@ -3435,6 +5082,15 @@ function buildControls() {
   slider(L, 'RL', 'Reference line', 0.1, 0.9, 0.01, (v) => (v * 100).toFixed(0), '% c');
   slider(L, 'RP', 'Rotation point', 0.0, 0.9, 0.01, (v) => (v * 100).toFixed(0), '% c');
   hint(L, 'The reference line is the chord point laid along the arc; the rotation point is what washin turns about.');
+
+  const E = clear('g-env');
+  slider(E, 'altitudeM', 'Altitude', 0, 50000, 100, (v) => (v / 1000).toFixed(1), ' km');
+  slider(E, 'deltaISA', 'Temperature offset', -40, 40, 1, (v) => (v > 0 ? '+' : '') + v.toFixed(0), ' K');
+  hint(E, 'U.S. Standard Atmosphere 1976 (identical to ICAO and ISO 2533 to 32 km), valid to 86 km. Altitude is geometric; the geopotential conversion is applied internally.');
+  const envHost = el('div'); envHost.id = 'envTable'; E.append(envHost);
+  const flagHost = el('div'); flagHost.id = 'envFlags';
+  flagHost.style.display = 'flex'; flagHost.style.flexDirection = 'column'; flagHost.style.gap = '5px';
+  E.append(flagHost);
 
   const B = clear('g-balance');
   slider(B, 'pilotMass', 'Pilot + gear', 40, 140, 1, (v) => v.toFixed(0), ' kg');
@@ -3522,6 +5178,31 @@ function buildControls() {
   load.addEventListener('click', () => fi.click());
   grid.append(load, fi);
   F.append(grid);
+  const xg = el('div', 'btn-grid');
+  button(xg, 'XFOIL package', () => {
+    const pkg = runPackage(M.airfoil, {
+      reynolds: M.nd.reynolds, mach: M.nd.mach, nCrit: S.nCrit,
+      alphaRange: [-4, 14], alphaStep: 0.5,
+    });
+    for (const f of pkg.files) save(f.name, f.content);
+  }, 'btn');
+  const polIn = el('button', 'btn', XPOLAR ? 'Replace polar' : 'Import polar');
+  const polFile = el('input');
+  polFile.type = 'file'; polFile.accept = '.dat,.txt,.pol'; polFile.style.display = 'none';
+  polFile.addEventListener('change', async () => {
+    const f = polFile.files[0]; if (!f) return;
+    try { XPOLAR = parsePolar(await f.text()); buildControls(); rebuild(); }
+    catch (e) { setStatus(`Could not read polar: ${e.message}`); }
+  });
+  polIn.addEventListener('click', () => polFile.click());
+  xg.append(polIn, polFile);
+  F.append(xg);
+  if (XPOLAR) {
+    hint(F, `Section polar from XFOIL: Re ${XPOLAR.reynolds ? XPOLAR.reynolds.toExponential(2) : '?'}, M ${XPOLAR.mach ?? '?'}, ${XPOLAR.points.length} points. The wing polar now uses measured section data.`);
+    button(F, 'Drop XFOIL polar', () => { XPOLAR = null; buildControls(); rebuild(); });
+  } else {
+    hint(F, 'Export the section and a command file at the current Reynolds and Mach number, run XFOIL, then import the polar back. Until then the section model is thin-airfoil theory plus a friction correlation — good for comparing, not for predicting.');
+  }
   hint(F, 'DXF is written as R12 with one layer per panel, the same convention the handbook\u2019s own subroutine uses.');
   if (LEP) {
     const i = LEP.info;
@@ -3550,7 +5231,121 @@ function draw() {
   drawFront();
   drawSection();
   drawCut();
+  drawPolar();
+  drawAtmosphere();
   drawBalanceTable();
+  drawEnvironment();
+}
+
+function drawEnvironment() {
+  const host = document.getElementById('envTable');
+  if (!host) return;
+  const a = M.atm;
+  const n = M.nd;
+  const rows = [
+    ['Temperature', `${a.temperature.toFixed(2)} K`],
+    ['Pressure', `${a.pressure.toPrecision(5)} Pa`],
+    ['Density', `${a.density.toExponential(4)} kg/m³`],
+    ['Density ratio', `${(a.densityRatio * 100).toFixed(2)}% of SL`],
+    ['Speed of sound', `${a.speedOfSound.toFixed(1)} m/s`],
+    ['Viscosity μ', `${a.dynamicViscosity.toExponential(3)} Pa·s`],
+    ['Mean free path', `${(a.meanFreePath * 1e9).toFixed(1)} nm`],
+    ['Gravity', `${a.gravity.toFixed(4)} m/s²`],
+    ['Reynolds', n.reynolds.toExponential(3), true],
+    ['Mach', n.mach.toFixed(4), true],
+    ['Knudsen', n.knudsen.toExponential(2), true],
+    ['Dynamic pressure', `${n.dynamicPressure.toFixed(1)} Pa`],
+    ['True airspeed', `${(n.trueAirspeed * 3.6).toFixed(1)} km/h`],
+    ['Equivalent airspeed', `${(n.equivalentAirspeed * 3.6).toFixed(1)} km/h`],
+  ];
+  const t = el('table', 'tbl');
+  for (const [k, v, em] of rows) {
+    const tr = el('tr', em ? 'em' : null);
+    tr.append(el('td', null, k), el('td', null, v));
+    t.append(tr);
+  }
+  host.innerHTML = '';
+  host.append(t);
+
+  const fh = document.getElementById('envFlags');
+  if (!fh) return;
+  fh.innerHTML = '';
+  const all = [...M.nd.flags, ...M.polarIssues];
+  if (!all.length) {
+    fh.append(el('div', 'flag ok', 'Continuum, incompressible and Reynolds assumptions all hold here.'));
+  } else {
+    for (const f of all) fh.append(el('div', `flag ${f.level}`, f.text));
+  }
+}
+
+function drawPolar() {
+  const pts = M.polar.points.filter((p) => p.CL > 0 && Number.isFinite(p.CD));
+  const note = document.getElementById('note-polar');
+  if (pts.length < 2) { canvas('vp-polar', [[0, 0], [1, 1]]); note.textContent = 'No polar'; return; }
+
+  const data = pts.map((p) => [p.CD, p.CL]);
+  const c = canvas('vp-polar', data.concat([[0, 0]]));
+  c.grid(0.02);
+  c.path(data, '#35d6e8', 1.6);
+
+  // Best-glide point: the tangent from the origin touches the polar there.
+  const bg = M.polar.bestGlide;
+  if (bg) {
+    c.path([[0, 0], [bg.CD, bg.CL]], '#e8c547', 0.8, { dash: '4 3' });
+    c.dot([bg.CD, bg.CL], '#e8c547', 3);
+    c.text(`L/D ${bg.glideRatio.toFixed(1)}`, [bg.CD, bg.CL + 0.06], '#e8c547', 9);
+  }
+  if (M.polar.minSink) {
+    const ms = M.polar.minSink;
+    c.dot([ms.CD, ms.CL], '#5fd97a', 3);
+    c.text('min sink', [ms.CD, ms.CL - 0.10], '#5fd97a', 8);
+  }
+  // Induced-drag component, to show how much of the drag is the wing's shape
+  // and how much is everything else hanging below it.
+  c.path(pts.map((p) => [p.CDi, p.CL]), '#e85bc4', 0.9, { dash: '3 3' });
+
+  for (const p of pts) if (p.alphaDeg % 4 === 0) {
+    c.dot([p.CD, p.CL], '#4e6270', 1.6);
+    c.text(`${p.alphaDeg}°`, [p.CD + 0.004, p.CL - 0.02], '#4e6270', 7);
+  }
+
+  note.textContent = `${M.polar.source === 'xfoil' ? 'XFOIL section data' : 'estimated section'}`
+    + `  ·  Cx total ${bg ? bg.CD.toFixed(4) : '—'}  ·  induced ${bg ? ((bg.CDi / bg.CD) * 100).toFixed(0) : '—'}%`
+    + `  ·  e ${bg ? bg.oswald.toFixed(3) : '—'}  ·  magenta = induced only`;
+}
+
+function drawAtmosphere() {
+  const top = Math.max(20000, S.altitudeM * 1.15);
+  const prof = profile({ from: 0, to: top, steps: 60, deltaISA: S.deltaISA });
+  // Density spans four decades over this range, so plot it logarithmically —
+  // on a linear axis everything above 15 km is pinned to the axis.
+  const pts = prof.map((p) => [Math.log10(Math.max(1e-8, p.density)), p.z / 1000]);
+  const c = canvas('vp-atmos', pts);
+  c.grid(1);
+  c.path(pts, '#5fd97a', 1.5);
+
+  const here = [Math.log10(M.atm.density), S.altitudeM / 1000];
+  c.dot(here, '#e8c547', 3.5);
+  c.text(`${(S.altitudeM / 1000).toFixed(1)} km`, [here[0] + 0.08, here[1]], '#e8c547', 9);
+
+  // Speed needed to hold the trim lift coefficient, as the air thins.
+  const CL = M.trim ? M.trim.CL : 0.6;
+  const mass = S.pilotMass + S.wingMass + S.lineMass;
+  const vs = prof.map((p) => {
+    const V = speedForLift({ mass, area: M.metrics.area, cl: CL, atm: p });
+    return [Math.log10(Math.max(1e-8, p.density)), p.z / 1000, V / p.speedOfSound];
+  });
+  const sonic = vs.find((v) => v[2] >= 1);
+  if (sonic) {
+    c.path([[pts[0][0], sonic[1]], [pts[pts.length - 1][0], sonic[1]]], '#ff5e5e', 1, { dash: '5 4' });
+    c.text('Mach 1 to stay up', [pts[pts.length - 1][0], sonic[1] + 0.6], '#ff5e5e', 8);
+  }
+
+  const decades = (Math.log10(prof[0].density) - Math.log10(prof[prof.length - 1].density)).toFixed(1);
+  document.getElementById('note-atmos').textContent =
+    `density, log scale — ${decades} decades over ${(top / 1000).toFixed(0)} km`
+    + `  ·  here ${(M.atm.densityRatio * 100).toFixed(2)}% of sea level`
+    + `  ·  V for trim CL ${(speedForLift({ mass, area: M.metrics.area, cl: CL, atm: M.atm }) * 3.6).toFixed(0)} km/h`;
 }
 
 function drawReadout() {
@@ -3569,6 +5364,11 @@ function drawReadout() {
     ['calage', (b.calageFraction * 100).toFixed(1) + '% c', 'hot'],
     ['wing load', (M.balance.totalMass / M.projArea).toFixed(2) + ' kg/m²'],
     ['worst φ', M.worstPhi.toFixed(1) + '°', M.worstPhi > 6 ? 'warn' : undefined],
+    ['altitude', (S.altitudeM / 1000).toFixed(1) + ' km'],
+    ['ρ', M.atm.density.toExponential(2) + ' kg/m³'],
+    ['Re', M.nd.reynolds.toExponential(2), M.nd.reynolds < 2e5 ? 'warn' : undefined],
+    ['Mach', M.nd.mach.toFixed(3), M.nd.mach > 0.3 ? 'warn' : undefined],
+    ['L/D est', M.polar.bestGlide ? M.polar.bestGlide.glideRatio.toFixed(2) : '—', 'hot'],
   ];
   for (const [k, v, cls] of items) {
     const s = el('div', 'stat');

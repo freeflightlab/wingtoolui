@@ -30,7 +30,17 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 178-test validation suite and a benchmark with regression budgets
+- [x] 303-test validation suite and a benchmark with regression budgets
+- [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
+      Reynolds, Mach and Knudsen numbers and applicability warnings
+- [x] Lifting line over the real planform — Oswald factor and span loading are
+      now results, not typed-in assumptions
+- [x] Wing polars, with best glide and minimum sink at any altitude
+- [x] Reflex, applied to the camber line of any section
+- [x] XFOIL interoperability: geometry and command export at the computed
+      Reynolds and Mach number, polar import, condition-mismatch checking
+- [x] Production line-table import, with cascade topology recovered from
+      lengths alone
 
 ---
 
@@ -46,6 +56,29 @@ material published after the handbook:
       with all 33 unmodelled sections preserved byte for byte. Validated
       against the published gnuC2-27 (27.00 m² recovered from a file named
       for 27 m²). See `docs/lep-format.md`.
+- [x] **Riser-based line plans** — rows and risers modelled separately,
+      industry naming grammar, production line-table import, cascade topology
+      and riser length recovered from lengths alone, junction placement
+      calibrated against three real wings. See `docs/line-plans.md`.
+- [ ] **Brake cascade generation** — `K`/`KM`/`KMU`/`KRU`/`KRL` lines are
+      parsed and named but not generated. Needs the uneven spanwise
+      distribution and the pulley geometry.
+- [ ] **Collapse and stabilo lines** — the `Z` row on the Lyght; parsed, not
+      generated.
+- [ ] **Line materials and diameter selection** — the reference sheets group
+      by material code with sheathed and unsheathed types. Choosing a diameter
+      needs load per line, which needs the load model below.
+- [ ] **Load distribution through the cascade** — load per line from the
+      spanwise lift distribution, which then drives diameter selection,
+      elastic stretch correction (LEP section 18) and the weighted-centroid
+      load case.
+- [ ] **Left/right and asymmetric plans** — quantities of 2 and 4 already
+      encode mirror pairs; asymmetric line or colour plans do not yet exist.
+- [ ] **Riser hardware** — maillons, pulleys, speed-system travel and trimmer
+      geometry, feeding the calage variation study (LEP section 28).
+- [ ] **Reference wing library** — the 17 imported production line sets as
+      selectable comparison targets, so a design can be diffed against a real
+      wing of similar size while it is being drawn.
 - [ ] **Read the remaining LEP sections into the model** — 9-11 (the line
       cascade matrix, richer than this project's centroid method), 12 (V-ribs),
       29 (3D shaping), 34 (line characteristics), 35 (equilibrium inputs).
@@ -68,9 +101,13 @@ validation notes flagged.
       speed system's travel and plot speed against sink.
 - [ ] **NACA 5-digit and modified 4-digit sections**, matching the generator
       this project was cross-checked against.
-- [ ] **Airfoil aerodynamics.** Right now Cz, Cx and Cm are typed in by hand.
-      A thin-airfoil or panel-method estimate would let the section drive the
-      balance directly, and make the polar sweep meaningful.
+- [ ] **Feed the polar back into the balance solve.** The polar now computes
+      CL, CD, Cm and the Oswald factor properly, but chapter 4's equilibrium
+      still takes them as typed-in numbers. Wiring the two together closes the
+      loop between section, planform and trim.
+- [ ] **Riser-aware line plans.** The cascade generator still assumes one
+      riser per anchor row; real wings put four rows on three risers. The
+      importer already models this correctly — the generator needs to follow.
 - [ ] **Per-rib balance.** The current solve treats the central section as
       representative, as the handbook does. Solving spanwise would let washin
       and taper feed back into trim.
