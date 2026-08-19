@@ -13,8 +13,9 @@ drive: change a number, see the wing change, and export cutting files.
 
 ## Status
 
-**Phase 1 complete and reviewed.** The geometry pipeline runs end to end, from
-design parameters to nested DXF cutting files. It is covered by **152 tests**
+**Phase 1 complete and reviewed. Phase 2 underway — LEP file interoperability
+is done.** The geometry pipeline runs end to end, from
+design parameters to nested DXF cutting files. It is covered by **178 tests**
 and a **benchmark with regression budgets**. Validation includes the handbook's
 worked example, the author's 2021 rotation study, a real published airfoil
 checked against the handbook's own table, and a cross-check of the section
@@ -33,7 +34,7 @@ To rebuild after changing the source:
 
 ```bash
 python3 build.py           # bundles src/ into dist/paraglider-design-tool.html
-node tests/run-tests.js    # 152 checks against known geometry and the sources
+node tests/run-tests.js    # 178 checks against known geometry and the sources
 node tests/benchmark.js    # timings, scaling, and budget regressions
 ```
 
@@ -76,11 +77,12 @@ src/core/          the maths — pure functions, no DOM, individually testable
   ovalization.js   ch.6  billow geometry and panel widening
   lines.js         ch.8  weighted-centroid line cascade
   export.js        DXF R12, SVG, nesting, fabric estimation
+  lep.js           LEparagliding .txt read/write, verbatim section preservation
 
 src/ui/            index.html + style.css + app.js  (shell, controls, viewports)
 tests/run-tests.js validation suite
 tests/benchmark.js performance, scaling and budgets
-docs/              source mapping and validation notes
+docs/              source mapping, validation notes, LEP format notes
 build.py           bundler
 dist/              the built tool
 ```
@@ -126,6 +128,9 @@ so a wing on screen and the same wing opened from a `.dxf` look alike.
 - **Line lengths CSV** — every cascade segment with its length, plus totals by
   row
 - **Project JSON** — every input, reloadable
+- **leparagliding.txt** — read and written, so designs move between this tool
+  and the author's reference program. Sections this tool does not model are
+  carried through untouched; see `docs/lep-format.md`
 
 ---
 

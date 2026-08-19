@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 152-test validation suite and a benchmark with regression budgets
+- [x] 178-test validation suite and a benchmark with regression budgets
 
 ---
 
@@ -42,9 +42,14 @@ material published after the handbook:
 - [ ] **3D shaping of the leading edge** — a four-part study on forming the
       nose in ripstop, including negative shaping. Changes panel geometry near
       the LE and is standard on modern wings.
-- [ ] **LEP file interoperability** — read and write `leparagliding.txt`, so
-      designs move between this tool and the author's reference implementation.
-      This is the single highest-value integration available.
+- [x] **LEP file interoperability** — `leparagliding.txt` read and written,
+      with all 33 unmodelled sections preserved byte for byte. Validated
+      against the published gnuC2-27 (27.00 m² recovered from a file named
+      for 27 m²). See `docs/lep-format.md`.
+- [ ] **Read the remaining LEP sections into the model** — 9-11 (the line
+      cascade matrix, richer than this project's centroid method), 12 (V-ribs),
+      29 (3D shaping), 34 (line characteristics), 35 (equilibrium inputs).
+      All are round-trip safe today; mapping them into the model is next.
 - [ ] **Reference wings from the gnuLAB / gnuA / BHL series** — dozens of
       complete published designs with airfoils and areas, usable as both
       starting points and validation cases.
