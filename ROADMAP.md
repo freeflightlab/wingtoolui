@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 616-test validation suite and a benchmark with regression budgets
+- [x] 640-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -192,12 +192,13 @@ material published after the handbook:
       transferable law; on the Geo 7 the mean length per piece divided by span
       is constant to 0.0025, but on the Ultralite 5 it drifts by 0.011 across
       a near-doubling of area.
-- [ ] **Scale a full design, not just its summary numbers** — `scaleToArea`
-      returns a size's parameters; driving the whole pipeline through it to
-      emit cutting files for every size in a family is the next step.
-- [ ] **Per-size line sizing** — loads scale with k^2 while line strength
-      scales with area, so a family's linesets are not similar. Each size
-      needs sizing from its own loads.
+- [x] **Scale a full design, not just its summary numbers** — `buildFamily`
+      runs geometry, panels, nesting, balance, lines and sizing per size. The
+      load-sized fraction rises 10% to 19% across the Geo 7 family, line mass
+      per m² rises, and line drag barely improves because the practical floor
+      caps it. See `docs/scaling.md` §6.
+- [x] **Per-size line sizing** — each size sized from its own loads, which is
+      what makes the load-sized trend above visible.
 - [ ] **Discrete hardware** — riser length and speed-system travel step
       between sizes (570/600 mm, 150/180 mm) rather than scaling. Needs a
       table, not a law.

@@ -309,7 +309,57 @@ returns **1.99** from the same figures, and is what the module now uses.
 
 ---
 
-## 6. What this does not cover
+## 6. Driving a whole family through the pipeline
+
+`buildFamily` runs geometry, panels, nesting, balance, line plan, loads and
+line selection for every size, so a family produces cutting files and line
+schedules rather than a table of dimensions.
+
+Two things make it more than a loop, and both show up in the output.
+
+**The canopy scales; the lineset does not.** Every planform length multiplies
+by k, so a family shares one shape and the aspect ratio is identical to machine
+precision. But line *loads* scale with k², following weight, while a line's
+strength scales with its cross-section — so a family's linesets are not similar
+to each other and each size must be sized from its own loads.
+
+**Most lines are not load-sized at all.** With the practical floor of 0.50 mm
+in place, the interesting output is not the line list but how the load-sized
+fraction moves.
+
+### The Ozone Geo 7 family, built
+
+| size | flat area | span | all-up | speed | glide | fabric | line mass | load-sized |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| XS | 22.64 m² | 10.69 m | 63 kg | 31.7 km/h | 10.67 | 36.6 m | 69 g | 9/88 |
+| S | 24.58 | 11.14 | 75 | 33.4 | 10.68 | 39.1 | 78 | 11/88 |
+| MS | 26.32 | 11.52 | 85 | 34.3 | 10.73 | 41.3 | 80 | 12/88 |
+| ML | 27.85 | 11.85 | 95 | 35.3 | 10.73 | 42.2 | 91 | 12/88 |
+| L | 29.58 | 12.22 | 105 | 36.0 | 10.71 | 45.4 | 108 | 17/88 |
+
+Areas run about 2% above the published figures because the planform is
+parametric rather than the real Geo 7 shape; span is set directly and matches
+to the rounding in the published data.
+
+### Three results worth having
+
+**The load-sized fraction rises with size** — 10% on the smallest to 19% on the
+largest. Loads scale with k² while the floor does not move, so a small wing's
+lines are decided almost entirely by handling and a large wing's increasingly
+by load. This was the prediction the module was built to test.
+
+**Line mass per square metre rises** — 3.1 to 3.7 g/m² — even though the canopy
+is geometrically similar, because bigger wings need thicker line.
+
+**Line drag barely improves with size.** Cx lines moves only 2.8% across a 30%
+increase in area, and not even monotonically. The floor caps it: a small wing
+is already on the thinnest line available so there is nothing to gain there,
+and a large wing's lines are thicker. A designer hoping that a bigger size
+would glide better on relatively less line drag does not get it.
+
+---
+
+## 7. What this does not cover
 
 - **Per-family fitting is required.** Three families are now measured and the
   coefficients demonstrably do not transfer. `fitScalingFamily` exists so a
