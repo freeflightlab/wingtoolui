@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 524-test validation suite and a benchmark with regression budgets
+- [x] 550-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -68,9 +68,14 @@ material published after the handbook:
       travel rotates the wing, the brake pulley couples to it, and the polar
       runs across the bar range. Validated against BGD's published Lynx 2
       figures on four independent quantities. See `docs/speed-system.md`.
-- [ ] **Derive the lift slope from the section** rather than taking `czAt` as
-      an input. The accelerated polar is only as good as that curve, and the
-      Cz guard exists precisely because it is easy to use outside its range.
+- [x] **Lift curve derived from the wing** — section polar plus lifting line
+      plus Reynolds iteration, replacing the last hand-fed input. Most of the
+      validity range now falls out of the same calculation.
+- [ ] **Predict the frontal-collapse floor** rather than assuming it. It is
+      structural, not aerodynamic, and it governs predicted top speed at
+      4.8 km/h per 0.05. Currently inverted from published speeds (implying
+      Cz 0.307 on the Lynx 2); predicting it needs internal pressure and rib
+      support modelling.
 - [ ] **Trimmers** *(ch.9.3)* and riser webbing geometry — B-handle heights,
       C-handle steering, and the split between main and speed-system webbing.
 - [ ] **Line loads under acceleration** — loads shift forward on the bar,
@@ -115,9 +120,15 @@ material published after the handbook:
       progression at r=+0.99, with hike-and-fly wings excluded by design
       rather than trimmed as outliers.
 - [x] **Viewport fitting** — drawings re-fit their viewBox to what was
-      actually drawn, so labels and markers stay inside the frame; the nested
-      cutting layout wraps into bands, taking it from 4% to 91% of frame
-      height.
+      actually drawn; the cutting layout wraps into bands (4% to 91% of frame
+      height); and charts now use independent axes, taking the polar from 1.6%
+      of frame width to filling it. See `docs/viewports.md`.
+- [x] **Pan and zoom** on the section and rib views, defaulting to the fit and
+      surviving a redraw.
+- [x] **Single-rib view** with a rib selector, showing the cut pattern with
+      seam allowance, intake and anchors, on its own tab.
+- [ ] **Rib internals in the rib view** — lightening holes, cross-ports and
+      attachment tabs are Phase 3 geometry and would show here first.
 - [x] **Alpina 5 specifications** — six sizes added, giving a five-family,
       three-manufacturer scaling sample.
 - [x] **Lynx 2 specifications** — BGD joins as a sixth family and third

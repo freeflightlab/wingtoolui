@@ -400,6 +400,67 @@ input[type=range]::-moz-range-thumb {
 .flag.warn  { border-color: var(--aci-yellow); color: var(--aci-yellow); }
 .flag.error { border-color: var(--aci-red);    color: var(--aci-red); }
 .flag.ok    { border-color: var(--aci-green);  color: var(--aci-green); }
+
+
+/* ---------- viewport tabs ---------- */
+
+.vptabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  flex: none;
+}
+
+.vptab {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--text-faint);
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+.vptab:hover { color: var(--text); }
+.vptab.is-on { color: var(--aci-cyan); border-bottom-color: var(--aci-cyan); }
+
+.vptab-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 4px;
+}
+.vptab-tools label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.vptab-tools select, .vptab-tools input[type=range] { width: auto; }
+.vptab-tools input[type=range] { width: 130px; }
+
+.viewports[hidden] { display: none; }
+.viewports.one { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.viewports.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+
+.zoomtag {
+  display: none;
+  color: var(--aci-yellow);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  margin-left: 6px;
+}
+
+/* The stage holds the tab bar plus one viewport grid plus the status bar. */
+.stage { grid-template-rows: auto 1fr auto; }
 </style>
 </head>
 <body>
@@ -461,11 +522,31 @@ input[type=range]::-moz-range-thumb {
     </aside>
 
     <main class="stage">
-      <div class="viewports">
+      <div class="vptabs" role="tablist">
+        <button class="vptab is-on" data-tab="wing" role="tab">Wing</button>
+        <button class="vptab" data-tab="rib" role="tab">Rib</button>
+        <button class="vptab" data-tab="analysis" role="tab">Analysis</button>
+        <div class="vptab-tools" id="tabTools"></div>
+      </div>
+
+      <div class="viewports" data-tab="wing">
         <div class="vp"><div class="vp-label">Plan — flat</div><svg id="vp-plan"></svg><div class="vp-note" id="note-plan"></div></div>
         <div class="vp"><div class="vp-label">Front — arc</div><svg id="vp-front"></svg><div class="vp-note" id="note-front"></div></div>
-        <div class="vp"><div class="vp-label">Section — balance</div><svg id="vp-section"></svg><div class="vp-note" id="note-section"></div></div>
+        <div class="vp">
+          <div class="vp-label">Section — balance <span class="zoomtag" id="zoom-vp-section">zoomed · dbl-click to reset</span></div>
+          <svg id="vp-section"></svg><div class="vp-note" id="note-section"></div>
+        </div>
         <div class="vp"><div class="vp-label">Cutting layout</div><svg id="vp-cut"></svg><div class="vp-note" id="note-cut"></div></div>
+      </div>
+
+      <div class="viewports one" data-tab="rib" hidden>
+        <div class="vp">
+          <div class="vp-label">Rib <span class="zoomtag" id="zoom-vp-rib">zoomed · dbl-click to reset</span></div>
+          <svg id="vp-rib"></svg><div class="vp-note" id="note-rib"></div>
+        </div>
+      </div>
+
+      <div class="viewports two" data-tab="analysis" hidden>
         <div class="vp"><div class="vp-label">Polar</div><svg id="vp-polar"></svg><div class="vp-note" id="note-polar"></div></div>
         <div class="vp"><div class="vp-label">Atmosphere</div><svg id="vp-atmos"></svg><div class="vp-note" id="note-atmos"></div></div>
       </div>
@@ -4225,6 +4306,7 @@ function centroidPts(pts) {
  */
 
 
+
 /**
  * A riser set.
  *
@@ -4441,6 +4523,247 @@ const RISER_HARDWARE = {
 function hardwareForSize(table, size) {
   for (const step of table) if (step.sizes.includes(size)) return step;
   return table[table.length - 1];
+}
+
+/* --------------------------------------------------- lift from the wing -- */
+
+/**
+ * Derive the lift curve from the wing itself.
+ *
+ * `acceleratedPolar` takes `czAt` as an input, and every use of it so far has
+ * handed it a straight line fitted by eye around the trim point. That is the
+ * last hand-fed quantity in the flight model, and it is the one the answer is
+ * most sensitive to: speed goes as 1/sqrt(Cz).
+ *
+ * Everything needed to replace it already exists. `estimateSectionPolar`
+ * gives the section's lift curve and where it stalls, `liftingLine` corrects
+ * it for finite span and non-uniform loading, and `wingPolar` runs both while
+ * iterating speed and Reynolds number to consistency. This wires them to the
+ * speed system.
+ *
+ * The second benefit matters as much as the first. The hand-fed version needed
+ * a hand-set `czRange` to stop it extrapolating into nonsense — a pair of
+ * magic numbers chosen from experience. A derived curve knows where it stalls
+ * and where it was evaluated, so the validity range comes out of the same
+ * calculation rather than being asserted alongside it.
+ */
+function liftModelFromWing({
+  planform, airfoil, atm, mass, area = null,
+  alphaRange = [-6, 16], step = 0.5,
+  cxLines = 0.010, cxPilot = 0.015, twistAt = null, N = 24,
+  minFlyingCz = 0.35,
+}) {
+  const polar = wingPolar({
+    planform, airfoil, atm, mass, area, twistAt,
+    cxLines, cxPilot, alphaRange, step, N,
+  });
+
+  const usable = polar.points.filter((p) => !p.stalled && p.CL > 0.05);
+  if (usable.length < 2) throw new Error('Wing polar produced no usable points.');
+
+  const alphas = usable.map((p) => p.alphaDeg);
+  const cls = usable.map((p) => p.CL);
+  const ta = thinAirfoil(airfoil);
+
+  const czAt = (aDeg) => {
+    if (aDeg <= alphas[0]) {
+      // Extend on the section's own slope rather than clamping: a clamp would
+      // silently flatten the curve where the speed system spends most of its
+      // range, and a flat curve reads as a wing that cannot be accelerated.
+      const slope = (cls[1] - cls[0]) / (alphas[1] - alphas[0]);
+      return cls[0] + slope * (aDeg - alphas[0]);
+    }
+    if (aDeg >= alphas[alphas.length - 1]) return cls[cls.length - 1];
+    for (let i = 1; i < alphas.length; i++) {
+      if (alphas[i] >= aDeg) {
+        const f = (aDeg - alphas[i - 1]) / (alphas[i] - alphas[i - 1]);
+        return cls[i - 1] + f * (cls[i] - cls[i - 1]);
+      }
+    }
+    return cls[cls.length - 1];
+  };
+
+  // The upper bound of the usable range is aerodynamic: where the section
+  // stalls. The lower bound is not.
+  //
+  // A rigid wing can fly at Cz 0.06 — the polar says so, and the arithmetic
+  // is right. A paraglider cannot. It is a pressurised fabric structure held
+  // open by the air entering its intakes, and the angle of attack that
+  // produces a very low lift coefficient is at or below the point where the
+  // leading edge stops being pressurised and the wing folds. That is the
+  // frontal-collapse boundary, and it is structural rather than aerodynamic,
+  // so nothing in the section polar knows about it.
+  //
+  // Left to the polar alone the derived range came out as [0.064, 1.627] and
+  // the accelerated polar duly ran to 87 km/h on a wing that does 58. The
+  // floor has to be stated separately because it comes from somewhere else.
+  const polarMin = Math.min(...cls);
+  const czFloor = Math.max(polarMin, minFlyingCz);
+
+  return {
+    source: polar.source,
+    czAt,
+    cmAt: () => ta.cm0,
+    czRange: [czFloor, Math.max(...cls)],
+    czFloorFrom: czFloor > polarMin ? 'collapse limit' : 'polar',
+    minFlyingCz,
+    alphaRange: [alphas[0], alphas[alphas.length - 1]],
+    alphaL0Deg: polar.points.length ? ta.alphaL0Deg : null,
+    cm0: ta.cm0,
+    bestGlide: polar.bestGlide,
+    minSink: polar.minSink,
+    aspectRatio: polar.aspectRatio,
+    area: polar.area,
+    polar,
+  };
+}
+
+/**
+ * The accelerated polar, driven by a lift model derived from the wing.
+ * A thin wrapper, but it is the one that removes the last free hand from the
+ * chain: geometry in, speed range out.
+ */
+function acceleratedPolarFromWing({ riser, base, chordM, liftModel, steps = 11 }) {
+  return acceleratedPolar({
+    riser,
+    base: { ...base, cz: liftModel.czAt(base.alphaDeg) },
+    chordM,
+    czAt: liftModel.czAt,
+    cmAt: liftModel.cmAt,
+    czRange: liftModel.czRange,
+    steps,
+  });
+}
+
+/**
+ * Back-solve the collapse floor from a published top speed.
+ *
+ * The floor is the dominant uncertainty in a predicted top speed, and it is
+ * the one quantity here that cannot be derived: it is where a pressurised
+ * fabric structure stops holding its shape, which depends on intake design,
+ * internal pressure and rib support, none of which this project models.
+ *
+ * What can be done is to run the inference the other way. A manufacturer's
+ * published top speed, with the wing's own lift curve, implies the Cz the
+ * wing is still flying at — and that is a number a designer can compare
+ * against other wings and against their own prototype.
+ *
+ * Reported alongside the sensitivity, because a prediction whose answer is
+ * governed by an assumed threshold should carry how hard it leans on it.
+ */
+function collapseFloorForTopSpeed({
+  riser, base, chordM, liftModel, targetTopKMH, steps = 41,
+}) {
+  const full = acceleratedPolar({
+    riser, base: { ...base, cz: liftModel.czAt(base.alphaDeg) }, chordM,
+    czAt: liftModel.czAt, cmAt: liftModel.cmAt,
+    czRange: [-Infinity, Infinity], steps,
+  });
+
+  // Walk out along the bar to the point that reaches the target speed.
+  let hit = null;
+  for (const r of full.rows) {
+    if (r.speedKMH >= targetTopKMH) { hit = r; break; }
+  }
+  if (!hit) {
+    return { reachable: false, maxSpeedKMH: full.rows[full.rows.length - 1].speedKMH };
+  }
+
+  // Sensitivity: how much top speed moves for a 0.05 change in the floor.
+  const speedAt = (floor) => {
+    const rows = full.rows.filter((r) => r.cz >= floor);
+    return rows.length ? rows[rows.length - 1].speedKMH : full.rows[0].speedKMH;
+  };
+  const sensitivity = Math.abs(speedAt(hit.cz - 0.025) - speedAt(hit.cz + 0.025));
+
+  return {
+    reachable: true,
+    impliedCz: hit.cz,
+    barFraction: hit.bar,
+    alphaDeg: hit.alphaDeg,
+    speedKMH: hit.speedKMH,
+    // km/h of top speed per 0.05 of assumed floor.
+    sensitivityKMHPer005: sensitivity,
+    assumedFloor: liftModel.minFlyingCz,
+    verdict: hit.cz < liftModel.minFlyingCz
+      ? 'published speed implies a lower collapse floor than assumed'
+      : 'published speed is consistent with the assumed floor',
+  };
+}
+
+/* ===== viewfit.js ===== */
+/* viewfit.js — fitting a drawing to a frame.
+ *
+ * Two kinds of picture need opposite things from the same frame, and getting
+ * that backwards produces a drawing that is correctly fitted and useless.
+ *
+ * **Geometry** — plan, front view, section, rib pattern. Both axes are metres,
+ * so the scale must be identical in x and y. Stretching one axis draws a wing
+ * that is not the wing.
+ *
+ * **Charts** — a polar, an atmosphere plot. The axes are km/h against m/s, or
+ * metres against degrees. There is no meaningful ratio between them, so there
+ * is nothing to preserve, and the drawing should fill the frame.
+ *
+ * Forcing the geometric rule on a polar is what put a tall narrow curve down
+ * the middle of a wide frame with empty space either side: the aspect ratio of
+ * the *data* was being honoured, when the data had no aspect ratio to honour.
+ */
+
+/**
+ * Scale factors and offsets to fit bounds into a frame.
+ *
+ * @param {object} bounds {minX, maxX, minY, maxY} in data units
+ * @param {object} frame  {width, height} in pixels
+ * @param {object} opts   chart: independent axes; pad: fraction of the span
+ * @returns {{sx, sy, ox, oy, uniform}}
+ */
+function fitScales(bounds, frame, { chart = false, pad = 0.10 } = {}) {
+  const w = Math.max(1, frame.width);
+  const h = Math.max(1, frame.height);
+
+  let { minX, maxX, minY, maxY } = bounds;
+  if (![minX, maxX, minY, maxY].every(Number.isFinite)) {
+    minX = 0; maxX = 1; minY = 0; maxY = 1;
+  }
+  // A zero-extent axis has no scale of its own; give it a unit span so the
+  // drawing lands in the middle of the frame rather than dividing by zero.
+  const dx = (maxX - minX) || 1;
+  const dy = (maxY - minY) || 1;
+
+  const scaleX = w / (dx * (1 + pad * 2));
+  const scaleY = h / (dy * (1 + pad * 2));
+
+  const sx = chart ? scaleX : Math.min(scaleX, scaleY);
+  const sy = chart ? scaleY : sx;
+
+  return {
+    sx,
+    sy,
+    ox: w / 2 - ((minX + maxX) / 2) * sx,
+    oy: h / 2 + ((minY + maxY) / 2) * sy,
+    uniform: !chart,
+    // How much of the frame the drawing actually uses. A geometric fit of
+    // very elongated data will be low in one direction and that is correct;
+    // a chart should be near 1 in both.
+    fillX: (dx * sx) / w,
+    fillY: (dy * sy) / h,
+  };
+}
+
+/** Bounds of a point list. */
+function boundsOf(points) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of points) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, maxX, minY, maxY };
 }
 
 /* ===== loads.js ===== */
@@ -7136,6 +7459,7 @@ const S = {
   cz: 0.90, cx0a: 0.009, cm: -0.042, rho: 1.11, oswald: 0.90,
   cxPilot: 0.015, cxLines: 0.020, legacy: false,
   // panels
+  ribIndex: 0, tab: 'wing',
   ovalAmount: 6.0, seamAllowance: 10, pointsPerSurface: 50,
   rollWidth: 1.40, panelGap: 3.0, applyOval: true,
 };
@@ -7585,12 +7909,12 @@ function seamed() {
 
 function draw() {
   drawReadout();
+  if (S.tab === 'rib') { drawRib(); drawBalanceTable(); return; }
+  if (S.tab === 'analysis') { drawPolar(); drawAtmosphere(); drawBalanceTable(); return; }
   drawPlan();
   drawFront();
   drawSection();
   drawCut();
-  drawPolar();
-  drawAtmosphere();
   drawBalanceTable();
   drawEnvironment();
 }
@@ -7642,7 +7966,7 @@ function drawPolar() {
   if (pts.length < 2) { canvas('vp-polar', [[0, 0], [1, 1]]); note.textContent = 'No polar'; return; }
 
   const data = pts.map((p) => [p.CD, p.CL]);
-  const c = canvas('vp-polar', data.concat([[0, 0]]));
+  const c = canvas('vp-polar', data.concat([[0, 0]]), 0.10, { chart: true });
   c.grid(0.02);
   c.path(data, '#35d6e8', 1.6);
 
@@ -7678,7 +8002,7 @@ function drawAtmosphere() {
   // Density spans four decades over this range, so plot it logarithmically —
   // on a linear axis everything above 15 km is pinned to the axis.
   const pts = prof.map((p) => [Math.log10(Math.max(1e-8, p.density)), p.z / 1000]);
-  const c = canvas('vp-atmos', pts);
+  const c = canvas('vp-atmos', pts, 0.10, { chart: true });
   c.grid(1);
   c.path(pts, '#5fd97a', 1.5);
 
@@ -7752,7 +8076,13 @@ function drawReadout() {
  * The browser then guarantees the fit, and it accounts for everything —
  * including text, which no geometric bound can predict.
  */
-function canvas(id, pts, pad = 0.10) {
+/**
+ * Per-viewport user view state, so a pan or zoom survives a redraw.
+ * Empty until the user actually interacts; the default is always the fit.
+ */
+const VIEW_STATE = {};
+
+function canvas(id, pts, pad = 0.10, opts = {}) {
   const svg = document.getElementById(id);
   svg.innerHTML = '';
 
@@ -7772,12 +8102,24 @@ function canvas(id, pts, pad = 0.10) {
   }
   if (!isFinite(minX)) { minX = 0; maxX = 1; minY = 0; maxY = 1; }
   const dx = (maxX - minX) || 1, dy = (maxY - minY) || 1;
-  const scale = Math.min(W / (dx * (1 + pad * 2)), H / (dy * (1 + pad * 2)));
-  const ox = W / 2 - ((minX + maxX) / 2) * scale;
-  const oy = H / 2 + ((minY + maxY) / 2) * scale;
 
-  const X = (x) => ox + x * scale;
-  const Y = (y) => oy - y * scale;
+  // A wing drawing and a chart want opposite things from the frame.
+  //
+  // Plan, front, section and rib views are geometry: their axes are both
+  // metres, so the scale must be the same in x and y or the wing is drawn
+  // wrong. A polar is not geometry — its axes are km/h and m/s, and there is
+  // no meaningful aspect ratio between them. Forcing one scale on both made
+  // the polar a narrow sliver down the middle of a wide frame, correctly
+  // fitted and useless.
+  //
+  // So charts get independent scales and fill the frame.
+  const chart = !!opts.chart;
+  const f = fitScales({ minX, maxX, minY, maxY }, { width: W, height: H }, { chart, pad });
+  const { sx, sy, ox, oy } = f;
+  const scale = sx;
+
+  const X = (x) => ox + x * sx;
+  const Y = (y) => oy - y * sy;
 
   const add = (tag, attrs) => {
     const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -7802,9 +8144,16 @@ function canvas(id, pts, pad = 0.10) {
       let b;
       try { b = svg.getBBox(); } catch { return; }
       if (!b || !isFinite(b.width) || b.width <= 0 || b.height <= 0) return;
-      svg.setAttribute('viewBox',
-        `${b.x - padPx} ${b.y - padPx} ${b.width + padPx * 2} ${b.height + padPx * 2}`);
+      const fitted = [b.x - padPx, b.y - padPx, b.width + padPx * 2, b.height + padPx * 2];
+      svg.dataset.fitted = fitted.join(' ');
+      // A user who has panned or zoomed has said what they want to look at;
+      // a redraw must not throw that away. The fitted box is kept so a reset
+      // can return to it.
+      const st = VIEW_STATE[id];
+      svg.setAttribute('viewBox', (st && st.viewBox) ? st.viewBox : fitted.join(' '));
     },
+    /** Charts fill the frame, so they must not letterbox either. */
+    chartMode: chart,
     path(points, stroke, width = 1, opts = {}) {
       if (!points.length) return;
       const d = points.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(2)} ${Y(p[1]).toFixed(2)}`).join('');
@@ -7965,6 +8314,7 @@ function drawSection() {
   c.path([[0, 0], [chord * 1.3, -chord * 1.3 * Math.tan(g)]], '#5fd97a', 0.8, { dash: '6 4' });
 
   c.fit();
+  enablePanZoom('vp-section');
   document.getElementById('note-section').textContent =
     `α ${S.alphaDeg.toFixed(1)}°  ·  θ ${b.thetaDeg.toFixed(2)}°  ·  γ ${b.gammaDeg.toFixed(2)}°  ·  calage ${b.calageMetres.toFixed(3)} m`;
 }
@@ -8031,6 +8381,162 @@ function drawBalanceTable() {
   host.append(t);
 }
 
+/**
+ * Pan and zoom for one viewport.
+ *
+ * Wheel zooms about the cursor, drag pans, double-click returns to the fit.
+ * The transform is stored as a viewBox rather than an SVG transform so that
+ * `vector-effect: non-scaling-stroke` keeps line weights constant as the view
+ * changes — zooming in should reveal detail, not thicken every line.
+ */
+function enablePanZoom(id) {
+  const svg = document.getElementById(id);
+  if (!svg || svg.dataset.panzoom) return;
+  svg.dataset.panzoom = '1';
+  svg.style.cursor = 'grab';
+
+  const readBox = () => (svg.getAttribute('viewBox') || '0 0 100 100')
+    .split(/\s+/).map(Number);
+  const writeBox = (b) => {
+    const s2 = b.join(' ');
+    svg.setAttribute('viewBox', s2);
+    VIEW_STATE[id] = { viewBox: s2 };
+    markZoom(id, true);
+  };
+
+  svg.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const [x, y, w, h] = readBox();
+    const r = svg.getBoundingClientRect();
+    // Zoom about the pointer, so the feature under the cursor stays put.
+    const fx = r.width ? (e.clientX - r.left) / r.width : 0.5;
+    const fy = r.height ? (e.clientY - r.top) / r.height : 0.5;
+    const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+    const nw = Math.max(1e-4, w * k);
+    const nh = Math.max(1e-4, h * k);
+    writeBox([x + (w - nw) * fx, y + (h - nh) * fy, nw, nh]);
+  }, { passive: false });
+
+  let drag = null;
+  svg.addEventListener('pointerdown', (e) => {
+    drag = { x: e.clientX, y: e.clientY, box: readBox() };
+    svg.style.cursor = 'grabbing';
+    if (svg.setPointerCapture) svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const r = svg.getBoundingClientRect();
+    const [x, y, w, h] = drag.box;
+    const dx2 = ((e.clientX - drag.x) / (r.width || 1)) * w;
+    const dy2 = ((e.clientY - drag.y) / (r.height || 1)) * h;
+    svg.setAttribute('viewBox', [x - dx2, y - dy2, w, h].join(' '));
+    VIEW_STATE[id] = { viewBox: svg.getAttribute('viewBox') };
+    markZoom(id, true);
+  });
+  const end = () => { drag = null; svg.style.cursor = 'grab'; };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointerleave', end);
+
+  svg.addEventListener('dblclick', () => resetView(id));
+}
+
+function resetView(id) {
+  const svg = document.getElementById(id);
+  delete VIEW_STATE[id];
+  if (svg && svg.dataset.fitted) svg.setAttribute('viewBox', svg.dataset.fitted);
+  markZoom(id, false);
+}
+
+function markZoom(id, on) {
+  const badge = document.getElementById(`zoom-${id}`);
+  if (badge) badge.style.display = on ? 'inline' : 'none';
+}
+
+/* ------------------------------------------------------------- rib view -- */
+
+/**
+ * One rib, drawn as it is cut.
+ *
+ * The wing views answer "what shape is this wing"; this one answers "what do
+ * I cut for station 14". The rib is projected back into its own plane — the
+ * same transform the DXF export uses — so what is on screen is the pattern,
+ * not a perspective of it.
+ *
+ * Shown with it: the air intake, the line anchor points that pierce this rib,
+ * the chord line, and the rib's own washin, dihedral and yaw, since those are
+ * what make it different from its neighbours.
+ */
+function drawRib() {
+  const note = document.getElementById('note-rib');
+  const rib = M.wing.ribs[Math.min(S.ribIndex, M.wing.ribs.length - 1)];
+  if (!rib) { canvas('vp-rib', [[0, 0], [1, 1]]); note.textContent = 'No rib'; return; }
+
+  // Project into the rib's own plane, exactly as ribsToDXF does.
+  const b = (rib.betaDeg * Math.PI) / 180;
+  const oy = rib.lobePoint[0];
+  const oz = rib.lobePoint[1];
+  const flat = ([x, y, z]) => [x - rib.xLE, -(y - oy) * Math.sin(b) + (z - oz) * Math.cos(b)];
+
+  const upper = rib.upper.map(flat);
+  const lower = rib.lower.map(flat);
+  const loop = upper.slice().reverse().concat(lower.slice(1));
+
+  const c = canvas('vp-rib', loop.concat([[0, 0], [rib.chord, 0]]));
+  c.grid(0.1);
+
+  // Chord line and the section.
+  c.path([[0, 0], [rib.chord, 0]], '#4e6270', 0.8, { dash: '5 4' });
+  c.path(loop, '#35d6e8', 1.6, { close: true });
+
+  // Seam allowance, which is what actually gets cut.
+  const allowance = S.seamAllowance / 1000;
+  if (allowance > 0) {
+    const cx = rib.chord / 2;
+    const cy = (Math.max(...loop.map((p) => p[1])) + Math.min(...loop.map((p) => p[1]))) / 2;
+    const grown = loop.map(([x, y]) => {
+      const vx = x - cx;
+      const vy = y - cy;
+      const m = Math.hypot(vx, vy) || 1;
+      return [x + (vx / m) * allowance, y + (vy / m) * allowance];
+    });
+    c.path(grown, '#5fd97a', 0.7, { close: true, dash: '4 3', opacity: 0.8 });
+  }
+
+  // Air intake, on the lower surface.
+  const intake = lower.filter((p, i) => {
+    const t = rib.lower[i][0] - rib.xLE;
+    return t >= M.airfoil.intake.start * rib.chord && t <= M.airfoil.intake.end * rib.chord;
+  });
+  if (intake.length > 1) c.path(intake, '#ff5e5e', 3);
+
+  // Line anchors that pass through this rib.
+  for (const [row, frac] of Object.entries(M.airfoil.anchors)) {
+    const target = frac * rib.chord;
+    let best = lower[0];
+    let bd = Infinity;
+    lower.forEach((p, i) => {
+      const d = Math.abs((rib.lower[i][0] - rib.xLE) - target);
+      if (d < bd) { bd = d; best = p; }
+    });
+    c.dot(best, '#6e8bff', 2.4);
+    c.text(row, [best[0], best[1] - rib.chord * 0.035], '#6e8bff', 9, 'middle');
+  }
+
+  // Leading and trailing edge markers.
+  c.dot(upper[0], '#e8c547', 2.4);
+  c.dot(upper[upper.length - 1], '#e8c547', 2.4);
+
+  c.fit();
+  enablePanZoom('vp-rib');
+
+  const t = Math.max(...loop.map((p) => p[1])) - Math.min(...loop.map((p) => p[1]));
+  note.textContent =
+    `rib ${rib.index} of ${M.wing.ribs.length - 1}  ·  station ${rib.station.toFixed(3)} m`
+    + `  ·  chord ${rib.chord.toFixed(3)} m  ·  thickness ${(t / rib.chord * 100).toFixed(1)}%`
+    + `  ·  washin ${rib.alphaDeg.toFixed(2)}°  ·  dihedral ${rib.betaDeg.toFixed(1)}°`
+    + `  ·  yaw ${rib.zetaDeg.toFixed(2)}°  ·  φ ${rib.phiDeg.toFixed(2)}°`;
+}
+
 /* --------------------------------------------------------------- output -- */
 
 function linesCSV() {
@@ -8082,9 +8588,59 @@ function setStatus(error, msg) {
     `<span class="sep"> · </span>rebuilt in ${(M.ms || 0).toFixed(0)} ms`;
 }
 
+/* ------------------------------------------------------------- tab bar -- */
+
+function selectTab(name) {
+  S.tab = name;
+  for (const b of document.querySelectorAll('.vptab')) {
+    b.classList.toggle('is-on', b.dataset.tab === name);
+  }
+  for (const g of document.querySelectorAll('.viewports')) {
+    g.hidden = g.dataset.tab !== name;
+  }
+  buildTabTools();
+  // The hidden grids had no size, so anything drawn while they were hidden
+  // fitted to nothing. Redraw on the way in rather than on the way out.
+  draw();
+}
+
+/** Controls that belong to the current tab, shown beside the tabs. */
+function buildTabTools() {
+  const host = document.getElementById('tabTools');
+  if (!host) return;
+  host.innerHTML = '';
+  if (S.tab !== 'rib' || !M.wing) return;
+
+  const last = M.wing.ribs.length - 1;
+  if (S.ribIndex > last) S.ribIndex = last;
+
+  const lab = el('label', null, 'Rib');
+  const slider2 = el('input');
+  slider2.type = 'range';
+  slider2.min = 0; slider2.max = last; slider2.step = 1; slider2.value = S.ribIndex;
+  slider2.setAttribute('aria-label', 'Rib to display');
+  const out = el('label', null, `${S.ribIndex} / ${last}`);
+  out.style.color = 'var(--aci-yellow)';
+  slider2.addEventListener('input', () => {
+    S.ribIndex = parseInt(slider2.value, 10);
+    out.textContent = `${S.ribIndex} / ${last}`;
+    drawRib();
+  });
+
+  const reset = el('button', 'btn', 'Reset view');
+  reset.style.padding = '4px 8px';
+  reset.addEventListener('click', () => resetView('vp-rib'));
+
+  host.append(lab, slider2, out, reset);
+}
+
 /* ----------------------------------------------------------------- boot -- */
 
 document.getElementById('wingName').addEventListener('input', (e) => { S.name = e.target.value || 'wing'; });
+
+for (const b of document.querySelectorAll('.vptab')) {
+  b.addEventListener('click', () => selectTab(b.dataset.tab));
+}
 
 // Redraw on any change to the viewport container, not only on window
 // resize: collapsing a control group or opening the panel changes the frames
@@ -8102,6 +8658,7 @@ if (typeof ResizeObserver === 'function') {
 
 buildControls();
 rebuild();
+buildTabTools();
 
 </script>
 </body>
