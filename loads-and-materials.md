@@ -115,7 +115,86 @@ Closure is now exact to 0.01%.
 
 ---
 
-## 5. The PHI line sheet: a third format
+## 5. Trim is the wrong sizing case
+
+Everything above sizes each line for the load it carries in **trimmed**
+flight. That is the wrong case, and the chordwise pressure work shows why: the
+load distribution moves a long way on the speedbar, so the split between the
+rows at speed is not the split at trim.
+
+Swept across the bar on a wing with 180 mm of travel:
+
+| bar | α | A | B | C | D |
+| --- | --- | --- | --- | --- | --- |
+| 0% | 6.00° | 38.0 | 24.7 | 20.5 | 16.8 |
+| 25% | 3.81° | 33.6 | 25.5 | 22.2 | 18.7 |
+| 50% | 1.62° | 26.1 | 26.8 | 25.1 | 22.1 |
+| 63% | 0.5° | ~20 | ~28 | ~28 | ~25 |
+
+The rear rows gain steadily as the front row sheds load. Worst tension over
+the flyable range, against trim: **A +0%, B +12%, C +33%, D +46%**.
+
+The consequence is concrete. **78 of 104 lines are governed by a bar position
+other than trim**, and six of them need a thicker line than trim-only sizing
+would choose.
+
+`loadEnvelope` sweeps the bar and sizes each line for the worst case it sees
+anywhere in the flyable range.
+
+### Two things it has to get right
+
+**Total load does not change.** In steady flight the lines carry the weight
+whatever the speed; only the distribution moves. An envelope reporting rising
+*total* load would be wrong, so the shares are checked to still sum to one at
+every bar position.
+
+**The sweep must stop where the wing stops flying.** Run to the end of the bar
+the angle of attack drops below the collapse floor, and thin-aerofoil theory
+reports the A row carrying **negative** load — the front of the section
+pushing down. That is not a modelling error. It is the frontal-collapse
+mechanism, and the A lines going slack is its precursor. But it is not a load
+case either, because the wing is no longer flying. Those positions are
+excluded from sizing and reported with a reason.
+
+### A subtlety that produced a wrong test first
+
+Comparing trim sizing against envelope sizing must hold the **share model**
+fixed. Sizing at trim with the handbook convention and on the envelope with
+pressure-derived shares conflates two changes, and the convention's larger B
+share then makes the envelope appear to need *less* line there — which says
+nothing about the speedbar. Both sides use the same share model, so what is
+measured is the effect of the bar alone.
+
+---
+
+## 6. Gust loads, and why the case is 8g
+
+Steady flight explains the distribution but not the magnitude. A vertical gust
+changes the angle of attack by roughly `w/V`, and the lift that produces
+scales with dynamic pressure:
+
+```
+Δn = ρ · V · a · w / (2 · W/S)
+```
+
+For a 25 m² wing at 95 kg with a 7.5 m/s gust:
+
+| condition | load factor |
+| --- | --- |
+| trim, 10.3 m/s | **7.40 g** |
+| full speed, 16.1 m/s | **11.00 g** |
+
+A strong gust at trim lands close to the **8 g** the EN 926-1 load test uses,
+which is a useful cross-check on both. At speed the same gust exceeds it —
+which is why a wing is certified to a factor it will not see in calm air, and
+why the speed range is where line strength earns its keep.
+
+This is the sharp-edged form, with no gust alleviation factor. That is
+conservative, which is the right direction for a line that has to hold.
+
+---
+
+## 7. The PHI line sheet: a third format
 
 Where the Ozone sheets are an inventory with a totals matrix alongside, this
 is a **cascade table** — one row per canopy attachment, with each level's

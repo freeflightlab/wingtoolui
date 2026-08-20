@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 574-test validation suite and a benchmark with regression budgets
+- [x] 594-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -103,8 +103,19 @@ material published after the handbook:
       convention gives 10%. A paraglider's rear rows are deliberately unloaded
       so the C and D lines can be thin; quantifying that needs measured riser
       loads.
-- [ ] **Row shares under acceleration in the load model** — the shares are now
-      known to move with angle of attack, but `loads.js` still sizes at trim.
+- [x] **Row shares under acceleration** — `loadEnvelope` sweeps the speedbar
+      and sizes each line for the worst case in the flyable range. 78 of 104
+      lines are governed away from trim; the D row gains 46%. The sweep stops
+      at the collapse floor, where the A row unloads.
+- [x] **Gust load factor**, connecting speed to the design case: a 7.5 m/s
+      gust gives 7.4 g at trim and 11.0 g at full speed, bracketing the 8 g
+      certification test.
+- [ ] **Gust alleviation** — the gust model is sharp-edged, with no
+      alleviation factor. Conservative, but a real wing's fabric and line
+      stretch shed some of it.
+- [ ] **Asymmetric and collapse load cases** — everything so far is symmetric
+      steady flight. A one-side collapse loads half the lineset at a much
+      higher factor, and is what actually breaks lines.
 - [ ] **Brake cascade decoding** — the PHI sheet's brake block lists each upper
       line twice, plain and with the spanwise distribution added, so its
       columns do not map one-to-one onto names. Needs the pulley geometry.

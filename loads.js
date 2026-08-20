@@ -29,6 +29,7 @@
  */
 
 import { liftingLine } from './aero.js';
+import { rowSharesFromPressure } from './pressure.js';
 
 /* --------------------------------------------------------------- loading -- */
 
@@ -118,6 +119,46 @@ export const LOAD_ROW_SHARES = { A: 0.35, B: 0.35, C: 0.20, D: 0.10 };
  * A — its share is redistributed over the rows that are there, so the total
  * still balances.
  */
+/**
+ * Row shares for a wing, either from convention or from its own pressure
+ * distribution.
+ *
+ * `convention` is the handbook's fixed 35/35/20/10 — a reasonable summary of
+ * one wing at one angle of attack, and blind to both where the anchors sit
+ * and how fast the wing is flying.
+ *
+ * `pressure` derives the split from thin-aerofoil theory for the actual
+ * section, anchors and angle of attack. On a NACA 4415 with the default
+ * anchors at 6 degrees it gives A 38.0 / B 24.7 / C 20.5 / D 16.8.
+ *
+ * The two agree closely on A and C and disagree on B and D. That gap is worth
+ * understanding rather than averaging away: thin-aerofoil theory describes a
+ * rigid surface carrying load all the way to the trailing edge, whereas a
+ * paraglider's rear rows are deliberately unloaded — modern wings shift load
+ * forward so the C and D lines can be made thin, which costs less drag. The
+ * convention encodes that rigging decision; the theory does not know about it.
+ *
+ * So the convention remains the default, and the derived split is available
+ * for the questions the convention cannot answer: what moving an anchor does,
+ * and what happens on the speedbar.
+ */
+export function rowSharesFor({
+  mode = 'convention', airfoil = null, anchors = null, alphaDeg = 6,
+  conventionShares = LOAD_ROW_SHARES,
+} = {}) {
+  if (mode !== 'pressure') return { shares: conventionShares, source: 'convention' };
+  if (!airfoil) throw new Error('Pressure-derived row shares need the section.');
+  const a = anchors || airfoil.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const r = rowSharesFromPressure(airfoil, a, alphaDeg);
+  return {
+    shares: r.shares,
+    source: 'pressure',
+    centreOfPressure: r.centreOfPressure,
+    cl: r.cl,
+    alphaDeg,
+  };
+}
+
 export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {
   const byAnchor = new Map();
   for (const l of plan.lines) {
@@ -514,14 +555,18 @@ export function lineDrag(selection, {
 /** Everything in one call: loading, tensions, sizing, stretch. */
 export function analyseLoads({
   plan, planform, stations, totalMassKg, alphaDeg = 5, twistAt = null,
-  table = DEFAULT_LINE_TABLE, loadCase = DEFAULT_LOAD_CASE, rowShares = LOAD_ROW_SHARES,
+  table = DEFAULT_LINE_TABLE, loadCase = DEFAULT_LOAD_CASE, rowShares = null,
   strengthBasis = 'kinked', wingAreaM2 = null,
+  rowShareMode = 'convention', airfoil = null, anchors = null,
 }) {
+  const shareInfo = rowShares
+    ? { shares: rowShares, source: 'given' }
+    : rowSharesFor({ mode: rowShareMode, airfoil, anchors, alphaDeg });
   const totalLoadN = totalMassKg * loadCase.gravity;
   const span = spanLoadDistribution({
     planform, stations, totalLoadN, twistAt, alphaDeg,
   });
-  const loads = anchorLoads(plan, span, { rowShares });
+  const loads = anchorLoads(plan, span, { rowShares: shareInfo.shares });
   const tensions = lineTensions(plan, loads);
   const selection = selectLines(tensions, { table, loadCase, strengthBasis });
   const stretch = stretchCorrection(selection);
@@ -533,6 +578,7 @@ export function analyseLoads({
   return {
     totalLoadN,
     spanLoad: span,
+    rowShares: shareInfo,
     anchorLoads: loads,
     loadByRow: byRow,
     tensions,
@@ -584,4 +630,172 @@ export function lineScheduleText(analysis, { name = 'wing' } = {}) {
     ].join('\t'));
   }
   return out.join('\n');
+}
+
+/* ------------------------------------------------------------ envelope -- */
+
+/**
+ * Line loads across the speedbar range, not just at trim.
+ *
+ * `analyseLoads` sizes every line for the load it carries in trimmed flight.
+ * That is the wrong case, and the pressure work shows why: the chordwise load
+ * distribution moves a long way on the bar, so the split between the rows at
+ * full speed is not the split at trim.
+ *
+ * On a wing with 180 mm of travel the rear rows carry substantially more at
+ * speed than they do at trim — by a quarter to a third — while the front row
+ * carries less. Size the C and D lines at trim and they are undersized for the
+ * condition in which the wing spends its fastest, most heavily loaded flying.
+ *
+ * Two things this must get right to be worth having:
+ *
+ * **Total load does not change.** In steady flight the lines carry the weight,
+ * whatever the speed. What changes is only the distribution, so an envelope
+ * that reported rising total load would be wrong. The check that the shares
+ * still sum to one at every bar position is the guard on that.
+ *
+ * **The sweep must respect the flyable range.** Run to the end of the bar the
+ * angle of attack drops below the collapse floor, and thin-aerofoil theory
+ * duly reports the A row carrying *negative* load — the front of the section
+ * pushing down. That is not a modelling error; it is the frontal-collapse
+ * mechanism, and the A lines going slack is its precursor. But it is not a
+ * load case either, because the wing is no longer flying. Positions outside
+ * the flyable range are excluded from sizing and reported separately.
+ */
+export function loadEnvelope({
+  plan, planform, stations, totalMassKg, airfoil, anchors = null,
+  riser, chordM, trimAlphaDeg = 6, liftModel = null,
+  barSteps = 9, alphaDeg = null, unloadWarnShare = 0.05,
+}) {
+  const a0 = alphaDeg ?? trimAlphaDeg;
+  const anchorSet = anchors || airfoil.anchors
+    || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+
+  const cases = [];
+  const excluded = [];
+
+  for (let i = 0; i < barSteps; i++) {
+    const bar = i / (barSteps - 1);
+    const alpha = a0 + (riser ? alphaChangeFor(riser, bar, chordM) : 0);
+
+    // Outside the flyable range this is not a load case, whatever the
+    // arithmetic says.
+    if (liftModel) {
+      const cz = liftModel.czAt(alpha);
+      if (cz < liftModel.czRange[0]) {
+        excluded.push({ bar, alphaDeg: alpha, cz, reason: 'below the collapse floor' });
+        continue;
+      }
+    }
+
+    const shares = rowSharesFromPressure(airfoil, anchorSet, alpha);
+    const negative = Object.entries(shares.shares).filter(([, v]) => v < 0).map(([k]) => k);
+    if (negative.length) {
+      excluded.push({ bar, alphaDeg: alpha, reason: `row ${negative.join(',')} unloads` });
+      continue;
+    }
+
+    const analysis = analyseLoads({
+      plan, planform, stations, totalMassKg, alphaDeg: alpha,
+      rowShares: shares.shares,
+    });
+
+    cases.push({
+      bar,
+      alphaDeg: alpha,
+      shares: shares.shares,
+      centreOfPressure: shares.centreOfPressure,
+      tensions: analysis.tensions,
+      loadByRow: analysis.loadByRow,
+      // A row approaching zero share is going slack, which is a handling and
+      // collapse warning even though it is not a strength one.
+      unloading: Object.entries(shares.shares)
+        .filter(([, v]) => v < unloadWarnShare).map(([k]) => k),
+    });
+  }
+
+  if (!cases.length) throw new Error('No flyable bar positions in the sweep.');
+
+  // Worst tension each line sees anywhere in the flyable range.
+  const worst = new Map();
+  for (const c of cases) {
+    for (const l of c.tensions.lines) {
+      const prev = worst.get(l.name);
+      if (!prev || l.tensionN > prev.tensionN) {
+        worst.set(l.name, { ...l, governingBar: c.bar, governingAlphaDeg: c.alphaDeg });
+      }
+    }
+  }
+
+  const trimCase = cases[0];
+  const trimTension = new Map(trimCase.tensions.lines.map((l) => [l.name, l.tensionN]));
+  const increases = [...worst.values()].map((l) => ({
+    name: l.name,
+    row: l.row,
+    trimN: trimTension.get(l.name) ?? 0,
+    worstN: l.tensionN,
+    governingBar: l.governingBar,
+    increasePct: trimTension.get(l.name)
+      ? ((l.tensionN / trimTension.get(l.name)) - 1) * 100 : 0,
+  }));
+
+  const byRow = {};
+  for (const inc of increases) {
+    if (!byRow[inc.row] || inc.increasePct > byRow[inc.row]) byRow[inc.row] = inc.increasePct;
+  }
+
+  return {
+    cases,
+    excluded,
+    // The sizing input: worst case per line, wherever it occurs.
+    tensions: { lines: [...worst.values()] },
+    increases,
+    worstIncreaseByRow: byRow,
+    trimGoverns: increases.every((i) => i.governingBar === 0),
+    flyableBars: cases.map((c) => c.bar),
+    unloadingRows: [...new Set(cases.flatMap((c) => c.unloading))],
+  };
+}
+
+/** Riser angle change, without importing the whole risers module eagerly. */
+function alphaChangeFor(riser, bar, chordM) {
+  const b = Math.max(0, Math.min(1, bar));
+  const rows = riser.rows;
+  const front = rows[0];
+  const rear = rows[rows.length - 1];
+  const dFront = b * riser.travelMM * (riser.share[front] ?? 0);
+  const dRear = b * riser.travelMM * (riser.share[rear] ?? 0);
+  const lever = ((riser.anchors[rear] - riser.anchors[front]) * chordM);
+  if (lever <= 0) return 0;
+  return -(Math.atan(((dFront - dRear) / 1000) / lever) * 180) / Math.PI;
+}
+
+/**
+ * Gust load factor.
+ *
+ * The reason the load case is 8g and not 1g. A vertical gust changes the
+ * angle of attack by roughly `w/V`, and the extra lift that produces scales
+ * with dynamic pressure — so the same gust is far more punishing at speed.
+ *
+ *     dn = rho * V * a * w / (2 * W/S)
+ *
+ * with `a` the lift-curve slope per radian and `W/S` the wing loading in
+ * newtons per square metre. This is the sharp-edged form, without the gust
+ * alleviation factor an aeroplane would apply, so it is conservative — which
+ * is the right direction for a line that has to hold.
+ */
+export function gustLoadFactor({
+  speedMS, gustMS = 7.5, liftSlopePerRad = 5.0,
+  wingLoadingNPerM2, rho = 1.225,
+}) {
+  const dn = (rho * speedMS * liftSlopePerRad * gustMS) / (2 * wingLoadingNPerM2);
+  return {
+    deltaN: dn,
+    loadFactor: 1 + dn,
+    speedMS,
+    gustMS,
+    // At twice the speed the same gust gives twice the increment, which is
+    // why the certification case is flown fast.
+    perMS: dn / (speedMS || 1),
+  };
 }
