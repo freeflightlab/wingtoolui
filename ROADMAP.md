@@ -86,9 +86,20 @@ material published after the handbook:
       angle to the flow is taken from its own endpoints where available and a
       single factor otherwise. Wake interference between lines is not modelled
       at all and is known to matter.
-- [ ] **Size-family scaling** — the reference data covers six sizes of one
-      wing with a fixed flat aspect ratio of 6.03 and line length scaling with
-      span. Generating a size family from one design is a natural next step.
+- [x] **Size-family scaling** — canopy scales isometrically (aspect ratio held
+      to 6.03 across six sizes); line length and mass follow affine laws with
+      a fixed component. Valid for interpolation only: extrapolated beyond the
+      fitted range the affine law is worse than isometric, so the module falls
+      back. See `docs/scaling.md`.
+- [ ] **Scale a full design, not just its summary numbers** — `scaleToArea`
+      returns a size's parameters; driving the whole pipeline through it to
+      emit cutting files for every size in a family is the next step.
+- [ ] **Per-size line sizing** — loads scale with k^2 while line strength
+      scales with area, so a family's linesets are not similar. Each size
+      needs sizing from its own loads.
+- [ ] **Discrete hardware** — riser length and speed-system travel step
+      between sizes (570/600 mm, 150/180 mm) rather than scaling. Needs a
+      table, not a law.
 - [ ] **Left/right and asymmetric plans** — quantities of 2 and 4 already
       encode mirror pairs; asymmetric line or colour plans do not yet exist.
 - [ ] **Riser hardware** — maillons, pulleys, speed-system travel and trimmer
