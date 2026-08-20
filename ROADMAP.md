@@ -65,13 +65,30 @@ material published after the handbook:
       distribution and the pulley geometry.
 - [ ] **Collapse and stabilo lines** — the `Z` row on the Lyght; parsed, not
       generated.
-- [ ] **Line materials and diameter selection** — the reference sheets group
-      by material code with sheathed and unsheathed types. Choosing a diameter
-      needs load per line, which needs the load model below.
-- [ ] **Load distribution through the cascade** — load per line from the
-      spanwise lift distribution, which then drives diameter selection,
-      elastic stretch correction (LEP section 18) and the weighted-centroid
-      load case.
+- [x] **Load distribution through the cascade** — lifting-line lift to load
+      per rib to tension per line, closing exactly on half the wing load.
+- [x] **Line materials and diameter selection** — 78 measured line types with
+      both new and kinked breaking strengths; selection sizes on the kinked
+      figure, which is up to 52% lower. See `docs/loads-and-materials.md`.
+- [x] **Elastic stretch correction** *(LEP section 18)* — cut lengths shortened
+      so each line flies to its design length.
+- [x] **Line drag computed from the lineset**, replacing the constant the
+      balance solver has used since Phase 1. Worth about 1.6 of glide ratio on
+      a modern thin set.
+- [ ] **Chordwise pressure distribution** to replace the fixed A/B/C/D load
+      shares (35/35/20/10). The row shares are the handbook's convention; a
+      real pressure distribution over the section would place them properly
+      and would change with angle of attack.
+- [ ] **Brake cascade decoding** — the PHI sheet's brake block lists each upper
+      line twice, plain and with the spanwise distribution added, so its
+      columns do not map one-to-one onto names. Needs the pulley geometry.
+- [ ] **Line drag by inclination from real geometry** — currently each line's
+      angle to the flow is taken from its own endpoints where available and a
+      single factor otherwise. Wake interference between lines is not modelled
+      at all and is known to matter.
+- [ ] **Size-family scaling** — the reference data covers six sizes of one
+      wing with a fixed flat aspect ratio of 6.03 and line length scaling with
+      span. Generating a size family from one design is a natural next step.
 - [ ] **Left/right and asymmetric plans** — quantities of 2 and 4 already
       encode mirror pairs; asymmetric line or colour plans do not yet exist.
 - [ ] **Riser hardware** — maillons, pulleys, speed-system travel and trimmer
