@@ -5783,6 +5783,151 @@ function gustLoadFactor({
   };
 }
 
+/* ------------------------------------------------- asymmetric and collapse -- */
+
+/**
+ * Load cases that are not symmetric steady flight.
+ *
+ * Everything above assumes the wing is flying level and intact. Certification
+ * tests to 8 g symmetrically, and that is the case the whole load chain has
+ * been built around — but it is not what breaks lines. Lines break in
+ * collapses, where part of the wing stops lifting and the rest carries the
+ * load through fewer paths, with a dynamic overshoot on top.
+ *
+ * Two mechanisms, both computed from the span loading rather than assumed:
+ *
+ * **Asymmetric collapse.** A fraction of one side stops producing lift. The
+ * pilot's weight has not changed, so what remains must carry it — and it
+ * carries it through the anchors that are still flying. The multiplier is not
+ * simply `1/(1-f)` in span, because the lift lost depends on *where* the
+ * collapse is: a tip collapse sheds much less lift than the same span taken
+ * from mid-wing, since the loading is far higher inboard.
+ *
+ * **Frontal collapse.** The leading edge folds under and the front rows shed
+ * their load onto the rows behind. The pressure model already predicts the
+ * precursor: run the angle of attack down far enough and the A row's share
+ * goes negative before anything else happens.
+ *
+ * The dynamic factor covers the surge and re-inflation that follow, and is
+ * the least defensible number here — it is a stand-in for a transient the
+ * static model cannot represent. It is stated as an input rather than buried.
+ */
+function asymmetricCollapse({
+  spanLoad, plan, loads, collapsedSpanFraction = 0.5,
+  fromTip = true, dynamicFactor = 1.5,
+}) {
+  const half = spanLoad.stations;
+  const total = half.reduce((a, s) => a + s.loadN, 0);
+  if (total <= 0) throw new Error('No span load to redistribute.');
+
+  // Which stations are inside the collapsed region.
+  const maxStation = Math.max(...half.map((s) => s.station));
+  const cut = maxStation * (1 - collapsedSpanFraction);
+  const isCollapsed = (s) => (fromTip ? s.station >= cut : s.station <= maxStation * collapsedSpanFraction);
+
+  const lostN = half.filter(isCollapsed).reduce((a, s) => a + s.loadN, 0);
+  const lostFraction = lostN / total;
+
+  // The intact side carries what the collapsed side has dropped. Both sides
+  // of the wing are in play — one collapsed, one flying — so the flying side
+  // picks up the whole of the lost load, not half of it.
+  const survivingFraction = 1 - lostFraction;
+  const multiplier = survivingFraction > 1e-6
+    ? (1 + lostFraction / survivingFraction) * dynamicFactor
+    : Infinity;
+
+  const scaled = loads.map((l) => ({
+    ...l,
+    loadN: l.loadN * multiplier,
+    collapsed: false,
+  }));
+
+  return {
+    case: fromTip ? 'asymmetric tip collapse' : 'asymmetric inboard collapse',
+    collapsedSpanFraction,
+    // The distinction that matters: half the span is not half the lift.
+    lostLiftFraction: lostFraction,
+    multiplier,
+    dynamicFactor,
+    loads: scaled,
+    tensions: lineTensions(plan, scaled),
+  };
+}
+
+/**
+ * Frontal collapse: the front rows shed their load onto those behind.
+ *
+ * `shed` is the fraction of the front row's load that transfers. It is
+ * redistributed over the remaining rows in proportion to what they already
+ * carry, which is the assumption that the chordwise load simply moves back
+ * rather than changing shape — crude, and stated as such.
+ */
+function frontalCollapse({
+  plan, loads, frontRows = ['A'], shed = 1.0, dynamicFactor = 1.4,
+}) {
+  const frontTotal = loads.filter((l) => frontRows.includes(l.row))
+    .reduce((a, l) => a + l.loadN, 0);
+  const rearTotal = loads.filter((l) => !frontRows.includes(l.row))
+    .reduce((a, l) => a + l.loadN, 0);
+  if (rearTotal <= 0) throw new Error('No rear rows to carry a frontal collapse.');
+
+  const transfer = frontTotal * shed;
+  const scaled = loads.map((l) => {
+    if (frontRows.includes(l.row)) {
+      return { ...l, loadN: l.loadN * (1 - shed) * dynamicFactor, collapsed: true };
+    }
+    const gain = transfer * (l.loadN / rearTotal);
+    return { ...l, loadN: (l.loadN + gain) * dynamicFactor, collapsed: false };
+  });
+
+  return {
+    case: 'frontal collapse',
+    shed,
+    dynamicFactor,
+    transferredN: transfer,
+    loads: scaled,
+    tensions: lineTensions(plan, scaled),
+  };
+}
+
+/**
+ * The full design envelope: symmetric flight across the bar, plus the
+ * collapse cases, with each line sized for the worst it ever sees.
+ *
+ * This is what a line schedule should be built from. The symmetric envelope
+ * alone understates the rear rows in a frontal collapse and every row in an
+ * asymmetric one.
+ */
+function designEnvelope({
+  symmetric, collapseCases = [], loadCase = DEFAULT_LOAD_CASE, table = DEFAULT_LINE_TABLE,
+}) {
+  const worst = new Map();
+  const record = (caseName, lines) => {
+    for (const l of lines) {
+      const prev = worst.get(l.name);
+      if (!prev || l.tensionN > prev.tensionN) {
+        worst.set(l.name, { ...l, governingCase: caseName });
+      }
+    }
+  };
+
+  record('symmetric', symmetric.tensions.lines);
+  for (const c of collapseCases) record(c.case, c.tensions.lines);
+
+  const lines = [...worst.values()];
+  const byCase = {};
+  for (const l of lines) byCase[l.governingCase] = (byCase[l.governingCase] || 0) + 1;
+
+  return {
+    tensions: { lines },
+    governingCases: byCase,
+    // A design in which no collapse case governs anything has either very
+    // generous margins or a load model that is not doing its job.
+    collapseGoverns: Object.keys(byCase).some((k) => k !== 'symmetric'),
+    selection: selectLines({ lines }, { loadCase, table }),
+  };
+}
+
 /* ===== scaling.js ===== */
 /* scaling.js — generating a size family from one design.
  *

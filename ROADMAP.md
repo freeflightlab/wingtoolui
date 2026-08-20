@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 594-test validation suite and a benchmark with regression budgets
+- [x] 608-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -113,9 +113,14 @@ material published after the handbook:
 - [ ] **Gust alleviation** — the gust model is sharp-edged, with no
       alleviation factor. Conservative, but a real wing's fabric and line
       stretch shed some of it.
-- [ ] **Asymmetric and collapse load cases** — everything so far is symmetric
-      steady flight. A one-side collapse loads half the lineset at a much
-      higher factor, and is what actually breaks lines.
+- [x] **Asymmetric and collapse load cases** — a tip collapse sheds far less
+      lift than its span fraction (25% of span sheds 17% of lift), a frontal
+      collapse moves the A row's load onto C, and sized on the full envelope
+      the asymmetric case governs every line with 35 of 76 needing more
+      material than symmetric sizing.
+- [ ] **Measured collapse loads** — the dynamic factor is a stand-in for a
+      transient the static model cannot represent, and is the least defensible
+      number in the load chain.
 - [ ] **Brake cascade decoding** — the PHI sheet's brake block lists each upper
       line twice, plain and with the spanwise distribution added, so its
       columns do not map one-to-one onto names. Needs the pulley geometry.
