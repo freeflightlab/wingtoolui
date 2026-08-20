@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 483-test validation suite and a benchmark with regression budgets
+- [x] 500-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -60,9 +60,14 @@ material published after the handbook:
       industry naming grammar, production line-table import, cascade topology
       and riser length recovered from lengths alone, junction placement
       calibrated against three real wings. See `docs/line-plans.md`.
-- [ ] **Brake cascade generation** — `K`/`KM`/`KMU`/`KRU`/`KRL` lines are
-      parsed and named but not generated. Needs the uneven spanwise
-      distribution and the pulley geometry.
+- [x] **Brake cascade generation** — four levels with a single shared lower
+      line, uneven tip-biased anchors, and engagement driven by a slack
+      distribution rather than geometry. Structure matches the BGD reference
+      exactly (13/6/3/1). See `docs/brakes.md`.
+- [ ] **Pulley and speedbar coupling** — the pulley position is a parameter,
+      not derived. Riser travel under speedbar moves it and changes brake
+      length in accelerated flight, which is why wings carry brake travel
+      compensation.
 - [ ] **Collapse and stabilo lines** — the `Z` row on the Lyght; parsed, not
       generated.
 - [x] **Load distribution through the cascade** — lifting-line lift to load

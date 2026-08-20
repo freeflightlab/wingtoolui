@@ -1009,3 +1009,260 @@ export function bgdStatedTopology(table, row) {
     .map(([mid, ribs]) => ({ middle: mid, ribs: ribs.sort((a, b) => a - b) }))
     .sort((a, b) => a.ribs[0] - b.ribs[0]);
 }
+
+/* ------------------------------------------------------------- brakes -- */
+
+/**
+ * Brake cascades, which are not just another row.
+ *
+ * Every generated row so far runs three levels from a riser maillon to the
+ * canopy. Brakes differ in four ways, all visible in the production data:
+ *
+ *   1. **Four levels, not three.** BGD's Lynx 2 runs k -> KM -> KR -> KL, and
+ *      Ozone splits its riser level into KRU and KRL around the pulley.
+ *   2. **A single shared lower line.** KL1 appears in all thirteen paths at
+ *      the same 2926 mm: one line from the handle up to the pulley, carrying
+ *      the whole cascade. Nothing in the load-bearing rows behaves like that.
+ *   3. **Anchors are deliberately uneven.** The Lynx 2 attaches at ribs
+ *      2, 4, 8, 10, 13, 15, 18, 20, 23, 25, 27, 29, 31 — gaps of 2 to 4
+ *      inboard closing to a steady 2 outboard. Braking is meant to bite at
+ *      the tip first.
+ *   4. **Total length falls outboard**, from 7913 mm at rib 2 to 6813 mm at
+ *      rib 31, because the arc brings the tip trailing edge nearer the pilot.
+ *
+ * The handle hangs below and behind the maillon, and the line runs up through
+ * a pulley on the riser. Slack between handle and trailing edge is what gives
+ * a brake its free travel, and it is a design quantity rather than a
+ * by-product: too little and the wing flies braked, too much and the range
+ * runs out before the stall.
+ */
+
+/**
+ * Trailing-edge attachment ribs, spaced denser toward the tip.
+ * @param {number} ribCount   ribs in the half wing
+ * @param {number} anchors    attachment points wanted
+ * @param {number} tipBias    0 = even, 1 = strongly bunched outboard
+ */
+export function brakeAnchorRibs(ribCount, anchors, tipBias = 0.55) {
+  // More anchors than ribs cannot be placed. The monotonic repair below
+  // clamps at the tip, so asking for too many silently returned the outermost
+  // rib twice — two brake lines onto one attachment point, which is not a
+  // wing. Cap the request instead.
+  const wanted = Math.max(1, Math.min(anchors, ribCount));
+  const out = [];
+  for (let i = 0; i < wanted; i++) {
+    const u = wanted === 1 ? 0 : i / (wanted - 1);
+    // Blend a linear sweep with one biased outboard; the exponent pulls
+    // stations toward the tip without ever reversing their order.
+    const t = (1 - tipBias) * u + tipBias * (1 - (1 - u) ** 1.7);
+    out.push(Math.min(ribCount - 1, Math.max(0, Math.round(t * (ribCount - 1)))));
+  }
+  // Never place two anchors on one rib. Repair upward, then sweep back down
+  // from the tip so a run that hit the ceiling is pushed inboard rather than
+  // collapsing onto the last rib.
+  for (let i = 1; i < out.length; i++) {
+    if (out[i] <= out[i - 1]) out[i] = out[i - 1] + 1;
+  }
+  if (out[out.length - 1] > ribCount - 1) {
+    out[out.length - 1] = ribCount - 1;
+    for (let i = out.length - 2; i >= 0; i--) {
+      if (out[i] >= out[i + 1]) out[i] = out[i + 1] - 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * Build the brake cascade.
+ *
+ * `levelCounts` gives the number of lines at each cascade level below the
+ * anchors, outermost first — [6, 3, 1] reproduces the Lynx 2's structure of
+ * six middle lines onto three riser lines onto one shared lower line.
+ */
+export function buildBrakePlan({
+  wing,
+  handlePoint = null,
+  pulleyPoint = null,
+  anchors = 13,
+  tipBias = 0.55,
+  levelCounts = [6, 3, 1],
+  lineLengthM = 6.5,
+  handleDropM = 0.55,
+  handleAftM = 0.35,
+  karabinerSeparationM = 0.42,
+  levelFractions = [0.64, 0.78],
+} = {}) {
+  const ribs = wing.ribs;
+  const maillon = [0, karabinerSeparationM / 2, -lineLengthM];
+  const pulley = pulleyPoint || maillon;
+  const handle = handlePoint
+    || [maillon[0] + handleAftM, maillon[1], maillon[2] - handleDropM];
+
+  const anchorRibs = brakeAnchorRibs(ribs.length, anchors, tipBias);
+  const points = anchorRibs.map((ri, i) => ({
+    anchor: i + 1,
+    ribIndex: ri,
+    chord: ribs[ri].chord,
+    // The trailing edge is the last point of the lower surface.
+    point: ribs[ri].lower[ribs[ri].lower.length - 1].slice(),
+  }));
+
+  const lines = [];
+
+  // Work down from the pulley: split the anchors into riser groups, then
+  // middle groups, then run the upper lines out to the trailing edge.
+  const [nMid, nRiser] = levelCounts;
+  const riserGroups = chunkInto(points, nRiser);
+  let midIndex = 0;
+
+  riserGroups.forEach((rg, r) => {
+    const rNode = lerpPt(pulley, centroidPts(rg.map((p) => p.point)), levelFractions[0]);
+    lines.push({
+      row: 'K', level: 'riser', index: r + 1, name: `KR${r + 1}`,
+      riser: 'K', from: pulley, to: rNode,
+      lengthMM: mmDist(pulley, rNode),
+      anchors: rg.map((p) => p.anchor),
+    });
+
+    const perRiser = Math.max(1, Math.round(nMid / nRiser));
+    const midGroups = chunkInto(rg, perRiser);
+    midGroups.forEach((mg) => {
+      midIndex += 1;
+      const mNode = lerpPt(rNode, centroidPts(mg.map((p) => p.point)), levelFractions[1]);
+      lines.push({
+        row: 'K', level: 'middle', index: midIndex, name: `KM${midIndex}`,
+        riser: 'K', from: rNode, to: mNode,
+        lengthMM: mmDist(rNode, mNode),
+        anchors: mg.map((p) => p.anchor),
+      });
+      mg.forEach((p) => {
+        lines.push({
+          row: 'K', level: 'upper', index: p.anchor, name: `k${p.anchor}`,
+          riser: 'K', ribIndex: p.ribIndex,
+          from: mNode, to: p.point,
+          lengthMM: mmDist(mNode, p.point),
+          anchors: [p.anchor],
+        });
+      });
+    });
+  });
+
+  // The shared lower line: handle to pulley, carrying the whole cascade.
+  const lower = {
+    row: 'K', level: 'riser', side: 'lower', index: 1, name: 'KL1',
+    riser: 'K', from: handle, to: pulley,
+    lengthMM: mmDist(handle, pulley),
+    anchors: points.map((p) => p.anchor),
+    shared: true,
+  };
+  lines.push(lower);
+
+  // Totals from the handle to each trailing-edge point.
+  const totals = {};
+  for (const l of lines) {
+    if (l.level !== 'upper') continue;
+    const mid = lines.find((x) => x.level === 'middle' && x.anchors.includes(l.index));
+    const ris = lines.find((x) => x.level === 'riser' && !x.shared && x.anchors.includes(l.index));
+    totals[l.index] = Math.round(
+      l.lengthMM + (mid?.lengthMM ?? 0) + (ris?.lengthMM ?? 0) + lower.lengthMM,
+    );
+  }
+
+  return {
+    lines,
+    handle,
+    pulley,
+    anchorRibs,
+    totals,
+    sharedLower: lower,
+    totalLengthMM: lines.reduce((a, l) => a + l.lengthMM * 2, 0) - lower.lengthMM,
+  };
+}
+
+/**
+ * Brake engagement across the span.
+ *
+ * An earlier version of this reported "free travel" as the cascade path
+ * length minus the straight-line distance from handle to trailing edge. That
+ * number is not free travel and is not physically meaningful: the cascade
+ * path *is* the taut route, so the difference is just how far the route bends
+ * around the junctions, and it grows with span for reasons that have nothing
+ * to do with braking.
+ *
+ * Free travel cannot be derived from geometry at all. If every brake line
+ * were cut to its exact taut length, the whole trailing edge would engage the
+ * instant the handle moved. Free travel is the slack the designer *adds*, and
+ * the spanwise differential — which part of the wing bites first — comes from
+ * how that slack is distributed, not from where the anchors sit.
+ *
+ * So what geometry supplies is the taut path per anchor. Combined with a
+ * slack distribution it gives the engagement order, and that is what this
+ * returns.
+ *
+ * @param {function} slackAt  extra length in mm, given normalised span 0..1.
+ *                            Constant slack engages the whole span together;
+ *                            slack falling outboard makes the tip bite first,
+ *                            which is the usual choice.
+ */
+export function brakeEngagement(brakePlan, {
+  slackAt = () => 120,
+  halfSpanRibs = null,
+} = {}) {
+  const uppers = brakePlan.lines
+    .filter((l) => l.level === 'upper')
+    .sort((a, b) => a.index - b.index);
+  const maxRib = halfSpanRibs
+    ?? Math.max(...uppers.map((l) => l.ribIndex ?? 0), 1);
+
+  const rows = uppers.map((l) => {
+    const t = maxRib ? (l.ribIndex ?? 0) / maxRib : 0;
+    const slack = slackAt(t);
+    return {
+      anchor: l.index,
+      ribIndex: l.ribIndex,
+      spanFraction: t,
+      tautPathMM: brakePlan.totals[l.index],
+      slackMM: Math.round(slack),
+      // Handle movement before this anchor takes load.
+      engagesAtMM: Math.round(slack),
+    };
+  });
+
+  const eng = rows.map((r) => r.engagesAtMM);
+  // Ties are possible where a slack distribution flattens near the tip, so
+  // take the outermost of any minimum: that is the one a pilot feels first.
+  const first = rows.reduce((a, r) => (r.engagesAtMM <= a.engagesAtMM ? r : a), rows[0]);
+  return {
+    rows,
+    firstToEngage: first,
+    minMM: Math.min(...eng),
+    maxMM: Math.max(...eng),
+    spreadMM: Math.max(...eng) - Math.min(...eng),
+    tipEngagesFirst: rows[rows.length - 1].engagesAtMM < rows[0].engagesAtMM,
+    // With no differential the whole trailing edge moves at once, which is
+    // what an undistributed brake does and why designers do not use one.
+    uniform: Math.max(...eng) - Math.min(...eng) < 1,
+  };
+}
+
+/**
+ * A slack distribution that brings the tip in first.
+ * Returns a function of normalised span for `brakeEngagement`.
+ */
+export function tipFirstSlack({ centreMM = 180, tipMM = 60, power = 1.5 } = {}) {
+  return (t) => centreMM + (tipMM - centreMM) * (t ** power);
+}
+
+function chunkInto(arr, groups) {
+  const n = Math.max(1, Math.min(groups, arr.length));
+  const per = Math.ceil(arr.length / n);
+  const out = [];
+  for (let i = 0; i < arr.length; i += per) out.push(arr.slice(i, i + per));
+  return out;
+}
+const mmDist = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000);
+const lerpPt = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+function centroidPts(pts) {
+  const s = pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1], a[2] + p[2]], [0, 0, 0]);
+  return s.map((v) => v / pts.length);
+}
