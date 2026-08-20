@@ -53,9 +53,34 @@
  * behaving wings.
  */
 
-/** Laws fitted to the PHI ALLEGRO light family. */
-export const DEFAULT_SCALING = {
-  source: 'PHI ALLEGRO light, six sizes, 2021',
+/**
+ * Laws fitted to one family, kept as a worked example — **not** as defaults to
+ * apply to another wing.
+ *
+ * Checked against two more families (Ozone Geo 7, five sizes; Ozone Ultralite
+ * 5, seven sizes), the *form* of these laws transfers and the *coefficients*
+ * do not:
+ *
+ *   total line length vs span      slope    intercept   R^2
+ *     PHI Allegro light            21.46     -5.54      0.983
+ *     Ozone Geo 7                  26.54    -40.93      0.991
+ *     Ozone Ultralite 5            36.64    -76.93      0.997
+ *
+ *   mass vs projected area
+ *     PHI Allegro light            0.1588   +0.2926     0.987
+ *     Ozone Geo 7                  0.1270   +0.9639     0.974
+ *     Ozone Ultralite 5            0.0927   +0.3871     0.999
+ *
+ * Every fit is tight, so affine is the right shape. But the slopes differ by
+ * a factor of 1.7 across the three, because they depend on how many lines a
+ * wing has, how deep its cascade runs and how it is built. Applying one
+ * family's coefficients to another is simply wrong.
+ *
+ * So `scaleToArea` scales isometrically unless it is handed laws fitted to
+ * the family being scaled. Use `fitScalingFamily` on your own sizes.
+ */
+export const EXAMPLE_SCALING = {
+  source: 'PHI ALLEGRO light, six sizes, 2021 — example only, do not reuse',
   aspectRatioConstant: true,
   // length = slope * span + intercept
   lineLength: { slope: 0.5659, intercept: 0.4594, r2: 0.9948 },
@@ -92,8 +117,18 @@ export function fitScalingFamily(sizes) {
   const flat = sizes.map((s) => s.flatArea);
   const proj = sizes.map((s) => s.projectedArea);
 
-  const ars = sizes.map((s) => (s.flatSpan ** 2) / s.flatArea);
+  // Aspect ratio: use the published figure where a family states one, and
+  // compute it otherwise. Computing it from published span and area looks
+  // inconsistent even when the maker holds it fixed, because span and area
+  // are quoted to one decimal — Ozone's Ultralite 5 states 4.56 for all seven
+  // sizes but the rounded figures compute anywhere from 4.52 to 4.60. That
+  // spread is the rounding, not the design.
+  const stated = sizes.map((s) => s.flatAR).filter((v) => v != null);
+  const ars = stated.length === sizes.length
+    ? stated
+    : sizes.map((s) => (s.flatSpan ** 2) / s.flatArea);
   const arSpread = Math.max(...ars) - Math.min(...ars);
+  const arFromRounding = stated.length !== sizes.length;
 
   return {
     source: 'fitted',
@@ -103,8 +138,11 @@ export function fitScalingFamily(sizes) {
     areaRange: [Math.min(...flat), Math.max(...flat)],
     sampleCount: sizes.length,
     aspectRatio: ars.reduce((a, b) => a + b, 0) / ars.length,
-    aspectRatioConstant: arSpread < 0.02,
+    // A tighter bound is justified when the maker states the ratio; a looser
+    // one when it has to be recovered from rounded span and area.
+    aspectRatioConstant: arSpread < (arFromRounding ? 0.12 : 0.02),
     aspectRatioSpread: arSpread,
+    aspectRatioFromRounding: arFromRounding,
     lineLength: fit(span, sizes.map((s) => s.lineLength)),
     totalLineLength: fit(span, sizes.map((s) => s.totalLineLength)),
     wingMass: fit(proj, sizes.map((s) => s.mass)),
@@ -137,9 +175,14 @@ function exponent(span, values) {
  * Line length and mass come from the affine laws instead, because they do not
  * scale with the canopy.
  */
-export function scaleToArea(base, targetAreaM2, laws = DEFAULT_SCALING, {
+export function scaleToArea(base, targetAreaM2, laws = null, {
   outsideRange = 'isometric',
 } = {}) {
+  // With no fitted laws the only defensible scaling is isometric. Falling back
+  // to another family's coefficients would look like more knowledge than there
+  // is: the affine slopes vary by a factor of 1.7 between the families
+  // measured, so borrowing them is worse than assuming nothing.
+  if (!laws) laws = { projectedRatio: base.projectedArea / base.flatArea || 0.86 };
   const k = Math.sqrt(targetAreaM2 / base.flatArea);
   const flatSpan = base.flatSpan * k;
 
@@ -172,7 +215,11 @@ export function scaleToArea(base, targetAreaM2, laws = DEFAULT_SCALING, {
       ? laws.totalLineLength.slope * flatSpan + laws.totalLineLength.intercept
       : (base.totalLineLength != null ? base.totalLineLength * k : null),
     inFittedRange: inRange,
-    method: useAffine ? 'affine' : 'isometric',
+    // The label must reflect what was actually used. With no fitted laws the
+    // affine branch has nothing to apply and every quantity falls back to the
+    // scale factor, so calling that 'affine' would misreport it.
+    method: (useAffine && laws.lineLength) ? 'affine' : 'isometric',
+    lawsSource: laws.source || (laws.lineLength ? 'fitted' : 'none — isometric'),
     mass,
     midWeight: laws.midWeight
       ? laws.midWeight.slope * projectedArea + laws.midWeight.intercept
@@ -188,7 +235,7 @@ export function scaleToArea(base, targetAreaM2, laws = DEFAULT_SCALING, {
 }
 
 /** Generate a whole family from one design and a list of target areas. */
-export function generateFamily(base, targetAreas, laws = DEFAULT_SCALING) {
+export function generateFamily(base, targetAreas, laws = null) {
   return targetAreas.map((a) => ({ targetArea: a, ...scaleToArea(base, a, laws) }));
 }
 
@@ -283,4 +330,57 @@ export function parseSizeTable(tsv) {
       speedwayMM: num('speedway_mm', i),
     };
   });
+}
+
+/** Read the multi-family reference table. */
+export function parseSizeFamilies(tsv) {
+  const lines = tsv.split(/\r?\n/).filter((l) => l.trim());
+  const head = lines[0].split('\t');
+  const idx = (k) => head.indexOf(k);
+  const out = {};
+  for (const line of lines.slice(1)) {
+    const f = line.split('\t');
+    const n = (k) => {
+      const v = Number(f[idx(k)]);
+      return Number.isFinite(v) ? v : null;
+    };
+    const fam = f[idx('family')];
+    (out[fam] ||= []).push({
+      name: f[idx('size')],
+      cells: n('cells'),
+      flatSpan: n('flat_span_m'),
+      flatArea: n('flat_area_m2'),
+      flatAR: n('flat_AR'),
+      projectedSpan: n('proj_span_m'),
+      projectedArea: n('proj_area_m2'),
+      maxChord: n('root_chord_m'),
+      minChord: null,
+      mass: n('mass_kg'),
+      midWeight: n('weight_lo_kg') != null && n('weight_hi_kg') != null
+        ? (n('weight_lo_kg') + n('weight_hi_kg')) / 2 : null,
+      totalLineLength: n('total_line_m'),
+      linePieces: n('line_pieces'),
+      lineLength: null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Cross-check a set of laws against a family they were not fitted to.
+ * The point of this is to make the non-transferability measurable rather than
+ * a claim: it returns how far the borrowed laws land.
+ */
+export function crossFamilyError(laws, family) {
+  const base = family[0];
+  const errs = [];
+  for (const size of family.slice(1)) {
+    const p = scaleToArea(base, size.flatArea, laws, { outsideRange: 'affine' });
+    if (size.totalLineLength && p.totalLineLength) {
+      errs.push(Math.abs(p.totalLineLength - size.totalLineLength) / size.totalLineLength);
+    }
+  }
+  return errs.length
+    ? { worstPct: Math.max(...errs) * 100, meanPct: (errs.reduce((a, b) => a + b, 0) / errs.length) * 100 }
+    : null;
 }

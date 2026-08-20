@@ -86,11 +86,17 @@ material published after the handbook:
       angle to the flow is taken from its own endpoints where available and a
       single factor otherwise. Wake interference between lines is not modelled
       at all and is known to matter.
-- [x] **Size-family scaling** — canopy scales isometrically (aspect ratio held
-      to 6.03 across six sizes); line length and mass follow affine laws with
-      a fixed component. Valid for interpolation only: extrapolated beyond the
-      fitted range the affine law is worse than isometric, so the module falls
-      back. See `docs/scaling.md`.
+- [x] **Size-family scaling**, validated across three families from two
+      manufacturers (18 sizes, 12.9-29 m²). Canopy scales isometrically
+      everywhere; line length and mass are affine everywhere; but the
+      coefficients vary by ~1.7x between families, so they must be fitted per
+      family and isometric is the default. See `docs/scaling.md`.
+- [ ] **Line count as a scaling parameter** — the total-line-length slope
+      tracks how many lines a wing carries (258 pieces on the Ultralite 5
+      against 224 on the Geo 7). Normalising by piece count may recover a
+      transferable law; on the Geo 7 the mean length per piece divided by span
+      is constant to 0.0025, but on the Ultralite 5 it drifts by 0.011 across
+      a near-doubling of area.
 - [ ] **Scale a full design, not just its summary numbers** — `scaleToArea`
       returns a size's parameters; driving the whole pipeline through it to
       emit cutting files for every size in a family is the next step.

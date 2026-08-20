@@ -88,13 +88,74 @@ case) needs the size's own figure.
 
 ---
 
-## 4. What this does not cover
+## 4. Cross-family check: the form transfers, the coefficients do not
 
-- **One family, one manufacturer.** The laws are fitted to a single
-  six-size family. Whether the slopes transfer to another maker is untested;
-  `fitScalingFamily` exists so a user can fit their own.
-- **Cell count is held constant** at 72 across all six sizes here, so cell
-  width scales with the wing. Some makers change cell count between sizes,
+The laws above were fitted to one family. Checked against two more — Ozone
+**Geo 7** (5 sizes) and **Ultralite 5** (7 sizes), spanning 12.9 to 29 m² and
+aspect ratios from 4.56 to 6.03:
+
+**Canopy isometry holds everywhere.** Flat-area exponent against span ratio:
+1.99 (PHI), 2.00 (Geo 7), 2.08 (Ultralite 5), with aspect ratio held constant
+within each family. A single scale factor for the planform is legitimate for
+all three.
+
+**The affine form holds everywhere.** Total line length against span:
+
+| family | slope | intercept | R² |
+| --- | --- | --- | --- |
+| PHI Allegro light | 21.46 | −5.54 | 0.983 |
+| Ozone Geo 7 | 26.54 | −40.93 | 0.991 |
+| Ozone Ultralite 5 | 36.64 | −76.93 | 0.997 |
+
+Mass against projected area:
+
+| family | slope | intercept | R² |
+| --- | --- | --- | --- |
+| PHI Allegro light | 0.1588 | +0.2926 | 0.987 |
+| Ozone Geo 7 | 0.1270 | +0.9639 | 0.974 |
+| Ozone Ultralite 5 | 0.0927 | +0.3871 | 0.999 |
+
+**But the coefficients vary by a factor of about 1.7.** They depend on how
+many lines a wing carries, how deep its cascade runs and how it is built — not
+on size alone. The Ultralite 5 has 258 line pieces against the Geo 7's 224 and
+is a much smaller wing, so its total line length climbs far faster with span.
+
+### The correction this forced
+
+The previous version shipped one family's fit as `DEFAULT_SCALING` and applied
+it to anything. That was wrong. Borrowing another family's laws lands more
+than 10% out — worse than assuming nothing.
+
+So:
+
+- `scaleToArea` now **scales isometrically unless handed laws fitted to the
+  family being scaled**, and reports which it used.
+- The PHI fit is renamed `EXAMPLE_SCALING` and documented as a worked example,
+  not a default.
+- `crossFamilyError` exists to make the non-transferability measurable rather
+  than a claim.
+
+Fit your own family with `fitScalingFamily`. Within a family the fitted laws
+interpolate to better than 3% on all three.
+
+### A measurement note
+
+Aspect ratio is taken from the maker's published figure where there is one.
+Recomputing it from published span and area looks inconsistent even when the
+maker holds it fixed: Ozone states 4.56 for all seven Ultralite 5 sizes, but
+span and area quoted to one decimal compute anywhere from 4.52 to 4.60. That
+spread is rounding, not design, and a fit that treats it as real will reject a
+perfectly regular family.
+
+---
+
+## 5. What this does not cover
+
+- **Per-family fitting is required.** Three families are now measured and the
+  coefficients demonstrably do not transfer. `fitScalingFamily` exists so a
+  user fits their own; without one, scaling is isometric.
+- **Cell count is held constant** within each family measured — 72, 48 and 34
+  respectively — so cell width scales with the wing. Some makers change cell count between sizes,
   which breaks isometry of the panel work.
 - **Riser length steps rather than scales** — 570 mm on the two smallest,
   600 mm on the rest — and the speed system travel likewise (150/180 mm).
