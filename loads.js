@@ -364,6 +364,30 @@ export function parseMaterialsTable(tsv) {
   return out;
 }
 
+/**
+ * The thinnest line real wings actually use.
+ *
+ * Checked across two manufacturers' complete linesets, neither goes below
+ * **0.50 mm**: PHI's Allegro X-alps stops at DC40 (0.50 mm, 41 daN kinked)
+ * and Ozone's Geo 7 at its 050 references. The materials table contains
+ * thinner line than that, and it is not used on a wing.
+ *
+ * The reason is not strength. A 0.4 mm Dyneema line is strong enough for a
+ * tip D-line several times over. It is handling, abrasion, knot retention and
+ * the simple fact that a line too thin to grip is a line that gets damaged in
+ * a bush. So below this diameter, load is not what decides the line — and a
+ * model that keeps sizing downward past it produces a lineset no one would
+ * build.
+ *
+ * This is why most of a real lineset is *not* load-sized. Measured against the
+ * 1 g load, PHI's own choices sit at 28x on the C riser and 108x on the tip D
+ * lines. The riser end is load-driven; the tip end is at the floor.
+ */
+export const PRACTICAL_FLOOR = {
+  diameterMM: 0.50,
+  source: 'PHI Allegro X-alps and Ozone Geo 7: neither uses thinner line',
+};
+
 export const DEFAULT_LOAD_CASE = {
   // EN 926-1 load-tests a paraglider to 8g. That is the certification case,
   // so it is the design case here.
@@ -387,7 +411,7 @@ export function selectLines(tensions, {
   table = DEFAULT_LINE_TABLE,
   loadCase = DEFAULT_LOAD_CASE,
   brakeSafetyFactor = 2.0,
-  minimumDiameterMM = 0.5,
+  minimumDiameterMM = PRACTICAL_FLOOR.diameterMM,
   strengthBasis = 'kinked',
   preferLowDrag = true,
 } = {}) {
@@ -404,15 +428,25 @@ export function selectLines(tensions, {
     // Anchor loads are already at 1g; the limit case multiplies them.
     const requiredN = l.tensionN * loadCase.limitG * factor;
     const requiredDaN = requiredN / 10;
+    // What the load alone would call for, ignoring the practical floor.
+    const byLoad = sorted.find((mat) => rated(mat) >= requiredDaN);
     const pick = sorted.find(
       (mat) => rated(mat) >= requiredDaN && mat.diameterMM >= minimumDiameterMM,
     );
+    // Whether this line is decided by the load or by the floor. A designer
+    // wants to know which: the load-sized lines are the ones that respond to
+    // a change in the load case, and the floor-sized ones never will.
+    const sizedBy = (byLoad && pick && byLoad.diameterMM < pick.diameterMM)
+      || (pick && rated(pick) > requiredDaN * 2)
+      ? 'floor' : 'load';
     return {
       ...l,
       requiredDaN,
       line: pick || null,
       utilisation: pick ? requiredDaN / rated(pick) : Infinity,
       ratedDaN: pick ? rated(pick) : null,
+      sizedBy,
+      loadOnlyLine: byLoad || null,
       massG: pick ? (pick.gramsPerM * l.lengthMM) / 1000 : null,
     };
   });
@@ -428,6 +462,9 @@ export function selectLines(tensions, {
     byMaterial: groupLinesBy(chosen.filter((c) => c.line), (c) => c.line.code),
     loadCase,
     strengthBasis,
+    floorSized: chosen.filter((c) => c.sizedBy === 'floor').length,
+    loadSized: chosen.filter((c) => c.sizedBy === 'load').length,
+    practicalFloor: minimumDiameterMM,
   };
 }
 

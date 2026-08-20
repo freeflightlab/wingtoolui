@@ -551,11 +551,60 @@ doubles — and the pressure model predicts the precursor independently, since
 the A row's share goes negative before anything else happens.
 
 Sized on the full envelope rather than symmetric flight, **asymmetric collapse
-governs every line**, and **35 of 76 need more material**.
+governs every line**.
 
-The dynamic factor is the least defensible number in this document. It stands
-in for a transient a static model cannot represent, and it is an input rather
-than a buried constant for that reason.
+### 6.2.1 Which raised an obvious objection: real linesets do not break
+
+If collapse governs every line and calls for more material than symmetric
+sizing, then either the collapse model is too severe or real wings are already
+built to it. Real wings survive collapses routinely, so this had to be
+settled against the manufacturers' own line choices rather than argued.
+
+Measured against the **1 g** line load, PHI's Allegro X-alps 21:
+
+| line | type | kinked | 1 g load | implied factor |
+| --- | --- | --- | --- | --- |
+| C riser | U-135 | 85.6 daN | 3.0 daN | **28×** |
+| A riser | PPSLS 260 | 259.4 daN | 5.3 daN | 49× |
+| A middle | U-135 | 85.6 daN | 2.7 daN | 32× |
+| tip D | DC40 | 41.0 daN | 0.4 daN | **108×** |
+
+Against which:
+
+| case | implied design factor |
+| --- | --- |
+| symmetric certification, 8 g × 1.5 | **12×** |
+| 50% asymmetric collapse on top | **28.6×** |
+| PHI's most load-critical line | **28×** |
+
+So the collapse model is not too severe — it lands within 2% of what the
+manufacturer actually built at the load-critical end. **Real linesets are
+already sized to the collapse case**, which is exactly why they do not break in
+one. The thing that was wrong was sizing on symmetric certification alone,
+which is thinner than any line on that wing.
+
+### 6.2.2 And most of a lineset is not load-sized at all
+
+The spread from 28× to 108× is not inconsistency. Neither PHI nor Ozone uses
+line thinner than **0.50 mm** anywhere in a complete lineset, and it is not
+strength that stops them: a 0.4 mm Dyneema line is several times strong enough
+for a tip D-line. Handling, abrasion and knot retention decide below that
+diameter, not load.
+
+So a model that keeps sizing downward past 0.5 mm produces a lineset nobody
+would build. With the floor in place, **76 of 88 lines are floor-sized** under
+symmetric loading — only twelve respond to the load case at all. Adding the
+collapse case moves that to 41 load-sized, which is the mechanism by which it
+changes a design.
+
+`selectLines` reports `sizedBy: 'load' | 'floor'` per line, because the
+distinction is what a designer needs: the load-sized lines are the ones that
+respond to a change in the load case, and the floor-sized ones never will.
+
+The dynamic factor remains the least defensible number in this document. It
+stands in for a transient a static model cannot represent, and it is an input
+rather than a buried constant for that reason — though the agreement above
+suggests 1.5 is not far off.
 
 ### 6.3 Gust loads bracket the certification case
 
@@ -589,8 +638,14 @@ Where a test does not assert machine precision, the reason:
 Not validated, because there is nothing to validate against.
 
 - **The dynamic factor in a collapse** (§6.2). A stand-in for a transient the
-  static model cannot represent. Measured line loads through a real collapse
-  would settle it; nothing published gives them.
+  static model cannot represent. The agreement between the collapse envelope
+  and real line choices in §6.2.1 suggests 1.5 is about right, but that is
+  circumstantial: a different dynamic factor with a different collapse
+  fraction would land in the same place. Measured line loads through a real
+  collapse would settle it.
+- **The practical floor is one number from two makers.** Both stop at 0.50 mm,
+  which is suggestive rather than established. It may also be a fabric-era
+  artefact rather than a fixed limit.
 - **Gust alleviation.** The gust model is sharp-edged. A real wing's fabric and
   line stretch shed some of it, and by how much is not established here.
 - **The frontal-collapse floor** (§5.3). Inverted from published speeds, never

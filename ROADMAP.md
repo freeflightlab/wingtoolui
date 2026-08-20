@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 608-test validation suite and a benchmark with regression budgets
+- [x] 616-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -118,9 +118,18 @@ material published after the handbook:
       collapse moves the A row's load onto C, and sized on the full envelope
       the asymmetric case governs every line with 35 of 76 needing more
       material than symmetric sizing.
-- [ ] **Measured collapse loads** — the dynamic factor is a stand-in for a
-      transient the static model cannot represent, and is the least defensible
-      number in the load chain.
+- [x] **Reconciliation with real linesets** — checked against PHI's own line
+      choices: the collapse envelope implies 28.6x the 1g load, and PHI's most
+      load-critical line sits at 28x. Real wings are already built to the
+      collapse case, which is why they survive one; symmetric certification
+      sizing alone is thinner than any line on that wing.
+- [x] **Practical minimum diameter** — neither PHI nor Ozone uses line below
+      0.50 mm, and it is handling rather than strength that stops them. With
+      the floor in place most of a lineset is floor-sized, not load-sized, and
+      `selectLines` reports which.
+- [ ] **Measured collapse loads** — the dynamic factor is still a stand-in.
+      The agreement above is circumstantial: a different factor with a
+      different collapse fraction lands in the same place.
 - [ ] **Brake cascade decoding** — the PHI sheet's brake block lists each upper
       line twice, plain and with the spanwise distribution added, so its
       columns do not map one-to-one onto names. Needs the pulley geometry.
