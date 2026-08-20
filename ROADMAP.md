@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 500-test validation suite and a benchmark with regression budgets
+- [x] 524-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -64,10 +64,17 @@ material published after the handbook:
       line, uneven tip-biased anchors, and engagement driven by a slack
       distribution rather than geometry. Structure matches the BGD reference
       exactly (13/6/3/1). See `docs/brakes.md`.
-- [ ] **Pulley and speedbar coupling** — the pulley position is a parameter,
-      not derived. Riser travel under speedbar moves it and changes brake
-      length in accelerated flight, which is why wings carry brake travel
-      compensation.
+- [x] **Risers, speed system and the accelerated polar** *(ch.9)* — riser
+      travel rotates the wing, the brake pulley couples to it, and the polar
+      runs across the bar range. Validated against BGD's published Lynx 2
+      figures on four independent quantities. See `docs/speed-system.md`.
+- [ ] **Derive the lift slope from the section** rather than taking `czAt` as
+      an input. The accelerated polar is only as good as that curve, and the
+      Cz guard exists precisely because it is easy to use outside its range.
+- [ ] **Trimmers** *(ch.9.3)* and riser webbing geometry — B-handle heights,
+      C-handle steering, and the split between main and speed-system webbing.
+- [ ] **Line loads under acceleration** — loads shift forward on the bar,
+      changing what each row carries; `loads.js` still assumes trim.
 - [ ] **Collapse and stabilo lines** — the `Z` row on the Lyght; parsed, not
       generated.
 - [x] **Load distribution through the cascade** — lifting-line lift to load
