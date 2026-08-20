@@ -5151,6 +5151,88 @@ function loadingCheck(sizes) {
   return out;
 }
 
+/* -------------------------------------------------- line length from AR -- */
+
+/**
+ * Total line length from aspect ratio and span.
+ *
+ * The raw affine law — total line length against span — does not transfer
+ * between families: its slope varies by a factor of 1.7, from 16.2 on a
+ * competition wing to 36.6 on a mountain wing. That was recorded earlier as a
+ * flat "coefficients do not transfer", with the reason unresolved because
+ * aspect ratio and span are confounded at r = +0.91: a higher aspect ratio
+ * means a longer span at the same area.
+ *
+ * Five families across three manufacturers separate them.
+ *
+ * **Aspect ratio has an effect independent of span.** Geo 7 and Allegro light
+ * are both three-liners with mean spans within 5% of each other. The Allegro's
+ * aspect ratio is 17% higher, and it carries 9% less line per metre of span.
+ * Span cannot explain that.
+ *
+ * **Riser count has a comparable effect.** Allegro light and Alpina 5 have
+ * near-identical aspect ratios (6.03 and 6.07) and spans, but the Alpina is a
+ * two-liner and carries 10% less line per metre of span.
+ *
+ * Normalising by span removes the dominant size effect and leaves a quantity
+ * that does transfer:
+ *
+ *     line metres per metre of span  =  -5.12 * AR + 50.72        R^2 = 0.95
+ *
+ *   wing              AR    actual   fitted
+ *   Ozone Ultralite 5 4.56   28.2     27.4
+ *   Ozone Geo 7       5.16   23.0     24.3
+ *   PHI Allegro light 6.03   21.0     19.8
+ *   Ozone Alpina 5    6.07   18.9     19.6
+ *   Ozone Zeno 2      6.90   15.5     15.4
+ *
+ * Predicting a family's total line length from aspect ratio and span alone
+ * lands within **6.2%** on all five — across three manufacturers, two- and
+ * three-line wings, and a range of nearly 2:1 in area. That is the first
+ * line-length estimate in this project that survives leaving the family it
+ * was fitted to.
+ *
+ * Two honest caveats. Five families is a small sample for a two-parameter
+ * fit. And riser count is still partly collinear with aspect ratio here —
+ * both two-liners are high-aspect wings — so the `risers` correction below is
+ * offered as an adjustment, not as an independently established effect.
+ */
+const LINE_LENGTH_PER_SPAN = {
+  slope: -5.120,
+  intercept: 50.72,
+  r2: 0.951,
+  worstFamilyErrorPct: 6.2,
+  sampleFamilies: 5,
+  sampleManufacturers: 3,
+  arRange: [4.56, 6.90],
+  // Measured difference between a two-liner and a three-liner at matched
+  // aspect ratio and span. One pair, so treat it as indicative.
+  twoLinerFactor: 0.90,
+};
+
+/** Line metres per metre of span, for an aspect ratio. */
+function lineLengthPerSpan(aspectRatio, { risers = 3 } = {}) {
+  const k = LINE_LENGTH_PER_SPAN.slope * aspectRatio + LINE_LENGTH_PER_SPAN.intercept;
+  return risers <= 2 ? k * LINE_LENGTH_PER_SPAN.twoLinerFactor : k;
+}
+
+/**
+ * Estimated total line length for a wing, from aspect ratio and span.
+ * `outsideRange` reports whether the aspect ratio sits inside the range the
+ * law was fitted over, since extrapolating a two-point-per-family fit is
+ * exactly the mistake the previous phase made.
+ */
+function estimateTotalLineLength({ aspectRatio, flatSpan, risers = 3 }) {
+  const [lo, hi] = LINE_LENGTH_PER_SPAN.arRange;
+  const perSpan = lineLengthPerSpan(aspectRatio, { risers });
+  return {
+    perSpan,
+    totalLineLengthM: perSpan * flatSpan,
+    inFittedRange: aspectRatio >= lo && aspectRatio <= hi,
+    expectedErrorPct: LINE_LENGTH_PER_SPAN.worstFamilyErrorPct,
+  };
+}
+
 /* ===== export.js ===== */
 /* export.js — DXF and SVG output.
  *

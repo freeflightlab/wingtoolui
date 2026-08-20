@@ -184,15 +184,56 @@ Read as design decisions rather than as quality:
 rather than ranking, and `compareFamilies` reports the normalised metrics and
 sorts by application.
 
-### What the numbers do and do not support
+### Separating aspect ratio from span — resolved
 
-The total-line-length slope correlates with aspect ratio at **r = −0.97**
-across the four families. It also correlates with mean span at **r = −0.99**,
-and the two are confounded: a higher aspect ratio means a longer span at the
-same area. With four families there is no separating them, so **no causal law
-is claimed**. What is supported, and is enough to be useful, is that the
-families are not interchangeable and any comparison should state which brief
-it holds fixed.
+Earlier this was left open: the total-line-length slope correlates with aspect
+ratio at r = −0.96 and with mean span at r = −0.98, and the two are confounded
+at r = +0.91, because a higher aspect ratio means a longer span at the same
+area. Four families could not separate them.
+
+A fifth family does, through two controlled comparisons:
+
+**Aspect ratio has an effect independent of span.** Geo 7 and Allegro light
+are both three-liners with mean spans within **5%** of each other. The
+Allegro's aspect ratio is 17% higher and it carries **9% less line per metre
+of span**. Span cannot account for that.
+
+**Riser count has a comparable effect.** Allegro light and Alpina 5 have
+near-identical aspect ratios — 6.03 and 6.07 — and similar spans, but the
+Alpina is a two-liner and carries **10% less line per metre of span**.
+
+Partial correlations agree: controlling for span, slope against aspect ratio
+holds at r = −0.86; controlling for aspect ratio, slope against span holds at
+r = −0.93. Both effects are real.
+
+### The law that transfers
+
+Normalising by span removes the dominant size effect and leaves a quantity
+that survives leaving its own family:
+
+```
+line metres per metre of span  =  -5.12 x AR + 50.72        R² = 0.95
+```
+
+| wing | AR | risers | actual | fitted |
+| --- | --- | --- | --- | --- |
+| Ozone Ultralite 5 | 4.56 | 3 | 28.2 | 27.4 |
+| Ozone Geo 7 | 5.16 | 3 | 23.0 | 24.3 |
+| PHI Allegro light | 6.03 | 3 | 21.0 | 19.8 |
+| Ozone Alpina 5 | 6.07 | 2 | 18.9 | 19.6 |
+| Ozone Zeno 2 | 6.90 | 2 | 15.5 | 15.4 |
+
+Predicting any family's total line length from **aspect ratio and span alone**,
+with nothing fitted to that family, lands within **6.2%** on all five — across
+three manufacturers, two- and three-line wings, and a near 2:1 range in area.
+Contrast the raw slope against span, which varied by a factor of 1.7 and did
+not transfer at all.
+
+Two caveats kept with the law rather than in a footnote. Five families is a
+small sample for a two-parameter fit. And riser count remains partly collinear
+with aspect ratio here — both two-liners are high-aspect wings — so the
+two-liner factor is offered as an adjustment, not as an independently
+established effect.
 
 ### A second measurement note
 

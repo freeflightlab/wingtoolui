@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 455-test validation suite and a benchmark with regression budgets
+- [x] 470-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -106,16 +106,24 @@ material published after the handbook:
       actually drawn, so labels and markers stay inside the frame; the nested
       cutting layout wraps into bands, taking it from 4% to 91% of frame
       height.
-- [ ] **Alpina 5 and Lynx 2 specifications** — line data for all sizes is in
-      hand and parses, but span, area and weight per size are not, so neither
-      can join the scaling analysis yet.
+- [x] **Alpina 5 specifications** — six sizes added, giving a five-family,
+      three-manufacturer scaling sample.
+- [ ] **Lynx 2 specifications** — four sizes of line data parse, but span,
+      area and weight per size are still missing, so BGD cannot join the
+      scaling analysis.
 - [ ] **Collapse-line (Z) risers** — the Zeno 2, Lyght and Alpina 5 all carry
       a Z row on its own riser, structurally unlike the three-riser wings
       modelled so far. Parsed and named; not generated.
-- [ ] **Separate aspect ratio from span** in the line-length trend. The slope
-      correlates with AR at r=-0.97 and with mean span at r=-0.99; four
-      families cannot separate them. More families, or one maker's wings at
-      matched area across categories, would.
+- [x] **Separate aspect ratio from span** — done with a matched-span pair.
+      At equal riser count and spans within 5%, a 17% higher aspect ratio
+      carries 9% less line per metre of span; at matched aspect ratio a
+      two-liner carries 10% less than a three-liner. The normalised law
+      `line m per m span = -5.12*AR + 50.72` predicts any family's total line
+      length within 6.2% with nothing fitted to it.
+- [ ] **Confirm the two-liner effect independently** — riser count is still
+      partly collinear with aspect ratio in this sample, since both two-liners
+      are high-aspect wings. A low-aspect two-liner or a high-aspect
+      three-liner would settle it.
 - [ ] **Line count as a scaling parameter** — the total-line-length slope
       tracks how many lines a wing carries (258 pieces on the Ultralite 5
       against 224 on the Geo 7). Normalising by piece count may recover a
