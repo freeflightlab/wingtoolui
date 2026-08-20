@@ -149,7 +149,64 @@ perfectly regular family.
 
 ---
 
-## 5. What this does not cover
+## 5. Application: comparisons must be like for like
+
+The cross-family result in section 4 was framed wrongly at first. Comparing a
+hike-and-fly wing with a competition wing and calling the difference a scaling
+failure is a category error. These wings are built to different briefs, and
+almost every ratio that looks like a law tracks the brief.
+
+| wing | application | cert | AR | cells/m span | line m/m² | kg/m² | loading |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Ozone Ultralite 5 | hike and fly | A/B | 4.56 | 3.66 | **13.8** | **0.102** | 4.55 |
+| Ozone Geo 7 | progression | B | 5.16 | 4.17 | 10.2 | 0.142 | 3.90 |
+| PHI Allegro light | performance XC | C | 6.03 | 5.86 | 10.3 | 0.148 | 4.35 |
+| Ozone Zeno 2 | competition | D | 6.90 | 6.05 | **8.3** | **0.217** | 5.05 |
+
+Read as design decisions rather than as quality:
+
+- **Line length per m² falls 40%** from the mountain wing to the competition
+  wing. Line drag is a first-order cost to a wing whose job is glide, so it
+  carries fewer and thinner lines. The mountain wing carries more per m²
+  partly because it is small — line length has a fixed component set by pilot
+  geometry, so a 13 m² wing cannot shrink its lines proportionally.
+- **Cells per metre of span nearly doubles.** More, narrower cells hold a
+  cleaner profile; they also cost weight and build time.
+- **Mass per m² doubles**, and the ordering is the reverse of the performance
+  ordering. The Ultralite 5 is the lightest per m² because that is its entire
+  reason for existing; the Zeno 2 is the heaviest because it is a highly
+  loaded competition wing with a dense internal structure.
+- **A low aspect ratio is not a worse wing.** It is the right answer to a
+  launch in a col with a pack on your back.
+
+`classifyApplication` infers the class from aspect ratio and certification,
+`compareApplications` flags a cross-class comparison and says what differs
+rather than ranking, and `compareFamilies` reports the normalised metrics and
+sorts by application.
+
+### What the numbers do and do not support
+
+The total-line-length slope correlates with aspect ratio at **r = −0.97**
+across the four families. It also correlates with mean span at **r = −0.99**,
+and the two are confounded: a higher aspect ratio means a longer span at the
+same area. With four families there is no separating them, so **no causal law
+is claimed**. What is supported, and is enough to be useful, is that the
+families are not interchangeable and any comparison should state which brief
+it holds fixed.
+
+### A second measurement note
+
+Section 4 noted that aspect ratio recovered from rounded span and area looks
+inconsistent. The same rounding breaks scaling exponents. Averaging
+`log(v_i/v_0) / log(s_i/s_0)` over the sizes is the obvious estimator and it
+is badly behaved: consecutive sizes are close, the ratios are small, and they
+carry the full rounding error. On the Zeno 2 that returns **1.86** for an area
+that is plainly scaling as the square of span. A least-squares fit on log-log
+returns **1.99** from the same figures, and is what the module now uses.
+
+---
+
+## 6. What this does not cover
 
 - **Per-family fitting is required.** Three families are now measured and the
   coefficients demonstrably do not transfer. `fitScalingFamily` exists so a

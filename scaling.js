@@ -157,14 +157,27 @@ export function fitScalingFamily(sizes) {
   };
 }
 
+/**
+ * Scaling exponent of a quantity against span, by least squares on log-log.
+ *
+ * The obvious estimator — averaging log(v_i/v_0) / log(s_i/s_0) over the
+ * sizes — is badly behaved on published data. Consecutive sizes are close
+ * together and makers quote span and area to one decimal, so those ratios are
+ * small numbers carrying the full rounding error, and dividing one by the
+ * other amplifies it. On the Zeno 2 that estimator returns 1.86 for an area
+ * that is scaling as the square of span; the least-squares fit below returns
+ * 1.99 from the same figures.
+ */
 function exponent(span, values) {
-  const ns = [];
-  for (let i = 1; i < span.length; i++) {
-    const k = span[i] / span[0];
-    if (k <= 1.0001) continue;
-    ns.push(Math.log(values[i] / values[0]) / Math.log(k));
-  }
-  return ns.length ? ns.reduce((a, b) => a + b, 0) / ns.length : null;
+  const pts = span.map((s, i) => [Math.log(s), Math.log(values[i])])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+  const n = pts.length;
+  if (n < 2) return null;
+  const mx = pts.reduce((a, p) => a + p[0], 0) / n;
+  const my = pts.reduce((a, p) => a + p[1], 0) / n;
+  const sxx = pts.reduce((a, p) => a + (p[0] - mx) ** 2, 0);
+  if (sxx === 0) return null;
+  return pts.reduce((a, p) => a + (p[0] - mx) * (p[1] - my), 0) / sxx;
 }
 
 /**
@@ -361,6 +374,9 @@ export function parseSizeFamilies(tsv) {
       totalLineLength: n('total_line_m'),
       linePieces: n('line_pieces'),
       lineLength: null,
+      application: f[idx('application')] || null,
+      certification: f[idx('certification')] || null,
+      aspectClass: f[idx('aspect_class')] || null,
     });
   }
   return out;
@@ -383,4 +399,165 @@ export function crossFamilyError(laws, family) {
   return errs.length
     ? { worstPct: Math.max(...errs) * 100, meanPct: (errs.reduce((a, b) => a + b, 0) / errs.length) * 100 }
     : null;
+}
+
+/* ------------------------------------------------------- application class -- */
+
+/**
+ * A wing's application, and why comparisons must respect it.
+ *
+ * Comparing a hike-and-fly wing with a competition wing and calling the
+ * difference a scaling-law failure is a category error. These wings are built
+ * to different briefs, and almost every ratio that looks like a "law" tracks
+ * the brief:
+ *
+ *   wing              application     cert   AR    cells  line m/m^2
+ *   Ozone Ultralite 5 hike and fly    A/B    4.56    34      13.8
+ *   Ozone Geo 7       progression     B      5.16    48      10.2
+ *   PHI Allegro light performance XC  C      6.03    72      10.3
+ *   Ozone Zeno 2      competition     D      6.90    78       8.3
+ *
+ * Line length per square metre falls by 40% from the mountain wing to the
+ * competition wing, and cell count more than doubles. A low aspect ratio is
+ * not a worse wing; it is the right answer to a launch in a col with a pack
+ * on your back.
+ *
+ * ---------------------------------------------------------------------------
+ * What the numbers do and do not support
+ * ---------------------------------------------------------------------------
+ * The total-line-length slope correlates with aspect ratio at r = -0.97 over
+ * four families. It also correlates with mean span at r = -0.99, and the two
+ * are confounded — a higher aspect ratio means a longer span at the same area.
+ * With four families there is no separating them, so no causal law is claimed
+ * here. What is claimed, and is enough to be useful, is that the families are
+ * not interchangeable and a comparison should say which brief it is holding
+ * fixed.
+ */
+export const APPLICATIONS = {
+  'hike and fly': {
+    order: 1,
+    typicalAR: [4.0, 5.2],
+    brief: 'Minimum weight and pack volume; short launches at altitude with a load.',
+    reads: 'Low aspect ratio and few cells are the design answer, not a compromise.',
+  },
+  progression: {
+    order: 2,
+    typicalAR: [4.8, 5.6],
+    brief: 'Passive safety with enough performance for a pilot building hours.',
+    reads: 'Moderate everything; the wing has to forgive.',
+  },
+  sport: {
+    order: 3,
+    typicalAR: [5.4, 6.0],
+    brief: 'The step after a progression wing: more performance, still forgiving.',
+    reads: 'Aspect ratio and cell count rise; line count usually rises with them.',
+  },
+  'performance XC': {
+    order: 4,
+    typicalAR: [5.8, 6.5],
+    brief: 'Flying far. Glide and speed matter more than damping.',
+    reads: 'Line drag is now a first-order cost, so line length per m^2 falls.',
+  },
+  competition: {
+    order: 5,
+    typicalAR: [6.5, 7.5],
+    brief: 'Maximum glide and speed for pilots with the skill to fly it.',
+    reads: 'Highest aspect ratio and cell count, least line per m^2, two risers.',
+  },
+};
+
+/** Best-guess application from the numbers, when it is not stated. */
+export function classifyApplication({ aspectRatio, cells = null, certification = null }) {
+  if (certification) {
+    const c = String(certification).toUpperCase();
+    if (c.startsWith('D')) return 'competition';
+  }
+  let best = null;
+  for (const [name, spec] of Object.entries(APPLICATIONS)) {
+    const [lo, hi] = spec.typicalAR;
+    const mid = (lo + hi) / 2;
+    const inside = aspectRatio >= lo && aspectRatio <= hi;
+    const d = Math.abs(aspectRatio - mid) - (inside ? 10 : 0);
+    if (!best || d < best.d) best = { name, d, inside };
+  }
+  return best.name;
+}
+
+/**
+ * Whether two wings are a fair comparison, and what to hold fixed if not.
+ *
+ * This does not refuse to compare — sometimes the cross-category comparison is
+ * exactly the question. It says plainly what differs, so a difference is not
+ * read as a defect in one of them.
+ */
+export function compareApplications(a, b) {
+  const appA = a.application || classifyApplication(a);
+  const appB = b.application || classifyApplication(b);
+  const same = appA === appB;
+  const oA = APPLICATIONS[appA]?.order ?? 0;
+  const oB = APPLICATIONS[appB]?.order ?? 0;
+
+  const notes = [];
+  if (!same) {
+    notes.push(`Different applications: ${appA} vs ${appB}.`);
+    notes.push(`${appA}: ${APPLICATIONS[appA]?.brief ?? 'unknown brief'}`);
+    notes.push(`${appB}: ${APPLICATIONS[appB]?.brief ?? 'unknown brief'}`);
+    notes.push('Differences in aspect ratio, cell count and line length follow '
+      + 'from the brief and should not be read as one wing being better built.');
+  }
+  return {
+    applicationA: appA,
+    applicationB: appB,
+    comparable: same,
+    categoryGap: Math.abs(oA - oB),
+    notes,
+  };
+}
+
+/**
+ * Metrics normalised so wings of different size can be set side by side.
+ * Absolute line length says mostly how big a wing is; per square metre says
+ * something about how it was designed.
+ */
+export function normalisedMetrics(size) {
+  const area = size.flatArea;
+  return {
+    lineLengthPerM2: size.totalLineLength != null ? size.totalLineLength / area : null,
+    linePiecesPerM2: size.linePieces != null ? size.linePieces / area : null,
+    cellsPerMetreSpan: size.cells != null ? size.cells / size.flatSpan : null,
+    massPerM2: size.mass != null ? size.mass / area : null,
+    loadingAtMid: size.midWeight != null && size.projectedArea
+      ? size.midWeight / size.projectedArea : null,
+    aspectRatio: size.flatAR ?? (size.flatSpan ** 2) / area,
+  };
+}
+
+/**
+ * Compare families like for like, reporting normalised metrics and flagging
+ * cross-application comparisons rather than silently making them.
+ */
+export function compareFamilies(families) {
+  const rows = [];
+  for (const [name, sizes] of Object.entries(families)) {
+    const mid = sizes[Math.floor(sizes.length / 2)];
+    rows.push({
+      family: name,
+      application: mid.application || classifyApplication({
+        aspectRatio: mid.flatAR, cells: mid.cells, certification: mid.certification,
+      }),
+      certification: mid.certification || null,
+      sizes: sizes.length,
+      ...normalisedMetrics(mid),
+    });
+  }
+  rows.sort((a, b) => (APPLICATIONS[a.application]?.order ?? 0)
+    - (APPLICATIONS[b.application]?.order ?? 0));
+  const apps = new Set(rows.map((r) => r.application));
+  return {
+    rows,
+    singleApplication: apps.size === 1,
+    warning: apps.size > 1
+      ? 'These wings serve different applications; normalised metrics differ by design.'
+      : null,
+  };
 }

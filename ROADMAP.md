@@ -91,6 +91,14 @@ material published after the handbook:
       everywhere; line length and mass are affine everywhere; but the
       coefficients vary by ~1.7x between families, so they must be fitted per
       family and isometric is the default. See `docs/scaling.md`.
+- [x] **Application-aware comparison** — wings classified by brief (hike and
+      fly, progression, sport, performance XC, competition); cross-class
+      comparisons flagged with an explanation rather than silently made, and
+      metrics normalised per m² so size does not masquerade as design.
+- [ ] **Separate aspect ratio from span** in the line-length trend. The slope
+      correlates with AR at r=-0.97 and with mean span at r=-0.99; four
+      families cannot separate them. More families, or one maker's wings at
+      matched area across categories, would.
 - [ ] **Line count as a scaling parameter** — the total-line-length slope
       tracks how many lines a wing carries (258 pieces on the Ultralite 5
       against 224 on the Geo 7). Normalising by piece count may recover a
