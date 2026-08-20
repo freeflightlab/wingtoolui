@@ -674,7 +674,38 @@ export function loadingCheck(sizes) {
  * line-length estimate in this project that survives leaving the family it
  * was fitted to.
  *
- * Two honest caveats. Five families is a small sample for a two-parameter
+ * ---------------------------------------------------------------------------
+ * The limit, found by testing it out of sample
+ * ---------------------------------------------------------------------------
+ * Applied to BGD's Lynx 2 — a sixth family, a third manufacturer, and none of
+ * its data used in the fit — the law lands within 1% on the smallest size and
+ * **16% out on the largest**. The error is systematic in size, not scatter,
+ * and the reason is that the law carries a hidden assumption: that a family's
+ * total line length scales with **span**.
+ *
+ * Fitting the exponent of total line length against the linear scale factor,
+ * per family:
+ *
+ *   Ozone Ultralite 5   1.30      Ozone Alpina 5   1.06
+ *   Ozone Geo 7         1.15      Ozone Zeno 2     1.04
+ *   PHI Allegro light   1.02      BGD Lynx 2       **2.03**
+ *
+ * A linear scale factor multiplies span by k and area by k², so an exponent
+ * near 1 means the lineset scales with span and near 2 means it scales with
+ * area. Five families do the first. BGD does the second: its published totals
+ * track area almost exactly, and it is the only maker here that publishes an
+ * explicit linear scaling factor per size.
+ *
+ * That is a design decision at the manufacturer level, not a measurement
+ * artefact, and this project cannot say why — only that assuming one regime
+ * silently mis-sizes the other by up to 16% at the ends of a range.
+ *
+ * So `estimateTotalLineLength` takes the exponent, defaulting to 1, and
+ * `lineLengthExponent` fits it from a family's own sizes. Use the AR law to
+ * set the level, and the family's own exponent to move across sizes.
+ *
+ * ---------------------------------------------------------------------------
+ * Two further caveats. Five families is a small sample for a two-parameter
  * fit. And riser count is still partly collinear with aspect ratio here —
  * both two-liners are high-aspect wings — so the `risers` correction below is
  * offered as an adjustment, not as an independently established effect.
@@ -687,6 +718,10 @@ export const LINE_LENGTH_PER_SPAN = {
   sampleFamilies: 5,
   sampleManufacturers: 3,
   arRange: [4.56, 6.90],
+  // Fitted on families whose lineset scales with span. Out of sample on an
+  // area-scaling family the error reaches 16%.
+  assumesSpanScaling: true,
+  worstOutOfSampleErrorPct: 16.2,
   // Measured difference between a two-liner and a three-liner at matched
   // aspect ratio and span. One pair, so treat it as indicative.
   twoLinerFactor: 0.90,
@@ -704,13 +739,53 @@ export function lineLengthPerSpan(aspectRatio, { risers = 3 } = {}) {
  * law was fitted over, since extrapolating a two-point-per-family fit is
  * exactly the mistake the previous phase made.
  */
-export function estimateTotalLineLength({ aspectRatio, flatSpan, risers = 3 }) {
+export function estimateTotalLineLength({
+  aspectRatio, flatSpan, risers = 3,
+  // Reference size and exponent, for families that do not scale with span.
+  referenceSpan = null, exponent = 1,
+}) {
   const [lo, hi] = LINE_LENGTH_PER_SPAN.arRange;
   const perSpan = lineLengthPerSpan(aspectRatio, { risers });
+
+  // The plain law is total = k * span, which is the exponent-1 case. Given a
+  // reference size and a fitted exponent, scale from the reference instead —
+  // without this an area-scaling family is mis-sized at both ends of its
+  // range, in opposite directions.
+  const base = referenceSpan ?? flatSpan;
+  const total = perSpan * base * ((flatSpan / base) ** exponent);
+
   return {
     perSpan,
-    totalLineLengthM: perSpan * flatSpan,
+    totalLineLengthM: total,
+    exponent,
     inFittedRange: aspectRatio >= lo && aspectRatio <= hi,
-    expectedErrorPct: LINE_LENGTH_PER_SPAN.worstFamilyErrorPct,
+    expectedErrorPct: exponent === 1
+      ? LINE_LENGTH_PER_SPAN.worstFamilyErrorPct
+      : null,
+  };
+}
+
+/**
+ * Fit how a family's total line length scales, as an exponent against span.
+ *
+ * Near 1 the lineset scales with span; near 2 with area. Both occur in the
+ * measured data, and which one a maker uses cannot be guessed from the wing's
+ * numbers — it has to be fitted from the family, or taken from the maker.
+ */
+export function lineLengthExponent(sizes) {
+  const pts = sizes
+    .filter((s) => s.totalLineLength && s.flatSpan)
+    .map((s) => [Math.log(s.flatSpan), Math.log(s.totalLineLength)]);
+  if (pts.length < 2) return null;
+  const n = pts.length;
+  const mx = pts.reduce((a, p) => a + p[0], 0) / n;
+  const my = pts.reduce((a, p) => a + p[1], 0) / n;
+  const sxx = pts.reduce((a, p) => a + (p[0] - mx) ** 2, 0);
+  if (sxx === 0) return null;
+  const exponent = pts.reduce((a, p) => a + (p[0] - mx) * (p[1] - my), 0) / sxx;
+  return {
+    exponent,
+    regime: exponent < 1.5 ? 'span' : 'area',
+    sizes: n,
   };
 }

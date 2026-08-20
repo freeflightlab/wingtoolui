@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 470-test validation suite and a benchmark with regression budgets
+- [x] 483-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -108,9 +108,14 @@ material published after the handbook:
       height.
 - [x] **Alpina 5 specifications** — six sizes added, giving a five-family,
       three-manufacturer scaling sample.
-- [ ] **Lynx 2 specifications** — four sizes of line data parse, but span,
-      area and weight per size are still missing, so BGD cannot join the
-      scaling analysis.
+- [x] **Lynx 2 specifications** — BGD joins as a sixth family and third
+      manufacturer. Used as a genuine out-of-sample test, which found that the
+      aspect-ratio line-length law assumes span scaling and is up to 16% out
+      on an area-scaling family.
+- [ ] **Why BGD scales its lineset with area** — five families scale total
+      line length with span (exponent 1.02-1.30), BGD with area (2.03). BGD is
+      the only 2.5-liner in the set; whether the hybrid layout is the cause is
+      untested. More makers would settle it.
 - [ ] **Collapse-line (Z) risers** — the Zeno 2, Lyght and Alpina 5 all carry
       a Z row on its own riser, structurally unlike the three-riser wings
       modelled so far. Parsed and named; not generated.

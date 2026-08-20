@@ -229,11 +229,73 @@ three manufacturers, two- and three-line wings, and a near 2:1 range in area.
 Contrast the raw slope against span, which varied by a factor of 1.7 and did
 not transfer at all.
 
-Two caveats kept with the law rather than in a footnote. Five families is a
-small sample for a two-parameter fit. And riser count remains partly collinear
-with aspect ratio here — both two-liners are high-aspect wings — so the
-two-liner factor is offered as an adjustment, not as an independently
-established effect.
+### Tested out of sample — and it broke
+
+BGD's Lynx 2 is a sixth family, a third manufacturer, and none of its data was
+used in the fit. Applying the law:
+
+| size | predicted | published | error |
+| --- | --- | --- | --- |
+| XS | 206.8 m | 209 m | −1.0% |
+| S | 214.4 m | 226 m | −5.1% |
+| M | 223.9 m | 247 m | −9.3% |
+| ML | 233.4 m | 268 m | −12.9% |
+| L | 242.9 m | 290 m | **−16.2%** |
+
+Within 1% at the small end and 16% out at the large end. The error is
+systematic in size, not scatter, which points at a hidden assumption rather
+than noise — and there was one: **that a family's lineset scales with span**.
+
+Fitting the exponent of total line length against the linear scale factor:
+
+| family | exponent | regime |
+| --- | --- | --- |
+| Ozone Ultralite 5 | 1.30 | span |
+| Ozone Geo 7 | 1.15 | span |
+| PHI Allegro light | 1.02 | span |
+| Ozone Alpina 5 | 1.06 | span |
+| Ozone Zeno 2 | 1.04 | span |
+| **BGD Lynx 2** | **2.03** | **area** |
+
+A linear scale factor multiplies span by k and area by k², so an exponent near
+1 means the lineset scales with span and near 2 means it scales with area.
+Five families do the first; BGD does the second, its published totals tracking
+area almost exactly.
+
+This is a manufacturer-level design decision, and nothing in a wing's
+published numbers reveals which regime it uses — it has to be fitted from the
+family, or taken from the maker. `lineLengthExponent` does the fitting, and
+`estimateTotalLineLength` takes the exponent and a reference size. Use the
+aspect-ratio law to set the *level*, and the family's own exponent to move
+*across* sizes.
+
+### Caveats kept with the law
+
+- The aspect-ratio fit rests on five families, which is a small sample for two
+  parameters, and it assumes span scaling.
+- Riser count is partly collinear with aspect ratio — both two-liners here are
+  high-aspect wings — so the two-liner factor is an adjustment, not an
+  independently established effect.
+- Why BGD scales its lineset with area is not established here. It is a
+  2.5-liner, three-line in the centre and two-line at the tip, which is a
+  layout no other family in this set uses; whether that is the cause is
+  untested.
+
+### BGD publishes its scale factor, and it confirms isometry
+
+Uniquely in this dataset, BGD states a **linear scaling factor** per size —
+0.92, 0.96, 1.00, 1.04, 1.08. Against the geometry:
+
+| size | stated | span ratio | √(area ratio) | line length ratio |
+| --- | --- | --- | --- | --- |
+| XS | 0.92 | 0.9237 | 0.9208 | 0.9178 |
+| S | 0.96 | 0.9576 | 0.9555 | 0.9589 |
+| ML | 1.04 | 1.0424 | 1.0426 | 1.0411 |
+| L | 1.08 | 1.0847 | 1.0835 | 1.0822 |
+
+Agreement to three decimals across span, area and line length. A manufacturer
+stating outright the isometric canopy scaling this document derived from
+measurements — and the strongest external confirmation of it available.
 
 ### A second measurement note
 
