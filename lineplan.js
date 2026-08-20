@@ -30,15 +30,26 @@ const COLLAPSE = 'Z';
 /**
  * Decode a line name.
  *   A1     -> row A, level 'upper',  index 1
+ *   a1     -> row A, level 'upper',  index 1   (lowercase convention)
  *   AM6    -> row A, level 'middle', index 6
  *   AR3    -> row A, level 'riser',  index 3
  *   KMU2   -> row K, level 'middle', side 'upper', index 2
  *   CRL4   -> row C, level 'riser',  side 'lower', index 4
+ *
+ * Two conventions are in use for the lines that reach the canopy, and both
+ * have to be read. Ozone writes them uppercase (`A1`), while PHI and BGD
+ * write them lowercase (`a1`) and reserve uppercase for the cascade above.
+ * Rejecting the lowercase form silently drops every canopy line in those
+ * files — which is exactly what happened until a table that states its own
+ * topology made the gap visible.
  */
 export function parseLineName(name) {
-  const m = String(name).trim().match(/^([A-Z])(R|M)?(U|L)?(\d+)([a-z])?$/);
+  const m = String(name).trim().match(/^([A-Za-z])(R|M)?(U|L)?(\d+)([a-z])?$/);
   if (!m) return null;
-  const [, row, levelCode, side, idx, variant] = m;
+  const [, rawRow, levelCode, side, idx, variant] = m;
+  const row = rawRow.toUpperCase();
+  // A lowercase row letter always denotes a canopy line: the level suffixes
+  // only ever appear with an uppercase row.
   const level = levelCode === 'R' ? 'riser' : levelCode === 'M' ? 'middle' : 'upper';
   return {
     name: String(name).trim(),
@@ -80,6 +91,18 @@ export function parseLineTable(text) {
   const skipped = [];
   let material = null;
 
+  // Column positions are not fixed across producers' sheets, and guessing
+  // them silently drops every line. One Ozone sheet carries names in a single
+  // column with quantity beside it; another — a sheet shared between two
+  // models — uses two name columns, one per model, pushing quantity and
+  // length two columns right. The header row states the layout, so it is read
+  // rather than assumed: every column before "No." holds names.
+  let nameCols = [0];
+  let qtyCol = 1;
+  let sewnCol = 2;
+  let adjCol = 3;
+  let commentCol = 5;
+
   for (const r of rows) {
     const first = (r[0] || '').trim();
     if (!first && !r.some(Boolean)) continue;
@@ -119,16 +142,35 @@ export function parseLineTable(text) {
 
 
     if (/^LIN[-_]/i.test(first)) { material = first; continue; }
-    if (/^name$/i.test(first)) continue;
 
-    const qty = Number(r[1]);
-    const sewn = Number(r[2]);
+    const headerAt = r.findIndex((c) => /^name$/i.test((c || '').trim()));
+    if (headerAt >= 0) {
+      const noAt = r.findIndex((c) => /^no\.?$/i.test((c || '').trim()));
+      const sewnAt = r.findIndex((c) => /^sewn$/i.test((c || '').trim()));
+      if (noAt > headerAt) {
+        nameCols = [];
+        for (let i = headerAt; i < noAt; i++) nameCols.push(i);
+        qtyCol = noAt;
+        sewnCol = sewnAt > noAt ? sewnAt : noAt + 1;
+        adjCol = sewnCol + 1;
+        commentCol = sewnCol + 3;
+      }
+      continue;
+    }
+
+    const qty = Number(r[qtyCol]);
+    const sewn = Number(r[sewnCol]);
     if (!Number.isFinite(qty) || !Number.isFinite(sewn) || sewn <= 0) {
       if (first && !/^\*/.test(first) && !/^\d+$/.test(first)) skipped.push(first);
       continue;
     }
 
-    const names = first.split(/\s*,\s*/).filter(Boolean);
+    // Gather names from every name column. A shared length covers all of
+    // them, and the quantity counts the lot.
+    const names = nameCols
+      .flatMap((c) => (r[c] || '').split(/\s*,\s*/))
+      .map((x) => x.trim())
+      .filter(Boolean);
     const parsed = names.map(parseLineName).filter(Boolean);
     if (!parsed.length) { if (first) skipped.push(first); continue; }
 
@@ -137,9 +179,9 @@ export function parseLineTable(text) {
         ...p,
         quantity: qty / parsed.length,
         lengthMM: sewn,
-        adjustedMM: Number.isFinite(Number(r[3])) ? Number(r[3]) : null,
+        adjustedMM: Number.isFinite(Number(r[adjCol])) ? Number(r[adjCol]) : null,
         material,
-        comment: r[5] || null,
+        comment: r[commentCol] || null,
       });
     }
   }
@@ -648,4 +690,322 @@ function pointOnSurface(poly, frac) {
     poly[i][1] + f * (poly[i + 1][1] - poly[i][1]),
     poly[i][2] + f * (poly[i + 1][2] - poly[i][2]),
   ];
+}
+
+/* ------------------------------------------------- PHI line sheet format -- */
+
+/**
+ * Read a PHI-style line sheet.
+ *
+ * A second production format, and a usefully different one. Where the Ozone
+ * sheets are an inventory (one row per line, with a totals matrix alongside),
+ * this is a cascade table: one row per canopy attachment, with the length of
+ * each level of the cascade laid out across the columns and the total in a
+ * "Checking" column.
+ *
+ *   Rib | upper | middle | riser | ... | Checking | Rib | types... | Rib | names...
+ *     2 |  1344 |   1779 |  4255 |     |     7378 |
+ *     5 |  1247 |        |       |     |     7281 |
+ *
+ * A blank means "the same as the row above" — rib 5 hangs from the same middle
+ * and riser lines as rib 2, which is how the branching is expressed. Carrying
+ * the last non-blank value forward recovers the cascade directly, so unlike
+ * the Ozone sheets no inference is needed: the topology is stated.
+ *
+ * The naming convention differs too, and is worth recording because it is a
+ * third scheme again: lowercase for the upper lines (`a1`), uppercase for the
+ * middle (`A1`), and roman numerals for the riser level (`AI`, `AII`).
+ *
+ * The totals close exactly — level lengths sum to the printed check with no
+ * residue — which makes this the strongest arithmetic validation available
+ * for cascade totals anywhere in this project.
+ */
+export function parsePhiLineSheet(text) {
+  const grid = text.split(/\r?\n/).map((l) => l.split('\t'));
+  const num = (v) => {
+    const n = Number(String(v ?? '').trim());
+    return Number.isFinite(n) && n !== 0 ? n : null;
+  };
+  const txt = (v) => (v || '').trim();
+
+  const blocks = [];
+  let current = null;
+
+  for (const r of grid) {
+    // A block header can sit in any column — the brake block is indented
+    // past a spanwise distribution column, and looking only where the first
+    // header appeared silently folds the brakes into the D row.
+    let header = null;
+    let headerCol = -1;
+    for (let c = 0; c < r.length; c++) {
+      const m2 = /^([A-Z]{1,3})\s*-\s*LINES$/.exec(txt(r[c]));
+      if (m2) { header = m2[1]; headerCol = c; break; }
+    }
+    if (header) {
+      // Column positions are fixed by the sheet layout, not by where the
+      // block label happens to sit: lengths from column 2, the check total at
+      // 9, line types from 12, names from 20. The label for the brake block
+      // is pushed right by a distribution column, so keying off its position
+      // reads the wrong columns entirely.
+      current = {
+        row: header,
+        anchors: [],
+        lengths: new Map(),
+        types: new Map(),
+        // Brakes run a deeper cascade and list each upper line twice — once
+        // plain and once with the spanwise distribution added — so the level
+        // columns do not line up one-to-one with the names. Decoding that
+        // properly needs the brake geometry, so it is flagged rather than
+        // guessed at.
+        paired: header === 'BR',
+      };
+      blocks.push(current);
+      continue;
+    }
+    if (!current) continue;
+
+    // The rib number is the first integer in the two leading columns.
+    const rib = num(r[0]) ?? num(r[1]);
+    if (rib == null) continue;
+
+    // Names identify the line at each level, and they are what makes the
+    // sheet readable: a blank length means this anchor shares the level above
+    // it, and the repeated name says which line that is. Reading the columns
+    // positionally instead — carrying the last value forward — cannot tell a
+    // shared line from a level that simply does not exist for this anchor,
+    // and gets both wrong at the tip.
+    const names = [];
+    for (let c = 20; c < r.length; c++) {
+      const t = txt(r[c]);
+      if (t && !/^\d+$/.test(t)) names.push(t);
+    }
+    if (!names.length) continue;
+
+    // Level lengths and types, from their fixed columns.
+    const lens = [];
+    const typs = [];
+    for (let k = 0; k < names.length; k++) {
+      lens.push(num(r[2 + k]));
+      typs.push(txt(r[12 + k]));
+    }
+
+    // Record a length the first time its name carries one.
+    names.forEach((nm, k) => {
+      if (lens[k] != null && !current.lengths.has(nm)) {
+        current.lengths.set(nm, lens[k]);
+        if (typs[k]) current.types.set(nm, typs[k]);
+      }
+    });
+
+    const path = names.map((nm) => ({
+      name: nm,
+      lengthMM: current.lengths.get(nm) ?? 0,
+      type: current.types.get(nm) || null,
+    }));
+
+    current.anchors.push({
+      rib,
+      names,
+      path,
+      total: num(r[9]),
+      sum: path.reduce((a, b) => a + b.lengthMM, 0),
+    });
+  }
+
+  return {
+    blocks,
+    rows: blocks.map((b) => b.row),
+    lines: blocks.flatMap((b) => [...b.lengths].map(([name, lengthMM]) => ({
+      row: b.row, name, lengthMM, type: b.types.get(name) || null,
+    }))),
+  };
+}
+
+/**
+ * Check a PHI sheet's own arithmetic: the level lengths must sum to the
+ * printed total. Any residue means the cascade has been read wrongly — a
+ * missed continuation, or a column taken for a level that is really a variant.
+ */
+export function checkPhiSheet(sheet, { tolerance = 1 } = {}) {
+  const problems = [];
+  const crossBlock = [];
+  let checked = 0;
+  let exactRows = 0;
+
+  // Lengths of every named line, across all blocks. A row that cascades into
+  // another row's riser leaves those levels blank in its own block, because
+  // the line belongs to the block that owns it.
+  const all = sheet.lines.map((l) => ({ ...l }));
+
+  const skipped = [];
+  for (const b of sheet.blocks) {
+    if (b.paired) { skipped.push(b.row); continue; }
+    for (const a of b.anchors) {
+      if (a.total == null || !a.path.length) continue;
+      checked++;
+      const deficit = a.total - a.sum;
+      if (Math.abs(deficit) <= tolerance) { exactRows++; continue; }
+
+      // A deficit that matches the tail of another row's cascade means this
+      // row hangs off that row's riser — D into C is the usual case, and the
+      // tip lines of B often join the A riser. That is structure, not error,
+      // so it is resolved and reported rather than counted as a mismatch.
+      const parent = findTail(sheet, deficit, tolerance);
+      if (parent) {
+        crossBlock.push({ row: b.row, rib: a.rib, deficit, inheritsFrom: parent });
+        exactRows++;
+      } else {
+        problems.push({ row: b.row, rib: a.rib, sum: a.sum, total: a.total, deficit });
+      }
+    }
+  }
+
+  return {
+    checked,
+    exactRows,
+    problems,
+    crossBlock,
+    exact: problems.length === 0,
+    closureRate: checked ? exactRows / checked : 0,
+    lines: all.length,
+    notDecoded: skipped,
+  };
+}
+
+/** Find a set of lines from one block whose lengths sum to a deficit. */
+function findTail(sheet, deficit, tolerance) {
+  for (const b of sheet.blocks) {
+    const ls = [...b.lengths].map(([name, lengthMM]) => ({ name, lengthMM }));
+    // Single line.
+    for (const l of ls) {
+      if (Math.abs(l.lengthMM - deficit) <= tolerance) return { row: b.row, names: [l.name] };
+    }
+    // A pair — a middle plus a riser line, which is the common case.
+    for (let i = 0; i < ls.length; i++) {
+      for (let j = i + 1; j < ls.length; j++) {
+        if (Math.abs(ls[i].lengthMM + ls[j].lengthMM - deficit) <= tolerance) {
+          return { row: b.row, names: [ls[i].name, ls[j].name] };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Total line length of a PHI sheet, counting both sides of the wing. */
+export function phiLineLength(sheet, { sides = 2 } = {}) {
+  // Each named line is one physical line, however many anchors hang from it,
+  // so the set is the sum over distinct names — not over anchor paths, which
+  // would count every shared upper line once per anchor below it.
+  const total = sheet.lines.reduce((a, l) => a + l.lengthMM, 0);
+  return (total / 1000) * sides;
+}
+
+/* -------------------------------------------------- BGD line table format -- */
+
+/**
+ * Read a BGD line table.
+ *
+ * A fourth production format, and the only one that **states the cascade**
+ * rather than leaving it to be inferred. Each row is one line, and the
+ * right-hand columns name the whole path it belongs to:
+ *
+ *   Line ID | Material | Colour | Upper splice | Lower splice | Length | Rib | | Top | Middle | Riser | (Lower)
+ *   a1      | 8000U-120| Red    | 0            | 1            | 265    | 2   | | a1  | AM1    | AR1   |
+ *   k1      | 8000U-050| Yellow | 0            | 0            | 507    | 2   | | k1  | KM1    | KR1   | KL1
+ *
+ * A rib position of -1 marks a line that does not reach the canopy — the
+ * middle and riser lines, which appear again as rows of their own carrying
+ * their lengths. Brakes run four levels where the main rows run three.
+ *
+ * Two things this format records that the others do not:
+ *
+ *   - **Lengths are measured under 5 daN of pretension**, not slack. Line
+ *     length is only meaningful with the tension stated, since these lines
+ *     stretch under load; 5 daN is roughly what a line sees hanging.
+ *   - **Splice inserts** are flagged per end, and the sheet states that
+ *     compensation for tabs, knots and loops is already included — so these
+ *     are finished lengths, not cut lengths.
+ *
+ * Because the topology is given, this doubles as ground truth for
+ * `inferTopology`, which has to recover the same structure from lengths alone
+ * on the sheets that do not state it.
+ */
+export function parseBgdLineTable(text) {
+  const rows = text.split(/\r?\n/).map((l) => l.split('\t'));
+  const lines = [];
+  const meta = { pretensionDaN: 5, compensated: false, loops: null };
+
+  for (const r of rows) {
+    const first = (r[0] || '').trim();
+    if (/^Loops/i.test(first)) meta.loops = first;
+    if (/compensation/i.test(first)) meta.compensated = true;
+    if (/^Line ID$/i.test(first)) continue;
+
+    const lengthMM = Number(r[5]);
+    const ribPos = Number(r[6]);
+    if (!first || !Number.isFinite(lengthMM) || lengthMM <= 0) continue;
+
+    const path = [r[8], r[9], r[10], r[11]].map((x) => (x || '').trim()).filter(Boolean);
+    const parsed = parseLineName(first);
+
+    lines.push({
+      name: first,
+      ...(parsed || {}),
+      material: (r[1] || '').trim() || null,
+      colour: (r[2] || '').trim() || null,
+      upperSplice: Number(r[3]) || 0,
+      lowerSplice: Number(r[4]) || 0,
+      lengthMM,
+      // -1 marks a cascade line that does not reach the canopy.
+      ribPosition: Number.isFinite(ribPos) && ribPos > 0 ? ribPos : null,
+      reachesCanopy: Number.isFinite(ribPos) && ribPos > 0,
+      statedPath: path.length > 1 ? path : null,
+      quantity: 2,
+    });
+  }
+
+  const byName = new Map(lines.map((l) => [l.name, l]));
+  return { lines, byName, meta };
+}
+
+/**
+ * Cascade totals from a BGD table, using its stated paths.
+ * Every canopy line's total is the sum of the named lines on its path, so
+ * this needs no inference at all — which is what makes it a check on the
+ * inference used elsewhere.
+ */
+export function bgdCascadeTotals(table) {
+  const out = [];
+  for (const l of table.lines) {
+    if (!l.reachesCanopy || !l.statedPath) continue;
+    const segs = l.statedPath.map((n) => table.byName.get(n)).filter(Boolean);
+    if (segs.length !== l.statedPath.length) continue;
+    out.push({
+      name: l.name,
+      rib: l.ribPosition,
+      row: l.row,
+      path: l.statedPath,
+      lengths: segs.map((s) => s.lengthMM),
+      totalMM: segs.reduce((a, s) => a + s.lengthMM, 0),
+      depth: segs.length,
+    });
+  }
+  out.sort((a, b) => (a.row || '').localeCompare(b.row || '') || a.rib - b.rib);
+  return out;
+}
+
+/** The stated branch grouping: which anchors share each middle line. */
+export function bgdStatedTopology(table, row) {
+  const groups = new Map();
+  for (const l of table.lines) {
+    if (!l.reachesCanopy || !l.statedPath || l.row !== row) continue;
+    const mid = l.statedPath[1];
+    if (!mid) continue;
+    if (!groups.has(mid)) groups.set(mid, []);
+    groups.get(mid).push(l.ribPosition);
+  }
+  return [...groups.entries()]
+    .map(([mid, ribs]) => ({ middle: mid, ribs: ribs.sort((a, b) => a - b) }))
+    .sort((a, b) => a.ribs[0] - b.ribs[0]);
 }

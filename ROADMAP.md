@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 303-test validation suite and a benchmark with regression budgets
+- [x] 455-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -95,6 +95,23 @@ material published after the handbook:
       fly, progression, sport, performance XC, competition); cross-class
       comparisons flagged with an explanation rather than silently made, and
       metrics normalised per m² so size does not masquerade as design.
+- [x] **BGD line tables** — a fourth format, and the only one that states its
+      own cascade. Used as ground truth: the length-only topology inference
+      recovers BGD's stated branching on all four rows exactly, which is the
+      only direct check available on the method used for the Ozone sheets.
+- [x] **Wing loading against aspect ratio** — rises across the mainstream
+      progression at r=+0.99, with hike-and-fly wings excluded by design
+      rather than trimmed as outliers.
+- [x] **Viewport fitting** — drawings re-fit their viewBox to what was
+      actually drawn, so labels and markers stay inside the frame; the nested
+      cutting layout wraps into bands, taking it from 4% to 91% of frame
+      height.
+- [ ] **Alpina 5 and Lynx 2 specifications** — line data for all sizes is in
+      hand and parses, but span, area and weight per size are not, so neither
+      can join the scaling analysis yet.
+- [ ] **Collapse-line (Z) risers** — the Zeno 2, Lyght and Alpina 5 all carry
+      a Z row on its own riser, structurally unlike the three-riser wings
+      modelled so far. Parsed and named; not generated.
 - [ ] **Separate aspect ratio from span** in the line-length trend. The slope
       correlates with AR at r=-0.97 and with mean span at r=-0.99; four
       families cannot separate them. More families, or one maker's wings at

@@ -561,3 +561,74 @@ export function compareFamilies(families) {
       : null,
   };
 }
+
+/* ------------------------------------------------------------- loading -- */
+
+/**
+ * Wing loading against aspect ratio.
+ *
+ * Loading rises with aspect ratio — but only across the mainstream
+ * progression, and the exception is instructive.
+ *
+ * Mean loading at the middle of the certified weight range:
+ *
+ *   wing                application      AR    mid    top of range
+ *   Ozone Ultralite 5   hike and fly    4.56   4.93       6.17
+ *   Ozone Geo 7         progression     5.16   3.87       4.31
+ *   PHI Allegro light   performance XC  6.03   4.22       4.74
+ *   Ozone Zeno 2        competition     6.90   4.85       5.27
+ *
+ * Across all four the correlation is **r = +0.11** — nothing. Drop the
+ * hike-and-fly wing and it is **r = +0.99**, one of the cleanest trends in
+ * this whole dataset.
+ *
+ * The mountain wing is not noise, it is a different brief. A small wing flown
+ * heavily is more stable, penetrates better and packs smaller, so the
+ * Ultralite 5's 13 m² sits at 6.4 kg/m² at mid range — the highest loading
+ * here on the lowest aspect ratio. That is a deliberate choice about how the
+ * wing is used, not a consequence of its planform.
+ *
+ * So the fit below covers progression through competition, and hike-and-fly
+ * wings are excluded by design rather than by trimming an outlier.
+ */
+export const LOADING_VS_AR = {
+  slope: 0.5632,
+  intercept: 0.917,
+  appliesTo: ['progression', 'sport', 'performance XC', 'competition'],
+  excludes: ['hike and fly'],
+  basis: 'middle of certified weight range, projected area',
+  r: 0.986,
+  sampleFamilies: 3,
+};
+
+/** Expected loading for an aspect ratio, or null where the trend does not apply. */
+export function expectedLoading(aspectRatio, application = null) {
+  if (application && LOADING_VS_AR.excludes.includes(application)) return null;
+  return LOADING_VS_AR.slope * aspectRatio + LOADING_VS_AR.intercept;
+}
+
+/**
+ * Compare a family's actual loading against the trend for its aspect ratio.
+ * A wing far above the line is being flown harder than its planform alone
+ * would suggest, which for a mountain wing is the point.
+ */
+export function loadingCheck(sizes) {
+  const out = [];
+  for (const s of sizes) {
+    if (s.midWeight == null || !s.projectedArea) continue;
+    const ar = s.flatAR ?? (s.flatSpan ** 2) / s.flatArea;
+    const actual = s.midWeight / s.projectedArea;
+    const app = s.application || classifyApplication({ aspectRatio: ar, cells: s.cells });
+    const expected = expectedLoading(ar, app);
+    out.push({
+      name: s.name,
+      application: app,
+      aspectRatio: ar,
+      actualLoading: actual,
+      expectedLoading: expected,
+      deltaPct: expected ? ((actual / expected) - 1) * 100 : null,
+      trendApplies: expected != null,
+    });
+  }
+  return out;
+}
