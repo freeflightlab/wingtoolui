@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 550-test validation suite and a benchmark with regression budgets
+- [x] 574-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -92,10 +92,19 @@ material published after the handbook:
 - [x] **Line drag computed from the lineset**, replacing the constant the
       balance solver has used since Phase 1. Worth about 1.6 of glide ratio on
       a modern thin set.
-- [ ] **Chordwise pressure distribution** to replace the fixed A/B/C/D load
-      shares (35/35/20/10). The row shares are the handbook's convention; a
-      real pressure distribution over the section would place them properly
-      and would change with angle of attack.
+- [x] **Chordwise pressure distribution** — row load shares derived from
+      thin-aerofoil theory for the actual section, anchors and angle of
+      attack. Agrees with the handbook convention on A and C, disagrees on the
+      rear, and shows the A row swinging 20 points across the bar range where
+      the fixed split cannot. Convention remains the default; see
+      `docs/loads-and-materials.md`.
+- [ ] **Reconcile the rear-row disagreement** — thin-aerofoil theory loads a
+      rigid surface to the trailing edge and gives the D row ~17%, where the
+      convention gives 10%. A paraglider's rear rows are deliberately unloaded
+      so the C and D lines can be thin; quantifying that needs measured riser
+      loads.
+- [ ] **Row shares under acceleration in the load model** — the shares are now
+      known to move with angle of attack, but `loads.js` still sizes at trim.
 - [ ] **Brake cascade decoding** — the PHI sheet's brake block lists each upper
       line twice, plain and with the spanwise distribution added, so its
       columns do not map one-to-one onto names. Needs the pulley geometry.
