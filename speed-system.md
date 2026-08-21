@@ -85,7 +85,33 @@ a consistency check on the whole chain rather than a coincidence.
 
 ---
 
-## 4. Hardware steps, it does not scale
+## 4. Validated against a published speed system
+
+Skywalk's SAGE Pro Guide gives every riser's length at trim **and** at full
+bar — the only source here that states a speed system's geometry outright
+rather than implying it. Sizes 75 and 85:
+
+| riser | trim | accelerated | shortening | share |
+| --- | --- | --- | --- | --- |
+| A | 520 mm | 370 mm | 150 mm | 1.000 |
+| A2 | 520 mm | 450 mm | 70 mm | **0.467** |
+| B | 520 mm | 520 mm | 0 mm | 0.000 |
+
+Two things fall out.
+
+**The stated speedbar travel is the front riser's shortening**, exactly, on
+all five sizes — 150 mm on the two small sizes, 170 mm on the three large.
+That is the interpretation `travelMM` assumes, and it is now confirmed rather
+than assumed.
+
+**The default share is close.** Full travel on the front riser falling
+linearly to none at the rear was invented, not measured; it gives 0.500 for the
+middle riser where the SAGE measures **0.467**, a 7% difference. The rear riser
+does not move at all, as modelled.
+
+---
+
+## 5. Hardware steps, it does not scale
 
 PHI's ALLEGRO light runs 570 mm risers with 150 mm travel on its two smallest
 sizes and 600/180 on the other four, across a family whose spans scale
@@ -95,15 +121,69 @@ looks up the step.
 
 ---
 
-## 5. Not covered
+## 5. The lift curve, derived rather than fitted
+
+`czAt` was the last hand-fed quantity in the flight model, and the one the
+answer is most sensitive to. Everything needed to replace it already existed:
+`estimateSectionPolar` gives the section's lift curve and where it stalls,
+`liftingLine` corrects for finite span and non-uniform loading, and
+`wingPolar` runs both while iterating speed and Reynolds to consistency.
+`liftModelFromWing` wires them to the speed system, so the chain runs geometry
+in, speed range out.
+
+The second benefit matters as much as the first. The hand-fed version needed a
+hand-set `czRange` — two magic numbers chosen from experience — to stop it
+extrapolating into nonsense. A derived curve knows where it stalls and where
+it was evaluated, so most of the validity range falls out of the same
+calculation.
+
+### But the floor does not
+
+Derived from the polar alone, the usable Cz range came out as
+**[0.064, 1.627]**, and the accelerated polar duly ran to **87 km/h** on a
+wing that does 58.
+
+The arithmetic is right. A rigid wing *can* fly at Cz 0.06. A paraglider
+cannot: it is a pressurised fabric structure held open by air entering its
+intakes, and the angle of attack that produces a very low lift coefficient is
+at or below the point where the leading edge stops being pressurised and the
+wing folds. That is the frontal-collapse boundary — **structural, not
+aerodynamic** — and nothing in a section polar knows about it.
+
+So the upper bound of the range comes from the stall, and the lower bound is
+stated separately as `minFlyingCz`, because it comes from somewhere else.
+
+### Which makes the floor the dominant uncertainty
+
+It cannot be derived here: it depends on intake design, internal pressure and
+rib support, none of which this project models. And it *governs* the predicted
+top speed — 4.8 km/h per 0.05 of assumed floor on this wing.
+
+So the inference runs the other way. `collapseFloorForTopSpeed` takes a
+published top speed and reports the Cz the wing must still be flying at:
+
+| | |
+| --- | --- |
+| implied Cz at 58 km/h | **0.307** |
+| reached at | 75% bar, α −0.5° |
+| assumed floor | 0.35 |
+| sensitivity | 4.8 km/h per 0.05 |
+| verdict | published speed implies a **lower** floor than assumed |
+
+0.307 is a physically sensible collapse threshold, and it is a number a
+designer can compare against other wings and against a prototype. The verdict
+names the disagreement rather than absorbing it into a fitted constant.
+
+---
+
+## 6. Not covered
 
 - **Trimmers**, which change trim angle without the bar and are a separate
   adjustment on many wings.
 - **Riser webbing geometry** — the split between main and speed-system
   webbing, the B-handle heights the Alpina 5 advertises as adjustable, and
   the C-handle steering the Geo 7 and Swift 6 carry.
-- **The lift slope itself.** The polar is only as good as `czAt`, and the
-  guard above exists because that is easy to forget. Deriving it from the
-  section, rather than taking it as an input, is the obvious next step.
+- **The collapse floor.** Inverted from published data, never predicted.
+  Predicting it needs internal pressure and rib support modelling.
 - **Structural effect of acceleration.** Line loads shift forward under bar,
   which changes what each row carries; `loads.js` still assumes trim.

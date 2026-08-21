@@ -7398,6 +7398,7 @@ const LINE_LENGTH_PER_SPAN = {
   intercept: 50.72,
   r2: 0.951,
   worstFamilyErrorPct: 6.2,
+  worstOutOfSampleFamilyErrorPct: 0.8,   // Skywalk SAGE, five sizes
   sampleFamilies: 5,
   sampleManufacturers: 3,
   arRange: [4.56, 6.90],
@@ -7405,9 +7406,12 @@ const LINE_LENGTH_PER_SPAN = {
   // area-scaling family the error reaches 16%.
   assumesSpanScaling: true,
   worstOutOfSampleErrorPct: 16.2,
-  // Measured difference between a two-liner and a three-liner at matched
-  // aspect ratio and span. One pair, so treat it as indicative.
-  twoLinerFactor: 0.90,
+  // Refuted out of sample: see the note above. Left at 1 so it is inert, with
+  // the measured value recorded beside it.
+  twoLinerFactor: 1.0,
+  twoLinerFactorRefuted: 0.90,
+  twoLinerEvidence: 'Alpina 5 vs Allegro light suggested 0.90; Skywalk SAGE, '
+    + 'a two-liner at AR 6.4, matches the uncorrected law and rejects it.',
 };
 
 /** Line metres per metre of span, for an aspect ratio. */

@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 705-test validation suite and a benchmark with regression budgets
+- [x] 731-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -182,10 +182,13 @@ material published after the handbook:
       two-liner carries 10% less than a three-liner. The normalised law
       `line m per m span = -5.12*AR + 50.72` predicts any family's total line
       length within 6.2% with nothing fitted to it.
-- [ ] **Confirm the two-liner effect independently** — riser count is still
-      partly collinear with aspect ratio in this sample, since both two-liners
-      are high-aspect wings. A low-aspect two-liner or a high-aspect
-      three-liner would settle it.
+- [x] **The two-liner effect, tested and refuted** — Skywalk's SAGE, a genuine
+      two-liner at AR 6.4, matches the uncorrected line-length law; applying
+      the 0.90 factor makes every size 9% low. The factor is now inert, kept
+      with its contradiction recorded.
+- [ ] **What separates the Alpina 5 from the Allegro light** — 10% apart in
+      line per metre of span at near-identical aspect ratio. Riser count is no
+      longer a credible explanation, and nothing else has been identified.
 - [ ] **Line count as a scaling parameter** — the total-line-length slope
       tracks how many lines a wing carries (258 pieces on the Ultralite 5
       against 224 on the Geo 7). Normalising by piece count may recover a
