@@ -77,6 +77,49 @@ interlocking:
   are the ones worth nesting into the gaps left by the large panels — which is
   a placement problem, not a pairing one.
 
+## What did work: packing against the outlines
+
+The diagnosis said packing was the larger and more tractable loss. It was.
+
+`nestByProfile` replaces the skyline over rectangles with a skyline over the
+**real outlines**. Each panel is aligned to its long axis and sampled into
+columns, giving a lower and an upper profile. The roll carries a skyline, and
+a panel drops into the lowest position where its lower profile clears it:
+
+```
+dy = max over shared columns of ( skyline[c] − lower[c] )
+```
+
+exact for a given horizontal position, which is itself searched.
+
+| | roll used | utilisation |
+| --- | --- | --- |
+| skyline over boxes | 34.6 m | 48.2% |
+| skyline over outlines | 29.9 m | **55.7%** |
+
+**4.7 m of roll saved on a 25 m² wing**, with zero overlaps — checked by
+re-testing every placed pair of outlines for intersection, not assumed from
+the placement rule.
+
+The gain holds across roll widths: 54.1% at 1.0 m, 55.7% at 1.4 m, 55.1% at
+1.8 m. Resolution matters more than the number of positions tried — 200
+columns loses 11 points against 800, and 1200 gains nothing.
+
+### A regression it caused
+
+The profile packer returns a placed outline. The marked cutting file needs the
+two **seams**, not just the boundary, and the first version dropped them — so
+a marked file went from 314 polylines to 24 and lost every registration notch,
+with no error and no failing test. The seams are now carried through the same
+transform, and a test asserts both packers produce the same number of marks.
+
+## Still open
+
+Packing is now 55.7% against a 73% shape ceiling, so about 24 points remain in
+placement. Reaching the 60–70% the roadmap wanted needs the tip panels fitted
+into the gaps the large panels leave — a placement problem, and the one the
+diagnosis named.
+
 ## Kept anyway
 
 `alignToLongAxis` is a genuine reduction in the box a panel needs, and

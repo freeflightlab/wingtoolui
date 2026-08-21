@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 990-test validation suite and a benchmark with regression budgets
+- [x] 1004-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -364,9 +364,12 @@ Making it pleasant to use across a real project.
       assumed would fix it, does **not**: a developed panel is a near-straight
       strip of constant width, and interlocking a pair saves 1.8%. See
       `docs/nesting.md`.
-- [ ] **A no-fit-polygon packer.** Packing efficiency is 66% and is the larger
-      of the two losses. A skyline over bounding boxes cannot do better;
-      this needs real polygon placement.
+- [x] **Packing against the outlines** — a skyline over real panel profiles
+      rather than bounding boxes. 48.2% to 55.7%, 4.7 m of roll saved on a
+      25 m² wing, zero overlaps, and it holds across roll widths.
+- [ ] **Close the remaining placement gap.** Packing is 55.7% against a 73%
+      shape ceiling. The rest needs the tip panels fitted into the gaps the
+      large panels leave.
 - [ ] **Place the tip panels into the gaps.** Shape loss is concentrated in a
       few small panels — cell 24 upper is 29% efficient against the root's
       96% — so they are the ones to fit around the large ones. A placement

@@ -72,7 +72,10 @@ export function alignToLongAxis(outline, { steps = 180 } = {}) {
     b = pairBounds(rotate(outline, angle));
   }
   const moved = rotate(outline, angle).map(([x, y]) => [x - b.minX, y - b.minY]);
-  return { outline: moved, angle, bounds: pairBounds(moved) };
+  return {
+    outline: moved, angle, bounds: pairBounds(moved),
+    shiftX: b.minX, shiftY: b.minY,
+  };
 }
 
 /** Upper and lower profile of an outline, sampled in columns. */
@@ -313,4 +316,166 @@ export function nestingDiagnosis(items, nested, { rollWidth = 1.4, outlineOf = n
     dominantLoss: (1 - (boxArea > 0 ? panelArea / boxArea : 0))
       > (1 - (rollArea > 0 ? boxArea / rollArea : 0)) ? 'shape' : 'packing',
   };
+}
+
+/* --------------------------------------------------- profile packing -- */
+
+/**
+ * Nest panels against their real outlines rather than their bounding boxes.
+ *
+ * The existing packer is a skyline over rectangles. That is why packing
+ * efficiency sits at 66%: a panel's box is not the panel, and every gap
+ * between a box edge and the outline inside it is material the packer has
+ * decided it cannot use.
+ *
+ * This places against the outline itself. Each panel is aligned to its long
+ * axis and sampled into columns, giving a lower and an upper profile. The
+ * roll carries a skyline — the highest occupied point in each column — and a
+ * panel drops into the lowest position where its lower profile clears the
+ * skyline everywhere it overlaps:
+ *
+ *     dy = max over shared columns of ( skyline[c] - lower[c] )
+ *
+ * which is exact for a given horizontal position. The horizontal position is
+ * searched, because sliding a panel along changes which part of the skyline
+ * it has to clear.
+ *
+ * Panels go down largest first — the usual heuristic, and it matters here
+ * because the small tip panels are the ones that fit into gaps, so they must
+ * be placed last when there are gaps to fit into.
+ */
+export function nestByProfile(items, {
+  rollWidth = 1.4,
+  gap = 0.02,
+  // 800 columns is where the sweep flattens: 200 is too coarse to find the
+  // gaps and loses 11 points, 1200 is no better than 800 and takes twice as
+  // long. Resolution matters more than the number of positions tried.
+  columns = 800,
+  outlineOf = null,
+  positions = 120,
+} = {}) {
+  const outline = outlineOf || ((it) => it.panel.left.concat(it.panel.right.slice().reverse()));
+
+  const prepared = items.map((it) => {
+    const A = alignToLongAxis(outline(it));
+    // Carry the two seams through the same transform as the outline.
+    // Without them a marked cutting file loses every notch — the export
+    // needs the seams, not just the boundary, and dropping them silently
+    // turned 314 polylines into 24.
+    const c = Math.cos(A.angle);
+    const sn = Math.sin(A.angle);
+    const tf = (pts) => pts.map(([x, y]) => [
+      (x * c - y * sn) - A.shiftX, (x * sn + y * c) - A.shiftY,
+    ]);
+    return {
+      item: it,
+      outline: A.outline,
+      left: it.panel ? tf(it.panel.left) : null,
+      right: it.panel ? tf(it.panel.right) : null,
+      angle: A.angle,
+      bounds: A.bounds,
+    };
+  }).sort((a, b) => (b.bounds.width * b.bounds.height) - (a.bounds.width * a.bounds.height));
+
+  // Estimate a roll length generous enough to hold everything, then trim.
+  const totalW = prepared.reduce((s, p) => s + p.bounds.width, 0);
+  const rollLength = Math.max(...prepared.map((p) => p.bounds.width)) + totalW;
+  const colWidth = rollLength / columns;
+  const skyline = new Array(columns).fill(0);
+
+  const placed = [];
+  let usedLength = 0;
+
+  for (const p of prepared) {
+    if (p.bounds.height > rollWidth) {
+      throw new Error(`Panel ${p.item.surface} cell ${p.item.cell} is `
+        + `${p.bounds.height.toFixed(3)} m across a ${rollWidth} m roll.`);
+    }
+
+    // The panel's own lower and upper profile, in its local columns.
+    const nCols = Math.max(4, Math.ceil(p.bounds.width / colWidth));
+    const prof = profiles(p.outline, nCols, 0, p.bounds.width);
+
+    let best = null;
+    const maxStart = Math.max(0, columns - nCols);
+    const step = Math.max(1, Math.floor(maxStart / positions));
+
+    for (let c0 = 0; c0 <= maxStart; c0 += step) {
+      let need = 0;
+      let ok = true;
+      for (let k = 0; k < nCols; k++) {
+        if (prof.bot[k] === Infinity) continue;
+        const clearance = skyline[c0 + k] - prof.bot[k];
+        if (clearance > need) need = clearance;
+      }
+      const dy = need + (need > 0 ? gap : 0);
+      // Must fit across the roll.
+      if (dy + p.bounds.height > rollWidth) ok = false;
+      if (!ok) continue;
+
+      const rightEdge = (c0 * colWidth) + p.bounds.width;
+      const score = Math.max(usedLength, rightEdge) * 1000 + dy;
+      if (!best || score < best.score) best = { c0, dy, score, rightEdge };
+    }
+
+    if (!best) {
+      // Nowhere across the roll: start a fresh stretch beyond everything.
+      const c0 = Math.min(columns - nCols, Math.ceil(usedLength / colWidth) + 1);
+      best = { c0, dy: 0, score: 0, rightEdge: (c0 * colWidth) + p.bounds.width };
+    }
+
+    const dx = best.c0 * colWidth;
+    const moved = p.outline.map(([x, y]) => [x + dx, y + best.dy]);
+    placed.push({
+      cell: p.item.cell,
+      surface: p.item.surface,
+      panel: p.item.panel,
+      outline: moved,
+      left: p.left ? p.left.map(([x, y]) => [x + dx, y + best.dy]) : null,
+      right: p.right ? p.right.map(([x, y]) => [x + dx, y + best.dy]) : null,
+      angleDeg: (p.angle * 180) / Math.PI,
+      dx,
+      dy: best.dy,
+      width: p.bounds.width,
+      height: p.bounds.height,
+    });
+
+    // Raise the skyline over the columns this panel occupies.
+    for (let k = 0; k < nCols; k++) {
+      if (prof.top[k] === -Infinity) continue;
+      const c = best.c0 + k;
+      if (c >= columns) break;
+      const topY = prof.top[k] + best.dy + gap;
+      if (topY > skyline[c]) skyline[c] = topY;
+    }
+    usedLength = Math.max(usedLength, best.rightEdge);
+  }
+
+  const xs = placed.flatMap((p) => p.outline.map((q) => q[0]));
+  const ys = placed.flatMap((p) => p.outline.map((q) => q[1]));
+  return {
+    placed,
+    extent: {
+      minX: Math.min(...xs), maxX: Math.max(...xs),
+      minY: Math.min(...ys), maxY: Math.max(...ys),
+    },
+    rollWidth,
+    lengthM: Math.max(...xs) - Math.min(...xs),
+  };
+}
+
+/** Do any two placed outlines overlap? The check a packer must survive. */
+export function nestingOverlaps(nested) {
+  let count = 0;
+  const list = nested.placed;
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      // Cheap box rejection first.
+      const a = pairBounds(list[i].outline);
+      const b = pairBounds(list[j].outline);
+      if (a.maxX < b.minX || b.maxX < a.minX || a.maxY < b.minY || b.maxY < a.minY) continue;
+      if (pairOverlap(list[i].outline, list[j].outline)) count++;
+    }
+  }
+  return count;
 }
