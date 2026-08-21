@@ -91,7 +91,43 @@ unbuildable version.
 
 ---
 
-## 5. Not covered
+## 5. Cutting them
+
+Diagonals cost fabric and have to be cut like anything else. `vribsToDXF`
+nests them and writes R12, and they appear in the interface as their own
+export.
+
+They nest **separately from the panels**, for a practical reason: diagonals
+are usually cut from a different, lighter cloth than the sail, so mixing them
+into one layout produces a cutting file nobody can use.
+
+They also nest differently. A sail panel is long and narrow and wants to lie
+along the roll; a fan is a wedge. The existing nester copes without changes
+because it searches orientations against the real outline rather than the
+bounding box, so a wedge turned through 180 degrees interlocks with its
+neighbour. On the test wing, 48 diagonals take 4.28 m of a 1.4 m roll at 45%
+utilisation.
+
+One number is worth checking every time: the **flat-pattern area equals the
+surface area exactly**. A cone develops with no change of area, so 2.68 m² of
+diagonal becomes 2.68 m² of pattern. On the wing's own panels that equality is
+only approximate. Here it is exact, and it is the same developability property
+appearing a third way — after the radii and the base segments.
+
+## 6. In the interface
+
+The **Rib** tab draws the diagonals that touch the selected rib, and a builder
+needs both marks: the point where a diagonal's apex lands on a loaded rib, and
+the line along which its base is sewn to an unloaded one. The caption counts
+both — how many leave this rib, and how many land on it.
+
+`unsupportedRibs` is surfaced in the status bar as a warning, so a rigging
+choice that leaves span with no load path is visible while it is being made
+rather than discovered later.
+
+---
+
+## 7. Not covered
 
 - **H-ribs and VH-ribs.** LEP section 12 carries all three types; only the V
   form is generated. Horizontal straps spread load chordwise rather than

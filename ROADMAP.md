@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 658-test validation suite and a benchmark with regression budgets
+- [x] 665-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -226,6 +226,9 @@ validation notes flagged.
       load path checked by the fact that half the load must travel diagonally
       when lines attach every second rib, and unsupported span detected when
       diagonals cannot reach. See `docs/diagonal-ribs.md`.
+- [x] **Diagonal cutting files and display** — nested R12 DXF on their own
+      roll, drawn on the rib they touch, with unsupported span warned in the
+      status bar.
 - [ ] **H-ribs and VH-ribs** *(ch.7, LEP section 12)* — horizontal straps
       spread load chordwise rather than spanwise; only the V form is
       generated.

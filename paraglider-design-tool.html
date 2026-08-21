@@ -7693,6 +7693,80 @@ function layoutBands(placed, {
   };
 }
 
+/**
+ * Nest and write the diagonal ribs.
+ *
+ * Their flat patterns are fans — an apex and a curved base — which nest very
+ * differently from the wing's panels. A panel is long and narrow and wants to
+ * lie along the roll; a fan is a wedge, and wedges pack by alternating point
+ * to base. The existing nester handles that on its own, because it searches
+ * orientations against the real outline rather than the bounding box, and a
+ * wedge rotated 180 degrees interlocks with its neighbour.
+ *
+ * They are nested separately from the panels rather than mixed in. Diagonals
+ * are usually cut from a different, lighter cloth than the sail, so mixing
+ * them into one layout would produce a cutting file nobody can use.
+ */
+function vribsToDXF(vribSet, { rollWidth = 1.4, gap = 0.03, labels = true } = {}) {
+  const items = vribSet.vribs.map((v, i) => ({
+    surface: 'vrib',
+    cell: i + 1,
+    label: `${v.row}${v.fromRib}-${v.toRib}`,
+    panel: fanAsPanel(v),
+  }));
+
+  const nested = nestPanels(items, { rollWidth, gap });
+  const doc = dxfDocument();
+
+  for (const p of nested.placed) {
+    doc.polyline(p.outline, {
+      layer: `vrib-${p.label}`, color: ACI.magenta, closed: true,
+    });
+    if (labels) {
+      const c = centroidOf(p.outline);
+      doc.text(p.label, c, { height: 0.02, color: ACI.yellow });
+    }
+  }
+  doc.line([nested.extent.minX, 0], [nested.extent.maxX, 0], { layer: 'roll', color: ACI.cyan });
+  doc.line([nested.extent.minX, rollWidth], [nested.extent.maxX, rollWidth],
+    { layer: 'roll', color: ACI.cyan });
+
+  return doc.toString();
+}
+
+/**
+ * Present a fan as a two-sided panel so the nester can take it.
+ *
+ * The nester works on a left and a right seam. A fan has an apex and a base,
+ * so the apex is repeated down one side: degenerate as a seam, correct as an
+ * outline, and it keeps one nesting implementation rather than two.
+ */
+function fanAsPanel(vrib) {
+  const base = vrib.flat.base;
+  return {
+    left: base.map(() => [0, 0]),
+    right: base.map((p) => [p[0], p[1]]),
+    seamLengths: { left: 0, right: 0, leftSource: 0, rightSource: 0 },
+  };
+}
+
+/** Fabric needed for the diagonals, on their own roll. */
+function vribFabricEstimate(vribSet, { rollWidth = 1.4, gap = 0.03 } = {}) {
+  if (!vribSet.vribs.length) {
+    return { linearMetres: 0, rollWidth, panelArea: 0, utilisation: 0, count: 0 };
+  }
+  const items = vribSet.vribs.map((v, i) => ({
+    surface: 'vrib', cell: i + 1, panel: fanAsPanel(v),
+  }));
+  const est = fabricEstimate(items, { rollWidth, gap });
+  return {
+    ...est,
+    count: vribSet.vribs.length,
+    // True surface area, as against the flat-pattern area the nester sees.
+    surfaceAreaM2: vribSet.totalAreaM2,
+  };
+}
+
 /* ===== lep.js ===== */
 /* lep.js — interoperability with LEparagliding data files.
  *
@@ -8577,6 +8651,7 @@ const S = {
   cxPilot: 0.015, cxLines: 0.020, legacy: false,
   // panels
   ribIndex: 0, tab: 'wing',
+  vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
   ovalAmount: 6.0, seamAllowance: 10, pointsPerSurface: 50,
   rollWidth: 1.40, panelGap: 3.0, applyOval: true,
 };
@@ -8637,6 +8712,18 @@ function rebuild() {
       zRotation: S.zRotation,
       alphaDeg: S.alphaDeg,
     });
+
+    // Diagonal ribs carry the span that has no line on it. With attachments
+    // on every second rib, that is half the wing.
+    const vribs = S.vribs
+      ? buildVRibs({
+        wing, airfoil,
+        anchorRibs: wing.ribs.map((_, i) => i).filter((i) => i % 2 === 0),
+        rows: S.vribRows.split(''),
+        baseSpread: S.vribSpread / 100,
+        maxReach: S.vribReach,
+      })
+      : { vribs: [], count: 0, totalAreaM2: 0, unsupportedRibs: [] };
 
     // Worst flow misalignment across the span — how far the least well
     // presented rib is from lying in the glide path.
@@ -8704,7 +8791,7 @@ function rebuild() {
 
     M = {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
-      panels, balance, cascade, anchors, worstDev, worstPhi, imported,
+      panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
@@ -8911,6 +8998,14 @@ function buildControls() {
   B.append(balanceHost);
 
   const N = clear('g-panels');
+  checkField(N, 'vribs', 'Diagonal ribs');
+  if (S.vribs) {
+    selectField(N, 'vribRows', 'Diagonals on rows', [
+      ['BC', 'B and C'], ['B', 'B only'], ['C', 'C only'], ['BCD', 'B, C and D'],
+    ]);
+    slider(N, 'vribSpread', 'Diagonal base width', 6, 40, 1, (v) => v.toFixed(0), '% c');
+    slider(N, 'vribReach', 'Diagonal reach', 1, 3, 1, (v) => `${v} cell${v > 1 ? 's' : ''}`);
+  }
   checkField(N, 'applyOval', 'Add ovalization');
   slider(N, 'ovalAmount', 'Total widening', 0, 12, 0.1, (v) => v.toFixed(1), '%');
   slider(N, 'seamAllowance', 'Seam allowance', 0, 25, 1, (v) => v.toFixed(0), ' mm');
@@ -8923,6 +9018,10 @@ function buildControls() {
   button(grid, 'Panels DXF', () => save(`${S.name}-panels.dxf`,
     panelsToDXF(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn primary');
   button(grid, 'Ribs DXF', () => save(`${S.name}-ribs.dxf`, ribsToDXF(M.wing)), 'btn');
+  button(grid, 'Diagonals DXF', () => {
+    if (!M.vribs || !M.vribs.count) { setStatus('No diagonal ribs to export.'); return; }
+    save(`${S.name}-diagonals.dxf`, vribsToDXF(M.vribs, { rollWidth: S.rollWidth, gap: S.panelGap / 100 }));
+  }, 'btn');
   button(grid, 'Panels SVG', () => save(`${S.name}-panels.svg`,
     panelsToSVG(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn');
   button(grid, 'Line lengths', () => save(`${S.name}-lines.csv`, linesCSV()), 'btn');
@@ -9163,6 +9262,8 @@ function drawReadout() {
     ['calage', (b.calageFraction * 100).toFixed(1) + '% c', 'hot'],
     ['wing load', (M.balance.totalMass / M.projArea).toFixed(2) + ' kg/m²'],
     ['worst φ', M.worstPhi.toFixed(1) + '°', M.worstPhi > 6 ? 'warn' : undefined],
+    ['diagonals', M.vribs ? String(M.vribs.count) : '0',
+      M.vribs && M.vribs.unsupportedRibs.length ? 'warn' : undefined],
     ['altitude', (S.altitudeM / 1000).toFixed(1) + ' km'],
     ['ρ', M.atm.density.toExponential(2) + ' kg/m³'],
     ['Re', M.nd.reynolds.toExponential(2), M.nd.reynolds < 2e5 ? 'warn' : undefined],
@@ -9639,6 +9740,23 @@ function drawRib() {
     c.text(row, [best[0], best[1] - rib.chord * 0.035], '#6e8bff', 9, 'middle');
   }
 
+  // Diagonal ribs that touch this rib. A builder needs both marks: the point
+  // where a diagonal's apex lands on a loaded rib, and the line along which
+  // its base is sewn to an unloaded one.
+  if (M.vribs && M.vribs.count) {
+    const idx = rib.index;
+    for (const v of M.vribs.vribs) {
+      if (v.fromRib === idx) {
+        const p = flat(v.apex);
+        c.dot(p, '#e85bc4', 3.2);
+        c.text(`${v.row}→${v.toRib}`, [p[0] + rib.chord * 0.02, p[1]], '#e85bc4', 8);
+      }
+      if (v.toRib === idx) {
+        c.path(v.base.map(flat), '#e85bc4', 2.4, { opacity: 0.9 });
+      }
+    }
+  }
+
   // Leading and trailing edge markers.
   c.dot(upper[0], '#e8c547', 2.4);
   c.dot(upper[upper.length - 1], '#e8c547', 2.4);
@@ -9651,7 +9769,11 @@ function drawRib() {
     `rib ${rib.index} of ${M.wing.ribs.length - 1}  ·  station ${rib.station.toFixed(3)} m`
     + `  ·  chord ${rib.chord.toFixed(3)} m  ·  thickness ${(t / rib.chord * 100).toFixed(1)}%`
     + `  ·  washin ${rib.alphaDeg.toFixed(2)}°  ·  dihedral ${rib.betaDeg.toFixed(1)}°`
-    + `  ·  yaw ${rib.zetaDeg.toFixed(2)}°  ·  φ ${rib.phiDeg.toFixed(2)}°`;
+    + `  ·  yaw ${rib.zetaDeg.toFixed(2)}°  ·  φ ${rib.phiDeg.toFixed(2)}°`
+    + (M.vribs && M.vribs.count
+      ? `  ·  ${M.vribs.vribs.filter((v) => v.fromRib === rib.index).length} diagonals from here, `
+        + `${M.vribs.vribs.filter((v) => v.toRib === rib.index).length} landing`
+      : '');
 }
 
 /* --------------------------------------------------------------- output -- */
@@ -9699,8 +9821,12 @@ function setStatus(error, msg) {
   if (error) { s.innerHTML = `<span class="bad">${error}</span>`; return; }
   const dev = M.worstDev != null ? (M.worstDev * 100).toFixed(3) + '%' : '—';
   const ok = (M.worstDev ?? 0) < 0.01;
+  const unsupported = M.vribs ? M.vribs.unsupportedRibs.length : 0;
+  const warn = unsupported
+    ? `<span class="bad"> · ${unsupported} rib${unsupported > 1 ? 's' : ''} with no load path</span>`
+    : '';
   s.innerHTML =
-    `<span class="${ok ? 'ok' : 'bad'}">●</span> ${msg || 'Model current'}` +
+    `<span class="${ok ? 'ok' : 'bad'}">●</span> ${msg || 'Model current'}${warn}` +
     `<span class="sep"> · </span>worst panel distortion ${dev}` +
     `<span class="sep"> · </span>rebuilt in ${(M.ms || 0).toFixed(0)} ms`;
 }
