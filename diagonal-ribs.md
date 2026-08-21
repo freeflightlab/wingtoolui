@@ -140,3 +140,32 @@ rather than discovered later.
   cut is unchanged here.
 - **Cross-ports and their interaction.** Diagonals and cross-ports compete for
   the same region of a rib, and the source treats them together.
+
+---
+
+## 8. What the H form exposed
+
+The H-rib was implemented expecting it to show a development distortion the V
+form does not, since a strip between two curves is not generally developable
+while a cone always is.
+
+It showed none. Nor, on investigation, did the sail panels it was being
+compared against — at any rib spacing from 0.23 m to 4.1 m, on a wing with 9
+degrees of washin and a strongly arced lobe. Surfaces that are certainly not
+developable were reporting machine precision.
+
+The measure was at fault, not the geometry. Each unrolling step preserves five
+of the quadrilateral's six lengths, including **both** diagonals, and
+`developmentError` was comparing one of those diagonals. It could not return
+anything but zero, and had been doing so since Phase 1 — through the status
+line, through the test suite's loose `< 1%` tolerance, and through every
+validation run.
+
+Measuring the fourth side instead — the one length the construction actually
+gives up — reports 0.0034% on a normal wing, exactly zero on a cylinder and a
+cone, and a figure that grows with the twist of a ruled surface. The H form
+does carry a small distortion after all, and the V form genuinely carries none.
+
+The test is now two-sided. A measure that only ever returns zero passes any
+one-sided check, so it has to be shown reporting something where something is
+there.

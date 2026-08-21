@@ -105,6 +105,30 @@ cross-product perpendicular distance, taken straight from the vectors.
 Algebraically identical, and neither subtracts nearly equal quantities. Seam
 length is now preserved to machine precision.
 
+### 2.3.1 The distortion measure was tautological
+
+Each unrolling step preserves five of the quadrilateral's six lengths: both
+seam segments, the width, and **both diagonals**. The one it must give up is
+the fourth side, `|L2 R2|`.
+
+`developmentError` compared the diagonal `|L1 R2|` before and after
+flattening — one of the five the construction preserves exactly. The
+comparison could not return anything but machine precision, and it duly did:
+on every wing, at every rib spacing from 0.23 m to 4.1 m, and on surfaces that
+are plainly not developable. The status line reporting "worst panel
+distortion" was reporting a number that could not move, and the test suite's
+`< 1%` tolerance was satisfied by a zero that meant nothing.
+
+It surfaced only when H-ribs were added and predicted to show distortion where
+V-ribs would not. They showed none either — and neither did the sail panels
+they were being compared against, which was the tell.
+
+Measuring the fourth side gives a figure that responds to geometry: 0.0034% on
+a normal wing, exactly zero on a cylinder and a cone, and growing with the
+twist of a ruled surface. The test is now two-sided — **zero where the surface
+really is developable, non-zero where it is not** — because only that
+distinguishes a real measure from a tautological one.
+
 ### 2.4 The method is not symmetric between the two ribs — this is inherent
 
 Each step preserves five of the quadrilateral's six lengths and lets the sixth
