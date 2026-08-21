@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 823-test validation suite and a benchmark with regression budgets
+- [x] 890-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -161,8 +161,8 @@ material published after the handbook:
       surviving a redraw.
 - [x] **Single-rib view** with a rib selector, showing the cut pattern with
       seam allowance, intake and anchors, on its own tab.
-- [ ] **Rib internals in the rib view** — lightening holes, cross-ports and
-      attachment tabs are Phase 3 geometry and would show here first.
+- [x] **Rib internals in the rib view** — lightening holes drawn from the
+      same rules the export uses.
 - [x] **Alpina 5 specifications** — six sizes added, giving a five-family,
       three-manufacturer scaling sample.
 - [x] **Lynx 2 specifications** — BGD joins as a sixth family and third
@@ -296,12 +296,28 @@ validation notes flagged.
 
 ---
 
+## Audit
+
+- [x] **Self-audit** (`tools/audit.mjs`) — bundle coverage, unused exports,
+      documented numbers, figure references and the test count. It found four
+      real problems on its first run: thirteen exports with no caller, a
+      reference corpus of which 63 of 72 files were never touched, a PMA
+      strength table routed as a line sheet, and a stale test count.
+- [ ] **Run the audit in the same breath as the suite** — it is a separate
+      command, so it can go stale between runs.
+
 ## Phase 3 — construction detail
 
 Turning geometry into something a person can actually sew.
 
-- [ ] **Rib internals** *(ch.2.7)*: lightening holes with structural margins,
-      cross-port placement, attachment tab geometry.
+- [x] **Rib internals** — lightening holes placed into the space left after
+      surface margins, nose band, anchor load paths and webs are subtracted,
+      with the rules verified independently. See `docs/construction.md`.
+- [ ] **Cross-ports** — pressure equalisation between cells, distinct from
+      lightening holes and subject to different rules.
+- [x] **Bill of materials** — fabric by roll rather than by area, line by
+      cut length rather than finished, hardware counted from the plan, and
+      what is missing reported rather than treated as zero.
 - [ ] **Reinforcement layout**: Mylar at the intakes, Dacron at anchor points,
       seam tapes.
 - [ ] **Marking and registration**: alignment notches, cell numbers, grain
