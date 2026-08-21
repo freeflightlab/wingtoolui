@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 924-test validation suite and a benchmark with regression budgets
+- [x] 976-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -310,6 +310,12 @@ validation notes flagged.
       real problems on its first run: thirteen exports with no caller, a
       reference corpus of which 63 of 72 files were never touched, a PMA
       strength table routed as a line sheet, and a stale test count.
+- [x] **Checkout completeness** — `MANIFEST.txt` lists every file a working
+      tree needs, the audit verifies it in both directions, and `build.py`
+      reports all missing modules at once. Added after a repository was found
+      holding 11 of 24 core modules with no build script, tests or data: the
+      built HTML is self-contained, so nothing about using it revealed that it
+      could no longer be rebuilt.
 - [ ] **Run the audit in the same breath as the suite** — it is a separate
       command, so it can go stale between runs.
 
@@ -326,10 +332,19 @@ Turning geometry into something a person can actually sew.
 - [x] **Bill of materials** — fabric by roll rather than by area, line by
       cut length rather than finished, hardware counted from the plan, and
       what is missing reported rather than treated as zero.
-- [ ] **Reinforcement layout**: Mylar at the intakes, Dacron at anchor points,
-      seam tapes.
-- [ ] **Marking and registration**: alignment notches, cell numbers, grain
-      direction on every panel.
+- [x] **Reinforcement layout** — mylar, dacron and tapes placed and totalled,
+      anchor patches counted from the line plan, and a mass budget that
+      reports the remaining gap against a published weight rather than
+      claiming to be one. See `docs/construction.md`.
+- [x] **Rods** — arc length along the rib surface rather than a chord
+      fraction (8.3% longer), mass as the square of diameter, and shorter rods
+      on the closed ribs. Counting them removes them from the missing list.
+- [ ] **Thread, risers and hardware webbing** — what is left of the mass gap,
+      now about 35% of a finished wing.
+- [x] **Marking and registration** — notches paired at equal fractions of each
+      seam so ovalization's 31 mm of ease becomes 3.9 mm per segment, plus
+      grain arrows and panel labels on their own DXF layers. See
+      `docs/construction.md`.
 - [ ] **Materials** *(ch.10)*: a real properties table — weights, strengths,
       stretch — feeding wing mass estimation and line sizing.
 - [ ] **Line specification** *(ch.8.3–8.4)*: load per line from the cascade,

@@ -180,7 +180,56 @@ inventing a target.
 
 ---
 
-## 5. Not covered
+## 5. Registration marks
+
+The panels exported as bare outlines. A cutter can cut those; a sewer cannot
+assemble them, because nothing says which panel is which, which way up it
+goes, or where along a two-metre seam any given point belongs.
+
+### Notches are not decoration
+
+Two panels are joined along seams that are **not the same length**. Before
+ovalization they match to six microns — the development shares the rib curve
+between them. Ovalization then widens each panel about its own centreline,
+lengthening its outer seam and shortening its inner one, so the seams that
+actually get sewn together differ by up to **31 mm over two metres**.
+
+That is not an error. It is the ease that lets flat cloth take a curved shape,
+and it has to be *distributed* rather than run out at one end. A sewer working
+it by eye over two metres will not get it even, and the wing will pull.
+
+The rule that makes notches work: **they pair at equal fractions of each
+seam's own length, not at equal distances.** Marking both seams every 250 mm
+puts the last notch of the longer seam 31 mm past its partner and leaves the
+whole discrepancy in the final segment. At equal fractions, 31 mm over a seam
+becomes **3.9 mm per segment**, which is what a sewer can actually work in.
+
+### Two bugs the checks caught
+
+**Notch counts were derived per panel**, so neighbours could disagree — nine
+notches against eight. A notch with no partner is worse than no notch, because
+it invites the sewer to match it against the wrong thing. The count is now
+agreed per *join*, from the mean of the two seams that will be sewn.
+
+**Both notch signs were wrong.** The direction was assumed from the winding of
+the seams, and every notch cut *outward* — removing seam allowance instead of
+marking it. The direction now comes from the geometry: a notch must move
+toward the opposite seam. All 332 on the test wing now cut inward.
+
+The check for this also had to be rewritten. Measuring from the panel centre
+fails on a curved panel, because the seam normal does not point at the
+centroid.
+
+### The rest of the marks
+
+Panel identity (`14U`), a grain arrow — ripstop is far stiffer along its warp
+than across it — and the leading edge, since a panel is not symmetric end to
+end. Each goes on its own DXF layer (`notch`, `grain`, `label`), so a cutting
+table can be told to cut the outline, plot the notches and ignore the text.
+
+---
+
+## 6. Not covered
 
 - **Rods.** Modern wings carry nylon or carbon rods in the leading edge; on a
   light wing they are a noticeable fraction of the weight.
