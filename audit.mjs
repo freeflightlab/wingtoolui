@@ -19,6 +19,40 @@ const say = (ok, what, detail = '') => {
   if (!ok) problems.push(what);
 };
 
+/* ---- 0. is this a complete checkout at all? ---------------------------- */
+//
+// The audit's whole job is to diagnose a tree, so it must survive a tree that
+// is broken. The first version called readdirSync('src/core') at the top and
+// crashed with ENOENT on exactly the incomplete checkout it was written to
+// report — a diagnostic that only runs when nothing is wrong.
+if (!existsSync('src/core') || !existsSync('build.py')) {
+  console.log('  FAIL this is not a complete checkout');
+  console.log(`       src/core: ${existsSync('src/core') ? 'present' : 'MISSING'}`);
+  console.log(`       build.py: ${existsSync('build.py') ? 'present' : 'MISSING'}`);
+  console.log(`       src/ui:   ${existsSync('src/ui') ? 'present' : 'MISSING'}`);
+  console.log(`       tests:    ${existsSync('tests') ? 'present' : 'MISSING'}`);
+  console.log(`       data:     ${existsSync('data/reference') ? 'present' : 'MISSING'}`);
+  console.log('\n  A tree missing these can still open the built HTML, which is');
+  console.log('  self-contained, but cannot be rebuilt, tested or audited.');
+  console.log('  See MANIFEST.txt for the full list.');
+  process.exit(1);
+}
+
+/* ---- 0b. is the tree flat? --------------------------------------------- */
+//
+// A flattened checkout can still build — build.py accepts either layout — but
+// it cannot be *tested*, because the suite's imports are static ES module
+// paths like '../src/core/num.js' and there is no way to resolve those in a
+// single directory. Worth saying explicitly, because a flat tree that builds
+// looks healthy.
+if (existsSync('num.js') && !existsSync('src/core/num.js')) {
+  console.log('  WARN the tree is flat: modules sit beside the tests');
+  console.log('       build.py copes, but node tests/run-tests.js cannot —');
+  console.log('       its imports are static paths into src/core/.');
+  console.log('       Commit the directories, not the files. See REPO.md.');
+  notes.push('flat layout: buildable, not testable');
+}
+
 /* ---- 1. every core module is bundled ---------------------------------- */
 const coreFiles = readdirSync('src/core').filter((f) => f.endsWith('.js'));
 const buildSrc = readFileSync('build.py', 'utf8');
@@ -26,10 +60,41 @@ const unbundled = coreFiles.filter((f) => !buildSrc.includes(`"${f}"`));
 say(unbundled.length === 0, 'every core module reaches the bundle',
   unbundled.length ? `missing: ${unbundled.join(', ')}` : `${coreFiles.length} modules`);
 
+/* ---- 1b. the checkout is complete -------------------------------------- */
+//
+// A repository arrived holding eleven of twenty-four core modules, no build
+// script, no interface sources and none of the reference data. Everything in
+// it was current; what was missing had never been added. The built HTML still
+// opened, which is exactly what made the gap easy to miss — so the audit now
+// checks the tree against MANIFEST.txt rather than trusting that a working
+// directory implies a working checkout.
+if (!existsSync('MANIFEST.txt')) {
+  say(false, 'MANIFEST.txt is present', 'run: node tools/manifest.mjs');
+} else {
+  const manifest = readFileSync('MANIFEST.txt', 'utf8');
+  const listed = [...manifest.matchAll(/^\s+\d+\s+(\S+)$/gm)].map((m) => m[1]);
+  const absent = listed.filter((f) => !existsSync(f));
+  say(absent.length === 0, 'every file the manifest lists is present',
+    absent.length ? `${absent.length} missing: ${absent.slice(0, 6).join(', ')}` : `${listed.length} files`);
+
+  // And the reverse: a file added but never listed.
+  const onDisk = [];
+  for (const d of ['src/core', 'src/ui', 'tests', 'tools']) {
+    if (!existsSync(d)) continue;
+    for (const f of readdirSync(d)) {
+      if (/\.(js|mjs|py|html|css)$/.test(f)) onDisk.push(`${d}/${f}`);
+    }
+  }
+  const unlisted = onDisk.filter((f) => !manifest.includes(f));
+  say(unlisted.length === 0, 'and the manifest lists every source file',
+    unlisted.length ? `unlisted: ${unlisted.join(', ')}` : 'in step');
+}
+
 /* ---- 2. exports are used somewhere ------------------------------------ */
 const allSrc = coreFiles.map((f) => readFileSync(`src/core/${f}`, 'utf8')).join('\n');
 const uiSrc = readFileSync('src/ui/app.js', 'utf8');
 const testSrc = readFileSync('tests/run-tests.js', 'utf8');
+const roadmapSrc = readFileSync('ROADMAP.md', 'utf8');
 const toolSrc = readdirSync('tools').filter((f) => f.endsWith('.mjs'))
   .map((f) => readFileSync(`tools/${f}`, 'utf8')).join('\n');
 const consumers = `${allSrc}\n${uiSrc}\n${testSrc}\n${toolSrc}`;
@@ -86,6 +151,34 @@ for (const [what, got, want, tol] of claims) {
 }
 say(bad === 0, 'documented numbers match the code', `${claims.length} claims checked`);
 
+/* ---- 3b. the roadmap is not stale -------------------------------------- */
+//
+// An item can be built and the roadmap never updated. That happened: the
+// spanwise lift distribution was listed as open in Phase 5 long after
+// loads.js was using lifting line for exactly that. Prose does not fail a
+// test run, and nobody re-reads a 400-line roadmap.
+//
+// So each open item is probed against the code for a symbol that would only
+// exist if it had been done. The probes are deliberately specific — a loose
+// pattern would flag everything and be ignored.
+const coreSrc = coreFiles.map((f) => readFileSync(`src/core/${f}`, 'utf8')).join('\n');
+const probes = [
+  ['Spanwise lift distribution', /liftingLine\(/],
+  ['Load distribution through the cascade', /export function spanLoadDistribution/],
+  ['Line materials and diameter selection', /export function selectLines/],
+  ['Diagonal ribs', /export function buildVRibs/],
+  ['Cross-ports', /export function buildCrossPorts/],
+  ['Marking and registration', /export function markPanels/],
+  ['Rods', /export function buildRods/],
+  ['Reinforcement layout', /export function buildReinforcement/],
+];
+const openItems = [...roadmapSrc.matchAll(/^- \[ \] \*\*([^*]+)\*\*/gm)].map((m) => m[1]);
+const stale = probes
+  .filter(([name, re]) => openItems.some((o) => o.includes(name)) && re.test(coreSrc))
+  .map(([name]) => name);
+say(stale.length === 0, 'no roadmap item is listed open after being built',
+  stale.length ? `stale: ${stale.join(', ')}` : `${openItems.length} open items probed`);
+
 /* ---- 4. reference data is exercised ----------------------------------- */
 //
 // The first version of this grepped the test source for each filename and
@@ -117,7 +210,7 @@ for (const d of readdirSync('docs').filter((f) => f.endsWith('.md'))) {
 say(dangling === 0, 'no documentation figure is missing');
 
 /* ---- 6. roadmap claims match reality ---------------------------------- */
-const roadmap = readFileSync('ROADMAP.md', 'utf8');
+const roadmap = roadmapSrc;
 const doneCount = (roadmap.match(/^- \[x\]/gm) || []).length;
 const openCount = (roadmap.match(/^- \[ \]/gm) || []).length;
 notes.push(`roadmap: ${doneCount} done, ${openCount} open`);

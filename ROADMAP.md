@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 976-test validation suite and a benchmark with regression budgets
+- [x] 990-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -359,13 +359,24 @@ Turning geometry into something a person can actually sew.
 
 Making it pleasant to use across a real project.
 
-- [ ] **Better nesting.** Currently about 42% utilisation. A proper no-fit
-      polygon packer with pairwise interlocking and colour blocking should
-      reach 60–70%. This is the single largest material saving available.
+- [x] **Diagnosed the nesting loss** — 48.2% utilisation splits into 73%
+      shape and 66% packing. Pairwise interlocking, which this roadmap
+      assumed would fix it, does **not**: a developed panel is a near-straight
+      strip of constant width, and interlocking a pair saves 1.8%. See
+      `docs/nesting.md`.
+- [ ] **A no-fit-polygon packer.** Packing efficiency is 66% and is the larger
+      of the two losses. A skyline over bounding boxes cannot do better;
+      this needs real polygon placement.
+- [ ] **Place the tip panels into the gaps.** Shape loss is concentrated in a
+      few small panels — cell 24 upper is 29% efficient against the root's
+      96% — so they are the ones to fit around the large ones. A placement
+      problem, not a pairing one.
 - [ ] **Design comparison**: hold two designs side by side, diff their numbers.
 - [ ] **Undo/redo and named revisions.**
-- [ ] **Reference wings**: the parameter sets from the handbook's own gnuLAB
-      series as loadable starting points.
+- [ ] **Reference wings** as loadable starting points. The data is already
+      here — seven size families parsed by `parseSizeFamilies`, and gnuLAB
+      sections through the LEP import — but nothing in the interface offers
+      them, so a user cannot start from a known wing.
 - [ ] **Prototype tuning** *(ch.4.7)*: record measured flight behaviour against
       predicted, and solve for the trim correction.
 - [ ] **Printed pattern output**: tiled A4/A3 pages with registration marks for
@@ -380,8 +391,10 @@ describing geometry and starts predicting behaviour.
 
 - [ ] **Structural check**: line loads into rib and panel stress, so the
       reinforcement layout has a basis rather than a convention.
-- [ ] **Spanwise lift distribution** by lifting-line, replacing the uniform
-      assumption in the line cascade's load case 1.
+- [x] **Spanwise lift distribution** by lifting-line — done in Phase 2;
+      `spanLoadDistribution` in loads.js has used `liftingLine` since the load
+      model was built. Listed here as open long after it shipped, which is
+      what the roadmap staleness probe in `tools/audit.mjs` now catches.
 - [ ] **Inflated-shape estimate**: the built shape and the flying shape differ,
       and every measurement in the handbook is of the flying one.
 
