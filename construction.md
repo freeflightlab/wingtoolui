@@ -138,14 +138,41 @@ and friends.
 Anchor patches are counted **from the line plan**, not from a guess at rows
 per rib, so changing the rigging changes the order.
 
+### Rods
+
+The largest single item in the gap, and the one a light wing feels most. A rod
+holds the leading edge open so the wing keeps its intake shape at low angles
+and reinflates cleanly after a collapse.
+
+Two things the model gets right that a back-of-envelope estimate does not.
+
+**A rod follows the rib's surface, not the chord.** Its length is an arc along
+the profile, and on a cambered nose that is **8.3% longer** than a chord
+fraction times the chord — small, and exactly the size of error a mass budget
+accumulates over a hundred rods.
+
+**Mass goes as the square of diameter**, so this is the trade worth seeing:
+
+| | nylon | carbon |
+| --- | --- | --- |
+| 1.0 mm | 46 g | 58 g |
+| 1.3 mm | 66 g | 86 g |
+| 1.6 mm | 91 g | 121 g |
+
+Closed ribs — those behind a diagonal, facing no cell opening — take a shorter
+rod, since they have less nose shape to hold.
+
 ### The gap is the output
 
 `massBudget` compares against a published weight:
 
 ```
-cloth 2305 g + line 93 g + reinforcement 130 g = 2.528 kg
-gap 1472 g (37%) — rods and rod pockets, thread, risers and hardware webbing
+cloth 2305 g + line 93 g + reinforcement 130 g + rods 66 g = 2.594 kg
+gap 1406 g (35%) — thread, risers and hardware webbing, the bag
 ```
+
+Counting rods removes them from the list of what is missing, so the remainder
+is always what is *genuinely* still unmodelled rather than a fixed disclaimer.
 
 The useful number is not the total but what the model **cannot yet see**, and
 how big it is. Given no published weight it reports no gap rather than

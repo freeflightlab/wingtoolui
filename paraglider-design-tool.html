@@ -6694,21 +6694,153 @@ function buildReinforcement(wing, airfoil, { spec = {}, plan = null } = {}) {
  * build against a published weight wants to know what the model does not yet
  * see, and how big it is.
  */
-function massBudget({ bom, reinforcement, publishedKg = null }) {
+function massBudget({ bom, reinforcement, rods = null, publishedKg = null }) {
   const cloth = bom.totals.fabricMassKg;
   const line = bom.totals.lineMassKg;
   const reinf = reinforcement ? reinforcement.massKg : 0;
-  const accounted = cloth + line + reinf;
+  const rodMass = rods ? rods.massKg : 0;
+  const accounted = cloth + line + reinf + rodMass;
   return {
     clothKg: cloth,
     lineKg: line,
     reinforcementKg: reinf,
+    rodsKg: rodMass,
     accountedKg: accounted,
     publishedKg,
     gapKg: publishedKg != null ? publishedKg - accounted : null,
     gapFraction: publishedKg != null ? (publishedKg - accounted) / publishedKg : null,
-    stillMissing: reinforcement ? reinforcement.notCounted : ['reinforcement', 'rods', 'thread'],
+    // Rods leave the list once they are counted, so the remainder is always
+    // what is genuinely still unmodelled rather than a fixed disclaimer.
+    stillMissing: (reinforcement ? reinforcement.notCounted : ['reinforcement', 'rods', 'thread'])
+      .filter((m) => !(rods && /rod/.test(m))),
   };
+}
+
+/* ----------------------------------------------------------------- rods -- */
+
+/**
+ * Leading-edge rods.
+ *
+ * The largest single item in the mass gap, and the one a light wing feels
+ * most. A rod is a nylon or carbon rod sewn into a sleeve along the nose,
+ * holding the leading edge open so the wing keeps its intake shape at low
+ * angles of attack and reinflates cleanly after a collapse. Before rods, that
+ * job was done by fabric stiffness and mylar alone, and wings needed a larger
+ * nose radius to manage without.
+ *
+ * ---------------------------------------------------------------------------
+ * What decides the length
+ * ---------------------------------------------------------------------------
+ * A rod runs from the leading edge back along the rib, far enough to control
+ * the curvature that matters and no further — every millimetre past that is
+ * weight and pack volume. Makers typically run to somewhere between 25% and
+ * 45% of chord, longer on the ribs that face a cell opening and shorter on
+ * the closed ones behind a diagonal.
+ *
+ * The rod follows the rib's own surface rather than a straight line, so its
+ * length is an arc length along the profile, not a chord fraction times the
+ * chord. On a cambered nose the difference is a few per cent — small, and
+ * exactly the sort of small that a mass budget accumulates over a hundred
+ * rods.
+ *
+ * Diameter is the designer's choice, and mass goes as the square of it: a
+ * 1.4 mm rod weighs twice a 1.0 mm rod for the same length. That is the trade
+ * this exists to make visible.
+ */
+
+/** Rod materials: density in kg/m^3, and what they are for. */
+const ROD_MATERIALS = {
+  nylon: { densityKgM3: 1140, note: 'forgiving, recovers from a kink, heavier' },
+  carbon: { densityKgM3: 1600, note: 'stiffer for its mass, but breaks rather than bends' },
+  'nitinol': { densityKgM3: 6450, note: 'shape memory; used sparingly at the tips' },
+};
+const DEFAULT_ROD_SPEC = {
+  material: 'nylon',
+  diameterMM: 1.3,
+  // Fraction of chord the rod runs back along the upper surface.
+  extentOpen: 0.42,      // ribs facing a cell opening
+  extentClosed: 0.28,    // closed ribs, which need less
+  sleeveGsm: 0.030,      // the fabric sleeve the rod sits in
+  sleeveWidthM: 0.018,
+  everyRib: true,
+};
+
+/**
+ * Rods for a wing.
+ *
+ * @param {object} wing
+ * @param {object} o  spec overrides, plus `closedRibs` — the indices that do
+ *                    not face a cell opening, which take the shorter rod.
+ */
+function buildRods(wing, { spec = {}, closedRibs = null } = {}) {
+  const R = { ...DEFAULT_ROD_SPEC, ...spec };
+  const mat = ROD_MATERIALS[R.material];
+  if (!mat) throw new Error(`Unknown rod material: ${R.material}`);
+
+  const closed = new Set(closedRibs || []);
+  const areaM2 = Math.PI * ((R.diameterMM / 2000) ** 2);
+  const rods = [];
+
+  for (const rib of wing.ribs) {
+    const isClosed = closed.has(rib.index);
+    const extent = isClosed ? R.extentClosed : R.extentOpen;
+    // Arc length along the upper surface out to the extent, not a straight
+    // line: the nose is where the profile curves most.
+    const lengthM = upperArcLength(rib, extent);
+    rods.push({
+      ribIndex: rib.index,
+      closed: isClosed,
+      extentChord: extent,
+      lengthM,
+      // A straight chordwise measure, for comparison.
+      chordwiseM: extent * rib.chord,
+      massKg: lengthM * areaM2 * mat.densityKgM3,
+    });
+  }
+
+  const sides = 2;
+  const totalLengthM = rods.reduce((s, r) => s + r.lengthM, 0) * sides;
+  const rodMass = rods.reduce((s, r) => s + r.massKg, 0) * sides;
+  const sleeveMass = totalLengthM * R.sleeveWidthM * R.sleeveGsm;
+  const straight = rods.reduce((s, r) => s + r.chordwiseM, 0) * sides;
+
+  return {
+    rods,
+    material: R.material,
+    diameterMM: R.diameterMM,
+    count: rods.length * sides,
+    totalLengthM,
+    rodMassKg: rodMass,
+    sleeveMassKg: sleeveMass,
+    massKg: rodMass + sleeveMass,
+    // How much the curvature costs against a straight-line estimate.
+    straightLengthM: straight,
+    curvatureExcess: straight > 0 ? totalLengthM / straight - 1 : 0,
+    spec: R,
+  };
+}
+
+/** Arc length along the upper surface from the leading edge to a chord fraction. */
+function upperArcLength(rib, extentChord) {
+  const b = (rib.betaDeg * Math.PI) / 180;
+  const oy = rib.lobePoint[0];
+  const oz = rib.lobePoint[1];
+  const flat = ([x, y, z]) => [
+    (x - rib.xLE) / rib.chord,
+    (-(y - oy) * Math.sin(b) + (z - oz) * Math.cos(b)) / rib.chord,
+  ];
+  const pts = rib.upper.map(flat);
+  let s = 0;
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i][0] > extentChord) {
+      // Partial final segment, so the length does not jump with sampling.
+      const f = (extentChord - pts[i - 1][0]) / ((pts[i][0] - pts[i - 1][0]) || 1);
+      s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) * Math.max(0, f);
+      break;
+    }
+    s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  }
+  return s * rib.chord;
 }
 
 /* ===== bom.js ===== */
