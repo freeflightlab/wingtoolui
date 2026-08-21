@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 665-test validation suite and a benchmark with regression budgets
+- [x] 705-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -229,9 +229,18 @@ validation notes flagged.
 - [x] **Diagonal cutting files and display** — nested R12 DXF on their own
       roll, drawn on the rib they touch, with unsupported span warned in the
       status bar.
-- [ ] **H-ribs and VH-ribs** *(ch.7, LEP section 12)* — horizontal straps
-      spread load chordwise rather than spanwise; only the V form is
-      generated.
+- [x] **H-ribs** *(ch.7, LEP section 12)* — internal sheets holding the cell
+      to its intended width, developed as strips rather than cones, and
+      combined with the V form through `internalStructure`.
+- [x] **Corrected the panel distortion measure** — it had compared a length
+      the unrolling preserves by construction, so it reported machine
+      precision on every wing since Phase 1. See `docs/validation.md` §2.3.1.
+- [x] **Responsiveness audit** — 26 reported metrics swept against the inputs
+      they claim to depend on, checking each moves by a meaningful amount in
+      the right direction. Added because the panel distortion measure passed
+      every one-sided check for months while unable to return anything but
+      zero.
+- [ ] **VH-ribs** — the combined form; LEP section 12 carries all three.
 - [ ] **Diagonals as structure** — treated as load paths and cut patterns,
       not members with stiffness. Whether a diagonal is in tension across its
       whole width is not modelled.

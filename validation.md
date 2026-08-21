@@ -29,6 +29,14 @@ three. The cylinder case is the sharpest: the unrolled panel must be an exact
 rectangle whose width is the rib spacing and whose length is the arc length of
 the section.
 
+**Metrics that can move.** A one-sided check — "is the distortion small?",
+"is the utilisation a fraction?" — is satisfied perfectly by a number that is
+always zero. The panel distortion measure passed every test here for months
+while being incapable of returning anything but zero (§2.3.1). So every
+reported quantity meant to vary is now checked that it *does*, by a meaningful
+amount and in the right direction, when the input it claims to depend on is
+perturbed. Twenty-six of them, in one section of the suite.
+
 **Production data as ground truth.** Where a manufacturer states something this
 project has to infer, the inference is run against the stated answer. BGD's
 line tables give their own cascade topology, so the topology inference — which
@@ -344,6 +352,21 @@ Checked against the published gnuLAB2 section:
 This is the strongest end-to-end check in the suite: a real file, through the
 importer, against numbers the handbook published independently. The fourth
 header integer is not yet identified and is ignored.
+
+### 2.3.2 An invariance the audit turned up
+
+Sweeping every metric against its inputs asked whether **phi**, the angle
+between a rib's plane and the glide path, responds to washin. It does not —
+4.831 degrees either side of a nine-fold change.
+
+That is correct, and it is the distinction between a dead metric and a real
+one. Washin rotates a rib about the spanwise axis, which is to say *within its
+own plane*; it cannot change where that plane points. What responds to washin
+is **chi**, the angle between the chord and the glide path, and it does.
+
+Both are now pinned: phi invariant under washin to machine precision, chi
+responsive to it. The invariance is the more useful of the two, because it is
+the kind of property that silently breaks when a rotation order is changed.
 
 ---
 
