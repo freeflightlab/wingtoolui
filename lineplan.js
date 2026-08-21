@@ -23,7 +23,12 @@
  * check: if the names and the lengths disagree, the remainders scatter.
  */
 
-const ROWS = ['A', 'B', 'C', 'D', 'E'];
+// 'S' is the stabilo — the outermost line, on its own riser on many wings.
+// 'Z' is a collapse line. Both are real rows that carry names of their own.
+const ROWS = ['A', 'B', 'C', 'D', 'E', 'K', 'S', 'Z'];
+
+/** The rows that carry flight load. K is the brake, S the stabilo, Z collapse. */
+const LOAD_BEARING_ROWS = ['A', 'B', 'C', 'D', 'E'];
 const BRAKE = 'K';
 const COLLAPSE = 'Z';
 
@@ -42,9 +47,138 @@ const COLLAPSE = 'Z';
  * Rejecting the lowercase form silently drops every canopy line in those
  * files — which is exactly what happened until a table that states its own
  * topology made the gap visible.
+ *
+ * UP Paragliders uses a third scheme, and it needs its own branch because it
+ * distinguishes four levels where the others distinguish three:
+ *
+ *   a1      lowercase       top line, to the canopy
+ *   A1      uppercase       middle
+ *   AI      roman numeral   upper-main
+ *   Amain1  'main' + index   riser
+ *
+ * Roman numerals matter here: `AI` and `A1` are different lines on the same
+ * wing, and a parser that only sees digits reads `AI` as a name it does not
+ * recognise and discards a whole cascade level. `CVI` is the sixth C-main,
+ * not something beginning with `CV`.
  */
 export function parseLineName(name) {
-  const m = String(name).trim().match(/^([A-Za-z])(R|M)?(U|L)?(\d+)([a-z])?$/);
+  const raw = String(name).trim();
+
+  // UP Paragliders distinguishes four cascade levels where the others
+  // distinguish three, and names two of them differently:
+  //
+  //   a1      lowercase       top line, to the canopy
+  //   A1      uppercase       middle
+  //   AI      roman numeral   upper-main
+  //   Amain1  'main' + index  riser
+  //
+  // Roman numerals have to be handled before the digit form. `AI` and `A1`
+  // are different lines on the same wing, and `CVI` is the sixth C-main
+  // rather than something starting with `CV` — read digit-first, a whole
+  // cascade level is discarded as unrecognised names.
+
+  const mainMatch = raw.match(/^([A-Za-z]{1,2})main(\d*)$/i);
+  if (mainMatch) {
+    const r = mainMatch[1].toUpperCase();
+    if (!ROWS.includes(r) && r !== 'BR') return null;
+    return {
+      name: raw,
+      row: r === 'BR' ? 'K' : r,
+      level: 'riser',
+      side: null,
+      index: mainMatch[2] ? parseInt(mainMatch[2], 10) : 1,
+      variant: null,
+      isBrake: r === 'BR',
+      convention: 'up-main',
+    };
+  }
+
+  const ROMAN = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 };
+  // Two-letter rows are matched explicitly rather than with `{1,2}`. A greedy
+  // quantifier takes `AI` out of `AIII` and then fails on the remainder
+  // without backtracking, because the row check rejects `AI` and returns —
+  // so every numeral above II was silently discarded.
+  const NUMERAL = '(?:VIII|VII|III|IX|IV|VI|II|V|X|I)';
+  const romanMatch = raw.match(new RegExp(`^(BR)(${NUMERAL})$`))
+    || raw.match(new RegExp(`^([A-Za-z])(${NUMERAL})$`));
+  if (romanMatch) {
+    const r = romanMatch[1].toUpperCase();
+    if (!ROWS.includes(r) && r !== 'BR') return null;
+    return {
+      name: raw,
+      row: r === 'BR' ? 'K' : r,
+      level: 'upper-main',
+      side: null,
+      index: ROMAN[romanMatch[2]],
+      variant: null,
+      isBrake: r === 'BR',
+      convention: 'up-roman',
+    };
+  }
+
+  // UP writes brake top lines lowercase (`br1`) and stabilo lines as `sa1`,
+  // `sb2`, `st3`. Neither fits the single-letter-row pattern below.
+  const brMatch = raw.match(/^br(\d+)$/);
+  if (brMatch) {
+    return {
+      name: raw, row: 'K', level: 'upper', side: null,
+      index: parseInt(brMatch[1], 10), variant: null, isBrake: true,
+      convention: 'up-brake',
+    };
+  }
+  const stabMatch = raw.match(/^s([a-dt])(\d+)$/i);
+  if (stabMatch) {
+    const kind = stabMatch[1].toLowerCase();
+    return {
+      name: raw,
+      row: 'S',
+      // `st` is the stabilo's own main line; `sa`..`sd` are its top lines,
+      // named for the row they sit outboard of.
+      level: kind === 't' ? 'riser' : 'upper',
+      side: null,
+      index: parseInt(stabMatch[2], 10),
+      variant: kind === 't' ? null : kind,
+      isBrake: false,
+      isStabilo: true,
+      convention: 'up-stabilo',
+    };
+  }
+
+  // Advance's TAU DLS inverts the whole scheme: the level is a **prefix**,
+  // and a row may be a pair.
+  //
+  //   1A3    level 1 (at the canopy), row A, line 3
+  //   2AB2   level 2, one line serving both the A and B rows
+  //   3CD1   level 3, serving C and D
+  //   4AB1   level 4, at the riser
+  //
+  // Two things follow. A prefix level is relative — what depth 3 means
+  // depends on how many levels the wing has, so the depth is recorded and
+  // `resolveCascadeLevels` maps it to upper/middle/riser once the whole set
+  // is known. And a combined row is not a naming quirk: one line really does
+  // carry two rows' load, which is how a merged cascade reduces line count.
+  const prefixMatch = raw.match(/^(\d)([A-Z]{1,2})(\d+)$/);
+  if (prefixMatch) {
+    const depth = parseInt(prefixMatch[1], 10);
+    const letters = prefixMatch[2].split('');
+    if (!letters.every((c) => ROWS.includes(c))) return null;
+    return {
+      name: raw,
+      row: letters[0],
+      rows: letters,
+      combined: letters.length > 1,
+      // Depth 1 sits at the canopy; the deepest present is at the riser.
+      depthFromCanopy: depth,
+      level: depth === 1 ? 'upper' : `cascade-${depth}`,
+      side: null,
+      index: parseInt(prefixMatch[3], 10),
+      variant: null,
+      isBrake: letters[0] === 'K',
+      convention: 'prefix-level',
+    };
+  }
+
+  const m = raw.match(/^([A-Za-z])(R|M)?(U|L)?(\d+)([a-z])?$/);
   if (!m) return null;
   const [, rawRow, levelCode, side, idx, variant] = m;
   const row = rawRow.toUpperCase();
@@ -74,6 +208,30 @@ export function parseLineName(name) {
  * Anything that is not recognisable as a line row is skipped rather than
  * guessed at, and what was skipped is reported.
  */
+/**
+ * Resolve prefix-level names to upper / middle / riser.
+ *
+ * A prefix level is relative: `3AB1` is a riser line on a three-level wing
+ * and a middle line on a four-level one. The mapping therefore cannot be made
+ * while parsing a single name — it needs the whole set, which is why parsing
+ * leaves `depthFromCanopy` and a provisional `cascade-N` level behind.
+ */
+export function resolveCascadeLevels(lines) {
+  const depths = lines.map((l) => (l ? l.depthFromCanopy : null)).filter((d) => d != null);
+  if (!depths.length) return lines;
+  const maxDepth = Math.max(...depths);
+  return lines.map((l) => {
+    if (!l || l.depthFromCanopy == null) return l;
+    const d = l.depthFromCanopy;
+    return {
+      ...l,
+      level: d === 1 ? 'upper' : (d === maxDepth ? 'riser' : 'middle'),
+      cascadeDepth: d,
+      cascadeLevels: maxDepth,
+    };
+  });
+}
+
 export function parseLineTable(text) {
   // Decide the delimiter once for the whole file rather than accepting either
   // at every character. These tables routinely carry several line names in one
@@ -201,7 +359,12 @@ export function summarise(lineSet) {
   }
 
   const rows = Object.values(byRow).sort((a, b) => a.row.localeCompare(b.row));
-  const mainRows = rows.filter((r) => ROWS.includes(r.row));
+
+  // Load-bearing rows only. Brakes go to a handle, not a riser maillon; the
+  // stabilo and collapse rows carry no flight load either. Counting them as
+  // risers turns a two-liner into a three-liner and changes what the whole
+  // module reports about a wing's rigging.
+  const mainRows = rows.filter((r) => LOAD_BEARING_ROWS.includes(r.row));
   const risers = mainRows.filter((r) => r.riser.length > 0);
 
   const totalLength = lineSet.lines.reduce((s, l) => s + l.lengthMM * l.quantity, 0) / 1000;
@@ -216,6 +379,10 @@ export function summarise(lineSet) {
     // the usual arrangement for D on a three-riser wing.
     dependentRows: mainRows.filter((r) => r.riser.length === 0 && r.upper.length > 0)
       .map((r) => r.row),
+    // Reported separately, since they are real rows but not riser rows.
+    brakeRows: rows.filter((r) => r.row === 'K').map((r) => r.row),
+    stabiloRows: rows.filter((r) => r.row === 'S').map((r) => r.row),
+    collapseRows: rows.filter((r) => r.row === 'Z').map((r) => r.row),
     lineCount: lineSet.lines.reduce((s, l) => s + l.quantity, 0),
     distinctLengths: new Set(lineSet.lines.map((l) => l.lengthMM)).size,
     totalLengthM: totalLength,
@@ -1265,4 +1432,167 @@ const lerpPt = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
 function centroidPts(pts) {
   const s = pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1], a[2] + p[2]], [0, 0, 0]);
   return s.map((v) => v / pts.length);
+}
+
+/* ---------------------------------------------------- UP line sheets -- */
+
+/**
+ * Read a UP Paragliders line sheet.
+ *
+ * A sixth production format, and the only one that states the **loop
+ * allowance** separately:
+ *
+ *   line | length | | loop length | cutting length | material | colour | ...
+ *   a1   |   295  | |         130 |            425 | DC 120   | Red
+ *
+ * `cutting length = length + loop length`. Every other maker quotes one
+ * number and leaves the allowance implicit; UP breaks it out, and it is a
+ * constant per wing rather than a fraction of length — 130 mm on the Meru 2,
+ * whether the line is 250 mm or 4 m long.
+ *
+ * That matters more than it looks. Over a hundred-odd lines the allowance is
+ * ten to fifteen metres of material, and because it does not scale with length
+ * it lands hardest on the short top lines, where it can exceed a third of the
+ * cut length.
+ *
+ * ---------------------------------------------------------------------------
+ * Two sheet layouts, and telling them apart
+ * ---------------------------------------------------------------------------
+ * The same workbook carries per-size **totals** (one column per size, lines
+ * including risers) and per-size **components** (length, loop, cutting,
+ * material). They share a first column of line names and nothing else.
+ * Applying the component layout to a totals sheet reads three different
+ * sizes as length, loop and cutting length — arithmetic that fails on every
+ * row, which is how the confusion announced itself.
+ *
+ * The header names the layout, so it is read rather than assumed.
+ */
+export function parseUpLineSheet(text) {
+  const rows = text.split(/\r?\n/).map((l) => l.split('\t'));
+  const header = (rows[0] || []).join(' ').toLowerCase();
+  const isComponents = /cutting/.test(header);
+  const isTotals = /inklusive|including risers/.test((rows[1] || []).join(' ').toLowerCase())
+    || (!isComponents && (rows[0] || []).length > 2);
+
+  const lines = [];
+  const totals = [];
+  const sizes = isTotals
+    ? (rows[0] || []).slice(1).map((s) => (s || '').trim()).filter(Boolean)
+    : [];
+
+  for (const r of rows) {
+    const name = (r[0] || '').trim();
+    if (!name) continue;
+    const parsed = parseLineName(name);
+    if (!parsed) continue;
+
+    if (isComponents) {
+      const length = Number(r[1]);
+      const loop = Number(r[3]);
+      const cutting = Number(r[4]);
+      if (!Number.isFinite(length) || length <= 0) continue;
+      lines.push({
+        ...parsed,
+        lengthMM: length,
+        loopMM: Number.isFinite(loop) ? loop : null,
+        cuttingMM: Number.isFinite(cutting) ? cutting : null,
+        material: (r[5] || '').trim() || null,
+        colour: (r[6] || '').trim() || null,
+        // The sheet's own arithmetic, checked rather than trusted.
+        loopConsistent: Number.isFinite(loop) && Number.isFinite(cutting)
+          ? Math.abs(length + loop - cutting) < 0.5 : null,
+      });
+    } else if (isTotals) {
+      const byS = {};
+      sizes.forEach((sz, i) => {
+        const v = Number(r[i + 1]);
+        if (Number.isFinite(v) && v > 0) byS[sz] = v;
+      });
+      if (Object.keys(byS).length) totals.push({ ...parsed, totalsMM: byS });
+    }
+  }
+
+  const withLoop = lines.filter((l) => l.loopMM != null);
+  const loopValues = [...new Set(withLoop.map((l) => l.loopMM))];
+
+  return {
+    layout: isComponents ? 'components' : (isTotals ? 'totals' : 'unknown'),
+    lines,
+    totals,
+    sizes,
+    loopAllowanceMM: loopValues.length === 1 ? loopValues[0] : null,
+    loopValues,
+    // Material actually consumed, against finished length.
+    totalFinishedM: lines.reduce((a, l) => a + l.lengthMM, 0) / 1000,
+    totalCuttingM: lines.reduce((a, l) => a + (l.cuttingMM ?? l.lengthMM), 0) / 1000,
+    arithmeticHolds: withLoop.length > 0 && withLoop.every((l) => l.loopConsistent !== false),
+  };
+}
+
+/**
+ * What the loop allowance costs.
+ *
+ * Reported as a share of cut material and, more usefully, as the share of the
+ * shortest lines — because a fixed allowance is a rounding error on a riser
+ * line and a third of the material on a top line.
+ */
+export function loopAllowanceCost(sheet) {
+  const withLoop = sheet.lines.filter((l) => l.loopMM != null && l.cuttingMM != null);
+  if (!withLoop.length) return null;
+  const loopTotal = withLoop.reduce((a, l) => a + l.loopMM, 0) / 1000;
+  const cutTotal = withLoop.reduce((a, l) => a + l.cuttingMM, 0) / 1000;
+  const shares = withLoop.map((l) => l.loopMM / l.cuttingMM);
+  const shortest = withLoop.slice().sort((a, b) => a.lengthMM - b.lengthMM)[0];
+  return {
+    loopMetres: loopTotal,
+    cutMetres: cutTotal,
+    shareOfCut: loopTotal / cutTotal,
+    worstShare: Math.max(...shares),
+    worstLine: shortest.name,
+    shortestLengthMM: shortest.lengthMM,
+    count: withLoop.length,
+  };
+}
+
+/**
+ * Load carried by a line, accounting for combined rows.
+ *
+ * `2AB2` is one line carrying both the A and B rows below it. Counted as an
+ * A line it carries roughly half what it should; counted once per row it is
+ * double-counted. Neither is a naming detail — it changes what the line has
+ * to hold.
+ *
+ * Merging rows is how a cascade reduces line count without reducing anchor
+ * count, and it is why a merged line is the thickest in its level.
+ */
+export function combinedRowShare(line, rowShares) {
+  const rows = line.rows || [line.row];
+  const share = rows.reduce((a, r) => a + (rowShares[r] ?? 0), 0);
+  return {
+    rows,
+    combined: rows.length > 1,
+    share,
+    // What a single-row reading would have given, for comparison.
+    singleRowShare: rowShares[rows[0]] ?? 0,
+    understatedBy: rows.length > 1 ? share / (rowShares[rows[0]] ?? 1) : 1,
+  };
+}
+
+/** Summarise a prefix-level lineset: how many levels, and where rows merge. */
+export function summariseCascadeDepths(lines) {
+  const resolved = resolveCascadeLevels(lines.filter(Boolean));
+  const depths = [...new Set(resolved.map((l) => l.cascadeDepth).filter(Boolean))].sort();
+  const merged = resolved.filter((l) => l.combined);
+  const mergePairs = [...new Set(merged.map((l) => l.rows.join('')))].sort();
+  return {
+    levels: depths.length,
+    depths,
+    byDepth: Object.fromEntries(depths.map((d) => [d,
+      resolved.filter((l) => l.cascadeDepth === d).length])),
+    mergedLines: merged.length,
+    mergePairs,
+    // The depth at which rows first merge, which is where the cascade narrows.
+    firstMergeDepth: merged.length
+      ? Math.min(...merged.map((l) => l.cascadeDepth)) : null,
+  };
 }

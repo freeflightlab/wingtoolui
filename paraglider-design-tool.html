@@ -3166,6 +3166,40 @@ function parseLineName(name) {
     };
   }
 
+  // Advance's TAU DLS inverts the whole scheme: the level is a **prefix**,
+  // and a row may be a pair.
+  //
+  //   1A3    level 1 (at the canopy), row A, line 3
+  //   2AB2   level 2, one line serving both the A and B rows
+  //   3CD1   level 3, serving C and D
+  //   4AB1   level 4, at the riser
+  //
+  // Two things follow. A prefix level is relative — what depth 3 means
+  // depends on how many levels the wing has, so the depth is recorded and
+  // `resolveCascadeLevels` maps it to upper/middle/riser once the whole set
+  // is known. And a combined row is not a naming quirk: one line really does
+  // carry two rows' load, which is how a merged cascade reduces line count.
+  const prefixMatch = raw.match(/^(\d)([A-Z]{1,2})(\d+)$/);
+  if (prefixMatch) {
+    const depth = parseInt(prefixMatch[1], 10);
+    const letters = prefixMatch[2].split('');
+    if (!letters.every((c) => ROWS.includes(c))) return null;
+    return {
+      name: raw,
+      row: letters[0],
+      rows: letters,
+      combined: letters.length > 1,
+      // Depth 1 sits at the canopy; the deepest present is at the riser.
+      depthFromCanopy: depth,
+      level: depth === 1 ? 'upper' : `cascade-${depth}`,
+      side: null,
+      index: parseInt(prefixMatch[3], 10),
+      variant: null,
+      isBrake: letters[0] === 'K',
+      convention: 'prefix-level',
+    };
+  }
+
   const m = raw.match(/^([A-Za-z])(R|M)?(U|L)?(\d+)([a-z])?$/);
   if (!m) return null;
   const [, rawRow, levelCode, side, idx, variant] = m;
@@ -3196,6 +3230,29 @@ function parseLineName(name) {
  * Anything that is not recognisable as a line row is skipped rather than
  * guessed at, and what was skipped is reported.
  */
+/**
+ * Resolve prefix-level names to upper / middle / riser.
+ *
+ * A prefix level is relative: `3AB1` is a riser line on a three-level wing
+ * and a middle line on a four-level one. The mapping therefore cannot be made
+ * while parsing a single name — it needs the whole set, which is why parsing
+ * leaves `depthFromCanopy` and a provisional `cascade-N` level behind.
+ */
+function resolveCascadeLevels(lines) {
+  const depths = lines.map((l) => (l ? l.depthFromCanopy : null)).filter((d) => d != null);
+  if (!depths.length) return lines;
+  const maxDepth = Math.max(...depths);
+  return lines.map((l) => {
+    if (!l || l.depthFromCanopy == null) return l;
+    const d = l.depthFromCanopy;
+    return {
+      ...l,
+      level: d === 1 ? 'upper' : (d === maxDepth ? 'riser' : 'middle'),
+      cascadeDepth: d,
+      cascadeLevels: maxDepth,
+    };
+  });
+}
 function parseLineTable(text) {
   // Decide the delimiter once for the whole file rather than accepting either
   // at every character. These tables routinely carry several line names in one
@@ -4515,6 +4572,49 @@ function loopAllowanceCost(sheet) {
     worstLine: shortest.name,
     shortestLengthMM: shortest.lengthMM,
     count: withLoop.length,
+  };
+}
+
+/**
+ * Load carried by a line, accounting for combined rows.
+ *
+ * `2AB2` is one line carrying both the A and B rows below it. Counted as an
+ * A line it carries roughly half what it should; counted once per row it is
+ * double-counted. Neither is a naming detail — it changes what the line has
+ * to hold.
+ *
+ * Merging rows is how a cascade reduces line count without reducing anchor
+ * count, and it is why a merged line is the thickest in its level.
+ */
+function combinedRowShare(line, rowShares) {
+  const rows = line.rows || [line.row];
+  const share = rows.reduce((a, r) => a + (rowShares[r] ?? 0), 0);
+  return {
+    rows,
+    combined: rows.length > 1,
+    share,
+    // What a single-row reading would have given, for comparison.
+    singleRowShare: rowShares[rows[0]] ?? 0,
+    understatedBy: rows.length > 1 ? share / (rowShares[rows[0]] ?? 1) : 1,
+  };
+}
+
+/** Summarise a prefix-level lineset: how many levels, and where rows merge. */
+function summariseCascadeDepths(lines) {
+  const resolved = resolveCascadeLevels(lines.filter(Boolean));
+  const depths = [...new Set(resolved.map((l) => l.cascadeDepth).filter(Boolean))].sort();
+  const merged = resolved.filter((l) => l.combined);
+  const mergePairs = [...new Set(merged.map((l) => l.rows.join('')))].sort();
+  return {
+    levels: depths.length,
+    depths,
+    byDepth: Object.fromEntries(depths.map((d) => [d,
+      resolved.filter((l) => l.cascadeDepth === d).length])),
+    mergedLines: merged.length,
+    mergePairs,
+    // The depth at which rows first merge, which is where the cascade narrows.
+    firstMergeDepth: merged.length
+      ? Math.min(...merged.map((l) => l.cascadeDepth)) : null,
   };
 }
 

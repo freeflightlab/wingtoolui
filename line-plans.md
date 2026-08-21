@@ -48,6 +48,51 @@ Consistent across all three manufacturers' diagrams:
 | `R` | riser level — attaches to the riser maillon |
 | `MU`/`ML`, `RU`/`RL` | a level split upper/lower, e.g. a brake through a pulley |
 | index | numbered from the wing centre outward |
+
+UP Paragliders uses a **fourth level** and names two of them rather than
+suffixing:
+
+| form | level | example |
+| --- | --- | --- |
+| lowercase | top line, to the canopy | `a1` |
+| uppercase | middle | `A1` |
+| roman numeral | upper-main | `AI`, `CVI` |
+| `main` + index | riser | `Amain1`, `BRmain` |
+
+Roman numerals have to be read before digits: `AI` and `A1` are different
+lines on the same wing. And two-letter rows need matching explicitly — a
+greedy `[A-Za-z]{1,2}` takes `AI` out of `AIII`, fails the row check and
+returns, silently discarding every numeral above II.
+
+### Advance inverts it: the level is a prefix
+
+The TAU DLS puts the level first and allows a row to be a **pair**:
+
+| name | level | rows | reading |
+| --- | --- | --- | --- |
+| `1A3` | 1, at the canopy | A | third A line |
+| `2AB2` | 2 | A **and** B | one line carrying both rows |
+| `3CD1` | 3 | C **and** D | one line carrying both |
+| `4AB1` | 4, at the riser | A and B | |
+
+Two consequences.
+
+**A prefix level is relative.** `3CD1` is a *riser* line on a three-level wing
+and a *middle* line on a four-level one, so it cannot be resolved from the name
+alone. Parsing records `depthFromCanopy`, and `resolveCascadeLevels` maps it
+once the whole set is known.
+
+**A combined row is not a naming quirk.** `2AB2` carries the A and B rows
+together — **70% of the load** against the 35% a single-row reading gives.
+Undersizing by a factor of two is the kind of error a naming convention should
+not be able to cause, so `combinedRowShare` sums the rows a line actually
+serves. Merging is how a cascade cuts line count without cutting anchor count,
+and it is why a merged line is the thickest at its level.
+
+![Seven naming conventions decoded by one grammar](img/naming-conventions.svg)
+
+*The same cascade, canopy to riser, as five manufacturers write it. Colour is
+the level the parser resolves, not the text.*
 | `a`/`b` | a further split of one line (Lyght A-row) |
 
 ---

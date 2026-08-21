@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 782-test validation suite and a benchmark with regression budgets
+- [x] 805-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -201,8 +201,12 @@ material published after the handbook:
       directly since xlrd is unavailable. Five wings, 29 sheets.
 - [x] **Loop allowance in cut lengths** — UP is the only maker to state it,
       and it is 13% of all line material and 37% of the shortest line.
-- [ ] **TAU DLS naming** — a further convention, with the level as a prefix
-      (`1A3`, `2AB2`) and combined rows (`AB`, `CD`) where one line serves two.
+- [x] **Prefix-level naming and combined rows** *(Advance TAU DLS)* — the
+      level as a prefix, resolved relative to the wing's cascade depth, and
+      merged rows whose load is the sum of the rows they serve. A single-row
+      reading of `2AB2` understates it by 2x.
+- [ ] **Merged rows in the line plan generator** — parsed and their load
+      accounted for, but `buildLinePlan` still generates one line per row.
 - [ ] **What separates the Alpina 5 from the Allegro light** — 10% apart in
       line per metre of span at near-identical aspect ratio. Riser count is no
       longer a credible explanation, and nothing else has been identified.
