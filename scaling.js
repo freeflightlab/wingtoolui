@@ -715,6 +715,7 @@ export const LINE_LENGTH_PER_SPAN = {
   intercept: 50.72,
   r2: 0.951,
   worstFamilyErrorPct: 6.2,
+  worstOutOfSampleFamilyErrorPct: 0.8,   // Skywalk SAGE, five sizes
   sampleFamilies: 5,
   sampleManufacturers: 3,
   arRange: [4.56, 6.90],
@@ -722,9 +723,12 @@ export const LINE_LENGTH_PER_SPAN = {
   // area-scaling family the error reaches 16%.
   assumesSpanScaling: true,
   worstOutOfSampleErrorPct: 16.2,
-  // Measured difference between a two-liner and a three-liner at matched
-  // aspect ratio and span. One pair, so treat it as indicative.
-  twoLinerFactor: 0.90,
+  // Refuted out of sample: see the note above. Left at 1 so it is inert, with
+  // the measured value recorded beside it.
+  twoLinerFactor: 1.0,
+  twoLinerFactorRefuted: 0.90,
+  twoLinerEvidence: 'Alpina 5 vs Allegro light suggested 0.90; Skywalk SAGE, '
+    + 'a two-liner at AR 6.4, matches the uncorrected law and rejects it.',
 };
 
 /** Line metres per metre of span, for an aspect ratio. */
@@ -788,4 +792,154 @@ export function lineLengthExponent(sizes) {
     regime: exponent < 1.5 ? 'span' : 'area',
     sizes: n,
   };
+}
+
+/* ------------------------------------------------- scaling a lineset -- */
+
+/**
+ * Ozone's own scaling rule, stated on the Enzo 3 CCC check sheet:
+ *
+ *   "Reference Line Length of Self-Certified sizes must stay within +/-20mm
+ *    of the scaled XXS Reference Line Length. Risers are not scaled."
+ *
+ * Two claims, and both settle questions this project had left open.
+ *
+ * **Lines scale proportionally.** Not affinely — multiply every reference
+ * length by the size's scale ratio and it lands on that size's reference
+ * within 20 mm. On their own numbers the worst deviation is 8.8 mm and the
+ * mean is 2.7 mm.
+ *
+ * **Risers do not scale.** Which explains the intercept in the affine
+ * line-length law fitted earlier. Skywalk quotes "middle line length *without*
+ * risers", and that quantity scales proportionally to within 6 mm across five
+ * sizes — exponent 0.994. Quote the same length *including* a riser that does
+ * not scale, and the relationship looks affine with an intercept roughly the
+ * size of the riser. The intercept was never a property of the lines.
+ *
+ * PHI's family fits a non-scaling part of about 895 mm against a published
+ * riser of 570-600 mm, so the riser explains most of its intercept but not
+ * all — and their riser steps between sizes rather than being constant, which
+ * accounts for some of the rest.
+ */
+export function scalingCheck({
+  referenceLengths, scaledLengths, scaleRatio, toleranceMM = 20,
+}) {
+  const rows = [];
+  const n = Math.min(referenceLengths.length, scaledLengths.length);
+  for (let i = 0; i < n; i++) {
+    const ref = referenceLengths[i];
+    const actual = scaledLengths[i];
+    if (ref == null || actual == null) continue;
+    const predicted = ref * scaleRatio;
+    rows.push({
+      index: i + 1,
+      referenceMM: ref,
+      predictedMM: predicted,
+      actualMM: actual,
+      deviationMM: predicted - actual,
+      withinTolerance: Math.abs(predicted - actual) <= toleranceMM,
+    });
+  }
+  const devs = rows.map((r) => Math.abs(r.deviationMM));
+  return {
+    rows,
+    scaleRatio,
+    toleranceMM,
+    worstMM: devs.length ? Math.max(...devs) : 0,
+    meanMM: devs.length ? devs.reduce((a, b) => a + b, 0) / devs.length : 0,
+    passes: rows.every((r) => r.withinTolerance),
+    failures: rows.filter((r) => !r.withinTolerance),
+  };
+}
+
+/**
+ * Split a quoted line length into the part that scales and the part that does
+ * not.
+ *
+ * A maker who quotes line length including risers produces a set of numbers
+ * that look affine in span. Fitting a fixed part and a proportional part
+ * recovers the non-scaling component, which should come out near the riser
+ * length — and does, closely for a family with a constant riser and less well
+ * for one whose riser steps between sizes.
+ */
+export function splitFixedAndScaling(spans, lengths) {
+  let best = null;
+  for (let fixed = 0; fixed <= 1.5; fixed += 0.005) {
+    const k = (lengths[0] - fixed) / spans[0];
+    if (k <= 0) continue;
+    let worst = 0;
+    for (let i = 0; i < spans.length; i++) {
+      worst = Math.max(worst, Math.abs((fixed + k * spans[i]) - lengths[i]));
+    }
+    if (!best || worst < best.worstM) best = { fixedM: fixed, perSpan: k, worstM: worst };
+  }
+  return best;
+}
+
+/**
+ * Residuals of the line-length law, by family.
+ *
+ * The law explains most of the variation between families, and what is left
+ * over is where the remaining questions live. Two of them were left open:
+ * why the Alpina 5 and the Allegro light differ by 10% at near-identical
+ * aspect ratio, and whether riser count matters at all after the SAGE
+ * refuted the 10% two-liner factor.
+ *
+ * Residuals are reported rather than the raw quantity because the raw
+ * quantity is dominated by aspect ratio, which is already accounted for. A
+ * 21.0 against an 18.9 looks like a large difference until the law says one
+ * wing should be at 19.85 and the other at 19.64.
+ */
+export function lineLengthResiduals(families) {
+  const rows = [];
+  for (const [name, sizes] of Object.entries(families)) {
+    const withLines = sizes.filter((s) => s.totalLineLength && s.flatSpan);
+    if (!withLines.length) continue;
+    const ar = withLines[0].flatAR ?? (withLines[0].flatSpan ** 2) / withLines[0].flatArea;
+    const actual = withLines.reduce((a, s) => a + s.totalLineLength / s.flatSpan, 0)
+      / withLines.length;
+    const predicted = LINE_LENGTH_PER_SPAN.slope * ar + LINE_LENGTH_PER_SPAN.intercept;
+    rows.push({
+      family: name,
+      aspectRatio: ar,
+      cells: withLines[0].cells ?? null,
+      cellsPerMetre: withLines[0].cells
+        ? withLines.reduce((a, s) => a + s.cells / s.flatSpan, 0) / withLines.length : null,
+      actualPerSpan: actual,
+      predictedPerSpan: predicted,
+      residualPct: ((actual / predicted) - 1) * 100,
+    });
+  }
+  rows.sort((a, b) => a.aspectRatio - b.aspectRatio);
+
+  const res = rows.map((r) => Math.abs(r.residualPct));
+  return {
+    rows,
+    worstPct: res.length ? Math.max(...res) : 0,
+    meanAbsPct: res.length ? res.reduce((a, b) => a + b, 0) / res.length : 0,
+    outlier: rows.length
+      ? rows.reduce((m, r) => (Math.abs(r.residualPct) > Math.abs(m.residualPct) ? r : m), rows[0])
+      : null,
+  };
+}
+
+/** Simple Pearson correlation, and a partial correlation controlling for z. */
+export function correlate(x, y) {
+  const n = x.length;
+  if (n < 3) return null;
+  const mx = x.reduce((a, b) => a + b, 0) / n;
+  const my = y.reduce((a, b) => a + b, 0) / n;
+  const sxy = x.reduce((a, v, i) => a + (v - mx) * (y[i] - my), 0);
+  const sxx = x.reduce((a, v) => a + (v - mx) ** 2, 0);
+  const syy = y.reduce((a, v) => a + (v - my) ** 2, 0);
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : null;
+}
+
+export function partialCorrelate(x, y, z) {
+  const rxy = correlate(x, y);
+  const rxz = correlate(x, z);
+  const ryz = correlate(y, z);
+  if (rxy == null || rxz == null || ryz == null) return null;
+  const denom = Math.sqrt((1 - rxz ** 2) * (1 - ryz ** 2));
+  return denom ? (rxy - rxz * ryz) / denom : null;
 }

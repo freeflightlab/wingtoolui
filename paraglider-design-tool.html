@@ -6398,6 +6398,157 @@ function buildAllRibHoles(wing, airfoil, { rules = {}, ribCloth = 0.040 } = {}) 
   };
 }
 
+/* ------------------------------------------------------------ cross-ports -- */
+
+/**
+ * Cross-ports.
+ *
+ * Lightening holes are sized by what can be removed. Cross-ports are sized by
+ * what has to pass through them, which makes them a different problem wearing
+ * the same clothes.
+ *
+ * A paraglider is inflated through the cell openings at the nose, but only
+ * some ribs face an opening — the closed ribs behind a diagonal, and the ribs
+ * of a closed cell, are fed entirely through their neighbours. If the path
+ * between cells is too restricted the wing inflates unevenly on launch and,
+ * worse, re-inflates slowly after a collapse, which is when it matters.
+ *
+ * ---------------------------------------------------------------------------
+ * Sizing them
+ * ---------------------------------------------------------------------------
+ * The requirement is a flow area, not a fraction of the rib. Treating a
+ * cross-port as an orifice, the volume that has to move through it during
+ * re-inflation is the cell volume it feeds, and the time available is set by
+ * how quickly a wing must recover. So
+ *
+ *     A_required = V_cell / (Cd * v * t)
+ *
+ * with `Cd` an orifice coefficient near 0.62 for a sharp-edged hole in
+ * fabric, `v` the pressure-driven flow speed, and `t` the target time.
+ *
+ * The flow speed comes from the pressure difference the wing generates:
+ * `v = sqrt(2 dp / rho)`, and `dp` at flying speed is a fraction of dynamic
+ * pressure. This is a first-order estimate and stated as one — it ignores
+ * duct losses, the fact that flow crosses several ribs in series, and the
+ * changing volume as the cell fills.
+ *
+ * What it is good for is the comparison the designer actually needs: whether
+ * the ports drawn are the right order of size, and how the requirement moves
+ * with cell volume and target recovery time.
+ */
+const DEFAULT_CROSSPORT_RULES = {
+  dischargeCoefficient: 0.62,   // sharp-edged orifice in fabric
+  targetInflationS: 1.5,        // time allowed to fill one cell
+  pressureFraction: 0.85,       // internal pressure as a fraction of dynamic
+  // Placement, in the same terms as the lightening holes.
+  fromLE: 0.18,
+  toTE: 0.70,
+  surfaceMargin: 0.30,          // more conservative than a lightening hole
+  anchorClearance: 0.045,
+  minCount: 1,
+  maxCount: 3,
+};
+
+/**
+ * Required cross-port area for one cell.
+ *
+ * @param {number} cellVolumeM3
+ * @param {object} o  speedMS, rho, and the rules above
+ */
+function crossPortRequirement(cellVolumeM3, {
+  speedMS = 11,
+  rho = 1.225,
+  rules = {},
+} = {}) {
+  const R = { ...DEFAULT_CROSSPORT_RULES, ...rules };
+  const dynamic = 0.5 * rho * speedMS * speedMS;
+  const dp = dynamic * R.pressureFraction;
+  const flowMS = Math.sqrt((2 * dp) / rho);
+  const areaM2 = cellVolumeM3 / (R.dischargeCoefficient * flowMS * R.targetInflationS);
+  return {
+    cellVolumeM3,
+    pressurePa: dp,
+    flowMS,
+    requiredAreaM2: areaM2,
+    requiredAreaCM2: areaM2 * 1e4,
+    targetInflationS: R.targetInflationS,
+    note: 'first-order orifice estimate; ignores duct losses and ribs in series',
+  };
+}
+
+/** Volume of the cell between two ribs, by prismatic approximation. */
+function cellVolume(ribA, ribB) {
+  const areaOf = (rib) => {
+    const prof = ribProfile(rib);
+    return profileArea(prof) * rib.chord * rib.chord;
+  };
+  const span = Math.abs(ribB.station - ribA.station);
+  return ((areaOf(ribA) + areaOf(ribB)) / 2) * span;
+}
+
+/**
+ * Place cross-ports in a rib, sized to feed the cells either side of it.
+ *
+ * Placed in the same space the lightening holes use and subject to the same
+ * constraints, because they are cut from the same fabric — but sized from the
+ * flow requirement rather than from what is spare. Where the requirement
+ * exceeds what the available space can hold, that is reported rather than
+ * quietly cutting an undersized port.
+ */
+function buildCrossPorts(rib, neighbour, airfoil, {
+  speedMS = 11, rho = 1.225, rules = {},
+} = {}) {
+  const R = { ...DEFAULT_CROSSPORT_RULES, ...rules };
+  const volume = neighbour ? cellVolume(rib, neighbour) : 0;
+  const need = crossPortRequirement(volume, { speedMS, rho, rules: R });
+
+  // Reuse the lightening-hole placement, with the tighter cross-port rules.
+  const slots = buildRibHoles(rib, airfoil, {
+    fromLE: R.fromLE,
+    toTE: R.toTE,
+    surfaceMargin: R.surfaceMargin,
+    anchorClearance: R.anchorClearance,
+    webWidth: DEFAULT_HOLE_RULES.webWidth,
+    minWidth: DEFAULT_HOLE_RULES.minWidth,
+  });
+
+  // Take the largest available openings, up to the count allowed, and scale
+  // them to meet the requirement rather than filling the space.
+  const candidates = slots.holes.slice()
+    .sort((a, b) => b.areaM2 - a.areaM2)
+    .slice(0, R.maxCount);
+  const available = candidates.reduce((s, h) => s + h.areaM2, 0);
+  const scale = available > 0 ? Math.min(1, need.requiredAreaM2 / available) : 0;
+
+  const ports = candidates.map((h) => ({
+    ...h,
+    // Shrink about the hole's own centre, so a scaled port stays inside the
+    // margins the placement respected.
+    outline: scalePolygon(h.outline, Math.sqrt(scale)),
+    areaM2: h.areaM2 * scale,
+    scaledFrom: h.areaM2,
+  }));
+
+  const provided = ports.reduce((s, h) => s + h.areaM2, 0);
+  return {
+    ports,
+    requirement: need,
+    availableAreaM2: available,
+    providedAreaM2: provided,
+    // The check that matters: can the space hold what the flow needs?
+    sufficient: available >= need.requiredAreaM2 - 1e-12,
+    shortfallM2: Math.max(0, need.requiredAreaM2 - available),
+    utilisation: available > 0 ? provided / available : 0,
+    cellVolumeM3: volume,
+  };
+}
+
+function scalePolygon(pts, k) {
+  const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+  return pts.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
+}
+
 /* ===== bom.js ===== */
 /* bom.js — bill of materials.
  *
@@ -8499,6 +8650,73 @@ function splitFixedAndScaling(spans, lengths) {
   return best;
 }
 
+/**
+ * Residuals of the line-length law, by family.
+ *
+ * The law explains most of the variation between families, and what is left
+ * over is where the remaining questions live. Two of them were left open:
+ * why the Alpina 5 and the Allegro light differ by 10% at near-identical
+ * aspect ratio, and whether riser count matters at all after the SAGE
+ * refuted the 10% two-liner factor.
+ *
+ * Residuals are reported rather than the raw quantity because the raw
+ * quantity is dominated by aspect ratio, which is already accounted for. A
+ * 21.0 against an 18.9 looks like a large difference until the law says one
+ * wing should be at 19.85 and the other at 19.64.
+ */
+function lineLengthResiduals(families) {
+  const rows = [];
+  for (const [name, sizes] of Object.entries(families)) {
+    const withLines = sizes.filter((s) => s.totalLineLength && s.flatSpan);
+    if (!withLines.length) continue;
+    const ar = withLines[0].flatAR ?? (withLines[0].flatSpan ** 2) / withLines[0].flatArea;
+    const actual = withLines.reduce((a, s) => a + s.totalLineLength / s.flatSpan, 0)
+      / withLines.length;
+    const predicted = LINE_LENGTH_PER_SPAN.slope * ar + LINE_LENGTH_PER_SPAN.intercept;
+    rows.push({
+      family: name,
+      aspectRatio: ar,
+      cells: withLines[0].cells ?? null,
+      cellsPerMetre: withLines[0].cells
+        ? withLines.reduce((a, s) => a + s.cells / s.flatSpan, 0) / withLines.length : null,
+      actualPerSpan: actual,
+      predictedPerSpan: predicted,
+      residualPct: ((actual / predicted) - 1) * 100,
+    });
+  }
+  rows.sort((a, b) => a.aspectRatio - b.aspectRatio);
+
+  const res = rows.map((r) => Math.abs(r.residualPct));
+  return {
+    rows,
+    worstPct: res.length ? Math.max(...res) : 0,
+    meanAbsPct: res.length ? res.reduce((a, b) => a + b, 0) / res.length : 0,
+    outlier: rows.length
+      ? rows.reduce((m, r) => (Math.abs(r.residualPct) > Math.abs(m.residualPct) ? r : m), rows[0])
+      : null,
+  };
+}
+
+/** Simple Pearson correlation, and a partial correlation controlling for z. */
+function correlate(x, y) {
+  const n = x.length;
+  if (n < 3) return null;
+  const mx = x.reduce((a, b) => a + b, 0) / n;
+  const my = y.reduce((a, b) => a + b, 0) / n;
+  const sxy = x.reduce((a, v, i) => a + (v - mx) * (y[i] - my), 0);
+  const sxx = x.reduce((a, v) => a + (v - mx) ** 2, 0);
+  const syy = y.reduce((a, v) => a + (v - my) ** 2, 0);
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : null;
+}
+function partialCorrelate(x, y, z) {
+  const rxy = correlate(x, y);
+  const rxz = correlate(x, z);
+  const ryz = correlate(y, z);
+  if (rxy == null || rxz == null || ryz == null) return null;
+  const denom = Math.sqrt((1 - rxz ** 2) * (1 - ryz ** 2));
+  return denom ? (rxy - rxz * ryz) / denom : null;
+}
+
 /* ===== export.js ===== */
 /* export.js — DXF and SVG output.
  *
@@ -9887,7 +10105,7 @@ const S = {
   cz: 0.90, cx0a: 0.009, cm: -0.042, rho: 1.11, oswald: 0.90,
   cxPilot: 0.015, cxLines: 0.020, legacy: false,
   // panels
-  ribIndex: 0, tab: 'wing', ribHoles: true,
+  ribIndex: 0, tab: 'wing', ribHoles: true, crossPorts: false,
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
   mergeRows: 'none',
   ovalAmount: 6.0, seamAllowance: 10, pointsPerSurface: 50,
@@ -10257,6 +10475,7 @@ function buildControls() {
 
   const N = clear('g-panels');
   checkField(N, 'ribHoles', 'Rib lightening holes');
+  checkField(N, 'crossPorts', 'Cross-ports');
   checkField(N, 'vribs', 'Diagonal ribs');
   if (S.vribs) {
     selectField(N, 'vribRows', 'Diagonals on rows', [
@@ -11011,6 +11230,20 @@ function drawRib() {
     if (set.holes.length) {
       c.text(`${(set.removedFraction * 100).toFixed(0)}% removed`,
         [rib.chord * 0.5, -rib.chord * 0.10], '#5fd97a', 9, 'middle');
+    }
+  }
+
+  // Cross-ports, sized by the flow the neighbouring cell needs rather than
+  // by what is spare, so they are drawn separately from lightening holes.
+  if (S.crossPorts) {
+    const nb = M.wing.ribs[Math.min(rib.index + 1, M.wing.ribs.length - 1)];
+    const cp = buildCrossPorts(rib, nb === rib ? null : nb, M.airfoil,
+      { speedMS: M.balance ? M.balance.speedMS : 11 });
+    for (const p of cp.ports) c.path(p.outline, '#e8c547', 1.3, { close: true });
+    if (cp.ports.length) {
+      c.text(`${cp.requirement.requiredAreaCM2.toFixed(0)} cm² needed`
+        + (cp.sufficient ? '' : '  — SHORT'),
+      [rib.chord * 0.5, -rib.chord * 0.14], cp.sufficient ? '#e8c547' : '#ff5e5e', 9, 'middle');
     }
   }
 

@@ -257,3 +257,154 @@ export function buildAllRibHoles(wing, airfoil, { rules = {}, ribCloth = 0.040 }
     ribClothKgPerM2: ribCloth,
   };
 }
+
+/* ------------------------------------------------------------ cross-ports -- */
+
+/**
+ * Cross-ports.
+ *
+ * Lightening holes are sized by what can be removed. Cross-ports are sized by
+ * what has to pass through them, which makes them a different problem wearing
+ * the same clothes.
+ *
+ * A paraglider is inflated through the cell openings at the nose, but only
+ * some ribs face an opening — the closed ribs behind a diagonal, and the ribs
+ * of a closed cell, are fed entirely through their neighbours. If the path
+ * between cells is too restricted the wing inflates unevenly on launch and,
+ * worse, re-inflates slowly after a collapse, which is when it matters.
+ *
+ * ---------------------------------------------------------------------------
+ * Sizing them
+ * ---------------------------------------------------------------------------
+ * The requirement is a flow area, not a fraction of the rib. Treating a
+ * cross-port as an orifice, the volume that has to move through it during
+ * re-inflation is the cell volume it feeds, and the time available is set by
+ * how quickly a wing must recover. So
+ *
+ *     A_required = V_cell / (Cd * v * t)
+ *
+ * with `Cd` an orifice coefficient near 0.62 for a sharp-edged hole in
+ * fabric, `v` the pressure-driven flow speed, and `t` the target time.
+ *
+ * The flow speed comes from the pressure difference the wing generates:
+ * `v = sqrt(2 dp / rho)`, and `dp` at flying speed is a fraction of dynamic
+ * pressure. This is a first-order estimate and stated as one — it ignores
+ * duct losses, the fact that flow crosses several ribs in series, and the
+ * changing volume as the cell fills.
+ *
+ * What it is good for is the comparison the designer actually needs: whether
+ * the ports drawn are the right order of size, and how the requirement moves
+ * with cell volume and target recovery time.
+ */
+export const DEFAULT_CROSSPORT_RULES = {
+  dischargeCoefficient: 0.62,   // sharp-edged orifice in fabric
+  targetInflationS: 1.5,        // time allowed to fill one cell
+  pressureFraction: 0.85,       // internal pressure as a fraction of dynamic
+  // Placement, in the same terms as the lightening holes.
+  fromLE: 0.18,
+  toTE: 0.70,
+  surfaceMargin: 0.30,          // more conservative than a lightening hole
+  anchorClearance: 0.045,
+  minCount: 1,
+  maxCount: 3,
+};
+
+/**
+ * Required cross-port area for one cell.
+ *
+ * @param {number} cellVolumeM3
+ * @param {object} o  speedMS, rho, and the rules above
+ */
+export function crossPortRequirement(cellVolumeM3, {
+  speedMS = 11,
+  rho = 1.225,
+  rules = {},
+} = {}) {
+  const R = { ...DEFAULT_CROSSPORT_RULES, ...rules };
+  const dynamic = 0.5 * rho * speedMS * speedMS;
+  const dp = dynamic * R.pressureFraction;
+  const flowMS = Math.sqrt((2 * dp) / rho);
+  const areaM2 = cellVolumeM3 / (R.dischargeCoefficient * flowMS * R.targetInflationS);
+  return {
+    cellVolumeM3,
+    pressurePa: dp,
+    flowMS,
+    requiredAreaM2: areaM2,
+    requiredAreaCM2: areaM2 * 1e4,
+    targetInflationS: R.targetInflationS,
+    note: 'first-order orifice estimate; ignores duct losses and ribs in series',
+  };
+}
+
+/** Volume of the cell between two ribs, by prismatic approximation. */
+export function cellVolume(ribA, ribB) {
+  const areaOf = (rib) => {
+    const prof = ribProfile(rib);
+    return profileArea(prof) * rib.chord * rib.chord;
+  };
+  const span = Math.abs(ribB.station - ribA.station);
+  return ((areaOf(ribA) + areaOf(ribB)) / 2) * span;
+}
+
+/**
+ * Place cross-ports in a rib, sized to feed the cells either side of it.
+ *
+ * Placed in the same space the lightening holes use and subject to the same
+ * constraints, because they are cut from the same fabric — but sized from the
+ * flow requirement rather than from what is spare. Where the requirement
+ * exceeds what the available space can hold, that is reported rather than
+ * quietly cutting an undersized port.
+ */
+export function buildCrossPorts(rib, neighbour, airfoil, {
+  speedMS = 11, rho = 1.225, rules = {},
+} = {}) {
+  const R = { ...DEFAULT_CROSSPORT_RULES, ...rules };
+  const volume = neighbour ? cellVolume(rib, neighbour) : 0;
+  const need = crossPortRequirement(volume, { speedMS, rho, rules: R });
+
+  // Reuse the lightening-hole placement, with the tighter cross-port rules.
+  const slots = buildRibHoles(rib, airfoil, {
+    fromLE: R.fromLE,
+    toTE: R.toTE,
+    surfaceMargin: R.surfaceMargin,
+    anchorClearance: R.anchorClearance,
+    webWidth: DEFAULT_HOLE_RULES.webWidth,
+    minWidth: DEFAULT_HOLE_RULES.minWidth,
+  });
+
+  // Take the largest available openings, up to the count allowed, and scale
+  // them to meet the requirement rather than filling the space.
+  const candidates = slots.holes.slice()
+    .sort((a, b) => b.areaM2 - a.areaM2)
+    .slice(0, R.maxCount);
+  const available = candidates.reduce((s, h) => s + h.areaM2, 0);
+  const scale = available > 0 ? Math.min(1, need.requiredAreaM2 / available) : 0;
+
+  const ports = candidates.map((h) => ({
+    ...h,
+    // Shrink about the hole's own centre, so a scaled port stays inside the
+    // margins the placement respected.
+    outline: scalePolygon(h.outline, Math.sqrt(scale)),
+    areaM2: h.areaM2 * scale,
+    scaledFrom: h.areaM2,
+  }));
+
+  const provided = ports.reduce((s, h) => s + h.areaM2, 0);
+  return {
+    ports,
+    requirement: need,
+    availableAreaM2: available,
+    providedAreaM2: provided,
+    // The check that matters: can the space hold what the flow needs?
+    sufficient: available >= need.requiredAreaM2 - 1e-12,
+    shortfallM2: Math.max(0, need.requiredAreaM2 - available),
+    utilisation: available > 0 ? provided / available : 0,
+    cellVolumeM3: volume,
+  };
+}
+
+function scalePolygon(pts, k) {
+  const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+  return pts.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
+}

@@ -79,7 +79,42 @@ one for a wing that has none.
 
 ---
 
-## 3. Not covered
+## 3. Cross-ports
+
+A lightening hole is sized by what can be removed. **A cross-port is sized by
+what has to pass through it**, which makes it a different problem wearing the
+same clothes.
+
+Only some ribs face a cell opening; the closed ribs behind a diagonal are fed
+entirely through their neighbours. If that path is too restricted the wing
+inflates unevenly on launch and re-inflates slowly after a collapse — which is
+when it matters.
+
+Treating the port as an orifice:
+
+```
+A_required = V_cell / (Cd · v · t)        v = sqrt(2·dp/rho)
+```
+
+For the test wing's root cell — 0.28 m³, 63 Pa internal, 10.1 m/s flow — that
+is **293 cm² to fill in 1.5 s**. The tip cell needs 3 cm².
+
+The relationships are what the estimate is for, and each is asserted: halving
+the target time doubles the area, twice the volume needs twice the area, and
+flying faster needs *less* because pressure drives the flow.
+
+**An unmeetable requirement is reported, not met.** Ask for 0.02 s and the
+space cannot hold it; the tool cuts the largest ports the margins allow and
+says how much it is short, rather than cutting an undersized port and calling
+it done.
+
+This is a first-order estimate and says so: it ignores duct losses, the fact
+that flow crosses several ribs in series, and the changing volume as a cell
+fills.
+
+---
+
+## 4. Not covered
 
 - **Reinforcement layout.** Mylar at the intakes, Dacron at the anchor tabs,
   seam tapes. All real mass and all uncounted.

@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 890-test validation suite and a benchmark with regression budgets
+- [x] 924-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -212,9 +212,16 @@ material published after the handbook:
 - [ ] **Trimming a merged cascade** — merging removes the independent
       adjustment of the rows it joins, which is a real handling cost the tool
       does not represent.
-- [ ] **What separates the Alpina 5 from the Allegro light** — 10% apart in
-      line per metre of span at near-identical aspect ratio. Riser count is no
-      longer a credible explanation, and nothing else has been identified.
+- [x] **Residuals of the line-length law**, computed across all seven
+      families. Riser count is worth about 2 points, not the 10 once
+      proposed; cell count pushes in the right direction at r=0.2 but
+      explains little.
+- [ ] **What separates the Alpina 5 from the Allegro light** — still 9.7
+      residual points apart at aspect ratios within 0.04. Neither riser count
+      nor cell count accounts for it.
+- [ ] **Why BGD is the outlier on two counts** — the largest residual
+      (+10.2%) and the only family scaling its lineset with area rather than
+      span. Two anomalies, one manufacturer, no explanation.
 - [ ] **Line count as a scaling parameter** — the total-line-length slope
       tracks how many lines a wing carries (258 pieces on the Ultralite 5
       against 224 on the Geo 7). Normalising by piece count may recover a
@@ -313,8 +320,9 @@ Turning geometry into something a person can actually sew.
 - [x] **Rib internals** — lightening holes placed into the space left after
       surface margins, nose band, anchor load paths and webs are subtracted,
       with the rules verified independently. See `docs/construction.md`.
-- [ ] **Cross-ports** — pressure equalisation between cells, distinct from
-      lightening holes and subject to different rules.
+- [x] **Cross-ports** — sized by the flow a cell needs rather than by what is
+      spare, with an unmeetable requirement reported instead of met by an
+      undersized port. See `docs/construction.md`.
 - [x] **Bill of materials** — fabric by roll rather than by area, line by
       cut length rather than finished, hardware counted from the plan, and
       what is missing reported rather than treated as zero.
