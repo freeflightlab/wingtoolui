@@ -7477,6 +7477,88 @@ function lineLengthExponent(sizes) {
   };
 }
 
+/* ------------------------------------------------- scaling a lineset -- */
+
+/**
+ * Ozone's own scaling rule, stated on the Enzo 3 CCC check sheet:
+ *
+ *   "Reference Line Length of Self-Certified sizes must stay within +/-20mm
+ *    of the scaled XXS Reference Line Length. Risers are not scaled."
+ *
+ * Two claims, and both settle questions this project had left open.
+ *
+ * **Lines scale proportionally.** Not affinely — multiply every reference
+ * length by the size's scale ratio and it lands on that size's reference
+ * within 20 mm. On their own numbers the worst deviation is 8.8 mm and the
+ * mean is 2.7 mm.
+ *
+ * **Risers do not scale.** Which explains the intercept in the affine
+ * line-length law fitted earlier. Skywalk quotes "middle line length *without*
+ * risers", and that quantity scales proportionally to within 6 mm across five
+ * sizes — exponent 0.994. Quote the same length *including* a riser that does
+ * not scale, and the relationship looks affine with an intercept roughly the
+ * size of the riser. The intercept was never a property of the lines.
+ *
+ * PHI's family fits a non-scaling part of about 895 mm against a published
+ * riser of 570-600 mm, so the riser explains most of its intercept but not
+ * all — and their riser steps between sizes rather than being constant, which
+ * accounts for some of the rest.
+ */
+function scalingCheck({
+  referenceLengths, scaledLengths, scaleRatio, toleranceMM = 20,
+}) {
+  const rows = [];
+  const n = Math.min(referenceLengths.length, scaledLengths.length);
+  for (let i = 0; i < n; i++) {
+    const ref = referenceLengths[i];
+    const actual = scaledLengths[i];
+    if (ref == null || actual == null) continue;
+    const predicted = ref * scaleRatio;
+    rows.push({
+      index: i + 1,
+      referenceMM: ref,
+      predictedMM: predicted,
+      actualMM: actual,
+      deviationMM: predicted - actual,
+      withinTolerance: Math.abs(predicted - actual) <= toleranceMM,
+    });
+  }
+  const devs = rows.map((r) => Math.abs(r.deviationMM));
+  return {
+    rows,
+    scaleRatio,
+    toleranceMM,
+    worstMM: devs.length ? Math.max(...devs) : 0,
+    meanMM: devs.length ? devs.reduce((a, b) => a + b, 0) / devs.length : 0,
+    passes: rows.every((r) => r.withinTolerance),
+    failures: rows.filter((r) => !r.withinTolerance),
+  };
+}
+
+/**
+ * Split a quoted line length into the part that scales and the part that does
+ * not.
+ *
+ * A maker who quotes line length including risers produces a set of numbers
+ * that look affine in span. Fitting a fixed part and a proportional part
+ * recovers the non-scaling component, which should come out near the riser
+ * length — and does, closely for a family with a constant riser and less well
+ * for one whose riser steps between sizes.
+ */
+function splitFixedAndScaling(spans, lengths) {
+  let best = null;
+  for (let fixed = 0; fixed <= 1.5; fixed += 0.005) {
+    const k = (lengths[0] - fixed) / spans[0];
+    if (k <= 0) continue;
+    let worst = 0;
+    for (let i = 0; i < spans.length; i++) {
+      worst = Math.max(worst, Math.abs((fixed + k * spans[i]) - lengths[i]));
+    }
+    if (!best || worst < best.worstM) best = { fixedM: fixed, perSpan: k, worstM: worst };
+  }
+  return best;
+}
+
 /* ===== export.js ===== */
 /* export.js — DXF and SVG output.
  *

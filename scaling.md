@@ -208,6 +208,12 @@ r = −0.93. Both effects are real.
 
 ### The law that transfers
 
+![Line length per metre of span against aspect ratio](img/line-length-law.svg)
+
+*Seven families from four manufacturers. The dashed line is the fitted law;
+the pink point is Skywalk's SAGE, which was not in the fit and lands within
+0.8%.*
+
 Normalising by span removes the dominant size effect and leaves a quantity
 that survives leaving its own family:
 

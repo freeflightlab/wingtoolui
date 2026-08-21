@@ -22,6 +22,12 @@ So diagonals are not an optional refinement. Without them, a wing whose lines
 attach every second rib has half its span hanging on nothing — and the tool was
 modelling exactly that wing.
 
+![Diagonal ribs carrying the load from unattached ribs](img/diagonal-ribs.svg)
+
+*Cyan ribs carry a line; grey ribs do not. Each pink triangle runs from an
+attachment point on a loaded rib up to the upper surface of its unloaded
+neighbour. Generated from the tool's own geometry by `tools/make-diagrams.mjs`.*
+
 ---
 
 ## 2. The flat pattern is exact
