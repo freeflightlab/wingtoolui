@@ -3200,6 +3200,29 @@ function parseLineName(name) {
     };
   }
 
+  // Combined rows in suffix form: `ABM1`, `CDR2`, and the K2 5's `DE1`.
+  // Both letters must be load-bearing rows, which is what keeps `BR1` out —
+  // there is no R row, so it falls through and reads correctly as the B
+  // row's first riser line.
+  const pairMatch = raw.match(/^([A-Z])([A-Z])(R|M)?(U|L)?(\d+)$/);
+  if (pairMatch) {
+    const [, r1, r2, lvl, sd, idx] = pairMatch;
+    if (LOAD_BEARING_ROWS.includes(r1) && LOAD_BEARING_ROWS.includes(r2)) {
+      return {
+        name: raw,
+        row: r1,
+        rows: [r1, r2],
+        combined: true,
+        level: lvl === 'R' ? 'riser' : lvl === 'M' ? 'middle' : 'upper',
+        side: sd === 'U' ? 'upper' : sd === 'L' ? 'lower' : null,
+        index: parseInt(idx, 10),
+        variant: null,
+        isBrake: false,
+        convention: 'suffix-combined',
+      };
+    }
+  }
+
   const m = raw.match(/^([A-Za-z])(R|M)?(U|L)?(\d+)([a-z])?$/);
   if (!m) return null;
   const [, rawRow, levelCode, side, idx, variant] = m;
@@ -3643,6 +3666,9 @@ function buildLinePlan({
   levelFractions = [0.64, 0.78],
   loadMode = 1,
   tipDirectAnchors = 2,
+  // Rows that share their cascade below the top level, as Advance's TAU DLS
+  // does with AB and CD. Each entry is a group of row letters.
+  mergeRows = null,
 } = {}) {
   const fractions = airfoil?.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
   const maillon = [0, karabinerSeparationM / 2, -lineLengthM];
@@ -3775,9 +3801,92 @@ function buildLinePlan({
   }
 
   const plan = { lines, risers, riserLengthMM, maillon };
+  // Merging rebuilds part of the line list, so everything after it reads
+  // `plan.lines` rather than the local array it started from.
+  if (mergeRows) mergeCascades(plan, mergeRows, levelFractions);
   plan.totals = planTotals(plan);
-  plan.totalLengthM = lines.reduce((s, l) => s + (l.lengthMM * 2) / 1000, 0);
+  plan.totalLengthM = plan.lines.reduce((s, l) => s + (l.lengthMM * 2) / 1000, 0);
+  plan.mergedRows = mergeRows || [];
   return plan;
+}
+
+/**
+ * Merge two rows' cascades below the top level.
+ *
+ * Each row keeps its own top lines — they attach at different chord positions
+ * and cannot be shared — but everything below joins, so one line carries both
+ * rows down to the riser. Advance's TAU DLS does this with AB and CD.
+ *
+ * It is how a maker cuts line count without cutting anchor count. Whether it
+ * cuts *drag* is a separate question and worth measuring rather than
+ * assuming: the merged lines are fewer but each carries the sum of the rows
+ * it serves, and a line's diameter goes roughly as the square root of the
+ * load it holds. Halving the count while doubling the load per line is close
+ * to break-even on frontal area, and any saving comes from the fact that a
+ * line carrying twice the load is not twice as thick.
+ */
+function mergeCascades(plan, groups, levelFractions) {
+  for (const group of groups) {
+    const rows = group.filter((r) => plan.lines.some((l) => l.row === r));
+    if (rows.length < 2) continue;
+
+    const tops = plan.lines.filter((l) => rows.includes(l.row) && l.level === 'upper');
+    if (!tops.length) continue;
+
+    const below = plan.lines.filter((l) => rows.includes(l.row) && l.level !== 'upper');
+    const riserName = below[0]?.riser ?? plan.risers[0].name;
+    const maillon = plan.risers.find((r) => r.name === riserName)?.maillon ?? plan.maillon;
+    plan.lines = plan.lines.filter((l) => !below.includes(l));
+
+    // Pool both rows' top lines by the anchor they serve.
+    const byAnchor = new Map();
+    for (const t of tops) {
+      if (!byAnchor.has(t.index)) byAnchor.set(t.index, []);
+      byAnchor.get(t.index).push(t);
+    }
+    const anchors = [...byAnchor.keys()].sort((a, b) => a - b);
+    const label = rows.join('');
+
+    // The merged cascade keeps the same number of levels as the one it
+    // replaces — it shares them between two rows rather than collapsing them.
+    //
+    // Collapsing middle and riser into a single line was the first attempt,
+    // and it made every top line span most of the distance to the maillon:
+    // line count fell but total length rose by a quarter, and drag with it.
+    // The junctions have to stay where they were.
+    const groupsOf2 = [];
+    for (let i = 0; i < anchors.length; i += 2) groupsOf2.push(anchors.slice(i, i + 2));
+    const riserGroups = [];
+    for (let i = 0; i < groupsOf2.length; i += 2) riserGroups.push(groupsOf2.slice(i, i + 2));
+
+    let midIndex = 0;
+    riserGroups.forEach((rg, r) => {
+      const allTops = rg.flat().flatMap((a) => byAnchor.get(a));
+      const rNode = lerpPt(maillon, centroid3(allTops.map((t) => t.to)), levelFractions[0]);
+      plan.lines.push({
+        row: rows[0], rows: [...rows], combined: true,
+        level: 'riser', index: r + 1, name: `${label}R${r + 1}`,
+        riser: riserName, from: maillon, to: rNode, lengthMM: mm(maillon, rNode),
+        anchors: [...new Set(allTops.map((t) => t.index))],
+      });
+
+      for (const pair of rg) {
+        const grp = pair.flatMap((a) => byAnchor.get(a));
+        const mNode = lerpPt(rNode, centroid3(grp.map((t) => t.to)), levelFractions[1]);
+        midIndex += 1;
+        plan.lines.push({
+          row: rows[0], rows: [...rows], combined: true,
+          level: 'middle', index: midIndex, name: `${label}M${midIndex}`,
+          riser: riserName, from: rNode, to: mNode, lengthMM: mm(rNode, mNode),
+          anchors: [...new Set(grp.map((t) => t.index))],
+        });
+        for (const t of grp) {
+          t.from = mNode;
+          t.lengthMM = mm(mNode, t.to);
+        }
+      }
+    });
+  }
 }
 
 /** Carabiner-to-canopy length for every anchor, by walking the tree back. */
@@ -9303,6 +9412,7 @@ const S = {
   // panels
   ribIndex: 0, tab: 'wing',
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
+  mergeRows: 'none',
   ovalAmount: 6.0, seamAllowance: 10, pointsPerSurface: 50,
   rollWidth: 1.40, panelGap: 3.0, applyOval: true,
 };
@@ -9427,6 +9537,21 @@ function rebuild() {
     const riserOrigin = [balance.calageMetres, 0, -S.lineLength];
     const cascade = buildCascade(anchors, riserOrigin, { mode: 1 });
 
+    // The riser-based line plan, which is what the merge option and the load
+    // model act on. The geometric cascade above stays for the front view,
+    // since it is what the handbook's construction produces.
+    const MERGES = {
+      none: null,
+      AB: [['A', 'B']],
+      CD: [['C', 'D']],
+      'AB+CD': [['A', 'B'], ['C', 'D']],
+    };
+    const linePlan = buildLinePlan({
+      wing, airfoil, layout: RISER_LAYOUTS['A/B/C+D'],
+      everyNthRib: 2, lineLengthM: S.lineLength,
+      mergeRows: MERGES[S.mergeRows] || null,
+    });
+
     // Nesting is the one expensive step — a few hundred milliseconds on a
     // big wing — so it is deferred rather than run on every slider frame.
     // The other three viewports stay live; the cutting layout catches up
@@ -9443,6 +9568,7 @@ function rebuild() {
     M = {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
+      linePlan,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
@@ -9612,6 +9738,10 @@ function buildControls() {
   selectField(L, 'washinMode', 'Washin distribution', [
     ['linear', 'With span'], ['quadratic', 'Quadratic'], ['chord', 'With chord'],
   ]);
+  selectField(L, 'mergeRows', 'Merge line rows', [
+    ['none', 'None'], ['AB', 'A and B'], ['CD', 'C and D'], ['AB+CD', 'A+B and C+D'],
+  ]);
+  hint(L, 'Two rows can share their cascade below the top lines. Fewer lines and less drag, at the cost of thicker merged lines.');
   selectField(L, 'zRotation', 'Align ribs to flow', [
     ['none', 'Off — ribs parallel'], ['auto', 'On — yaw onto glide path'],
   ]);
@@ -9913,6 +10043,8 @@ function drawReadout() {
     ['calage', (b.calageFraction * 100).toFixed(1) + '% c', 'hot'],
     ['wing load', (M.balance.totalMass / M.projArea).toFixed(2) + ' kg/m²'],
     ['worst φ', M.worstPhi.toFixed(1) + '°', M.worstPhi > 6 ? 'warn' : undefined],
+    ['lines', M.linePlan ? String(M.linePlan.lines.length * 2) : '0'],
+    ['line length', M.linePlan ? M.linePlan.totalLengthM.toFixed(0) + ' m' : '-'],
     ['diagonals', M.vribs ? String(M.vribs.count) : '0',
       M.vribs && M.vribs.unsupportedRibs.length ? 'warn' : undefined],
     ['altitude', (S.altitudeM / 1000).toFixed(1) + ' km'],

@@ -89,6 +89,33 @@ not be able to cause, so `combinedRowShare` sums the rows a line actually
 serves. Merging is how a cascade cuts line count without cutting anchor count,
 and it is why a merged line is the thickest at its level.
 
+### Generating one
+
+`buildLinePlan` takes `mergeRows: [['A','B'],['C','D']]`. Each row keeps its
+own top lines — they attach at different chord positions and cannot be shared
+— and everything below joins.
+
+| | lines | total length | Cx lines |
+| --- | --- | --- | --- |
+| unmerged | 76 | 271 m | 0.0070 |
+| A+B merged | 69 | 215 m | 0.0052 |
+| A+B and C+D | 62 | 159 m | **0.0040** |
+
+A 43% cut in line drag, which is why makers do it, paid for in thicker merged
+lines and a cascade that is harder to trim.
+
+**The merged cascade must keep the same number of levels.** Collapsing middle
+and riser into a single line was the first attempt here: line count fell, and
+every top line then had to span most of the way to the maillon, so total
+length rose by a quarter and drag with it. The junctions have to stay where
+they were; only their ownership changes.
+
+Combined rows also occur in suffix form — the K2 5 carries `DE1`–`DE4`, which
+went unrecognised until this. The guard that makes it safe is that both
+letters must be load-bearing rows: there is no R row, so `BR1` falls through
+and reads correctly as the B row's first riser line rather than a combined
+B-and-R line.
+
 ![Seven naming conventions decoded by one grammar](img/naming-conventions.svg)
 
 *The same cascade, canopy to riser, as five manufacturers write it. Colour is

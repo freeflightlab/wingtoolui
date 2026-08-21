@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 805-test validation suite and a benchmark with regression budgets
+- [x] 823-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -205,8 +205,13 @@ material published after the handbook:
       level as a prefix, resolved relative to the wing's cascade depth, and
       merged rows whose load is the sum of the rows they serve. A single-row
       reading of `2AB2` understates it by 2x.
-- [ ] **Merged rows in the line plan generator** — parsed and their load
-      accounted for, but `buildLinePlan` still generates one line per row.
+- [x] **Merged rows in the line plan generator** — `mergeRows` shares a
+      cascade between two rows below their top lines, cutting line drag 43%
+      on the test wing, and exposed in the interface. Combined names round
+      trip through the parser.
+- [ ] **Trimming a merged cascade** — merging removes the independent
+      adjustment of the rows it joins, which is a real handling cost the tool
+      does not represent.
 - [ ] **What separates the Alpina 5 from the Allegro light** — 10% apart in
       line per metre of span at near-identical aspect ratio. Riser count is no
       longer a credible explanation, and nothing else has been identified.
