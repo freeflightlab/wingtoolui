@@ -131,6 +131,12 @@ Swept across the bar on a wing with 180 mm of travel:
 | 50% | 1.62° | 26.1 | 26.8 | 25.1 | 22.1 |
 | 63% | 0.5° | ~20 | ~28 | ~28 | ~25 |
 
+![Chordwise load distribution at three angles of attack](img/chordwise-load.svg)
+
+*Load per unit chord from thin-aerofoil theory, at 10, 6 and 2 degrees. The
+wing is strongly front-loaded at high incidence and much flatter at low, which
+is why the split between the rows is not the same at trim and at speed.*
+
 The rear rows gain steadily as the front row sheds load. Worst tension over
 the flyable range, against trim: **A +0%, B +12%, C +33%, D +46%**.
 
@@ -194,7 +200,49 @@ conservative, which is the right direction for a line that has to hold.
 
 ---
 
-## 7. The PHI line sheet: a third format
+## 7. Cut length is not finished length
+
+Every maker in the reference set quotes one number per line and leaves the
+loop allowance implicit. **UP Paragliders breaks it out**, and their sheets
+carry three columns where the others carry one:
+
+```
+line | length | | loop length | cutting length | material | colour
+a1   |   295  | |         130 |            425 | DC 120   | Red
+```
+
+`cutting length = length + loop length`, and the allowance is **a constant per
+wing, not a fraction of length** — 130 mm on the Meru 2 whether the line is
+250 mm or 4 m long.
+
+![Loop allowance against line length](img/loop-allowance.svg)
+
+*Every line on a Meru 2 size M, shortest at the top. The magenta band is the
+loop allowance: a fixed width on every bar, so it is a sliver of a riser line
+and a third of a top line.*
+
+The consequence, on their own numbers: 106 m of finished line becomes **122 m
+of material**, +15%. Loops are **13% of everything cut**, and **37% of the
+shortest line**.
+
+`stretchCorrection` now takes `loopAllowanceMM` and reports finished length
+and cut length separately. A model that returns only one of them is either
+under-ordering material or over-cutting lines.
+
+### A sheet that disagrees with itself
+
+Of 24 component sheets, 23 satisfy their own arithmetic exactly. One — the
+Meru 2 SM folding lines — has cutting lengths about 3% short of length plus
+loop, while the same wing's other sizes are exact. The ratio is not constant
+(0.969 to 0.974), so it is not a clean rescale either, and the cause cannot be
+determined from the data.
+
+It is reported rather than absorbed. A checking tool that quietly accepts a
+sheet inconsistent with itself is not checking anything.
+
+---
+
+## 8. The PHI line sheet: a third format
 
 Where the Ozone sheets are an inventory with a totals matrix alongside, this
 is a **cascade table** — one row per canopy attachment, with each level's

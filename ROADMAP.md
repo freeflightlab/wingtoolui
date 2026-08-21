@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 731-test validation suite and a benchmark with regression budgets
+- [x] 782-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -186,6 +186,23 @@ material published after the handbook:
       two-liner at AR 6.4, matches the uncorrected line-length law; applying
       the 0.90 factor makes every size 9% low. The factor is now inert, kept
       with its contradiction recorded.
+- [x] **Why the line-length law looked affine** — Ozone's Enzo 3 CCC check
+      states it: lines scale proportionally and risers are not scaled. A
+      length quoted including a riser looks affine, with the intercept being
+      the riser. Skywalk's riser-free figures need a fixed part of 0 mm.
+- [x] **Documentation figures** — generated from the project's own modules
+      and data by `tools/make-diagrams.mjs`, so they cannot drift; checked for
+      validity and for dangling references.
+- [ ] **Magnum 4, Vibe GT and Enzo 3 line sheets** — converted but not yet
+      folded into the validation set. The Magnum 4 is the first five-riser
+      wing here and the first tandem.
+- [x] **UP Paragliders line sheets** — a sixth naming convention with four
+      cascade levels, roman numerals and `main` names; legacy `.xls` read
+      directly since xlrd is unavailable. Five wings, 29 sheets.
+- [x] **Loop allowance in cut lengths** — UP is the only maker to state it,
+      and it is 13% of all line material and 37% of the shortest line.
+- [ ] **TAU DLS naming** — a further convention, with the level as a prefix
+      (`1A3`, `2AB2`) and combined rows (`AB`, `CD`) where one line serves two.
 - [ ] **What separates the Alpina 5 from the Allegro light** — 10% apart in
       line per metre of span at near-identical aspect ratio. Riser count is no
       longer a credible explanation, and nothing else has been identified.
