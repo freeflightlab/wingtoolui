@@ -30,7 +30,7 @@ Everything needed to go from numbers to a cutting file.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 640-test validation suite and a benchmark with regression budgets
+- [x] 658-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -221,9 +221,17 @@ material published after the handbook:
 The parts the source describes but Phase 1 skipped, plus the accuracy work the
 validation notes flagged.
 
-- [ ] **Diagonal ribs** *(ch.7)*. The source is figures only, so this needs
-      reconstruction from the drawings: V-ribs and horizontal straps, their
-      attachment geometry, and their effect on the rib cut.
+- [x] **Diagonal ribs** *(ch.7)* — reconstructed from the figures. Fan
+      geometry developed exactly (a cone is developable, error 4e-16), the
+      load path checked by the fact that half the load must travel diagonally
+      when lines attach every second rib, and unsupported span detected when
+      diagonals cannot reach. See `docs/diagonal-ribs.md`.
+- [ ] **H-ribs and VH-ribs** *(ch.7, LEP section 12)* — horizontal straps
+      spread load chordwise rather than spanwise; only the V form is
+      generated.
+- [ ] **Diagonals as structure** — treated as load paths and cut patterns,
+      not members with stiffness. Whether a diagonal is in tension across its
+      whole width is not modelled.
 - [ ] **Risers and speed system** *(ch.9)*. Four-riser geometry, travel of each
       riser under acceleration, and the resulting change in calage — which
       makes the balance solve a curve over the speed range rather than a point.
