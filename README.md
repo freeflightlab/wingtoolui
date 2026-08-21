@@ -3,7 +3,7 @@
 An interactive, browser-based paraglider design tool, built from the **LE
 Paraglider Design Handbook** published by [Laboratori
 d'envol](https://laboratoridenvol.com/paragliderdesign/index.html) and
-validated against production data from three manufacturers.
+validated against production data from five manufacturers.
 
 The handbook is a complete design method, but it is a set of pages, equations
 and one FORTRAN listing. This project turns it into something you can drive:
@@ -16,7 +16,7 @@ step checked against wings that have actually flown.
 
 **Phase 1 complete and verified. Phase 2 well advanced.**
 
-**574 tests** and a benchmark with regression budgets. The suite is not smoke
+**941 tests** and a benchmark with regression budgets. The suite is not smoke
 testing: every check asserts a value that can be verified independently — an
 exact closed-form answer, a conservation property, a manufacturer's published
 figure, or a number printed in the source.
@@ -30,36 +30,63 @@ access**. Open `dist/paraglider-design-tool.html` in any browser — double
 clicking works, no server needed.
 
 ```bash
-python3 build.py           # bundle src/ into dist/paraglider-design-tool.html
-node tests/run-tests.js    # 574 checks against known geometry and the sources
-node tests/benchmark.js    # timings, scaling, and budget regressions
+python3 build.py               # bundle src/ into dist/paraglider-design-tool.html
+node tools/make-diagrams.mjs   # regenerate the figures used in docs/
+node tests/run-tests.js    # 941 checks against known geometry and the sources
+node tests/benchmark.js        # timings, scaling, and budget regressions
+node tools/audit.mjs           # check the project's claims against its code
 ```
+
+The audit is separate from the suite because it checks things a test run
+cannot: that every module reaches the bundle, that no export is left without a
+caller, that numbers written in the documentation still match what the code
+produces, and that the test count quoted here is the count a run gives.
+
+Figures in `docs/` are generated from the project's own modules and reference
+data by `tools/make-diagrams.mjs`, so a diagram cannot drift away from the code
+it illustrates. The suite checks each is valid SVG and that every figure a
+document references exists.
 
 No package manager, no toolchain, nothing to install. Node runs the tests;
 Python concatenates files.
+
+### What a checkout needs
+
+`MANIFEST.txt` lists every file — 24 core modules, the interface sources,
+`build.py`, the tests, the tools and 72 reference data files. Regenerate it
+with `node tools/manifest.mjs`.
+
+This matters more than it sounds. **`dist/paraglider-design-tool.html` is
+self-contained**, so a tree missing half its sources still opens and runs
+perfectly. Nothing about using the tool reveals that it can no longer be
+rebuilt. `node tools/audit.mjs` checks the tree against the manifest and says
+plainly what is absent; `build.py` reports every missing module at once rather
+than failing on the first, and accepts either the nested layout or a flattened
+one.
 
 ---
 
 ## What it does
 
 **Geometry.** Planform, aerofoil, arc and twist, through three rotations, to a
-full 3D wing. Panels developed flat, ovalized for billow, given seam allowance,
+full 3D wing, with diagonal ribs carrying the span that has no line on it. Panels developed flat, ovalized for billow, given seam allowance,
 and nested onto a fabric roll.
 
 **Flight.** Longitudinal balance, section and wing polars from thin-aerofoil
 theory and lifting line, atmosphere to 20 km, and an accelerated polar across
 the speedbar range.
 
-**Lines.** Riser-based cascades with industry naming, brakes with their own
+**Lines.** Riser-based cascades with industry naming and optional merged rows, brakes with their own
 four-level cascade, load from lift distribution through to line tension, line
-selection from measured materials, elastic stretch, and line drag fed back
-into the balance.
+selection from measured materials sized across the speedbar range, elastic
+stretch, gust load factors, asymmetric and collapse load cases, and line drag
+fed back into the balance.
 
 **Interoperability.** Reads and writes `leparagliding.txt`; reads production
 line sheets in four manufacturers' formats; imports aerofoils in three.
 
-**Output.** DXF R12 cutting files, true-scale SVG, line schedules, and
-reloadable project files.
+**Output.** DXF R12 cutting files for panels, ribs and diagonals, true-scale
+SVG, line schedules, and reloadable project files.
 
 ---
 
@@ -103,6 +130,11 @@ src/core/          the maths — pure functions, no DOM, individually testable
   loads.js         lift to line tension, materials, sizing, stretch, drag
   lineplan.js      risers, cascade naming, four production sheet formats
   scaling.js       size families: isometric canopy, affine lines and mass
+  family.js        a whole family through the pipeline, sized per size
+  vribs.js         ch.7  diagonal and horizontal ribs, development, load path
+  ribholes.js      lightening holes placed around margins and load paths
+  reinforcement.js mylar, dacron and tapes, and the remaining mass gap
+  bom.js           bill of materials: roll length, cut length, hardware
   xfoil.js         export to and import from XFOIL
   export.js        DXF R12, SVG, nesting, fabric estimation
   viewfit.js       fitting drawings and charts to frames
@@ -110,10 +142,12 @@ src/core/          the maths — pure functions, no DOM, individually testable
 src/ui/            index.html + style.css + app.js
 tests/run-tests.js validation suite
 tests/benchmark.js performance, scaling and budgets
+tools/             figure generation, and a reader for legacy .xls sheets
 docs/              nine notes; see below
-data/reference/    44 production line sets from nine wings across three
-                   manufacturers, six size families (33 sizes, five
-                   applications), and a measured 78-line materials table
+data/reference/    44 production line sets from nine wings across four
+                   manufacturers, seven size families (38 sizes, five
+                   applications), a published speed-system geometry, and a
+                   measured 78-line materials table
 build.py           bundler
 ```
 
@@ -147,6 +181,12 @@ exact, the tolerance is machine precision. Where it is approximate, the test
 says so and pins the size of the approximation. Several tolerances were
 discovered rather than assumed.
 
+**And that reported numbers can move.** A one-sided check is satisfied
+perfectly by a metric that is always zero — which is how a broken distortion
+measure survived for months. Twenty-six reported quantities are swept against
+the inputs they claim to depend on, checking each responds by a meaningful
+amount in the right direction.
+
 **Assumptions are named, and guarded.** Where a model is used outside its
 evidence the code says so rather than returning a plausible number: scaling
 laws report when they are extrapolating, the accelerated polar refuses to
@@ -173,7 +213,11 @@ Against production data from Ozone, PHI and BGD:
 | LEP round trip on a real design | byte-identical, 33 unmodelled sections preserved |
 | gnuC2-27 flat area recovered from its geometry matrix | 27.00 m² |
 | Lynx 2 trim speed / top speed / best glide / min sink | within 3-8% |
-| Canopy isometric scaling, six families | exponent 1.99-2.08 |
+| Canopy isometric scaling, seven families | exponent 1.99-2.08 |
+| Line-length law on a fourth maker, out of sample | within 0.8% |
+| Ozone's own line scaling check, Enzo 3 CCC | 8.8 mm worst against ±20 mm |
+| Speed-system riser shares vs Skywalk's published geometry | 0.467 vs 0.500 |
+| Collapse envelope vs PHI's most load-critical line | 28.6x vs 28x |
 
 ---
 
@@ -190,6 +234,8 @@ Against production data from Ozone, PHI and BGD:
 | `docs/brakes.md` | brake cascades and engagement |
 | `docs/speed-system.md` | risers, accelerated polar, the collapse floor |
 | `docs/viewports.md` | fitting, zoom, tabs, the rib view |
+| `docs/diagonal-ribs.md` | diagonal ribs, development, the attachment trade-off |
+| `docs/construction.md` | rib holes and the bill of materials |
 
 `ROADMAP.md` carries the phased plan and every open question.
 

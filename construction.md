@@ -114,10 +114,47 @@ fills.
 
 ---
 
-## 4. Not covered
+## 4. Reinforcement, and the mass gap
 
-- **Reinforcement layout.** Mylar at the intakes, Dacron at the anchor tabs,
-  seam tapes. All real mass and all uncounted.
+The bill counts cloth and line and says so at the bottom of every printout.
+On a 25 m² wing it comes to 2.4 kg against a finished weight near 4 kg, and
+reinforcement is the largest single item in that gap.
+
+It is *placed*, not calculated — a designer decides where a wing needs help,
+and the rules are conventions rather than derivations. What can be done
+honestly is to place it consistently and let the mass appear where the
+omission currently is.
+
+| item | job | mass |
+| --- | --- | --- |
+| Mylar at the intakes | holds the nose against the highest pressure on the wing | 80 g |
+| Dacron at the anchors | spreads a point load that would tear ripstop | 38 g |
+| Trailing edge tape | sewn, loaded along its length, handled every flight | 13 g |
+
+Only the first two are structural. The others are wear and handling, which is
+why a light wing drops them first — and the generator lets it, with `fitMylar`
+and friends.
+
+Anchor patches are counted **from the line plan**, not from a guess at rows
+per rib, so changing the rigging changes the order.
+
+### The gap is the output
+
+`massBudget` compares against a published weight:
+
+```
+cloth 2305 g + line 93 g + reinforcement 130 g = 2.528 kg
+gap 1472 g (37%) — rods and rod pockets, thread, risers and hardware webbing
+```
+
+The useful number is not the total but what the model **cannot yet see**, and
+how big it is. Given no published weight it reports no gap rather than
+inventing a target.
+
+---
+
+## 5. Not covered
+
 - **Rods.** Modern wings carry nylon or carbon rods in the leading edge; on a
   light wing they are a noticeable fraction of the weight.
 - **Cross-ports.** Holes between cells for pressure equalisation, distinct
