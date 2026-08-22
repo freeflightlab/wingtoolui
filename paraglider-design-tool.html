@@ -5151,6 +5151,150 @@ function collapseFloorForTopSpeed({
   };
 }
 
+/* -------------------------------------------------------------- trimmers -- */
+
+/**
+ * Trimmers.
+ *
+ * A speed system shortens the **front** risers. A trimmer lengthens the
+ * **rear** ones. Both tip the wing nose-down and both trade angle of attack
+ * for speed, but they are not the same control and the difference matters.
+ *
+ *   - A speedbar is held. Release the bar and the wing returns to trim.
+ *   - A trimmer is set. It stays where it is put, hands free, which is why
+ *     paramotor and tandem wings carry them and most solo free-flight wings
+ *     do not.
+ *
+ * ---------------------------------------------------------------------------
+ * How they combine
+ * ---------------------------------------------------------------------------
+ * Both act on the same lever — the chordwise distance between the front and
+ * rear anchors — and they act on opposite ends of it. Shortening the front by
+ * dA and lengthening the rear by dT rotate the wing the same way, so the two
+ * add in the numerator:
+ *
+ *     delta alpha = atan( (dA + dT) / ((xRear - xFront) * chord) )
+ *
+ * They are therefore additive in the *shortening*, not in the resulting
+ * angle: two effects that each give 4 degrees alone do not give 8 together,
+ * because the arctangent is not linear. On a wing with enough of both, that
+ * difference is a degree or more, and it is in the conservative direction.
+ *
+ * ---------------------------------------------------------------------------
+ * Why full bar plus full trim is worth checking
+ * ---------------------------------------------------------------------------
+ * The two controls are independent and a pilot can apply both. The combined
+ * angle of attack can fall below the collapse floor when neither alone would,
+ * which is the case a designer needs to see rather than discover.
+ */
+const DEFAULT_TRIMMER = {
+  // How much the rear riser can lengthen, closed to fully open.
+  travelMM: 90,
+  // Which riser the trimmer acts on. On a three-riser wing it is the rear.
+  actsOn: null,
+  fitted: true,
+};
+
+/** Riser lengths at a given bar and trimmer setting. */
+function riserLengthsWithTrim(rs, bar = 0, trim = 0, trimmer = {}) {
+  const T = { ...DEFAULT_TRIMMER, ...trimmer };
+  const base = riserLengths(rs, bar);
+  if (!T.fitted) return base;
+  const rear = T.actsOn || rs.rows[rs.rows.length - 1];
+  const t = Math.max(0, Math.min(1, trim));
+  return { ...base, [rear]: base[rear] + t * T.travelMM };
+}
+
+/**
+ * Angle-of-attack change from bar and trimmer together.
+ *
+ * Returns the combined figure and each contribution alone, because the
+ * difference between their sum and the combination is the point.
+ */
+function alphaChangeWithTrim(rs, bar, trim, chordM, trimmer = {}) {
+  const T = { ...DEFAULT_TRIMMER, ...trimmer };
+  const front = rs.rows[0];
+  const rear = T.actsOn || rs.rows[rs.rows.length - 1];
+  const lever = (rs.anchors[rear] - rs.anchors[front]) * chordM;
+  if (lever <= 0) {
+    return { combinedDeg: 0, barOnlyDeg: 0, trimOnlyDeg: 0, sumOfPartsDeg: 0, lever };
+  }
+
+  const b = Math.max(0, Math.min(1, bar));
+  const t = Math.max(0, Math.min(1, trim));
+  const dFront = b * rs.travelMM * (rs.share[front] ?? 0);
+  const dRear = b * rs.travelMM * (rs.share[rear] ?? 0);
+  const dTrim = T.fitted ? t * T.travelMM : 0;
+
+  const angle = (mm) => -deg(Math.atan((mm / 1000) / lever));
+  const combined = angle((dFront - dRear) + dTrim);
+  const barOnly = angle(dFront - dRear);
+  const trimOnly = angle(dTrim);
+
+  return {
+    combinedDeg: combined,
+    barOnlyDeg: barOnly,
+    trimOnlyDeg: trimOnly,
+    // What adding the two angles would have given. Not the same thing.
+    sumOfPartsDeg: barOnly + trimOnly,
+    nonLinearityDeg: combined - (barOnly + trimOnly),
+    shorteningMM: (dFront - dRear) + dTrim,
+    lever,
+  };
+}
+
+/**
+ * The flight envelope a trimmer opens up, and where it stops being flyable.
+ *
+ * Sweeps both controls and reports which combinations stay above the collapse
+ * floor. A pilot can apply both at once; the combination can fall below the
+ * floor when neither alone does, and that is worth seeing on a chart rather
+ * than finding in the air.
+ */
+function trimEnvelope({
+  riser, chordM, liftModel, trimAlphaDeg = 6, trimmer = {}, steps = 5,
+}) {
+  const rows = [];
+  let flyable = 0;
+  let total = 0;
+
+  for (let i = 0; i < steps; i++) {
+    for (let j = 0; j < steps; j++) {
+      const bar = i / (steps - 1);
+      const trim = j / (steps - 1);
+      const d = alphaChangeWithTrim(riser, bar, trim, chordM, trimmer);
+      const alpha = trimAlphaDeg + d.combinedDeg;
+      const cz = liftModel ? liftModel.czAt(alpha) : null;
+      const inRange = !liftModel || cz >= liftModel.czRange[0];
+      total++;
+      if (inRange) flyable++;
+      rows.push({
+        bar, trim, alphaDeg: alpha, cz,
+        deltaDeg: d.combinedDeg, flyable: inRange,
+      });
+    }
+  }
+
+  const worst = rows.reduce((m, r) => (r.alphaDeg < m.alphaDeg ? r : m), rows[0]);
+  // The case a designer needs: neither control alone leaves the envelope, but
+  // the two together do.
+  const barAlone = rows.find((r) => r.bar === 1 && r.trim === 0);
+  const trimAlone = rows.find((r) => r.bar === 0 && r.trim === 1);
+  const both = rows.find((r) => r.bar === 1 && r.trim === 1);
+
+  return {
+    rows,
+    flyable,
+    total,
+    worst,
+    barAlone,
+    trimAlone,
+    both,
+    combinationIsWorse: !!(both && barAlone && trimAlone
+      && barAlone.flyable && trimAlone.flyable && !both.flyable),
+  };
+}
+
 /* ===== pairing.js ===== */
 /* pairing.js — interlocking two panels before they are packed.
  *

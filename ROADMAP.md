@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1028-test validation suite and a benchmark with regression budgets
+- [x] 1045-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -81,8 +81,12 @@ material published after the handbook:
       4.8 km/h per 0.05. Currently inverted from published speeds (implying
       Cz 0.307 on the Lynx 2); predicting it needs internal pressure and rib
       support modelling.
-- [ ] **Trimmers** *(ch.9.3)* and riser webbing geometry — B-handle heights,
-      C-handle steering, and the split between main and speed-system webbing.
+- [x] **Trimmers** *(ch.9.3)* — rear-riser lengthening, composed with the
+      speed system. The shortenings add but the angles do not quite, and the
+      combination can leave the flyable envelope when neither control alone
+      does. See `docs/speed-system.md`.
+- [ ] **Riser webbing geometry** — B-handle heights, C-handle steering, and
+      the split between main and speed-system webbing.
 - [ ] **Line loads under acceleration** — loads shift forward on the bar,
       changing what each row carries; `loads.js` still assumes trim.
 - [ ] **Collapse and stabilo lines** — the `Z` row on the Lyght; parsed, not

@@ -176,10 +176,55 @@ names the disagreement rather than absorbing it into a fitted constant.
 
 ---
 
-## 6. Not covered
+## 6. Trimmers
 
-- **Trimmers**, which change trim angle without the bar and are a separate
-  adjustment on many wings.
+A speedbar shortens the **front** risers. A trimmer lengthens the **rear**
+ones. Both tip the wing nose-down and both trade angle of attack for speed,
+but they are not the same control: a bar is held and releases to trim, while a
+trimmer stays where it is put. That is why paramotor and tandem wings carry
+them and most solo free-flight wings do not.
+
+### They add in the shortening, not in the angle
+
+Both act on the same lever — the chordwise distance between front and rear
+anchors — from opposite ends, so the shortenings add:
+
+```
+Δα = atan( (dA + dT) / ((x_rear − x_front) · chord) )
+```
+
+The *angles* therefore do not quite add, because the arctangent is not linear:
+
+| bar | trim | bar alone | trim alone | sum | combined |
+| --- | --- | --- | --- | --- | --- |
+| 1.0 | 0.0 | −8.70° | — | −8.70° | −8.70° |
+| 0.0 | 1.0 | — | −4.38° | −4.38° | −4.38° |
+| 1.0 | 1.0 | −8.70° | −4.38° | −13.08° | **−12.93°** |
+
+0.15° of shortfall at full both — small, real, and in the conservative
+direction.
+
+### The case worth seeing
+
+A pilot can apply both at once, and **the combination can leave the flyable
+envelope when neither control alone does.** On a wing with 120 mm of bar and
+60 mm of trimmer:
+
+| setting | α | flyable |
+| --- | --- | --- |
+| full bar, trimmers closed | 1.1° | yes |
+| trimmers open, no bar | 3.5° | yes |
+| both | −1.3° | **no** |
+
+`trimEnvelope` sweeps both controls against the collapse floor and flags this
+specifically. It also distinguishes it from the case where bar alone already
+leaves the envelope — on a wing with 180 mm of travel it does, and that is not
+the trimmer's doing.
+
+---
+
+## 7. Not covered
+
 - **Riser webbing geometry** — the split between main and speed-system
   webbing, the B-handle heights the Alpina 5 advertises as adjustable, and
   the C-handle steering the Geo 7 and Swift 6 carry.
