@@ -13,6 +13,11 @@ opening at the end of every one, not only at the end.
 
 Everything needed to go from numbers to a cutting file.
 
+Every item below is checked individually by `tests/phase1-audit.mjs` — 81
+checks that walk this list rather than the modules, asking whether each
+completed claim is still true. The audit runs it and fails if any claim does
+not verify.
+
 - [x] Planform: elliptical + linear edges, discrete tables, area, AR, MAC, centroid *(ch.1)*
 - [x] Sections: NACA 4-digit generator, coordinate import, surface splitting, metrics *(ch.2)*
 - [x] Arc: circle / ellipse / bionic / imported, arc-length parameterised, washin *(ch.3)*

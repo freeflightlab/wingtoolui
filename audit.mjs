@@ -151,6 +151,23 @@ for (const [what, got, want, tol] of claims) {
 }
 say(bad === 0, 'documented numbers match the code', `${claims.length} claims checked`);
 
+/* ---- 3a. Phase 1 still does what the roadmap says ---------------------- */
+//
+// A separate walk of the Phase 1 list, item by item. Kept out of the main
+// suite because it tests the *roadmap*, not the modules: it asks whether each
+// completed claim is still true, which is a different question from whether
+// the code works.
+try {
+  const out = execSync('node tests/phase1-audit.mjs', { encoding: 'utf8', maxBuffer: 1 << 24 });
+  const m = /(\d+) checks, (\d+) failed/.exec(out);
+  say(m && Number(m[2]) === 0, 'every Phase 1 claim verifies',
+    m ? `${m[1]} checks, ${m[2]} failed` : 'could not read the result');
+} catch (e) {
+  const m = /(\d+) checks, (\d+) failed/.exec(e.stdout || '');
+  say(false, 'every Phase 1 claim verifies',
+    m ? `${m[1]} checks, ${m[2]} FAILED` : 'the audit did not run');
+}
+
 /* ---- 3b. the roadmap is not stale -------------------------------------- */
 //
 // An item can be built and the roadmap never updated. That happened: the
