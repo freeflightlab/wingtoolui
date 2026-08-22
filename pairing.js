@@ -353,6 +353,13 @@ export function nestByProfile(items, {
   columns = 800,
   outlineOf = null,
   positions = 120,
+  // Pack from both edges of the roll rather than only from y = 0.
+  //
+  // A single bottom-up skyline leaves a band along the far edge that nothing
+  // can reach: on the test wing it averages 173 mm and comes to 12% of the
+  // roll, while the smallest panels are 24 mm tall and would fit in it many
+  // times over. A second skyline descending from the far edge lets them.
+  twoSided = true,
 } = {}) {
   const outline = outlineOf || ((it) => it.panel.left.concat(it.panel.right.slice().reverse()));
 
@@ -381,7 +388,9 @@ export function nestByProfile(items, {
   const totalW = prepared.reduce((s, p) => s + p.bounds.width, 0);
   const rollLength = Math.max(...prepared.map((p) => p.bounds.width)) + totalW;
   const colWidth = rollLength / columns;
+  // Height occupied from y = 0 upward, and from y = rollWidth downward.
   const skyline = new Array(columns).fill(0);
+  const ceiling = new Array(columns).fill(rollWidth);
 
   const placed = [];
   let usedLength = 0;
@@ -401,21 +410,70 @@ export function nestByProfile(items, {
     const step = Math.max(1, Math.floor(maxStart / positions));
 
     for (let c0 = 0; c0 <= maxStart; c0 += step) {
-      let need = 0;
-      let ok = true;
+      const rightEdge = (c0 * colWidth) + p.bounds.width;
+
+      // From the near edge: lift until the panel's lower profile clears the
+      // skyline everywhere.
+      let needUp = 0;
       for (let k = 0; k < nCols; k++) {
         if (prof.bot[k] === Infinity) continue;
         const clearance = skyline[c0 + k] - prof.bot[k];
-        if (clearance > need) need = clearance;
+        if (clearance > needUp) needUp = clearance;
       }
-      const dy = need + (need > 0 ? gap : 0);
-      // Must fit across the roll.
-      if (dy + p.bounds.height > rollWidth) ok = false;
-      if (!ok) continue;
+      const dyUp = needUp + (needUp > 0 ? gap : 0);
+      // A near-edge placement must clear the ceiling too, not just the
+      // skyline. Checking only the skyline let panels rise into space already
+      // taken from the far edge — 26 overlapping pairs, and a utilisation
+      // that looked like 90% because the panels were on top of each other.
+      // The gap applies between panels, not between a panel and the edge of
+      // the roll. Charging it at the untouched edge costs 2.2 points of
+      // utilisation for nothing.
+      let hitsCeiling = false;
+      for (let k = 0; k < nCols; k++) {
+        if (prof.top[k] === -Infinity) continue;
+        const c = c0 + k;
+        const margin = ceiling[c] < rollWidth ? gap : 0;
+        if (dyUp + prof.top[k] > ceiling[c] - margin) { hitsCeiling = true; break; }
+      }
+      if (!hitsCeiling && dyUp + p.bounds.height <= rollWidth) {
+        const score = Math.max(usedLength, rightEdge) * 1000 + dyUp;
+        if (!best || score < best.score) best = { c0, dy: dyUp, score, rightEdge, from: 'near' };
+      }
 
-      const rightEdge = (c0 * colWidth) + p.bounds.width;
-      const score = Math.max(usedLength, rightEdge) * 1000 + dy;
-      if (!best || score < best.score) best = { c0, dy, score, rightEdge };
+      // From the far edge: drop until the panel's *upper* profile clears the
+      // ceiling. The panel is not flipped — only its position changes.
+      if (twoSided) {
+        let lowest = Infinity;
+        for (let k = 0; k < nCols; k++) {
+          if (prof.top[k] === -Infinity) continue;
+          const allowed = ceiling[c0 + k] - prof.top[k];
+          if (allowed < lowest) lowest = allowed;
+        }
+        if (lowest !== Infinity) {
+          const dyDown = lowest - gap;
+          const lowEdge = dyDown + (Math.min(...prof.bot.filter((v) => v !== Infinity)) || 0);
+          if (dyDown >= 0 && lowEdge >= 0) {
+            // Prefer the far edge only when it does not collide with the
+            // near-edge stack.
+            let clashes = false;
+            for (let k = 0; k < nCols; k++) {
+              if (prof.bot[k] === Infinity) continue;
+              const c = c0 + k;
+              const lowMargin = skyline[c] > 0 ? gap : 0;
+              const highMargin = ceiling[c] < rollWidth ? gap : 0;
+              if (dyDown + prof.bot[k] < skyline[c] + lowMargin) { clashes = true; break; }
+              if (dyDown + prof.top[k] > ceiling[c] - highMargin) { clashes = true; break; }
+            }
+            if (!clashes) {
+              const score = Math.max(usedLength, rightEdge) * 1000
+                + (rollWidth - dyDown - p.bounds.height);
+              if (!best || score < best.score) {
+                best = { c0, dy: dyDown, score, rightEdge, from: 'far' };
+              }
+            }
+          }
+        }
+      }
     }
 
     if (!best) {
@@ -440,13 +498,19 @@ export function nestByProfile(items, {
       height: p.bounds.height,
     });
 
-    // Raise the skyline over the columns this panel occupies.
+    // Update whichever front this panel was placed against.
     for (let k = 0; k < nCols; k++) {
-      if (prof.top[k] === -Infinity) continue;
       const c = best.c0 + k;
       if (c >= columns) break;
-      const topY = prof.top[k] + best.dy + gap;
-      if (topY > skyline[c]) skyline[c] = topY;
+      if (best.from === 'far') {
+        if (prof.bot[k] === Infinity) continue;
+        const lowY = prof.bot[k] + best.dy - gap;
+        if (lowY < ceiling[c]) ceiling[c] = lowY;
+      } else {
+        if (prof.top[k] === -Infinity) continue;
+        const topY = prof.top[k] + best.dy + gap;
+        if (topY > skyline[c]) skyline[c] = topY;
+      }
     }
     usedLength = Math.max(usedLength, best.rightEdge);
   }

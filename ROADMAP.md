@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1004-test validation suite and a benchmark with regression budgets
+- [x] 1018-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -372,19 +372,25 @@ Making it pleasant to use across a real project.
 - [x] **Packing against the outlines** — a skyline over real panel profiles
       rather than bounding boxes. 48.2% to 55.7%, 4.7 m of roll saved on a
       25 m² wing, zero overlaps, and it holds across roll widths.
-- [ ] **Close the remaining placement gap.** Packing is 55.7% against a 73%
-      shape ceiling. The rest needs the tip panels fitted into the gaps the
-      large panels leave.
+- [x] **Packing from both edges of the roll** — a second skyline descending
+      from the far edge, reaching the band a bottom-up packer cannot use.
+      55.7% to 56.9%, and 61.0% on a 1.8 m roll.
+- [ ] **Close the remaining placement gap.** 56.9% against a 73% shape
+      ceiling. What is left needs true polygon placement rather than two
+      skylines.
 - [ ] **Place the tip panels into the gaps.** Shape loss is concentrated in a
       few small panels — cell 24 upper is 29% efficient against the root's
       96% — so they are the ones to fit around the large ones. A placement
       problem, not a pairing one.
 - [ ] **Design comparison**: hold two designs side by side, diff their numbers.
 - [ ] **Undo/redo and named revisions.**
-- [ ] **Reference wings** as loadable starting points. The data is already
-      here — seven size families parsed by `parseSizeFamilies`, and gnuLAB
-      sections through the LEP import — but nothing in the interface offers
-      them, so a user cannot start from a known wing.
+- [x] **Reference wings as loadable starting points** — twenty published
+      sizes from seven families, in the interface. Loads the size only, and
+      names every field that was not in the specification, so a loaded wing
+      is not mistaken for the wing it came from.
+- [ ] **Reference *shapes*** — a specification gives area, span and cell
+      count but not ellipticity, sweep, arc or section. Recovering those needs
+      a geometry file, which the LEP import can already read.
 - [ ] **Prototype tuning** *(ch.4.7)*: record measured flight behaviour against
       predicted, and solve for the trim correction.
 - [ ] **Printed pattern output**: tiled A4/A3 pages with registration marks for

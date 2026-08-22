@@ -943,3 +943,93 @@ export function partialCorrelate(x, y, z) {
   const denom = Math.sqrt((1 - rxz ** 2) * (1 - ryz ** 2));
   return denom ? (rxy - rxz * ryz) / denom : null;
 }
+
+/* ------------------------------------------------- reference wings -- */
+
+/**
+ * Turn a reference size into design inputs.
+ *
+ * Seven families of published data have been sitting in `data/reference` used
+ * only for validation. They are also the most useful thing a designer can
+ * start from: a set of numbers known to have produced a wing that flies,
+ * rather than a blank form.
+ *
+ * What can be recovered honestly is limited, and the limit is worth stating
+ * rather than papering over. A specification gives area, span, aspect ratio,
+ * root chord and cell count. It does not give the **shape** — how elliptical
+ * the leading edge is, how the trailing edge is swept, what the arc is, what
+ * section it uses. Those are the design.
+ *
+ * So this returns the published numbers with the shape parameters left at
+ * neutral defaults, and says which is which. A wing loaded this way has the
+ * right size and the wrong shape, and `derived` names every field that was
+ * not in the source.
+ */
+export function referenceDesignInputs(size, { tipChordFraction = 0.22 } = {}) {
+  if (!size || !size.flatSpan || !size.flatArea) return null;
+
+  // Tip chord is not published. A fraction of the root is the usual
+  // relationship and is flagged as an assumption.
+  const rootChord = size.maxChord ?? (size.flatArea / size.flatSpan) * 1.18;
+  const tipChord = size.minChord ?? rootChord * tipChordFraction;
+
+  return {
+    inputs: {
+      span: size.flatSpan,
+      rootChord,
+      tipChord,
+      // Sweep and ellipticity are shape, not size, and are not in any
+      // specification. These are neutral starting values.
+      tipSweep: rootChord * 0.55,
+      ellipticityLE: 0.85,
+      ellipticityTE: 0.55,
+    },
+    cells: size.cells ?? 40,
+    projectedRatio: size.projectedArea && size.flatArea
+      ? Math.sqrt(size.projectedArea / size.flatArea) : 0.87,
+    allUpMassKg: size.midWeight ?? null,
+    lineLengthM: null,
+    published: {
+      flatArea: size.flatArea,
+      flatSpan: size.flatSpan,
+      aspectRatio: size.flatAR,
+      projectedArea: size.projectedArea,
+      cells: size.cells,
+      massKg: size.mass,
+      weightRange: size.midWeight,
+    },
+    // Everything below was not in the specification and had to be chosen.
+    derived: [
+      size.minChord ? null : 'tip chord',
+      'tip sweep', 'leading edge ellipticity', 'trailing edge ellipticity',
+      'aerofoil section', 'arc type', 'washin',
+    ].filter(Boolean),
+    note: 'size from the published specification; shape is a neutral default',
+  };
+}
+
+/**
+ * The reference library, as a flat list a picker can show.
+ * Sorted by application then area, which is how a designer looks for one.
+ */
+export function referenceLibrary(families) {
+  const out = [];
+  for (const [family, sizes] of Object.entries(families)) {
+    for (const s of sizes) {
+      out.push({
+        id: `${family} ${s.name}`,
+        family,
+        size: s.name,
+        application: s.application || null,
+        flatArea: s.flatArea,
+        flatSpan: s.flatSpan,
+        aspectRatio: s.flatAR,
+        cells: s.cells,
+        source: s,
+      });
+    }
+  }
+  out.sort((a, b) => (a.application || '').localeCompare(b.application || '')
+    || a.family.localeCompare(b.family) || a.flatArea - b.flatArea);
+  return out;
+}

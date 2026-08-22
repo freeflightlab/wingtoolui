@@ -5507,6 +5507,13 @@ function nestByProfile(items, {
   columns = 800,
   outlineOf = null,
   positions = 120,
+  // Pack from both edges of the roll rather than only from y = 0.
+  //
+  // A single bottom-up skyline leaves a band along the far edge that nothing
+  // can reach: on the test wing it averages 173 mm and comes to 12% of the
+  // roll, while the smallest panels are 24 mm tall and would fit in it many
+  // times over. A second skyline descending from the far edge lets them.
+  twoSided = true,
 } = {}) {
   const outline = outlineOf || ((it) => it.panel.left.concat(it.panel.right.slice().reverse()));
 
@@ -5535,7 +5542,9 @@ function nestByProfile(items, {
   const totalW = prepared.reduce((s, p) => s + p.bounds.width, 0);
   const rollLength = Math.max(...prepared.map((p) => p.bounds.width)) + totalW;
   const colWidth = rollLength / columns;
+  // Height occupied from y = 0 upward, and from y = rollWidth downward.
   const skyline = new Array(columns).fill(0);
+  const ceiling = new Array(columns).fill(rollWidth);
 
   const placed = [];
   let usedLength = 0;
@@ -5555,21 +5564,70 @@ function nestByProfile(items, {
     const step = Math.max(1, Math.floor(maxStart / positions));
 
     for (let c0 = 0; c0 <= maxStart; c0 += step) {
-      let need = 0;
-      let ok = true;
+      const rightEdge = (c0 * colWidth) + p.bounds.width;
+
+      // From the near edge: lift until the panel's lower profile clears the
+      // skyline everywhere.
+      let needUp = 0;
       for (let k = 0; k < nCols; k++) {
         if (prof.bot[k] === Infinity) continue;
         const clearance = skyline[c0 + k] - prof.bot[k];
-        if (clearance > need) need = clearance;
+        if (clearance > needUp) needUp = clearance;
       }
-      const dy = need + (need > 0 ? gap : 0);
-      // Must fit across the roll.
-      if (dy + p.bounds.height > rollWidth) ok = false;
-      if (!ok) continue;
+      const dyUp = needUp + (needUp > 0 ? gap : 0);
+      // A near-edge placement must clear the ceiling too, not just the
+      // skyline. Checking only the skyline let panels rise into space already
+      // taken from the far edge — 26 overlapping pairs, and a utilisation
+      // that looked like 90% because the panels were on top of each other.
+      // The gap applies between panels, not between a panel and the edge of
+      // the roll. Charging it at the untouched edge costs 2.2 points of
+      // utilisation for nothing.
+      let hitsCeiling = false;
+      for (let k = 0; k < nCols; k++) {
+        if (prof.top[k] === -Infinity) continue;
+        const c = c0 + k;
+        const margin = ceiling[c] < rollWidth ? gap : 0;
+        if (dyUp + prof.top[k] > ceiling[c] - margin) { hitsCeiling = true; break; }
+      }
+      if (!hitsCeiling && dyUp + p.bounds.height <= rollWidth) {
+        const score = Math.max(usedLength, rightEdge) * 1000 + dyUp;
+        if (!best || score < best.score) best = { c0, dy: dyUp, score, rightEdge, from: 'near' };
+      }
 
-      const rightEdge = (c0 * colWidth) + p.bounds.width;
-      const score = Math.max(usedLength, rightEdge) * 1000 + dy;
-      if (!best || score < best.score) best = { c0, dy, score, rightEdge };
+      // From the far edge: drop until the panel's *upper* profile clears the
+      // ceiling. The panel is not flipped — only its position changes.
+      if (twoSided) {
+        let lowest = Infinity;
+        for (let k = 0; k < nCols; k++) {
+          if (prof.top[k] === -Infinity) continue;
+          const allowed = ceiling[c0 + k] - prof.top[k];
+          if (allowed < lowest) lowest = allowed;
+        }
+        if (lowest !== Infinity) {
+          const dyDown = lowest - gap;
+          const lowEdge = dyDown + (Math.min(...prof.bot.filter((v) => v !== Infinity)) || 0);
+          if (dyDown >= 0 && lowEdge >= 0) {
+            // Prefer the far edge only when it does not collide with the
+            // near-edge stack.
+            let clashes = false;
+            for (let k = 0; k < nCols; k++) {
+              if (prof.bot[k] === Infinity) continue;
+              const c = c0 + k;
+              const lowMargin = skyline[c] > 0 ? gap : 0;
+              const highMargin = ceiling[c] < rollWidth ? gap : 0;
+              if (dyDown + prof.bot[k] < skyline[c] + lowMargin) { clashes = true; break; }
+              if (dyDown + prof.top[k] > ceiling[c] - highMargin) { clashes = true; break; }
+            }
+            if (!clashes) {
+              const score = Math.max(usedLength, rightEdge) * 1000
+                + (rollWidth - dyDown - p.bounds.height);
+              if (!best || score < best.score) {
+                best = { c0, dy: dyDown, score, rightEdge, from: 'far' };
+              }
+            }
+          }
+        }
+      }
     }
 
     if (!best) {
@@ -5594,13 +5652,19 @@ function nestByProfile(items, {
       height: p.bounds.height,
     });
 
-    // Raise the skyline over the columns this panel occupies.
+    // Update whichever front this panel was placed against.
     for (let k = 0; k < nCols; k++) {
-      if (prof.top[k] === -Infinity) continue;
       const c = best.c0 + k;
       if (c >= columns) break;
-      const topY = prof.top[k] + best.dy + gap;
-      if (topY > skyline[c]) skyline[c] = topY;
+      if (best.from === 'far') {
+        if (prof.bot[k] === Infinity) continue;
+        const lowY = prof.bot[k] + best.dy - gap;
+        if (lowY < ceiling[c]) ceiling[c] = lowY;
+      } else {
+        if (prof.top[k] === -Infinity) continue;
+        const topY = prof.top[k] + best.dy + gap;
+        if (topY > skyline[c]) skyline[c] = topY;
+      }
     }
     usedLength = Math.max(usedLength, best.rightEdge);
   }
@@ -9837,6 +9901,96 @@ function partialCorrelate(x, y, z) {
   return denom ? (rxy - rxz * ryz) / denom : null;
 }
 
+/* ------------------------------------------------- reference wings -- */
+
+/**
+ * Turn a reference size into design inputs.
+ *
+ * Seven families of published data have been sitting in `data/reference` used
+ * only for validation. They are also the most useful thing a designer can
+ * start from: a set of numbers known to have produced a wing that flies,
+ * rather than a blank form.
+ *
+ * What can be recovered honestly is limited, and the limit is worth stating
+ * rather than papering over. A specification gives area, span, aspect ratio,
+ * root chord and cell count. It does not give the **shape** — how elliptical
+ * the leading edge is, how the trailing edge is swept, what the arc is, what
+ * section it uses. Those are the design.
+ *
+ * So this returns the published numbers with the shape parameters left at
+ * neutral defaults, and says which is which. A wing loaded this way has the
+ * right size and the wrong shape, and `derived` names every field that was
+ * not in the source.
+ */
+function referenceDesignInputs(size, { tipChordFraction = 0.22 } = {}) {
+  if (!size || !size.flatSpan || !size.flatArea) return null;
+
+  // Tip chord is not published. A fraction of the root is the usual
+  // relationship and is flagged as an assumption.
+  const rootChord = size.maxChord ?? (size.flatArea / size.flatSpan) * 1.18;
+  const tipChord = size.minChord ?? rootChord * tipChordFraction;
+
+  return {
+    inputs: {
+      span: size.flatSpan,
+      rootChord,
+      tipChord,
+      // Sweep and ellipticity are shape, not size, and are not in any
+      // specification. These are neutral starting values.
+      tipSweep: rootChord * 0.55,
+      ellipticityLE: 0.85,
+      ellipticityTE: 0.55,
+    },
+    cells: size.cells ?? 40,
+    projectedRatio: size.projectedArea && size.flatArea
+      ? Math.sqrt(size.projectedArea / size.flatArea) : 0.87,
+    allUpMassKg: size.midWeight ?? null,
+    lineLengthM: null,
+    published: {
+      flatArea: size.flatArea,
+      flatSpan: size.flatSpan,
+      aspectRatio: size.flatAR,
+      projectedArea: size.projectedArea,
+      cells: size.cells,
+      massKg: size.mass,
+      weightRange: size.midWeight,
+    },
+    // Everything below was not in the specification and had to be chosen.
+    derived: [
+      size.minChord ? null : 'tip chord',
+      'tip sweep', 'leading edge ellipticity', 'trailing edge ellipticity',
+      'aerofoil section', 'arc type', 'washin',
+    ].filter(Boolean),
+    note: 'size from the published specification; shape is a neutral default',
+  };
+}
+
+/**
+ * The reference library, as a flat list a picker can show.
+ * Sorted by application then area, which is how a designer looks for one.
+ */
+function referenceLibrary(families) {
+  const out = [];
+  for (const [family, sizes] of Object.entries(families)) {
+    for (const s of sizes) {
+      out.push({
+        id: `${family} ${s.name}`,
+        family,
+        size: s.name,
+        application: s.application || null,
+        flatArea: s.flatArea,
+        flatSpan: s.flatSpan,
+        aspectRatio: s.flatAR,
+        cells: s.cells,
+        source: s,
+      });
+    }
+  }
+  out.sort((a, b) => (a.application || '').localeCompare(b.application || '')
+    || a.family.localeCompare(b.family) || a.flatArea - b.flatArea);
+  return out;
+}
+
 /* ===== export.js ===== */
 /* export.js — DXF and SVG output.
  *
@@ -11273,6 +11427,40 @@ function runPackage(airfoil, { reynolds, mach, nCrit = 7, alphaRange, alphaStep 
  * four viewports, and writes the export files. All geometry comes from the
  * core modules; nothing is recomputed here. */
 
+/**
+ * Published wings, offered as starting points.
+ *
+ * Embedded rather than read from data/reference, because the built tool is a
+ * single file with no filesystem. Only the fields a design needs are carried;
+ * the full tables stay in the repository for validation.
+ */
+const REFERENCE_LIB = [
+  ['PHI Allegro light', 'XS', 20.40, 11.09, 6.03, 72, 2.29, 17.49],
+  ['PHI Allegro light', 'ML', 25.02, 12.29, 6.03, 72, 2.54, 21.40],
+  ['PHI Allegro light', 'XL', 28.62, 13.14, 6.03, 72, 2.72, 24.48],
+  ['Ozone Geo 7', 'XS', 22.20, 10.69, 5.16, 48, 2.63, 18.70],
+  ['Ozone Geo 7', 'MS', 25.80, 11.52, 5.16, 48, 2.84, 21.80],
+  ['Ozone Geo 7', 'L', 29.00, 12.22, 5.16, 48, 3.01, 24.50],
+  ['Ozone Ultralite 5', '13', 12.90, 7.70, 4.56, 34, 2.10, 11.40],
+  ['Ozone Ultralite 5', '19', 18.90, 9.30, 4.56, 34, 2.54, 16.50],
+  ['Ozone Ultralite 5', '25', 25.10, 10.70, 4.56, 34, 2.92, 21.90],
+  ['Ozone Alpina 5', 'XS', 19.30, 10.82, 6.07, 65, 2.25, 16.40],
+  ['Ozone Alpina 5', 'ML', 24.40, 12.16, 6.07, 65, 2.53, 20.70],
+  ['Ozone Alpina 5', 'XL', 27.80, 13.00, 6.07, 65, 2.71, 23.70],
+  ['Ozone Zeno 2', 'S', 21.00, 12.00, 6.90, 78, 2.19, 17.70],
+  ['Ozone Zeno 2', 'L', 26.50, 13.50, 6.90, 78, 2.46, 22.20],
+  ['BGD Lynx 2', 'XS', 19.50, 10.90, 6.20, 65, 2.20, 16.50],
+  ['BGD Lynx 2', 'M', 23.00, 11.80, 6.20, 65, 2.40, 19.50],
+  ['BGD Lynx 2', 'L', 27.00, 12.80, 6.20, 65, 2.60, 22.90],
+  ['Skywalk SAGE', '75', 20.26, 11.34, 6.40, 68, 2.20, 17.29],
+  ['Skywalk SAGE', '95', 22.70, 12.01, 6.40, 68, 2.33, 19.37],
+  ['Skywalk SAGE', '115', 25.67, 12.77, 6.40, 68, 2.48, 21.90],
+].map(([family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea]) => ({
+  id: `${family} ${size}`,
+  family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea,
+  source: { flatArea, flatSpan, flatAR, cells, maxChord, projectedArea, name: size },
+}));
+
 const S = {
   name: 'gnu-01',
   // planform
@@ -11297,6 +11485,7 @@ const S = {
   cxPilot: 0.015, cxLines: 0.020, legacy: false,
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, crossPorts: false, marks: true,
+  reference: '',
   packer: 'profile',
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
   mergeRows: 'none',
@@ -11310,7 +11499,27 @@ let XPOLAR = null; // imported XFOIL section polar, when there is one
 
 /* ---------------------------------------------------------------- model -- */
 
+/** Take the size from a published wing, leaving the shape alone. */
+function applyReference() {
+  if (!S.reference || S.reference === S._appliedReference) return;
+  const entry = REFERENCE_LIB.find((e) => e.id === S.reference);
+  if (!entry) return;
+  const r = referenceDesignInputs(entry.source);
+  if (!r) return;
+  S._appliedReference = S.reference;
+  S.span = r.inputs.span;
+  S.rootChord = r.inputs.rootChord;
+  S.tipChord = r.inputs.tipChord;
+  S.tipSweep = r.inputs.tipSweep;
+  S.cells = Math.max(8, Math.min(60, Math.round(r.cells / 2) * 2));
+  S.projectedRatio = r.projectedRatio;
+  S.name = S.reference.replace(/\s+/g, '-');
+  S._referenceNote = `${S.reference}: ${entry.flatArea} m² published. Size only — `
+    + `${r.derived.join(', ')} are defaults, not this wing's.`;
+}
+
 function rebuild() {
+  applyReference();
   const t0 = performance.now();
   try {
     // An imported LEP design supplies its own discrete planform and per-rib
@@ -11566,6 +11775,12 @@ function hint(host, text) { host.append(el('div', 'hint', text)); }
 
 function buildControls() {
   const P = clear('g-planform');
+  if (REFERENCE_LIB.length) {
+    selectField(P, 'reference', 'Start from a published wing',
+      [['', '—']].concat(REFERENCE_LIB.map((e) => [e.id, `${e.id}  ${e.flatArea} m²`])));
+    hint(P, 'Seven families of published sizes. Loads the size only: a specification '
+      + 'does not say how elliptical the leading edge is, or what section the wing uses.');
+  }
   slider(P, 'span', 'Flat span', 4, 16, 0.05, (v) => v.toFixed(2), ' m');
   slider(P, 'rootChord', 'Root chord', 0.8, 4, 0.01, (v) => v.toFixed(2), ' m');
   slider(P, 'tipChord', 'Tip chord', 0.1, 2.5, 0.01, (v) => v.toFixed(2), ' m');

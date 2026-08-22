@@ -113,6 +113,33 @@ a marked file went from 314 polylines to 24 and lost every registration notch,
 with no error and no failing test. The seams are now carried through the same
 transform, and a test asserts both packers produce the same number of marks.
 
+## Packing from both edges
+
+A single bottom-up skyline leaves a band along the far edge that nothing can
+reach — **173 mm on average, 12% of the roll** — while the smallest panels are
+24 mm tall and would fit in it many times over. A second skyline descending
+from the far edge lets them.
+
+| | roll used | utilisation |
+| --- | --- | --- |
+| boxes | 34.6 m | 48.2% |
+| outlines, one edge | 29.9 m | 55.7% |
+| outlines, both edges | **29.2 m** | **56.9%** |
+
+On a 1.8 m roll it reaches **61.0%**, inside the range the roadmap wanted.
+
+### The bug it introduced first
+
+The first version reported **90.1% with 26 overlapping pairs**. A near-edge
+placement consulted only the skyline, so panels rose straight into space
+already taken from the far edge. Utilisation looked wonderful because the
+panels were on top of each other.
+
+Both fronts are now checked in both directions. A second, quieter mistake came
+with it: charging the inter-panel gap against the *untouched* roll edge cost
+2.2 points of one-sided utilisation for nothing. The gap applies between
+panels, not between a panel and the edge of the roll.
+
 ## Still open
 
 Packing is now 55.7% against a 73% shape ceiling, so about 24 points remain in
