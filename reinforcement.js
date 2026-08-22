@@ -291,3 +291,139 @@ function upperArcLength(rib, extentChord) {
   }
   return s * rib.chord;
 }
+
+/* ------------------------------------------------------ attachment tabs -- */
+
+/**
+ * Line attachment tabs.
+ *
+ * The line plan ends at a point on a rib. Nothing is at that point. A line
+ * cannot be sewn to a point — it is sewn to a **tab**: a folded strip of
+ * reinforced cloth, stitched along the rib's lower edge, projecting far
+ * enough below the sail that the line's loop can pass through it without the
+ * knot bearing on the sail itself.
+ *
+ * ---------------------------------------------------------------------------
+ * What decides the size
+ * ---------------------------------------------------------------------------
+ * **The seam carries the load, and the seam is the tab's width.** A line
+ * pulling 25 daN through a 40 mm tab loads its stitch line at 6 daN per
+ * centimetre; through a 20 mm tab, at 12. Tab width is therefore not a
+ * styling choice but the direct consequence of the tension the line plan
+ * already computes, and this is where those two halves of the project meet.
+ *
+ * **Projection has to clear the knot.** Too short and the line's loop bears
+ * against the sail, chafing it; too long and the tab flutters and adds drag.
+ *
+ * **A tab cannot sit where the rib has been cut away.** Tabs and lightening
+ * holes compete for the same rib, and the hole rules already keep clear of
+ * anchors — but only if both are generated from the same anchor positions.
+ * `checkTabClearance` verifies that rather than assuming it.
+ */
+
+export const DEFAULT_TAB = {
+  // Strength of the stitching, daN per centimetre of seam. A doubled Dacron
+  // tab zigzagged to a reinforced rib edge is good for roughly this; it is a
+  // workshop figure rather than a measured one, and it is the number most
+  // worth replacing with a test result.
+  seamStrengthDaNPerCm: 25,
+  // The design case the tab is sized for. Sizing on the 1 g line tension puts
+  // every tab at minimum width and tells the designer nothing — the same
+  // mistake the line selection avoids by sizing on the certification case.
+  loadFactor: 8,
+  safetyFactor: 1.5,
+  minWidthM: 0.020,
+  maxWidthM: 0.060,
+  projectionM: 0.022,
+  // The tab is folded, so its cut length is twice the projection plus the
+  // seam allowance at each end.
+  foldAllowanceM: 0.010,
+  clothGsm: 0.120,
+};
+
+/**
+ * Tabs for a line plan.
+ *
+ * Width comes from the tension each anchor actually carries, so a design
+ * change that loads a row harder produces wider tabs rather than the same
+ * tabs quietly closer to failure.
+ */
+export function buildTabs({ plan, tensions = null, airfoil, spec = {} } = {}) {
+  const T = { ...DEFAULT_TAB, ...spec };
+  const anchors = plan.lines.filter((l) => l.level === 'upper');
+  const byName = tensions
+    ? new Map(tensions.lines.map((l) => [l.name, l.tensionN])) : null;
+
+  const tabs = anchors.map((a) => {
+    const tensionN = byName ? (byName.get(a.name) ?? 0) : 0;
+    const tensionDaN = tensionN / 10;
+    const designDaN = tensionDaN * T.loadFactor * T.safetyFactor;
+    // Width the stitching needs to carry the design load.
+    const needed = designDaN / T.seamStrengthDaNPerCm / 100;   // metres
+    const widthM = Math.min(T.maxWidthM, Math.max(T.minWidthM, needed));
+    const cutLengthM = 2 * T.projectionM + 2 * T.foldAllowanceM;
+    return {
+      name: a.name,
+      row: a.row,
+      ribIndex: a.ribIndex ?? null,
+      chordFraction: (airfoil.anchors && airfoil.anchors[a.row]) ?? null,
+      tensionDaN,
+      designDaN,
+      widthM,
+      projectionM: T.projectionM,
+      cutLengthM,
+      areaM2: widthM * cutLengthM,
+      massKg: widthM * cutLengthM * T.clothGsm,
+      // What the stitching actually sees.
+      seamLoadDaNPerCm: widthM > 0 ? designDaN / (widthM * 100) : 0,
+      widthLimitedBy: needed > T.maxWidthM ? 'maximum'
+        : (needed < T.minWidthM ? 'minimum' : 'load'),
+    };
+  });
+
+  const sides = 2;
+  const overloaded = tabs.filter((t) => t.seamLoadDaNPerCm > T.seamStrengthDaNPerCm + 1e-9);
+  return {
+    tabs,
+    count: tabs.length * sides,
+    totalAreaM2: tabs.reduce((s, t) => s + t.areaM2, 0) * sides,
+    massKg: tabs.reduce((s, t) => s + t.massKg, 0) * sides,
+    // A tab that has hit the maximum width and still exceeds its seam load is
+    // a real design problem: the answer is another anchor, not a wider tab.
+    overloaded,
+    ok: overloaded.length === 0,
+    spec: T,
+    loadSized: tabs.filter((t) => t.widthLimitedBy === 'load').length,
+    floorSized: tabs.filter((t) => t.widthLimitedBy === 'minimum').length,
+  };
+}
+
+/**
+ * Do the tabs clash with the rib's lightening holes?
+ *
+ * Both are generated from the same anchor positions, so they should not — but
+ * "should not" is exactly the kind of assumption that survives a refactor of
+ * one of the two and not the other.
+ */
+export function checkTabClearance(tabSet, holeSet, { chordM } = {}) {
+  const problems = [];
+  for (const t of tabSet.tabs) {
+    if (t.chordFraction == null) continue;
+    const halfWidth = chordM ? (t.widthM / 2) / chordM : 0.01;
+    for (const h of holeSet.holes) {
+      if (t.chordFraction + halfWidth > h.fromChord
+        && t.chordFraction - halfWidth < h.toChord) {
+        problems.push({
+          tab: t.name,
+          chordFraction: t.chordFraction,
+          hole: [h.fromChord, h.toChord],
+        });
+      }
+    }
+  }
+  return {
+    ok: problems.length === 0,
+    problems,
+    checked: tabSet.tabs.filter((t) => t.chordFraction != null).length,
+  };
+}

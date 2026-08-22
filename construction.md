@@ -229,7 +229,49 @@ table can be told to cut the outline, plot the notches and ignore the text.
 
 ---
 
-## 6. Not covered
+## 6. Attachment tabs
+
+The line plan ends at a point on a rib, and nothing is at that point. A line
+cannot be sewn to a point — it is sewn to a **tab**: a folded strip of
+reinforced cloth stitched along the rib's lower edge, projecting far enough
+that the line's loop does not bear on the sail.
+
+**The seam carries the load, and the seam is the tab's width.** A line pulling
+25 daN through a 40 mm tab loads its stitching at 6 daN per centimetre;
+through a 20 mm tab, at 12. So tab width follows from the tension the line
+plan already computes — this is where the two halves of the project meet.
+
+Sized on the **design case**, not the 1 g tension. Sizing on 1 g puts every
+tab at minimum width and tells the designer nothing, which is the same mistake
+the line selection avoids.
+
+### Almost every tab is minimum-width, and that is the finding
+
+| wing | anchors | tab widths | load-sized |
+| --- | --- | --- | --- |
+| solo 25 m² at 95 kg | 52 | 20 mm | 0 |
+| solo at 120 kg | 52 | 20 mm | 0 |
+| tandem 42 m² at 220 kg | 52 | 20–29 mm | 10 |
+| tandem, anchors every 4th rib | 28 | 20–54 mm | 11 |
+
+A 20 mm tab carries far more than a solo anchor ever asks of it. That is the
+same result as the line selection, where 76 of 88 lines are floor-sized rather
+than load-sized: **most of a wing is built to handling minimums, not to
+strength**.
+
+A tandem crosses into load-driven, and halving its anchor count widens the
+tabs from 29 mm to 54 mm — which is how the mechanism is shown to work rather
+than merely not to fail. A tab that hits the maximum width and still exceeds
+its seam load is reported: the answer there is another anchor, not more cloth.
+
+`checkTabClearance` verifies that tabs and lightening holes do not compete for
+the same part of a rib. Both are generated from the same anchor positions so
+they should not — but that is exactly the assumption that survives a refactor
+of one and not the other.
+
+---
+
+## 7. Not covered
 
 - **Rods.** Modern wings carry nylon or carbon rods in the leading edge; on a
   light wing they are a noticeable fraction of the weight.
@@ -238,5 +280,3 @@ table can be told to cut the outline, plot the notches and ignore the text.
 - **Hole shape.** The generator produces one tapered opening per available
   gap. Real ribs use a variety of shapes, and some makers cut several small
   holes where this cuts one large one.
-- **Attachment tab geometry.** Where a line meets a rib, the tab and its
-  reinforcement are their own small design problem.
