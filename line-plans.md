@@ -89,6 +89,45 @@ not be able to cause, so `combinedRowShare` sums the rows a line actually
 serves. Merging is how a cascade cuts line count without cutting anchor count,
 and it is why a merged line is the thickest at its level.
 
+### Validated against real line tables
+
+Every reference sheet lists a **K row** alongside A/B/C/D. A generated plan
+without brakes cannot be compared with one, and understates the wing by about
+a fifth — so the brake cascade goes into the same plan.
+
+With it, a three-liner lands within a line or two of the real table:
+
+| wing | real | modelled | risers real / modelled |
+| --- | --- | --- | --- |
+| Ozone Geo 7 MS | 112 | **111** | 13 / 13 |
+| Ozone Swift 6 MS | 114 | **115** | 13 / 13 |
+| Ozone Alpina 5 ML | 118 | 110 | 10 / 16 |
+| Ozone Zeno 2 ML | 102 | 91 | 7 / 14 |
+
+The level split matches too — Geo 7 is 65 upper / 33 middle / 13 riser against
+a real 68 / 31 / 13.
+
+**Two-liners do not match, and the riser count says why.** A real two-liner
+cascades its C row into B and ends with far fewer riser lines than the
+generator produces: 10 against 16 on the Alpina, 7 against 14 on the Zeno.
+The total is short while the risers are long, which points at the cascade
+shape rather than the anchor count. Both are asserted, so the gap is recorded
+rather than averaged into a pass.
+
+### A regression it caused
+
+Putting brakes in the plan made them arrive at the load model as **anchors**.
+They took a share of the span load alongside A/B/C/D, and the closure error —
+which asserts that anchor loads sum to half the wing's weight — went from
+0.02% to **19.7%**.
+
+Brakes carry pilot input, not lift. They are now excluded from the lift
+distribution while still being sized as lines, and a test asserts that adding
+them changes the closure error and the total load carried by *nothing at all*.
+
+That check existed for exactly this. A plan that looked more realistic had
+quietly broken the load model, and nothing else would have shown it.
+
 ### Generating one
 
 `buildLinePlan` takes `mergeRows: [['A','B'],['C','D']]`. Each row keeps its
@@ -116,7 +155,7 @@ letters must be load-bearing rows: there is no R row, so `BR1` falls through
 and reads correctly as the B row's first riser line rather than a combined
 B-and-R line.
 
-![Seven naming conventions decoded by one grammar](img/naming-conventions.svg)
+![Seven naming conventions decoded by one grammar](naming-conventions.svg)
 
 *The same cascade, canopy to riser, as five manufacturers write it. Colour is
 the level the parser resolves, not the text.*

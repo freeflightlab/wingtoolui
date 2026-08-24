@@ -648,6 +648,11 @@ export function buildLinePlan({
   // Rows that share their cascade below the top level, as Advance's TAU DLS
   // does with AB and CD. Each entry is a group of row letters.
   mergeRows = null,
+  // Include the brake cascade in the plan. Real line tables carry it — every
+  // reference sheet in this project lists a K row alongside A/B/C/D — so a
+  // plan without it cannot be compared with one, and its totals understate
+  // the wing by about a fifth.
+  brakes = null,
 } = {}) {
   const fractions = airfoil?.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
   const maillon = [0, karabinerSeparationM / 2, -lineLengthM];
@@ -783,6 +788,20 @@ export function buildLinePlan({
   // Merging rebuilds part of the line list, so everything after it reads
   // `plan.lines` rather than the local array it started from.
   if (mergeRows) mergeCascades(plan, mergeRows, levelFractions);
+
+  // The brake cascade is built separately because it is a different shape —
+  // four levels, one shared lower line, uneven anchors — but it belongs in
+  // the same plan.
+  if (brakes) {
+    const bp = buildBrakePlan({
+      wing,
+      lineLengthM,
+      karabinerSeparationM,
+      ...(typeof brakes === 'object' ? brakes : {}),
+    });
+    plan.lines = plan.lines.concat(bp.lines);
+    plan.brakePlan = bp;
+  }
   plan.totals = planTotals(plan);
   plan.totalLengthM = plan.lines.reduce((s, l) => s + (l.lengthMM * 2) / 1000, 0);
   plan.mergedRows = mergeRows || [];
