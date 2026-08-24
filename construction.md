@@ -271,7 +271,63 @@ of one and not the other.
 
 ---
 
-## 7. Not covered
+## 7. Reconciling against a real wing
+
+The mass budget said 2.5 kg accounted against a 4 kg wing and named the gap.
+Modelling a **published** wing instead of a generic one says how much of that
+gap is real and how much was my own assumptions.
+
+Skywalk's SAGE 95 — 22.70 m², 68 cells, published at **3.80 kg**, with its
+cloth named in the manual.
+
+| item | mass | share |
+| --- | --- | --- |
+| Sail cloth | 1249 g | 33% |
+| Seam allowance | 506 g | 13% |
+| Thread | 421 g | 11% |
+| Rib cloth | 340 g | 9% |
+| Risers | 230 g | 6% |
+| Lines | 150 g | 4% |
+| Reinforcement | 130 g | 3% |
+| Rods | 90 g | 2% |
+| Diagonals | 79 g | 2% |
+| Attachment tabs | 20 g | 1% |
+| **accounted** | **3214 g** | **85%** |
+| residual | 586 g | 15% |
+
+Three things moved it from 66% to 85%.
+
+**Cloth weight was wrong.** The default 38 g/m² is a mid-range sail cloth; the
+SAGE uses Dominico 10D at **27 g/m²**. On the largest item in the bill that is
+a 509 g error — more than every small item put together. `CLOTH_LIBRARY` now
+carries real named grades.
+
+**Seam allowance is cloth.** Every seam is folded, so the cut cloth is wider
+than the finished panel by the allowance on each side. 936 m of seam at 10 mm
+a side is **18.7 m² of extra cloth**, 506 g. A bill built from panel areas
+leaves it out entirely.
+
+**Thread is not negligible.** 936 m of seam, two rows of stitching, and a
+lockstitch consuming two and a half times the seam length gives 421 g — 11% of
+the wing, and easy to omit completely.
+
+The remaining **586 g is left as a residual**, with candidates named rather
+than absorbed: reinforcement beyond the simple layout, riser hardware, labels
+and sliders, and cloth heavier after coating than its nominal grade. A
+reconciliation that closes to zero by tuning its own assumptions has not
+learned anything.
+
+### And a modelling gap it exposed
+
+The generated line plan reaches the SAGE's published **215 m of line within
+12%**, but with **half as many lines**. A real wing runs four cascade levels
+plus brakes and a stabilo where the generator runs three and no brakes, so it
+arrives at the same length with fewer, longer lines. Length is right;
+topology is not.
+
+---
+
+## 8. Not covered
 
 - **Rods.** Modern wings carry nylon or carbon rods in the leading edge; on a
   light wing they are a noticeable fraction of the weight.

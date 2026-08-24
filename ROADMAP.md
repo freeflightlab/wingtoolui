@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1045-test validation suite and a benchmark with regression budgets
+- [x] 1059-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -348,8 +348,16 @@ Turning geometry into something a person can actually sew.
 - [x] **Rods** — arc length along the rib surface rather than a chord
       fraction (8.3% longer), mass as the square of diameter, and shorter rods
       on the closed ribs. Counting them removes them from the missing list.
-- [ ] **Thread, risers and hardware webbing** — what is left of the mass gap,
-      now about 35% of a finished wing.
+- [x] **Thread and seam allowance** — both counted, taking a reconciliation
+      against Skywalk's published SAGE 95 from 66% to 85% accounted. Cloth
+      weight was the largest error: the default 38 g/m² against the wing's
+      actual 27 g/m² is 509 g on the biggest item in the bill.
+- [ ] **The last 15%** — 586 g on a 3.80 kg wing: reinforcement beyond the
+      simple layout, riser hardware, labels, and cloth heavier after coating
+      than its nominal grade.
+- [ ] **Four-level cascades with brakes and stabilo** — the generator reaches
+      a real wing's line *length* within 12% but with half its line *count*,
+      because it runs three levels and no brake row.
 - [x] **Marking and registration** — notches paired at equal fractions of each
       seam so ovalization's 31 mm of ease becomes 3.9 mm per segment, plus
       grain arrows and panel labels on their own DXF layers. See
