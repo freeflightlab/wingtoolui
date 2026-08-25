@@ -3276,6 +3276,91 @@ function resolveCascadeLevels(lines) {
     };
   });
 }
+
+/**
+ * A plain line sheet, for data collected by hand.
+ *
+ * The production readers each follow one manufacturer's spreadsheet layout —
+ * column positions inferred from a header, names sometimes in two columns,
+ * quantities in a third. That is right for reading a maker's own file, and
+ * wrong to ask of someone transcribing a manual.
+ *
+ * This reads the format `docs/collecting-reference-data.md` describes:
+ *
+ *   # comments, including provenance, are ignored
+ *   name  length_mm  material  colour  comment
+ *   a1    295        DC 60     white   double spliced both sides
+ *
+ * A header row is required and read by name, so column order does not matter
+ * and extra columns are harmless. `loop_mm`, `cutting_mm`, `quantity` and
+ * `total_length_mm` are picked up where present.
+ *
+ * Written after the collection instructions were tested against the existing
+ * readers and parsed **zero lines** — the documented format was one no reader
+ * accepted. Better found before fifty wings were transcribed into it.
+ */
+function parseSimpleLineSheet(text) {
+  const rows = text.split(/\r?\n/)
+    .filter((l) => l.trim() && !l.trim().startsWith('#'))
+    .map((l) => (/\t/.test(text) ? l.split('\t') : l.split(',')).map((c) => c.trim()));
+  if (!rows.length) return { lines: [], header: null, skipped: [] };
+
+  const header = rows[0].map((h) => h.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+  const col = (...names) => {
+    for (const n of names) {
+      const i = header.indexOf(n);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const iName = col('name', 'line', 'reference', 'ref');
+  const iLen = col('length_mm', 'length', 'sewn_length_mm', 'single_length_mm');
+  if (iName < 0) {
+    throw new Error('parseSimpleLineSheet: no "name" column in the header row');
+  }
+
+  const iMat = col('material', 'material_reference');
+  const iCol = col('colour', 'color');
+  const iCom = col('comment', 'construction', 'note');
+  const iLoop = col('loop_mm', 'loop_length_mm');
+  const iCut = col('cutting_mm', 'cut_length_mm', 'cutting_length_mm');
+  const iQty = col('quantity', 'qty');
+  const iTot = col('total_length_mm', 'total_mm');
+
+  const lines = [];
+  const skipped = [];
+  for (const r of rows.slice(1)) {
+    const name = r[iName];
+    if (!name) continue;
+    const parsed = parseLineName(name);
+    if (!parsed) { skipped.push(name); continue; }
+    const num = (i) => (i >= 0 && r[i] !== undefined && r[i] !== ''
+      ? Number(String(r[i]).replace(/[^\d.-]/g, '')) : null);
+    const len = num(iLen);
+    lines.push({
+      ...parsed,
+      lengthMM: Number.isFinite(len) ? len : null,
+      material: iMat >= 0 ? (r[iMat] || null) : null,
+      colour: iCol >= 0 ? (r[iCol] || null) : null,
+      comment: iCom >= 0 ? (r[iCom] || null) : null,
+      loopMM: num(iLoop),
+      cuttingMM: num(iCut),
+      quantity: num(iQty) ?? 1,
+      totalLengthMM: num(iTot),
+    });
+  }
+
+  return {
+    lines,
+    header,
+    skipped,
+    // Provenance, so a sheet can say what it measured.
+    provenance: text.split(/\r?\n/).filter((l) => l.trim().startsWith('#'))
+      .map((l) => l.replace(/^#\s?/, '')),
+    includesRisers: /including risers/i.test(text)
+      ? true : (/excluding risers/i.test(text) ? false : null),
+  };
+}
 function parseLineTable(text) {
   // Decide the delimiter once for the whole file rather than accepting either
   // at every character. These tables routinely carry several line names in one

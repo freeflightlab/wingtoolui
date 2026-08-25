@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1184-test validation suite and a benchmark with regression budgets
+- [x] 1195-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -327,6 +327,13 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Reference data collection** — `docs/collecting-reference-data.md` is a
+      self-contained brief for building the database in a separate
+      conversation, and `data/reference/CATALOGUE.md` is a generated inventory
+      of what is already there. The documented format is read by
+      `parseSimpleLineSheet`; testing the instructions found they described a
+      format no reader accepted.
 
 - [x] **Documentation split and health-checked** — `line-plans.md` (458
       lines) and `validation.md` (721) each covered two subjects; split into
