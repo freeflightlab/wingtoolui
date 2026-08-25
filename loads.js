@@ -503,6 +503,103 @@ function groupLinesBy(arr, fn) {
  * Measured values are better than table values, and vary with how far a line
  * has been broken in.
  */
+/**
+ * The four lengths of a line, and why they are not interchangeable.
+ *
+ * Designing for aerodynamics and designing for manufacture ask different
+ * questions of the same line, and the answers differ by more than the
+ * inspection tolerance. Four distinct quantities:
+ *
+ *   **flying length** — the length under its actual working load. This sets
+ *     where the anchor sits relative to the pilot, and therefore the angle of
+ *     attack, the trim speed and the polar. It is what the *design* computes
+ *     and what the aerodynamics needs.
+ *
+ *   **reference length** — measured at the PMA's 5 daN. What a manual
+ *     publishes and an inspector checks against. Neither of the other two.
+ *
+ *   **sewn length** — unloaded, inside of one loop to inside of the other
+ *     (PMA Figure 6). What the sewer works to.
+ *
+ *   **cut length** — sewn plus the loop allowance. What is consumed from the
+ *     roll, and what a material order is built from.
+ *
+ * ---------------------------------------------------------------------------
+ * The surprise in the middle
+ * ---------------------------------------------------------------------------
+ * It is natural to assume the measuring tension is small compared with flight
+ * load, so that a reference length is near enough the flying length. On a
+ * paraglider it is the other way round. The load is spread over fifty-odd
+ * lines per side, so at 1 g the upper lines carry **0.9 daN on average** and
+ * even the main lines only 4.7 — all below the 5 daN the measurement applies.
+ *
+ * **A line measured at 5 daN is longer than it flies at 1 g.** The reference
+ * length is a stretched length, and publishing a design length in its place
+ * puts a systematic error into every manual and every inspection.
+ */
+export function lengthChain(selection, {
+  atG = 1,
+  loopAllowanceMM = 0,
+  measurementDaN = 5,
+} = {}) {
+  const rows = selection.lines.map((l) => {
+    if (!l.line) {
+      return {
+        ...l,
+        flyingLengthMM: l.lengthMM,
+        referenceLengthMM: l.lengthMM,
+        sewnLengthMM: l.lengthMM,
+        cutLengthMM: l.lengthMM + loopAllowanceMM,
+        sized: false,
+      };
+    }
+    const ratedN = (l.ratedDaN ?? l.line.strengthKinkedDaN) * 10;
+    const eps = l.line.elongationAtRated;
+    // Extension of a line of unloaded length L0 under force F.
+    const extend = (L0, forceN) => L0 * eps * (forceN / ratedN);
+
+    const flying = l.lengthMM;                       // the design output
+    const flightN = l.tensionN * atG;
+    // Unloaded length that reaches the flying length under the flight load.
+    const sewn = flying / (1 + eps * (flightN / ratedN));
+    const reference = sewn + extend(sewn, measurementDaN * 10);
+
+    return {
+      ...l,
+      flightN,
+      flyingLengthMM: Math.round(flying),
+      referenceLengthMM: Math.round(reference),
+      sewnLengthMM: Math.round(sewn),
+      cutLengthMM: Math.round(sewn + loopAllowanceMM),
+      // The two differences a designer needs to see.
+      flightStretchMM: flying - sewn,
+      measurementStretchMM: reference - sewn,
+      referenceMinusFlyingMM: reference - flying,
+      sized: true,
+    };
+  });
+
+  const sized = rows.filter((r) => r.sized);
+  const deltas = sized.map((r) => r.referenceMinusFlyingMM);
+  return {
+    lines: rows,
+    measurementDaN,
+    loopAllowanceMM,
+    flyingMetres: rows.reduce((a, r) => a + r.flyingLengthMM, 0) / 1000,
+    sewnMetres: rows.reduce((a, r) => a + r.sewnLengthMM, 0) / 1000,
+    cutMetres: rows.reduce((a, r) => a + r.cutLengthMM, 0) / 1000,
+    // Positive means the reference length is longer than the flying length,
+    // which is the usual case on a paraglider.
+    worstReferenceMinusFlyingMM: deltas.length
+      ? deltas.reduce((m, d) => (Math.abs(d) > Math.abs(m) ? d : m), 0) : 0,
+    meanReferenceMinusFlyingMM: deltas.length
+      ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0,
+    // How much of the PMA +/-12 mm band this systematic difference uses up.
+    bandUsedFraction: deltas.length
+      ? Math.max(...deltas.map((d) => Math.abs(d))) / 12 : 0,
+  };
+}
+
 export function stretchCorrection(selection, { atG = 1, loopAllowanceMM = 0 } = {}) {
   const corrected = selection.lines.map((l) => {
     if (!l.line) {

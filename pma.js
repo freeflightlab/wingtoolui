@@ -244,6 +244,10 @@ export function exchangeRecord({
   plan,
   selection = null,
   stretch = null,
+  // The length chain, which distinguishes the flying length from the
+  // reference length measured at 5 daN. Without it the record publishes a
+  // design length where the standard asks for a measured one.
+  lengths = null,
   riserLengthMM = 0,
   trimmerPosition = 'closed',
   lineCoefficientMaterial = 'dyneema',
@@ -254,6 +258,8 @@ export function exchangeRecord({
   if (selection) for (const l of selection.lines) byName.set(l.name, l);
   const stretchByName = new Map();
   if (stretch) for (const l of stretch.lines) stretchByName.set(l.name, l);
+  const chainByName = new Map();
+  if (lengths) for (const l of lengths.lines) chainByName.set(l.name, l);
 
   const lines = plan.lines.map((l) => {
     const sel = byName.get(l.name);
@@ -264,7 +270,8 @@ export function exchangeRecord({
       level: l.level,
       material: sel && sel.line ? sel.line.code : null,
       // Figure 6: inside of one loop to inside of the other.
-      sewnLengthMM: st ? st.finishedLengthMM : Math.round(l.lengthMM),
+      sewnLengthMM: chainByName.get(l.name)?.sewnLengthMM
+        ?? (st ? st.finishedLengthMM : Math.round(l.lengthMM)),
       colour: sel && sel.line ? (sel.line.colour ?? null) : null,
       construction: st ? 'spliced both ends' : null,
       newStrengthDaN: sel && sel.line
@@ -278,7 +285,16 @@ export function exchangeRecord({
   });
 
   // Total line length per attachment point, sail to harness.
+  //
+  // The standard measures this at 5 daN, and on a paraglider that tension
+  // exceeds the 1 g load on every line — so the reference length is longer
+  // than the flying length the design computed. On the longest, thinnest,
+  // least loaded lines the difference reaches 20 mm, which is 166% of the
+  // +/-12 mm inspection band. Publishing the design length in its place puts
+  // a systematic error into every manual and every inspection.
   const totals = [];
+  const referenceOffset = lengths
+    ? lengths.meanReferenceMinusFlyingMM : 0;
   if (plan.totals) {
     for (const [index, byRow] of Object.entries(plan.totals)) {
       for (const [row, mm] of Object.entries(byRow)) {
@@ -286,7 +302,10 @@ export function exchangeRecord({
           attachmentPoint: `${row}${index}`,
           row,
           index: Number(index),
-          totalLineLengthMM: Math.round(mm),
+          totalLineLengthMM: Math.round(mm + referenceOffset),
+          measuredAtDaN: lengths ? lengths.measurementDaN : null,
+          basis: lengths ? 'reference length at the measuring tension'
+            : 'design length; no length chain supplied',
           includesRisers: true,
           trimmerPosition,
         });
@@ -301,6 +320,9 @@ export function exchangeRecord({
   if (!weightRangeKg) missing.push('weight range');
   if (!selection) missing.push('line materials and strengths');
   if (!riserLengthMM) missing.push('riser length');
+  if (!lengths) {
+    missing.push('length chain (totals are design lengths, not measured at 5 daN)');
+  }
 
   return {
     standard: 'PMA Periodical Inspection of Paragliders',

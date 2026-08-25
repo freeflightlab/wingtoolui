@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1172-test validation suite and a benchmark with regression budgets
+- [x] 1184-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -349,6 +349,12 @@ validation notes flagged.
       command, so it can go stale between runs.
 
 ## Phase 3 — construction detail
+
+- [x] **Design length is not manufacturing length** — four distinct lengths
+      (flying, reference at 5 daN, sewn, cut), with the conversions between
+      them. The measuring tension exceeds the 1 g load on every line, so a
+      reference length is *longer* than a flying length by up to 20 mm — 166%
+      of the inspection band. See `docs/lengths.md`.
 
 Turning geometry into something a person can actually sew.
 
