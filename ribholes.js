@@ -408,3 +408,99 @@ function scalePolygon(pts, k) {
   const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
   return pts.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
 }
+
+/* --------------------------------------------------- internal collisions -- */
+
+/**
+ * Check that a rib's internal parts do not want the same fabric.
+ *
+ * Lightening holes, cross-ports, diagonal landings and attachment tabs are
+ * each generated correctly and **independently**. Each respects its own
+ * margins. Nothing has been checking that two of them do not occupy the same
+ * chordwise band of the same rib — and they easily can, because they are all
+ * placed into the space the anchors leave.
+ *
+ * `checkTabClearance` does this for tabs against lightening holes. This is
+ * the general form, and it exists because a rib that passes every individual
+ * rule can still be uncuttable.
+ *
+ * Everything is compared as a chordwise interval, which is the axis they
+ * compete on. Two parts overlapping in chord but at different heights in the
+ * section are reported as touching rather than colliding, since a hole near
+ * the upper surface and a diagonal landing near the lower can share a station.
+ */
+export function checkRibInternals({
+  chordM,
+  holes = [],
+  ports = [],
+  diagonalLandings = [],
+  tabs = [],
+  minSeparationChord = 0.02,
+} = {}) {
+  const parts = [];
+  const add = (list, kind, from, to, name) => {
+    for (const [i, item] of list.entries()) {
+      const a = from(item);
+      const b = to(item);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      parts.push({ kind, name: name(item, i), from: Math.min(a, b), to: Math.max(a, b) });
+    }
+  };
+
+  add(holes, 'lightening hole', (h) => h.fromChord, (h) => h.toChord,
+    (h, i) => `hole ${i + 1}`);
+  add(ports, 'cross-port', (p) => p.fromChord, (p) => p.toChord,
+    (p, i) => `port ${i + 1}`);
+  add(diagonalLandings, 'diagonal', (d) => d.fromChord, (d) => d.toChord,
+    (d, i) => d.name ?? `diagonal ${i + 1}`);
+  // A tab is a point on the chord; give it the width it actually occupies.
+  for (const t of tabs) {
+    if (!Number.isFinite(t.chordFraction)) continue;
+    const half = chordM ? (t.widthM / 2) / chordM : 0.01;
+    parts.push({
+      kind: 'tab', name: t.name,
+      from: t.chordFraction - half, to: t.chordFraction + half,
+    });
+  }
+
+  parts.sort((a, b) => a.from - b.from);
+  const collisions = [];
+  const tight = [];
+  for (let i = 0; i < parts.length; i++) {
+    for (let j = i + 1; j < parts.length; j++) {
+      const a = parts[i];
+      const b = parts[j];
+      if (b.from >= a.to) break;                       // sorted: no later part can overlap
+      const overlap = Math.min(a.to, b.to) - Math.max(a.from, b.from);
+      if (overlap > 0) {
+        collisions.push({
+          a: `${a.kind} ${a.name}`, b: `${b.kind} ${b.name}`,
+          overlapChord: overlap,
+          overlapMM: chordM ? overlap * chordM * 1000 : null,
+        });
+      }
+    }
+  }
+  // And parts that clear but only just.
+  for (let i = 1; i < parts.length; i++) {
+    const gap = parts[i].from - parts[i - 1].to;
+    if (gap >= 0 && gap < minSeparationChord) {
+      tight.push({
+        a: `${parts[i - 1].kind} ${parts[i - 1].name}`,
+        b: `${parts[i].kind} ${parts[i].name}`,
+        gapChord: gap,
+        gapMM: chordM ? gap * chordM * 1000 : null,
+      });
+    }
+  }
+
+  return {
+    parts,
+    collisions,
+    tight,
+    ok: collisions.length === 0,
+    partCount: parts.length,
+    kinds: [...new Set(parts.map((p) => p.kind))],
+    minSeparationChord,
+  };
+}

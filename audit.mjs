@@ -220,6 +220,52 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
     outOfSequence.join(' | ') || 'in order');
 }
 
+/* ---- 2d. "not covered" lists have not gone stale ----------------------- */
+//
+// Same failure as the roadmap: a document lists something as not covered, it
+// gets built, and the list is never revisited. Six entries had gone stale
+// this way — cross-ports, rods, reinforcement, stabilo, trimmers and the
+// brake cascade were all listed as absent after being implemented.
+{
+  const coreAll = coreFiles.map((f) => readFileSync(`src/core/${f}`, 'utf8')).join('\n');
+  const built = [
+    ['cross-port', /export function buildCrossPorts/],
+    ['reinforcement', /export function buildReinforcement/],
+    ['rods?\\b', /export function buildRods/],
+    ['attachment tab', /export function buildTabs/],
+    ['stabilo', /export function addStabilo/],
+    ['trimmer', /export function alphaChangeWithTrim/],
+    ['printed pattern', /export function tiledPages/],
+    ['brake cascade geometry', /export function buildBrakePlan/],
+  ];
+  const stale = [];
+  for (const f of readdirSync('docs').filter((x) => x.endsWith('.md'))) {
+    const md = readFileSync(`docs/${f}`, 'utf8');
+    const sections = md.split(/^## /m)
+      .filter((x) => /^\d+\.\s*(Not covered|Not yet modelled|Not decoded|Still open)/i.test(x));
+    for (const sec of sections) {
+      // A bullet mentioning a built feature is not automatically stale: an
+      // entry can name one while describing a real remaining gap around it —
+      // "cross-ports are generated, but nothing checks they do not collide
+      // with a diagonal" belongs in a not-covered list.
+      //
+      // What is stale is a bullet whose *subject* is the feature. So the
+      // check is per bullet, and only fires when the feature is named at the
+      // start of one, which is how these lists put their subject.
+      for (const bullet of sec.split(/\n- /).slice(1)) {
+        const subject = bullet.split(/[.—]/)[0];
+        for (const [name, re] of built) {
+          if (new RegExp(name, 'i').test(subject) && re.test(coreAll)) {
+            stale.push(`${f}: "${subject.trim().slice(0, 40)}"`);
+          }
+        }
+      }
+    }
+  }
+  say(stale.length === 0, 'no document lists a built feature as not covered',
+    stale.join(', ') || 'the gaps listed are real gaps');
+}
+
 /* ---- 3a. Phase 1 still does what the roadmap says ---------------------- */
 //
 // A separate walk of the Phase 1 list, item by item. Kept out of the main

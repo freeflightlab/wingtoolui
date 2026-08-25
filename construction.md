@@ -362,12 +362,40 @@ assertion of mine that expected `A1`.
 
 ---
 
-## 9. Not covered
+## 9. Rib internals compete for the same fabric
 
-- **Rods.** Modern wings carry nylon or carbon rods in the leading edge; on a
-  light wing they are a noticeable fraction of the weight.
-- **Cross-ports.** Holes between cells for pressure equalisation, distinct
-  from lightening holes and subject to different rules.
+Lightening holes, cross-ports, diagonal landings and attachment tabs are each
+generated correctly and **independently**. Each respects its own margins —
+nose band, surface margin, anchor clearance, webs between holes.
+
+Nothing was checking that two of them do not want the same chordwise band of
+the same rib. They do, because they are all placed into the space the anchors
+leave. On the root rib of the test wing:
+
+```
+lightening hole 1 overlaps cross-port 3 by 110 mm
+lightening hole 2 overlaps cross-port 1 by 270 mm
+lightening hole 3 overlaps cross-port 2 by 233 mm
+```
+
+**A rib that passes every individual rule can still be uncuttable.**
+
+`checkRibInternals` compares every part as a chordwise interval, which is the
+axis they compete on, and separates two cases that want different responses:
+
+- a **collision** — the parts overlap, and one of them must move
+- a **tight clearance** — they clear but by less than the minimum separation,
+  which is buildable and fragile
+
+`checkTabClearance` had been doing this for tabs against lightening holes
+only. This is the general form, and it was written because the documentation
+audit flagged "cross-ports and their interaction" as an open gap and it turned
+out to be a real one.
+
+---
+
+## 10. Not covered
+
 - **Hole shape.** The generator produces one tapered opening per available
   gap. Real ribs use a variety of shapes, and some makers cut several small
   holes where this cuts one large one.

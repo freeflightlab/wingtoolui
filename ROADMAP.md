@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1213-test validation suite and a benchmark with regression budgets
+- [x] 1222-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -356,6 +356,11 @@ validation notes flagged.
       command, so it can go stale between runs.
 
 ## Phase 3 — construction detail
+
+- [x] **Collision checking between rib internals** — holes, cross-ports and
+      tabs were each placed correctly and independently, and overlapped by up
+      to 270 mm on the root rib. A rib that passes every individual rule can
+      still be uncuttable.
 
 - [x] **Design length is not manufacturing length** — four distinct lengths
       (flying, reference at 5 daN, sewn, cut), with the conversions between
