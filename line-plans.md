@@ -409,3 +409,50 @@ reference wings, not for claiming a match.
 - **Left/right asymmetry.** Quantities of 2 and 4 encode mirror pairs;
   asymmetric colour or line plans are not represented.
 - **Riser hardware** — maillons, pulleys, speed system travel, trimmers.
+
+---
+
+## The stabilo, and why naming does not find it
+
+The stabilo is the outermost line group. It holds the tip against folding
+under, and it is what a pilot pulls for big ears. Every reference wing has
+one, and **it cannot be identified by name on most of them:**
+
+| maker | how the stabilo appears |
+| --- | --- |
+| UP Paragliders | `sa1` `sb1` `st1` — explicit, an s-prefix |
+| Skywalk SAGE | `a17` `a18` `b17` `b18` — named as A and B, grouped in the sheet under "SAB", with the main `as4` colour-coded orange |
+| Ozone | no marking at all; simply the highest indices in each row |
+
+A parser looking for an S row finds the stabilo on **one manufacturer in
+three**. So `findStabilo` tries the name first, and falls back to finding it
+structurally.
+
+### The signal is the gap
+
+A wing's ordinary anchors are spaced fairly evenly. The stabilo sits past a
+noticeably larger step, because the tip cells between it and the last ordinary
+anchor are carried by it rather than by lines of their own. The typical
+spacing is *measured* from the wing rather than assumed, and anything beyond
+`gapFactor` times it is outboard:
+
+```
+0 3 6 9 12 15 18 21 24    even spread     -> no separate stabilo
+0 3 6 9 12 15 18    24    one past a gap  -> 1 stabilo line
+0 3 6 9 12 15    23 24    a pair          -> 2
+0 2 4 6 8 10 12  22 23    dense inboard   -> 2, typical spacing 2 ribs
+```
+
+The first case matters as much as the others: a wing with no separate stabilo
+is reported as having none, with a note saying so, rather than the outermost
+ordinary anchors being silently relabelled.
+
+### Generating one
+
+`addStabilo` runs it to its own main line, as every reference wing does — the
+SAGE puts it on the A2 riser, UP gives it `st` mains of its own.
+
+It carries handling load, not lift, so like the brakes it is excluded from the
+span-load distribution. A test asserts that adding a stabilo changes the
+closure error by **nothing at all** — the same guard that caught the brake
+regression.

@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1148-test validation suite and a benchmark with regression budgets
+- [x] 1162-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -384,8 +384,9 @@ Turning geometry into something a person can actually sew.
 - [ ] **More designs.** Six is enough to separate two-liners from
       three-liners and not enough to fit a curve. The ratio ranges nearly
       touch at 2.13 against 2.58.
-- [ ] **Stabilo lines** — the outermost row on its own riser, present on most
-      reference wings and not generated.
+- [x] **Stabilo lines** — found by name where a maker gives one and
+      structurally where none does, which is two makers in three. Generated
+      onto its own main line, and excluded from the lift distribution.
 - [x] **Marking and registration** — notches paired at equal fractions of each
       seam so ovalization's 31 mm of ease becomes 3.9 mm per segment, plus
       grain arrows and panel labels on their own DXF layers. See

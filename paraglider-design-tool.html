@@ -4929,6 +4929,130 @@ function suggestAnchorsPerRow({
   };
 }
 
+/* -------------------------------------------------------------- stabilo -- */
+
+/**
+ * Find the stabilo.
+ *
+ * The stabilo is the outermost line group: it holds the wing tip against
+ * folding under and is what a pilot pulls for big ears. Every reference wing
+ * has one, and **it cannot be identified by name on most of them.**
+ *
+ *   UP Paragliders   `sa1` `sb1` `st1`      explicit, an s-prefix
+ *   Skywalk SAGE     `a17` `a18` `b17` `b18`  named as A and B, grouped in
+ *                                            the sheet under "SAB", with the
+ *                                            main `as4` colour-coded orange
+ *   Ozone            no marking at all — the stabilo lines are simply the
+ *                                            highest indices in each row
+ *
+ * So a parser that looks for an S row finds the stabilo on one manufacturer
+ * in three. It has to be found **structurally**: the outermost anchors, on
+ * the ribs beyond where the ordinary cascade reaches.
+ *
+ * The signal that works across all of them is the gap. A wing's ordinary
+ * anchors are spaced fairly evenly; the stabilo sits past a noticeably larger
+ * step, because the tip cells between are carried by it rather than by their
+ * own lines. `gapFactor` is how much larger that step has to be.
+ */
+function findStabilo(lines, { gapFactor = 1.8, maxLines = 6 } = {}) {
+  // Explicit naming first, where a maker provides it.
+  const named = lines.filter((l) => l.row === 'S' || l.isStabilo);
+  if (named.length) {
+    return {
+      lines: named,
+      count: named.length,
+      identifiedBy: 'name',
+      note: 'the maker names the stabilo explicitly',
+    };
+  }
+
+  // Otherwise: the outermost anchors, past an unusually large spanwise step.
+  const uppers = lines
+    .filter((l) => l.level === 'upper' && l.row !== 'K' && l.ribIndex != null)
+    .sort((a, b) => a.ribIndex - b.ribIndex);
+  if (uppers.length < 4) {
+    return { lines: [], count: 0, identifiedBy: 'none', note: 'too few anchors to judge' };
+  }
+
+  const ribs = [...new Set(uppers.map((l) => l.ribIndex))].sort((a, b) => a - b);
+  const gaps = [];
+  for (let i = 1; i < ribs.length; i++) gaps.push(ribs[i] - ribs[i - 1]);
+  const typical = median(gaps);
+
+  // Walk in from the tip while the step to the next anchor inboard is large.
+  let cut = ribs.length;
+  for (let i = ribs.length - 1; i > 0; i--) {
+    const gap = ribs[i] - ribs[i - 1];
+    if (gap >= typical * gapFactor) { cut = i; break; }
+  }
+
+  const outboard = ribs.slice(cut);
+  const found = uppers.filter((l) => outboard.includes(l.ribIndex)).slice(0, maxLines);
+  return {
+    lines: found,
+    count: found.length,
+    identifiedBy: found.length ? 'position' : 'none',
+    typicalGapRibs: typical,
+    outboardRibs: outboard,
+    note: found.length
+      ? 'found as the outermost anchors, past a larger-than-usual spanwise step'
+      : 'no outboard group stands out; this wing may have no separate stabilo',
+  };
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const v = values.slice().sort((a, b) => a - b);
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+/**
+ * Add a stabilo to a plan.
+ *
+ * It runs to its own main line, because that is how every reference wing does
+ * it — the SAGE puts it on the A2 riser, UP gives it `st` mains of its own.
+ * It carries little flight load and a lot of handling: a pilot grabs it for
+ * big ears, so it is sized for that rather than for lift.
+ */
+function addStabilo(plan, wing, {
+  anchors = 2, chordFraction = 0.35, riser = null,
+} = {}) {
+  const ribs = wing.ribs;
+  const n = Math.max(1, Math.min(anchors, 4));
+  const riserName = riser ?? (plan.risers[plan.risers.length - 1]?.name ?? 'B');
+  const maillon = plan.risers.find((r) => r.name === riserName)?.maillon ?? plan.maillon;
+
+  const tips = [];
+  for (let k = 0; k < n; k++) {
+    const i = ribs.length - 1 - k;
+    if (i < 0) break;
+    tips.push(ribs[i]);
+  }
+
+  const points = tips.map((rib) => pointOnSurface(rib.lower, chordFraction));
+  const node = centroidPts(points);
+  const added = [];
+
+  tips.forEach((rib, k) => {
+    added.push({
+      row: 'S', level: 'upper', index: k + 1, name: `s${k + 1}`,
+      riser: riserName, from: node, to: points[k],
+      lengthMM: mmDist(node, points[k]),
+      ribIndex: rib.index, isStabilo: true,
+    });
+  });
+  added.push({
+    row: 'S', level: 'main', index: 1, name: 'sm1',
+    riser: riserName, from: maillon, to: node,
+    lengthMM: mmDist(maillon, node), isStabilo: true,
+  });
+
+  plan.lines = plan.lines.concat(added);
+  plan.stabilo = { lines: added, anchors: n, riser: riserName };
+  return plan;
+}
+
 /* ===== risers.js ===== */
 /* risers.js — risers, the speed system, and accelerated flight.
  *
@@ -12662,7 +12786,7 @@ const S = {
   cxPilot: 0.015, cxLines: 0.020, legacy: false,
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, crossPorts: false, marks: true,
-  reference: '', brakeLines: true,
+  reference: '', brakeLines: true, stabilo: true,
   packer: 'profile',
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
   mergeRows: 'none',
@@ -12825,6 +12949,7 @@ function rebuild() {
       mergeRows: MERGES[S.mergeRows] || null,
       brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
     });
+    if (S.stabilo) addStabilo(linePlan, wing, { anchors: 2 });
 
     // Nesting is the one expensive step — a few hundred milliseconds on a
     // big wing — so it is deferred rather than run on every slider frame.
@@ -13060,6 +13185,7 @@ function buildControls() {
 
   const N = clear('g-panels');
   checkField(N, 'brakeLines', 'Brake lines in the plan');
+  checkField(N, 'stabilo', 'Stabilo line');
   selectField(N, 'packer', 'Nesting', [
     ['profile', 'Against panel outlines'], ['box', 'Against bounding boxes'],
   ]);
