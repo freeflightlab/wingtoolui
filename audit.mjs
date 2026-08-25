@@ -204,6 +204,20 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
     dupes.join(', ') || 'headings are distinct');
   say(unnumbered.length === 0, 'and section numbering is consistent within each',
     unnumbered.join(', ') || 'consistent');
+
+  // Consistent is not the same as correct: loads-and-materials.md ran
+  // 1..8 then 6, and speed-system.md had two section 5s. Both were
+  // "consistently numbered" and both were wrong.
+  const outOfSequence = [];
+  for (const f of docFiles) {
+    const nums = [...readFileSync(`docs/${f}`, 'utf8').matchAll(/^## (\d+)\./gm)]
+      .map((m) => Number(m[1]));
+    if (nums.length && nums.some((v, i) => v !== nums[0] + i)) {
+      outOfSequence.push(`${f} [${nums.join(',')}]`);
+    }
+  }
+  say(outOfSequence.length === 0, 'and the numbers run in sequence',
+    outOfSequence.join(' | ') || 'in order');
 }
 
 /* ---- 3a. Phase 1 still does what the roadmap says ---------------------- */

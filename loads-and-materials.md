@@ -131,7 +131,7 @@ Swept across the bar on a wing with 180 mm of travel:
 | 50% | 1.62° | 26.1 | 26.8 | 25.1 | 22.1 |
 | 63% | 0.5° | ~20 | ~28 | ~28 | ~25 |
 
-![Chordwise load distribution at three angles of attack](img/chordwise-load.svg)
+![Chordwise load distribution at three angles of attack](chordwise-load.svg)
 
 *Load per unit chord from thin-aerofoil theory, at 10, 6 and 2 degrees. The
 wing is strongly front-loaded at high incidence and much flatter at low, which
@@ -215,10 +215,10 @@ a1   |   295  | |         130 |            425 | DC 120   | Red
 wing, not a fraction of length** — 130 mm on the Meru 2 whether the line is
 250 mm or 4 m long.
 
-![Loop allowance against line length](img/loop-allowance.svg)
+![Loop allowance against line length](loop-allowance.svg)
 
 *Every line on a Meru 2 size M, shortest at the top. The magenta band is the
-loop allowance: a fixed width on every bar, so it is a sliver of a riser line
+loop allowance: a fixed width on every bar, so it is a sliver of a main line
 and a third of a top line.*
 
 The consequence, on their own numbers: 106 m of finished line becomes **122 m
@@ -275,13 +275,13 @@ structure the Ozone wings showed:
 - **D inherits `C1 + CI` from the C row** — four anchor rows on three risers,
   D cascading into C.
 - **B and C tip lines inherit `AIII` from the A row** — at the tip the rows
-  merge onto a shared riser line.
+  merge onto a shared main line.
 
 Three manufacturers, three formats, same underlying arrangement.
 
 ---
 
-## 6. Not decoded
+## 9. Not decoded
 
 The **brake block** is parsed structurally but flagged rather than guessed at.
 Brakes run a deeper cascade and list each upper line twice — once plain and
@@ -289,3 +289,41 @@ once with the spanwise distribution added, offset by exactly the `A-dist`
 column — so the level columns do not line up one-to-one with the names.
 Decoding it properly needs the brake and pulley geometry, which is the next
 roadmap item.
+
+---
+
+## 10. Wake shielding between lines
+
+A line sitting in the wake of one ahead of it sees reduced dynamic pressure
+and makes less drag. Whether that matters on a paraglider is a question of
+scale, and the scale is unintuitive.
+
+**The rows are separated by a chord fraction, which for a 1 mm line is
+hundreds of diameters.** A wake that far downstream has both decayed and
+spread — at 600 diameters it is about 6 mm wide.
+
+So the test is not "is there a line ahead of it" but **"is this line inside
+that wake"**. Those give very different answers:
+
+| criterion | lines shielded |
+| --- | --- |
+| any line within 50 mm laterally, ahead | 67 of 88 |
+| inside the wake, half-width `0.25·√(x·d)` | **16 of 88** |
+
+The first is how a small effect gets reported as a large one, and both are
+asserted so the distinction cannot quietly collapse.
+
+With the width taken properly: mean deficit 5.3%, worst 9.0%. Drag goes as
+velocity **squared**, so a 9% deficit is a 17% reduction on that one line —
+and across the wing:
+
+```
+Cx lines   0.00735 -> 0.00715    -2.7%
+glide      9.596   -> 9.628      +0.03
+```
+
+Real, small, and now measured rather than either ignored or assumed large.
+
+It is **off by default**. The wake model is first-order — a single upstream
+shielder, no wake merging, no unsteadiness — and a 2.7% correction from a
+first-order model should be offered, not imposed.

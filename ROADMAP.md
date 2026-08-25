@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1162-test validation suite and a benchmark with regression budgets
+- [x] 1172-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -153,10 +153,13 @@ material published after the handbook:
 - [ ] **Brake cascade decoding** — the PHI sheet's brake block lists each upper
       line twice, plain and with the spanwise distribution added, so its
       columns do not map one-to-one onto names. Needs the pulley geometry.
-- [ ] **Line drag by inclination from real geometry** — currently each line's
-      angle to the flow is taken from its own endpoints where available and a
-      single factor otherwise. Wake interference between lines is not modelled
-      at all and is known to matter.
+- [x] **Wake interference between lines** — measured rather than assumed.
+      Only 16 of 88 lines are genuinely inside another's wake once the wake
+      width is taken properly, against 67 by a naive proximity test. Worth
+      2.7% of line drag and +0.03 of glide. Off by default.
+- [ ] **Wake merging and unsteadiness** — the model takes a single upstream
+      shielder and a steady far-wake profile. Several lines shielding one, and
+      the unsteady vortex street, are not represented.
 - [x] **Size-family scaling**, validated across three families from two
       manufacturers (18 sizes, 12.9-29 m²). Canopy scales isometrically
       everywhere; line length and mass are affine everywhere; but the
@@ -324,6 +327,12 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Documentation split and health-checked** — `line-plans.md` (458
+      lines) and `validation.md` (721) each covered two subjects; split into
+      `line-sheets.md` and `departures.md`. The audit now checks document
+      length, duplicate subsection headings and consistent section numbering,
+      which caught `validation.md` after I had only looked at the other one.
 
 - [x] **Self-audit** (`tools/audit.mjs`) — bundle coverage, unused exports,
       documented numbers, figure references and the test count. It found four

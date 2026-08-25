@@ -163,6 +163,11 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
   const byAnchor = new Map();
   for (const l of plan.lines) {
     if (l.level !== 'upper') continue;
+    // Brakes carry pilot input, not lift. Once the brake cascade joined the
+    // line plan they arrived here as anchors, took a share of the span load
+    // alongside A/B/C/D, and the closure check went from 0.02% to 19.7% —
+    // which is exactly what that check is for.
+    if (l.isBrake || l.row === 'K' || l.row === 'S' || l.row === 'Z') continue;
     const key = `${l.row}${l.index}`;
     byAnchor.set(key, l);
   }
@@ -498,25 +503,50 @@ function groupLinesBy(arr, fn) {
  * Measured values are better than table values, and vary with how far a line
  * has been broken in.
  */
-export function stretchCorrection(selection, { atG = 1 } = {}) {
+export function stretchCorrection(selection, { atG = 1, loopAllowanceMM = 0 } = {}) {
   const corrected = selection.lines.map((l) => {
-    if (!l.line) return { ...l, stretchMM: 0, cutLengthMM: l.lengthMM };
+    if (!l.line) {
+      return {
+        ...l, stretchMM: 0,
+        finishedLengthMM: l.lengthMM,
+        cutLengthMM: l.lengthMM + loopAllowanceMM,
+      };
+    }
     const forceN = l.tensionN * atG;
     const ratedN = (l.ratedDaN ?? l.line.strengthKinkedDaN) * 10;
     const stretchMM = l.lengthMM * l.line.elongationAtRated * (forceN / ratedN);
+    // Finished length: shortened by the stretch, so the flying length is the
+    // design length.
+    const finished = l.lengthMM - stretchMM;
     return {
       ...l,
       forceN,
       stretchMM,
-      // Cut short by the stretch so the flying length is the design length.
-      cutLengthMM: Math.round(l.lengthMM - stretchMM),
+      finishedLengthMM: Math.round(finished),
+      // Cut length adds the loop allowance — the material consumed by the
+      // loops at each end. It is a fixed quantity per line, not a fraction of
+      // length, so it lands hardest on the short top lines.
+      cutLengthMM: Math.round(finished + loopAllowanceMM),
+      loopAllowanceMM,
     };
   });
   const worst = corrected.reduce((m, c) => Math.max(m, c.stretchMM || 0), 0);
+  const finishedM = corrected.reduce((a, c) => a + c.finishedLengthMM, 0) / 1000;
+  const cutM = corrected.reduce((a, c) => a + c.cutLengthMM, 0) / 1000;
+  const shares = loopAllowanceMM
+    ? corrected.map((c) => loopAllowanceMM / c.cutLengthMM) : [0];
   return {
     lines: corrected,
     worstStretchMM: worst,
     meanStretchMM: corrected.reduce((s, c) => s + (c.stretchMM || 0), 0) / corrected.length,
+    loopAllowanceMM,
+    // What the loops actually cost. UP Paragliders is the only maker in the
+    // reference set that states this separately, and on their Meru 2 it comes
+    // to 13% of all line material — and 37% of the shortest line.
+    finishedMetres: finishedM,
+    cutMetres: cutM,
+    loopShareOfCut: cutM > 0 ? (cutM - finishedM) / cutM : 0,
+    worstLoopShare: Math.max(...shares),
   };
 }
 
@@ -540,13 +570,78 @@ export function stretchCorrection(selection, { atG = 1 } = {}) {
  *   - Reynolds numbers here are a few thousand, where a smooth cylinder sits
  *     near Cd = 1.0-1.2. Sheathed lines are rougher and sit a little higher.
  */
+/**
+ * Wake shielding between lines.
+ *
+ * A line sitting in the wake of one ahead of it sees reduced dynamic pressure
+ * and makes less drag. Whether that matters on a paraglider is a question of
+ * scale, and the scale is unintuitive: the rows are separated by a chord
+ * fraction, which for a 1 mm line is **hundreds of diameters**, and a wake
+ * that far downstream has both decayed and spread.
+ *
+ * The test that matters is not "is there a line ahead of it" but "is this
+ * line inside that wake". Counting any line within 50 mm laterally makes 67
+ * of 88 lines shielded; a wake at 600 diameters is about 6 mm wide, so almost
+ * none of those are in it. With the width taken properly — a half-width
+ * growing as 0.25*sqrt(x*d) and a centreline deficit decaying as
+ * 1.2/sqrt(x/d) — the count falls to 16 of 88, mean deficit 5%, worst 9%.
+ *
+ * Drag goes as velocity squared, so a 9% deficit is a 17% drag reduction on
+ * that one line. A real effect and a small one, worth having measured rather
+ * than either ignored or assumed large.
+ */
+export function wakeShielding(lines, { flowDirection = [1, 0, 0], maxDeficit = 0.6 } = {}) {
+  const usable = lines.filter((l) => l.line && l.from && l.to);
+  const mid = (l) => [
+    (l.from[0] + l.to[0]) / 2, (l.from[1] + l.to[1]) / 2, (l.from[2] + l.to[2]) / 2,
+  ];
+  const fn = Math.hypot(...flowDirection) || 1;
+  const unit = flowDirection.map((v) => v / fn);
+  const along = (p) => p[0] * unit[0] + p[1] * unit[1] + p[2] * unit[2];
+
+  const byLine = new Map();
+  for (const a of usable) {
+    const ma = mid(a);
+    let deficit = 0;
+    let by = null;
+    for (const b of usable) {
+      if (b === a) continue;
+      const mb = mid(b);
+      const dx = along(ma) - along(mb);          // downstream separation
+      if (dx <= 0) continue;                     // b must be upstream of a
+      const db = b.line.diameterMM / 1000;
+      const sep = [ma[0] - mb[0], ma[1] - mb[1], ma[2] - mb[2]];
+      const total = Math.hypot(...sep);
+      const lateral = Math.sqrt(Math.max(0, total * total - dx * dx));
+      if (lateral > 0.25 * Math.sqrt(dx * db)) continue;   // outside the wake
+      const d = Math.min(maxDeficit, 1.2 / Math.sqrt(dx / db));
+      if (d > deficit) { deficit = d; by = b.name; }
+    }
+    if (deficit > 0) byLine.set(a.name, { deficit, shieldedBy: by });
+  }
+
+  const values = [...byLine.values()].map((v) => v.deficit);
+  return {
+    byLine,
+    shielded: byLine.size,
+    total: usable.length,
+    worstDeficit: values.length ? Math.max(...values) : 0,
+    meanDeficit: values.length ? values.reduce((x, y) => x + y, 0) / values.length : 0,
+  };
+}
+
 export function lineDrag(selection, {
   wingAreaM2,
   cdCylinder = 1.1,
   inclinationFactor = null,
   flowDirection = [1, 0, 0],
   sides = 2,
+  // Off by default: it is a fraction of a per cent on the total, and the
+  // wake model is first-order, so it is offered rather than imposed.
+  wakeInterference = false,
 } = {}) {
+  const wake = wakeInterference
+    ? wakeShielding(selection.lines, { flowDirection }) : null;
   let dragAreaM2 = 0;
   let lengthM = 0;
   const perLine = [];
@@ -570,7 +665,11 @@ export function lineDrag(selection, {
     }
 
     const cd = l.line.sheathed ? cdCylinder * 1.05 : cdCylinder;
-    const area = dM * lenM * cd * factor * sides;
+    // Drag goes as velocity squared, so a velocity deficit of q on a shielded
+    // line reduces its contribution by (1-q)^2.
+    const shield = wake && wake.byLine.has(l.name)
+      ? (1 - wake.byLine.get(l.name).deficit) ** 2 : 1;
+    const area = dM * lenM * cd * factor * sides * shield;
     dragAreaM2 += area;
     lengthM += lenM * sides;
     perLine.push({ name: l.name, dragAreaM2: area, inclinationFactor: factor });
@@ -579,6 +678,7 @@ export function lineDrag(selection, {
   return {
     dragAreaM2,
     totalLengthM: lengthM,
+    wake,
     cxLines: wingAreaM2 ? dragAreaM2 / wingAreaM2 : null,
     meanDiameterMM: selection.lines.filter((l) => l.line)
       .reduce((s2, l) => s2 + l.line.diameterMM * l.lengthMM, 0)
