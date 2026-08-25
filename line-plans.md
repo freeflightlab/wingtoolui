@@ -184,6 +184,47 @@ tables:
 `everyNthRib` still works and is still the default, because a design that has
 not specified per-row densities should not be given someone else's.
 
+### Deriving the densities: six designs, not thirty-three
+
+There are 33 size sheets in the reference set, and treating them as 33
+observations would be wrong. **The line topology is identical across every
+size in a family** — the Alpina 5 runs A:31 B:19 C:12 in XS through XL, the
+Ultralite 5 A:16 B:16 C:16 D:16 in all seven sizes. Only the lengths scale.
+
+So the evidence is **six designs**, and six points do not support a
+two-parameter fit. The numbers are carried as grouped ranges instead:
+
+| risers | designs | front-to-rear ratio |
+| --- | --- | --- |
+| 2 | Alpina 5, Lyght, Zeno 2 | 2.58 – 3.75 |
+| 3 | Geo 7, Swift 6, Ultralite 5 | 1.00 – 2.13 |
+
+The ranges do not overlap, but they nearly touch at 2.13 against 2.58 — so
+this separates the two classes and would not settle a marginal case.
+
+### Three shapes, because the designs show three
+
+A single ratio was the first attempt. It fitted the two-liners at 6–8% and
+missed the three-liners by up to **24%**, because they are not tapered at all:
+
+```
+Alpina 5     31 19 12      taper — each row carries less
+Zeno 2       30 14  8      taper
+Geo 7        14 14 15 14   flat
+Ultralite 5  16 16 16 16   flat
+Swift 6      17 17  8  8   step at the midpoint
+```
+
+A two-liner **tapers**: the A row holds the shape and each row behind carries
+less. A three-liner is **flat**, or **steps** once — its C row still reaches
+the riser, so the front does not have to do the work. Forcing one curve
+through all three is the kind of fit that looks reasonable and is wrong on
+half the sample. With the right shape, every design lands within 16%.
+
+**Absolute density is an input, not a prediction.** Two three-liners in the
+sample attach 56% and 89% of their ribs. Nothing here predicts that; it is a
+choice about how much shape the sail holds by itself.
+
 **Two-liners do not match, and the main count says why.** A real two-liner
 cascades its C row into B and ends with far fewer main lines than the
 generator produces: 10 against 16 on the Alpina, 7 against 14 on the Zeno.

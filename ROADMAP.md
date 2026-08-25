@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1137-test validation suite and a benchmark with regression budgets
+- [x] 1148-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -376,9 +376,14 @@ Turning geometry into something a person can actually sew.
       wing has, the more its front row carries the shape: a three-liner is
       near-uniform, a two-liner runs A:30 B:14 C:8. Worst error across four
       real line tables falls from 37% to 6%, with the Zeno 2 exact.
-- [ ] **Derive the per-row densities** rather than being told them — the
-      front-to-rear ratio tracks riser count (0.9, 2.1, 2.6, 3.8 for 3, 3, 2,
-      2 risers), which looks like a law worth fitting.
+- [x] **Per-row densities suggested from the reference designs** —
+      `suggestAnchorsPerRow`, with three distribution shapes because the
+      designs show three (taper, flat, step). Within 16% of every design.
+      Recorded as six designs rather than 33 sizes: topology is constant
+      within a family, so sizes are not independent observations.
+- [ ] **More designs.** Six is enough to separate two-liners from
+      three-liners and not enough to fit a curve. The ratio ranges nearly
+      touch at 2.13 against 2.58.
 - [ ] **Stabilo lines** — the outermost row on its own riser, present on most
       reference wings and not generated.
 - [x] **Marking and registration** — notches paired at equal fractions of each

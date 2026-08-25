@@ -1775,3 +1775,135 @@ export function summariseCascadeDepths(lines) {
       ? Math.min(...merged.map((l) => l.cascadeDepth)) : null,
   };
 }
+
+/* ------------------------------------------------ attachment density -- */
+
+/**
+ * How densely each row is attached, from the reference designs.
+ *
+ * ---------------------------------------------------------------------------
+ * The sample is six designs, not thirty-three
+ * ---------------------------------------------------------------------------
+ * There are 33 size sheets in the reference set, and it is tempting to treat
+ * them as 33 observations. They are not. **The line topology is identical
+ * across every size in a family** — the Alpina 5 runs A:31 B:19 C:12 in XS
+ * through XL, the Geo 7 A:14 B:14 C:15 D:14 in all five sizes, the Ultralite
+ * 5 A:16 B:16 C:16 D:16 in all seven. Only the lengths scale; the plan does
+ * not. So the evidence here is six designs, and the numbers below are stated
+ * as grouped ranges rather than a fitted line, because six points do not
+ * support a two-parameter fit.
+ *
+ * ---------------------------------------------------------------------------
+ * What the six show
+ * ---------------------------------------------------------------------------
+ * The front-to-rear ratio separates cleanly by riser count:
+ *
+ *   two risers    Alpina 5 2.58   Lyght 3.63   Zeno 2 3.75    range 2.6-3.8
+ *   three risers  Geo 7 1.00      Ultralite 5 1.00   Swift 6 2.13   range 1.0-2.1
+ *
+ * The fewer risers, the more the front row carries the wing's shape on its
+ * own, and the more sharply the attachment thins toward the trailing edge.
+ * The ranges do not overlap, but they nearly touch at 2.13 against 2.58, so
+ * this separates the two classes and would not distinguish a marginal case.
+ *
+ * Absolute density does not follow riser count at all: the Ultralite 5 is a
+ * three-liner attaching 89% of its ribs on every row, while the Geo 7 is a
+ * three-liner attaching 56%. That is a design choice about how much shape the
+ * sail holds by itself, and nothing here predicts it.
+ *
+ * ---------------------------------------------------------------------------
+ * The *shape* differs too, not just the ratio
+ * ---------------------------------------------------------------------------
+ * A single ratio was the first attempt and it fitted the two-liners at 6-8%
+ * while missing the three-liners by up to 24%, because they are not tapered
+ * at all:
+ *
+ *   Alpina 5    31 19 12    two-liner, roughly halving each row
+ *   Zeno 2      30 14  8    the same
+ *   Geo 7       14 14 15 14 flat
+ *   Ultralite 5 16 16 16 16 flat
+ *   Swift 6     17 17  8  8 a step at the midpoint
+ *
+ * So the distribution has two forms. A two-liner **tapers**: the A row holds
+ * the shape and each row behind carries less. A three-liner is **flat**, or
+ * steps once — its C row still reaches the riser, so it does not need the
+ * front to do the work. Forcing one curve through both is the kind of fit
+ * that looks reasonable and is wrong on half the sample.
+ */
+export const ANCHOR_DENSITY = {
+  designs: [
+    { name: 'Ozone Alpina 5', risers: 2, rows: { A: 31, B: 19, C: 12 }, ribs: 34 },
+    { name: 'Ozone Lyght', risers: 2, rows: { A: 29, B: 13, C: 8 }, ribs: 33 },
+    { name: 'Ozone Zeno 2', risers: 2, rows: { A: 30, B: 14, C: 8 }, ribs: 40 },
+    { name: 'Ozone Geo 7', risers: 3, rows: { A: 14, B: 14, C: 15, D: 14 }, ribs: 25 },
+    { name: 'Ozone Swift 6', risers: 3, rows: { A: 17, B: 17, C: 8, D: 8 }, ribs: 27 },
+    { name: 'Ozone Ultralite 5', risers: 3, rows: { A: 16, B: 16, C: 16, D: 16 }, ribs: 18 },
+  ],
+  // Front-to-rear ratio, by riser count. Ranges, not a fit.
+  ratioByRisers: {
+    2: { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
+    3: { mean: 1.38, min: 1.00, max: 2.13, n: 3 },
+  },
+  sampleDesigns: 6,
+  sampleSizes: 33,
+  note: 'topology is constant within a family; sizes are not independent observations',
+};
+
+/**
+ * Suggest per-row anchor counts for a wing.
+ *
+ * Takes the shape of the distribution from the designs of the same riser
+ * count and scales it to this wing's rib count. It is a starting point drawn
+ * from six wings, not a law — `source` says so, and `anchorsPerRow` accepts
+ * an explicit set for anyone who knows better.
+ */
+export function suggestAnchorsPerRow({
+  rows, ribCount, risers = null, frontFraction = null, shape = null,
+}) {
+  const n = risers ?? Math.min(3, Math.max(2, rows.length - 1));
+  const group = ANCHOR_DENSITY.ratioByRisers[n] ?? ANCHOR_DENSITY.ratioByRisers[3];
+
+  // Front density: the designs run 0.56 to 0.91 of ribs and it does not track
+  // riser count, so it is a parameter with a middling default rather than
+  // something predicted.
+  const front = frontFraction ?? 0.75;
+  const ratio = group.mean;
+
+  const out = {};
+  // Three shapes, because the reference designs show three and averaging
+  // them fits none. Flat is the default for a three-liner because two of the
+  // three are flat — but the Swift 6 steps, and forcing it flat is 36% out.
+  const form = shape ?? (n <= 2 ? 'taper' : 'flat');
+
+  rows.forEach((row, i) => {
+    let factor;
+    if (form === 'step') {
+      // Front half dense, rear half sparse, as the Swift 6 does: 17 17 8 8.
+      factor = i < rows.length / 2 ? 1 : 1 / ratio;
+    } else if (form === 'taper') {
+      // Two-liner: geometric, reaching `ratio` at the last row.
+      const t = rows.length > 1 ? i / (rows.length - 1) : 0;
+      factor = ratio > 0 ? Math.pow(1 / ratio, t) : 1;
+    } else {
+      // Flat. Two of the three reference three-liners are exactly flat.
+      factor = 1;
+    }
+    out[row] = Math.max(2, Math.round(ribCount * front * factor));
+  });
+
+  return {
+    anchorsPerRow: out,
+    risers: n,
+    shape: form,
+    ratio: form === 'flat' ? 1 : ratio,
+    frontFraction: front,
+    source: form === 'taper'
+      ? `${group.n} two-liners, ratio ${group.min}-${group.max}`
+      : (form === 'step' ? 'the Swift 6, the one stepped design'
+        : '3 three-liners, two of them flat'),
+    shapes: ['taper', 'flat', 'step'],
+    // Absolute density is a design choice, not a prediction.
+    caveat: 'front density is an input: the reference designs run 0.56 to 0.91 '
+      + 'of ribs at the same riser count',
+  };
+}
