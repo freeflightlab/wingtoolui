@@ -126,3 +126,37 @@ on unkinked figures is a design that fails its first check.
 drift is left before a lineset would fail geometry inspection. A line chosen
 with no margin fails the moment it ages, and the tool can say so while the
 design is still on screen.
+
+---
+
+## Data exchange (§6.2.1)
+
+The standard asks a manufacturer to hand the inspection company, "in a
+computable format": line references, materials, sewn lengths, colours,
+construction, the new breaking strength of each line, and the total line
+length for every attachment point including the trimmer position.
+
+That list is precisely what the design already knows, which makes it the
+natural output of the whole project — **the design produces the document that
+lets the wing be inspected for the rest of its life.**
+
+Two details the standard is specific about and that are easy to get wrong:
+
+**Sewn length is not cut length.** Figure 6 defines it as the distance between
+the *insides of the two loops*. The cut length includes the loops. Publishing
+the wrong one understates every line by the loop allowance — 130 mm on the
+wings that state it.
+
+**Total line length includes the riser**, with the trimmer at whatever
+position the maker specifies. A sheet quoted to the maillon is a different
+quantity, and the record says which it is rather than leaving it to be
+inferred.
+
+The loop closes neatly: the totals this record publishes are exactly what an
+inspector measures against, so a wing built to them passes its own geometry
+inspection by definition — which is asserted, because if it did not, one of
+the two calculations would be wrong.
+
+A record missing required fields is still produced, but marked `INCOMPLETE` in
+the file itself. An inspector receiving it needs to know what is absent rather
+than be handed something that looks whole.

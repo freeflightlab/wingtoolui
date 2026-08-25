@@ -5709,6 +5709,146 @@ function inspectionHeadroom(lines, { stretchAllowanceMM = 0 } = {}) {
   };
 }
 
+/* ------------------------------------------------------ data exchange -- */
+
+/**
+ * Section 6.2.1: what a manufacturer must hand an inspection company.
+ *
+ * The standard asks for this in "a computable format", and the list is
+ * precisely what a design tool already knows — line references, materials,
+ * sewn lengths, colours, construction, new breaking strength, and the total
+ * line length for every attachment point including the trimmer position.
+ *
+ * So this is the natural output of the whole project: the design produces the
+ * document that lets the wing be inspected for the rest of its life. It also
+ * closes a loop, because the same fields are what `parseLineTable` reads back
+ * out of a manufacturer's sheet.
+ *
+ * Two details the standard is specific about and that are easy to get wrong:
+ *
+ *   - **Sewn length** is the distance between the *insides of the two loops*
+ *     (Figure 6) — not the cut length, which includes the loops themselves.
+ *     The project's `stretchCorrection` produces both, and the wrong one here
+ *     would be short by the loop allowance on every line.
+ *
+ *   - **Total line length** is sail to harness and therefore includes the
+ *     riser (Figure 4), with the trimmer at whatever position the maker
+ *     specifies. A sheet quoted to the maillon is a different quantity.
+ */
+function exchangeRecord({
+  manufacturer, model, size,
+  weightRangeKg = null,
+  inspectionIntervalYears = 3,
+  inspectionIntervalHours = 150,
+  plan,
+  selection = null,
+  stretch = null,
+  riserLengthMM = 0,
+  trimmerPosition = 'closed',
+  lineCoefficientMaterial = 'dyneema',
+} = {}) {
+  if (!plan) throw new Error('exchangeRecord needs a line plan');
+
+  const byName = new Map();
+  if (selection) for (const l of selection.lines) byName.set(l.name, l);
+  const stretchByName = new Map();
+  if (stretch) for (const l of stretch.lines) stretchByName.set(l.name, l);
+
+  const lines = plan.lines.map((l) => {
+    const sel = byName.get(l.name);
+    const st = stretchByName.get(l.name);
+    return {
+      reference: l.name,
+      row: l.row,
+      level: l.level,
+      material: sel && sel.line ? sel.line.code : null,
+      // Figure 6: inside of one loop to inside of the other.
+      sewnLengthMM: st ? st.finishedLengthMM : Math.round(l.lengthMM),
+      colour: sel && sel.line ? (sel.line.colour ?? null) : null,
+      construction: st ? 'spliced both ends' : null,
+      newStrengthDaN: sel && sel.line
+        ? (sel.line.strengthKinkedDaN ?? sel.line.strengthDaN) : null,
+      minimumStrengthDaN: sel && sel.line
+        ? lineStrengthCheck({
+          newStrengthDaN: sel.line.strengthKinkedDaN ?? sel.line.strengthDaN,
+          material: lineCoefficientMaterial,
+        }).minimumStrengthDaN : null,
+    };
+  });
+
+  // Total line length per attachment point, sail to harness.
+  const totals = [];
+  if (plan.totals) {
+    for (const [index, byRow] of Object.entries(plan.totals)) {
+      for (const [row, mm] of Object.entries(byRow)) {
+        totals.push({
+          attachmentPoint: `${row}${index}`,
+          row,
+          index: Number(index),
+          totalLineLengthMM: Math.round(mm),
+          includesRisers: true,
+          trimmerPosition,
+        });
+      }
+    }
+  }
+
+  const missing = [];
+  if (!manufacturer) missing.push('manufacturer');
+  if (!model) missing.push('model');
+  if (!size) missing.push('size');
+  if (!weightRangeKg) missing.push('weight range');
+  if (!selection) missing.push('line materials and strengths');
+  if (!riserLengthMM) missing.push('riser length');
+
+  return {
+    standard: 'PMA Periodical Inspection of Paragliders',
+    standardVersion: 'V 2024.12.1',
+    manufacturer: manufacturer ?? null,
+    model: model ?? null,
+    size: size ?? null,
+    weightRangeKg,
+    periodicalInspection: {
+      intervalYears: inspectionIntervalYears,
+      intervalHours: inspectionIntervalHours,
+    },
+    riserLengthMM,
+    trimmerPosition,
+    lines,
+    totalLineLengths: totals,
+    // A record missing required fields is still returned, but says so — an
+    // inspector receiving it needs to know what is absent, not to be handed
+    // a file that looks complete.
+    missing,
+    complete: missing.length === 0,
+  };
+}
+
+/** The exchange record as TSV, which is what actually gets emailed. */
+function exchangeTSV(record) {
+  const out = [];
+  out.push(`# ${record.standard} ${record.standardVersion}`);
+  out.push(`# ${record.manufacturer ?? '?'}\t${record.model ?? '?'}\t${record.size ?? '?'}`);
+  out.push(`# riser ${record.riserLengthMM} mm, trimmer ${record.trimmerPosition}`);
+  if (!record.complete) out.push(`# INCOMPLETE: ${record.missing.join(', ')}`);
+  out.push('');
+  out.push(['reference', 'row', 'level', 'material', 'sewn_length_mm',
+    'colour', 'new_strength_daN', 'minimum_strength_daN'].join('\t'));
+  for (const l of record.lines) {
+    out.push([l.reference, l.row, l.level, l.material ?? '', l.sewnLengthMM,
+      l.colour ?? '', l.newStrengthDaN ?? '', l.minimumStrengthDaN != null
+        ? l.minimumStrengthDaN.toFixed(1) : ''].join('\t'));
+  }
+  out.push('');
+  out.push(['attachment_point', 'total_line_length_mm', 'includes_risers',
+    'trimmer_position'].join('\t'));
+  for (const t of record.totalLineLengths) {
+    out.push([t.attachmentPoint, t.totalLineLengthMM, t.includesRisers,
+      t.trimmerPosition].join('\t'));
+  }
+  return `${out.join('\n')}\n`;
+}
+
 /* ===== pairing.js ===== */
 /* pairing.js — interlocking two panels before they are packed.
  *
@@ -10548,6 +10688,13 @@ function lineLengthPerSpan(aspectRatio, { risers = 3 } = {}) {
  * law was fitted over, since extrapolating a two-point-per-family fit is
  * exactly the mistake the previous phase made.
  */
+/**
+ * Note on the name. This estimates a *whole lineset's* consumption from the
+ * aspect-ratio law — how many metres of line to order. It is not
+ * `totalLineLength` in risers.js, which is the PMA measurement of one line
+ * from sail to harness. Two different quantities, similar names, and the
+ * second was nearly reimplemented as the first.
+ */
 function estimateTotalLineLength({
   aspectRatio, flatSpan, risers = 3,
   // Reference size and exponent, for families that do not scale with span.
@@ -12764,6 +12911,15 @@ function buildControls() {
         rollWidth: S.rollWidth, gap: S.panelGap / 100, packer: S.packer,
       })
       : panelsToDXF(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn');
+  button(grid, 'PMA data sheet', () => {
+    if (!M.linePlan) { setStatus('No line plan to publish.'); return; }
+    const rec = exchangeRecord({
+      manufacturer: 'design tool', model: S.name, size: '',
+      plan: M.linePlan, riserLengthMM: Math.round(S.lineLength * 1000 * 0.075),
+    });
+    save(`${S.name}-pma.tsv`, exchangeTSV(rec));
+    if (!rec.complete) setStatus(`Data sheet written, incomplete: ${rec.missing.join(', ')}.`);
+  }, 'btn');
   button(grid, 'Diagonals DXF', () => {
     if (!M.vribs || !M.vribs.count) { setStatus('No diagonal ribs to export.'); return; }
     save(`${S.name}-diagonals.dxf`, vribsToDXF(M.vribs, { rollWidth: S.rollWidth, gap: S.panelGap / 100 }));

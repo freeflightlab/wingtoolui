@@ -151,6 +151,29 @@ for (const [what, got, want, tol] of claims) {
 }
 say(bad === 0, 'documented numbers match the code', `${claims.length} claims checked`);
 
+/* ---- 2b. terminology matches the standard ------------------------------ */
+//
+// The deepest *line* level is `main`; a riser is webbing. The project called
+// the level "riser" for a long time and the documentation lagged the rename
+// by a full session. Prose does not fail a test run, so it is checked here.
+{
+  const levelRiser = coreFiles.filter((f) => {
+    const body = readFileSync(`src/core/${f}`, 'utf8');
+    return /level:\s*'riser'/.test(body) || /level === 'riser'/.test(body);
+  });
+  say(levelRiser.length === 0, "no module uses 'riser' as a line level",
+    levelRiser.join(', ') || "the deepest level is 'main'");
+
+  const docFiles = readdirSync('docs').filter((f) => f.endsWith('.md'));
+  const stale = docFiles.filter((f) => {
+    if (f === 'inspection.md') return false;   // it explains the correction
+    const body = readFileSync(`docs/${f}`, 'utf8');
+    return /riser lines?\b|riser level/i.test(body);
+  });
+  say(stale.length === 0, 'and no document calls a line a riser',
+    stale.join(', ') || `${docFiles.length} documents checked`);
+}
+
 /* ---- 3a. Phase 1 still does what the roadmap says ---------------------- */
 //
 // A separate walk of the Phase 1 list, item by item. Kept out of the main

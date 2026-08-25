@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1110-test validation suite and a benchmark with regression budgets
+- [x] 1125-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -92,6 +92,10 @@ material published after the handbook:
 - [x] **PMA worked example validated** — `pma.js` already implemented the
       standard; its Appendix A example had never been run against it. All 28
       deltas and all eight flagged lines reproduce exactly.
+- [x] **PMA data exchange** *(§6.2.1)* — the record a manufacturer hands an
+      inspection company, produced from the design. Sewn length rather than
+      cut length, totals including the riser and trimmer position, and an
+      incomplete record marked as such.
 - [ ] **B-handle and C-handle geometry** — handle heights and the steering
       travel they give, which the riser assembly does not yet carry.
 - [ ] **Line loads under acceleration** — loads shift forward on the bar,
@@ -366,7 +370,7 @@ Turning geometry into something a person can actually sew.
       plan, and a three-liner matches a real line table to within 1%: Geo 7
       111 against 112, Swift 6 115 against 114, riser counts exact.
 - [ ] **Two-liner cascade shape** — a real two-liner cascades its C row into
-      B and carries far fewer riser lines than the generator: 10 against 16
+      B and carries far fewer main lines than the generator: 10 against 16
       on the Alpina 5, 7 against 14 on the Zeno 2. Total short, risers long.
 - [ ] **Stabilo lines** — the outermost row on its own riser, present on most
       reference wings and not generated.
