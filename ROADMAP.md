@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1195-test validation suite and a benchmark with regression budgets
+- [x] 1213-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -456,8 +456,9 @@ Making it pleasant to use across a real project.
       a geometry file, which the LEP import can already read.
 - [ ] **Prototype tuning** *(ch.4.7)*: record measured flight behaviour against
       predicted, and solve for the trim correction.
-- [ ] **Printed pattern output**: tiled A4/A3 pages with registration marks for
-      anyone without a plotter.
+- [x] **Printed pattern output** — tiled to A4/A3 at exactly 1:1, with a
+      100 mm calibration bar on every page, overlapping rather than butting,
+      and blank tiles skipped: 518 pages instead of 1110.
 
 ---
 

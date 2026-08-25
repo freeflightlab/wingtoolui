@@ -12140,6 +12140,200 @@ function markedPanelsToDXF(panels, {
   return doc.toString();
 }
 
+/* ------------------------------------------------------ printed patterns -- */
+
+/** Paper sizes, in millimetres. */
+const PAPER = {
+  A4: [210, 297],
+  A4L: [297, 210],
+  A3: [297, 420],
+  A3L: [420, 297],
+  Letter: [215.9, 279.4],
+};
+
+/**
+ * Tile a cutting layout into printable pages.
+ *
+ * The SVG export writes the whole roll as one sheet — 32 metres long on the
+ * test wing, which is right for a plotter and useless to anyone without one.
+ * At A4 that sheet is 171 by 6 tiles, and **most of those tiles are empty**,
+ * because a nested layout is mostly gaps. Emitting all 1026 would bury the
+ * ones that matter.
+ *
+ * So blank pages are dropped, and each printed page carries the grid
+ * reference it came from, which is what lets a builder lay them back out.
+ *
+ * ---------------------------------------------------------------------------
+ * The things that make a printed pattern usable
+ * ---------------------------------------------------------------------------
+ * **Exact scale, verifiably.** A pattern printed at 97% is worse than no
+ * pattern, and printer drivers scale to fit by default. Every page carries a
+ * 100 mm calibration bar: if it does not measure 100 mm, the print is wrong
+ * and nothing on it can be trusted.
+ *
+ * **Overlap, not butt joints.** Pages that meet exactly cannot be aligned;
+ * pages that overlap can be laid one over the other until the marks agree.
+ *
+ * **Registration marks inside the overlap**, so the same crosses appear on
+ * both of two adjoining pages.
+ */
+function tiledPages(panels, {
+  paper = 'A4',
+  marginMM = 10,
+  overlapMM = 15,
+  nested = null,
+  rollWidth = 1.4,
+  gap = 0.03,
+  marking = {},
+  includeMarks = true,
+} = {}) {
+  const size = Array.isArray(paper) ? paper : PAPER[paper];
+  if (!size) throw new Error(`Unknown paper size: ${paper}`);
+  const [pageW, pageH] = size;
+
+  // Usable area, and the step between page origins. The step is smaller than
+  // the usable area by the overlap, which is what makes adjoining pages share
+  // a strip.
+  const usableW = pageW - 2 * marginMM;
+  const usableH = pageH - 2 * marginMM;
+  const stepX = usableW - overlapMM;
+  const stepY = usableH - overlapMM;
+  if (stepX <= 0 || stepY <= 0) {
+    throw new Error('Overlap leaves no usable area on the page');
+  }
+
+  const layout = nested || nestPanels(panels, { rollWidth, gap });
+  const marks = includeMarks ? markPanels(panels, marking) : null;
+  const byKey = marks ? new Map(marks.marks.map((m) => [`${m.surface}:${m.cell}`, m])) : null;
+
+  // Everything to be drawn, in millimetres.
+  const shapes = [];
+  for (const p of layout.placed) {
+    shapes.push({
+      points: p.outline.map(([x, y]) => [x * 1000, y * 1000]),
+      kind: 'panel', label: `${p.cell}${p.surface === 'upper' ? 'U' : 'L'}`,
+      closed: true,
+    });
+    if (!byKey) continue;
+    const m = byKey.get(`${p.surface}:${p.cell}`);
+    if (!m || !p.left || !p.right) continue;
+    const pm = markPlacedSeams(p.left, p.right,
+      m.leftNotches.map((n) => n.fraction), m.rightNotches.map((n) => n.fraction),
+      { ...DEFAULT_MARKING, ...marking });
+    for (const n of pm.notches) {
+      shapes.push({ points: n.cut.map(([x, y]) => [x * 1000, y * 1000]), kind: 'notch' });
+    }
+    shapes.push({
+      points: pm.grain.map(([x, y]) => [x * 1000, y * 1000]), kind: 'grain',
+    });
+  }
+
+  const xs = shapes.flatMap((s) => s.points.map((q) => q[0]));
+  const ys = shapes.flatMap((s) => s.points.map((q) => q[1]));
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const totalW = Math.max(...xs) - minX;
+  const totalH = Math.max(...ys) - minY;
+
+  const cols = Math.max(1, Math.ceil((totalW - overlapMM) / stepX));
+  const rows = Math.max(1, Math.ceil((totalH - overlapMM) / stepY));
+
+  const pages = [];
+  let blank = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x0 = minX + c * stepX;
+      const y0 = minY + r * stepY;
+      const clip = shapes.filter((s) => s.points.some(([x, y]) =>
+        x >= x0 - 1 && x <= x0 + usableW + 1 && y >= y0 - 1 && y <= y0 + usableH + 1));
+      if (!clip.length) { blank++; continue; }
+      pages.push({
+        column: c + 1,
+        row: r + 1,
+        reference: `${String.fromCharCode(65 + r)}${c + 1}`,
+        originMM: [x0, y0],
+        shapes: clip,
+        svg: pageSVG(clip, x0, y0, {
+          pageW, pageH, marginMM, usableW, usableH, overlapMM,
+          reference: `${String.fromCharCode(65 + r)}${c + 1}`,
+          grid: `${cols} x ${rows}`,
+        }),
+      });
+    }
+  }
+
+  return {
+    pages,
+    columns: cols,
+    rows,
+    blankPagesSkipped: blank,
+    totalTiles: cols * rows,
+    paper,
+    pageMM: [pageW, pageH],
+    overlapMM,
+    marginMM,
+    extentMM: [totalW, totalH],
+    // A builder needs to know how many sheets to load, and how much was saved
+    // by not printing the empty ones.
+    note: `${pages.length} printed of ${cols * rows} tiles; `
+      + `${blank} blank pages skipped`,
+  };
+}
+
+/** One page, at exactly 1:1. */
+function pageSVG(shapes, x0, y0, o) {
+  const t = ([x, y]) => [x - x0 + o.marginMM, y - y0 + o.marginMM];
+  const path = (pts, close) => `M${pts.map(t).map((p) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`)
+    .join(' L')}${close ? ' Z' : ''}`;
+
+  const out = [];
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${o.pageW}mm" `
+    + `height="${o.pageH}mm" viewBox="0 0 ${o.pageW} ${o.pageH}">`);
+  out.push('<rect width="100%" height="100%" fill="#fff"/>');
+
+  for (const s of shapes) {
+    const stroke = s.kind === 'notch' ? '#d000a0' : (s.kind === 'grain' ? '#b08000' : '#000');
+    out.push(`<path d="${path(s.points, s.closed)}" fill="none" stroke="${stroke}" `
+      + `stroke-width="0.3"/>`);
+  }
+
+  // The overlap strip, so a builder can see how far to lay one page over the
+  // next.
+  out.push(`<rect x="${o.marginMM}" y="${o.marginMM}" width="${o.usableW}" `
+    + `height="${o.usableH}" fill="none" stroke="#ccc" stroke-width="0.2" `
+    + `stroke-dasharray="2 2"/>`);
+  out.push(`<rect x="${o.marginMM + o.usableW - o.overlapMM}" y="${o.marginMM}" `
+    + `width="${o.overlapMM}" height="${o.usableH}" fill="#000" fill-opacity="0.03"/>`);
+  out.push(`<rect x="${o.marginMM}" y="${o.marginMM + o.usableH - o.overlapMM}" `
+    + `width="${o.usableW}" height="${o.overlapMM}" fill="#000" fill-opacity="0.03"/>`);
+
+  // Registration crosses at the corners of the usable area. The same crosses
+  // fall inside the neighbouring page's overlap strip.
+  const cross = (x, y) => `<path d="M${x - 4} ${y} L${x + 4} ${y} M${x} ${y - 4} `
+    + `L${x} ${y + 4}" stroke="#000" stroke-width="0.3" fill="none"/>`;
+  for (const [cx, cy] of [
+    [o.marginMM, o.marginMM],
+    [o.marginMM + o.usableW, o.marginMM],
+    [o.marginMM, o.marginMM + o.usableH],
+    [o.marginMM + o.usableW, o.marginMM + o.usableH],
+  ]) out.push(cross(cx, cy));
+
+  // The calibration bar. If this does not measure 100 mm, the print is scaled
+  // and nothing on the page can be used.
+  const by = o.pageH - o.marginMM / 2;
+  out.push(`<path d="M${o.marginMM} ${by} L${o.marginMM + 100} ${by} `
+    + `M${o.marginMM} ${by - 2} L${o.marginMM} ${by + 2} `
+    + `M${o.marginMM + 100} ${by - 2} L${o.marginMM + 100} ${by + 2}" `
+    + `stroke="#000" stroke-width="0.4" fill="none"/>`);
+  out.push(`<text x="${o.marginMM + 103}" y="${by + 2}" font-size="3.5" `
+    + `font-family="monospace">100 mm — if this is not exactly 100 mm, the print is scaled</text>`);
+  out.push(`<text x="${o.pageW - o.marginMM}" y="${o.marginMM - 2}" font-size="5" `
+    + `text-anchor="end" font-family="monospace">${o.reference} of ${o.grid}</text>`);
+
+  out.push('</svg>');
+  return out.join('\n');
+}
+
 /* ===== lep.js ===== */
 /* lep.js — interoperability with LEparagliding data files.
  *
@@ -13058,7 +13252,7 @@ const S = {
   cxPilot: 0.015, cxLines: 0.020, legacy: false,
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, crossPorts: false, marks: true,
-  reference: '', brakeLines: true, stabilo: true,
+  reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   packer: 'profile',
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
   mergeRows: 'none',
@@ -13458,6 +13652,10 @@ function buildControls() {
   const N = clear('g-panels');
   checkField(N, 'brakeLines', 'Brake lines in the plan');
   checkField(N, 'stabilo', 'Stabilo line');
+  selectField(N, 'paper', 'Printable pattern paper', [
+    ['A4', 'A4 portrait'], ['A4L', 'A4 landscape'],
+    ['A3', 'A3 portrait'], ['A3L', 'A3 landscape'],
+  ]);
   selectField(N, 'packer', 'Nesting', [
     ['profile', 'Against panel outlines'], ['box', 'Against bounding boxes'],
   ]);
@@ -13492,6 +13690,16 @@ function buildControls() {
         rollWidth: S.rollWidth, gap: S.panelGap / 100, packer: S.packer,
       })
       : panelsToDXF(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn');
+  button(grid, 'Printable pattern', () => {
+    const t = tiledPages(seamed(), {
+      paper: S.paper, rollWidth: S.rollWidth, gap: S.panelGap / 100,
+    });
+    // One file holding every page, so a builder prints once.
+    const all = t.pages.map((p) => p.svg).join('\n<!-- page break -->\n');
+    save(`${S.name}-pattern-${S.paper}.svg`, all);
+    setStatus(`${t.pages.length} pages at ${S.paper}, `
+      + `${t.blankPagesSkipped} blank tiles skipped. Check the 100 mm bar before cutting.`);
+  }, 'btn');
   button(grid, 'PMA data sheet', () => {
     if (!M.linePlan) { setStatus('No line plan to publish.'); return; }
     const rec = exchangeRecord({

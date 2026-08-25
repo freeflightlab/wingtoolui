@@ -327,7 +327,42 @@ topology is not.
 
 ---
 
-## 8. Not covered
+## 8. Printed patterns
+
+The SVG export writes the whole roll as one sheet — **32 metres long** on the
+test wing. That is right for a plotter and useless to anyone without one.
+
+At A4 that sheet is 185 by 6 tiles, and **most of those tiles are empty**,
+because a nested layout is mostly gaps. Printing all 1110 would bury the ones
+that matter:
+
+| paper | printed | of tiles | saved |
+| --- | --- | --- | --- |
+| A4 | 518 | 1110 | 53% |
+| A3 | 325 | 496 | 34% |
+| A3 landscape | 279 | 504 | 45% |
+
+### Three things make a printed pattern usable
+
+**Exact scale, verifiably.** A pattern printed at 97% is worse than no
+pattern, and printer drivers scale to fit by default. Every page declares its
+size in millimetres with a viewBox that matches exactly — asserted, not
+assumed — and carries a **100 mm calibration bar**. If that bar does not
+measure 100 mm, the print is wrong and nothing on the page can be trusted.
+
+**Overlap, not butt joints.** Pages that meet exactly cannot be aligned; pages
+that overlap can be laid one over the other until the marks agree. The step
+between page origins is the usable width *minus* the overlap, and a test
+checks adjoining pages really do share that strip.
+
+**A grid reference on every sheet.** 518 pages in a pile are useless without
+one. Note that the first *printed* page is `A3`, not `A1` — columns 1 and 2
+were blank and skipped, which is the intended behaviour and caught a wrong
+assertion of mine that expected `A1`.
+
+---
+
+## 9. Not covered
 
 - **Rods.** Modern wings carry nylon or carbon rods in the leading edge; on a
   light wing they are a noticeable fraction of the weight.
