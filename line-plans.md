@@ -1,4 +1,4 @@
-# Line plans, risers and rigging
+# Line plans, main lines and rigging
 
 What three production line sets taught, and how the module was shaped by them.
 
@@ -8,6 +8,19 @@ production cut list with a cascade totals matrix, exported from OzoneCAD.
 Converted to TSV under `data/reference/`.
 
 ---
+
+## 0. A riser is not a line
+
+The PMA standard is explicit, and this project had it wrong for a long time:
+
+> **Riser** — textile element between the main lines and the suspension point
+> on the harness.
+>
+> **Main lines** — lines which are attached directly to the riser connectors.
+
+So the three line levels are **upper**, **middle** and **main**. The riser is
+webbing below all of them, and `docs/inspection.md` covers it. Anything below
+that says "riser" means the webbing; the deepest *line* level is `main`.
 
 ## 1. Rows and risers are not the same thing
 
@@ -25,7 +38,7 @@ The handbook builds one cascade per anchor row. Every one of these wings has
 Assuming one riser per row gets the riser count wrong, the load split wrong,
 and produces a wing that cannot be rigged. So a plan holds a list of risers,
 each naming the rows it carries, and only the row that *owns* a riser gets
-riser-level lines — a cascaded row continues in `M` numbering and joins the
+main-level lines — a cascaded row continues in `M` numbering and joins the
 same maillon.
 
 ---
@@ -45,7 +58,7 @@ Consistent across all three manufacturers' diagrams:
 | `Z` | collapse / stabilo lines (Lyght) |
 | *(no level)* | upper line — attaches to the canopy |
 | `M` | middle cascade |
-| `R` | riser level — attaches to the riser maillon |
+| `R` | main level — attaches to the riser maillon |
 | `MU`/`ML`, `RU`/`RL` | a level split upper/lower, e.g. a brake through a pulley |
 | index | numbered from the wing centre outward |
 
@@ -107,8 +120,49 @@ With it, a three-liner lands within a line or two of the real table:
 The level split matches too — Geo 7 is 65 upper / 33 middle / 13 riser against
 a real 68 / 31 / 13.
 
-**Two-liners do not match, and the riser count says why.** A real two-liner
-cascades its C row into B and ends with far fewer riser lines than the
+### Main lines are a fixed count, not a scaled one
+
+A real wing has the **same number of main lines in every size**. The Geo 7
+carries A:3 B:3 C:5 in XS, MS and L alike; the Alpina 5 carries A:4 B:4 in
+every size; the Zeno 2 carries A:3 B:4.
+
+The generator grouped by a constant chunk size, so its main count grew with
+the anchor count — 16 against a real 10 on the Alpina, 19 against 7 on the
+Zeno. `mainsPerRow` fixes the count instead, which is what a maker actually
+specifies, and the mains then land exactly:
+
+| wing | real mains | modelled |
+| --- | --- | --- |
+| Geo 7 MS | 13 | **13** |
+| Swift 6 MS | 13 | **13** |
+| Alpina 5 ML | 10 | 13 |
+| Zeno 2 ML | 7 | 6 |
+
+It defaults to null, keeping the old behaviour, because a design that has not
+said how many mains it wants should not silently be given three.
+
+### What is still wrong: attachment density
+
+With the mains fixed, the two-liners' remaining error is in the **upper**
+lines, and measuring the real wings says why:
+
+| wing | ribs per half | uppers per row | spacing |
+| --- | --- | --- | --- |
+| Geo 7 MS | 25 | 14.3 | every 1.75 ribs |
+| Swift 6 MS | 27 | 12.5 | every 2.16 ribs |
+| Alpina 5 ML | 34 | 20.7 | every 1.65 ribs |
+| Zeno 2 ML | 40 | 26.0 | every 1.54 ribs |
+
+**Real spacing is 1.5 to 2.2 ribs, and it differs per row.** The generator's
+`everyNthRib` is a single integer applied to every row, which cannot express
+that: at 2 it undershoots the two-liners by 15–37%, and at 1 it overshoots by
+22–45%. The truth is between, and it is not the same between for each row.
+
+That is the next thing to fix, and it is a change to what the parameter *is*,
+not to its value.
+
+**Two-liners do not match, and the main count says why.** A real two-liner
+cascades its C row into B and ends with far fewer main lines than the
 generator produces: 10 against 16 on the Alpina, 7 against 14 on the Zeno.
 The total is short while the risers are long, which points at the cascade
 shape rather than the anchor count. Both are asserted, so the gap is recorded
@@ -152,7 +206,7 @@ they were; only their ownership changes.
 Combined rows also occur in suffix form — the K2 5 carries `DE1`–`DE4`, which
 went unrecognised until this. The guard that makes it safe is that both
 letters must be load-bearing rows: there is no R row, so `BR1` falls through
-and reads correctly as the B row's first riser line rather than a combined
+and reads correctly as the B row's first main line rather than a combined
 B-and-R line.
 
 ![Seven naming conventions decoded by one grammar](naming-conventions.svg)
@@ -251,7 +305,7 @@ length to the 100–900 mm band, because this failure is invisible in the totals
 
 On the Geo 7, A13 and A14 are 1205 mm and 977 mm where every inboard A line is
 300–500 mm, and they have **no middle line above them**: the outermost anchors
-take one long line straight to the riser level. `tipDirectAnchors` reproduces
+take one long line straight to the main level. `tipDirectAnchors` reproduces
 this.
 
 Worth noting what it does *not* change: total carabiner-to-canopy length is

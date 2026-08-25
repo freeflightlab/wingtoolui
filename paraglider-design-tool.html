@@ -3666,6 +3666,17 @@ function buildLinePlan({
   levelFractions = [0.64, 0.78],
   loadMode = 1,
   tipDirectAnchors = 2,
+  // Main lines per row.
+  //
+  // A real wing has a *fixed* number of mains regardless of size. The Geo 7
+  // carries A:3 B:3 C:5 in XS, MS and L alike; the Alpina 5 carries A:4 B:4
+  // in every size. Grouping by a constant chunk size instead makes the main
+  // count scale with the anchor count, which produced 16 mains against a
+  // real 10 on the Alpina and 19 against 7 on the Zeno.
+  //
+  // Null keeps the old behaviour, because a design that has not said how many
+  // mains it wants should not silently get three.
+  mainsPerRow = null,
   // Rows that share their cascade below the top level, as Advance's TAU DLS
   // does with AB and CD. Each entry is a group of row letters.
   mergeRows = null,
@@ -3714,7 +3725,10 @@ function buildLinePlan({
       // this way each junction is placed along the path to the centre of
       // gravity of everything above it, which is the handbook's construction.
       const groups = chunkBy(cascaded, groupSize);
-      const riserGroups = chunkBy(groups, groupSize);
+      // Either a fixed number of mains, or the old constant-chunk grouping.
+      const riserGroups = mainsPerRow
+        ? chunkInto(groups, mainsPerRow)
+        : chunkBy(groups, groupSize);
 
       const riserNodePoints = riserGroups.map((rg) => {
         const all = rg.flat();

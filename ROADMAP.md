@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1125-test validation suite and a benchmark with regression budgets
+- [x] 1129-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -369,9 +369,13 @@ Turning geometry into something a person can actually sew.
 - [x] **Brakes in the line plan** — the brake cascade now goes into the same
       plan, and a three-liner matches a real line table to within 1%: Geo 7
       111 against 112, Swift 6 115 against 114, riser counts exact.
-- [ ] **Two-liner cascade shape** — a real two-liner cascades its C row into
-      B and carries far fewer main lines than the generator: 10 against 16
-      on the Alpina 5, 7 against 14 on the Zeno 2. Total short, risers long.
+- [x] **Main lines are a fixed count** — `mainsPerRow`, because a real wing
+      carries the same mains in every size (Geo 7: A:3 B:3 C:5 in XS, MS and
+      L alike). Mains now land exactly on the three-liners.
+- [ ] **Per-row attachment density** — real wings attach every 1.5 to 2.2
+      ribs and differ per row; `everyNthRib` is one integer for all rows and
+      cannot express it. At 2 it undershoots two-liners by 15-37%, at 1 it
+      overshoots by 22-45%.
 - [ ] **Stabilo lines** — the outermost row on its own riser, present on most
       reference wings and not generated.
 - [x] **Marking and registration** — notches paired at equal fractions of each

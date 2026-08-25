@@ -37,9 +37,9 @@ const COLLAPSE = 'Z';
  *   A1     -> row A, level 'upper',  index 1
  *   a1     -> row A, level 'upper',  index 1   (lowercase convention)
  *   AM6    -> row A, level 'middle', index 6
- *   AR3    -> row A, level 'riser',  index 3
+ *   AR3    -> row A, level 'main',   index 3
  *   KMU2   -> row K, level 'middle', side 'upper', index 2
- *   CRL4   -> row C, level 'riser',  side 'lower', index 4
+ *   CRL4   -> row C, level 'main',   side 'lower', index 4
  *
  * Two conventions are in use for the lines that reach the canopy, and both
  * have to be read. Ozone writes them uppercase (`A1`), while PHI and BGD
@@ -84,7 +84,7 @@ export function parseLineName(name) {
     return {
       name: raw,
       row: r === 'BR' ? 'K' : r,
-      level: 'riser',
+      level: 'main',
       side: null,
       index: mainMatch[2] ? parseInt(mainMatch[2], 10) : 1,
       variant: null,
@@ -134,7 +134,7 @@ export function parseLineName(name) {
       row: 'S',
       // `st` is the stabilo's own main line; `sa`..`sd` are its top lines,
       // named for the row they sit outboard of.
-      level: kind === 't' ? 'riser' : 'upper',
+      level: kind === 't' ? 'main' : 'upper',
       side: null,
       index: parseInt(stabMatch[2], 10),
       variant: kind === 't' ? null : kind,
@@ -191,7 +191,7 @@ export function parseLineName(name) {
         row: r1,
         rows: [r1, r2],
         combined: true,
-        level: lvl === 'R' ? 'riser' : lvl === 'M' ? 'middle' : 'upper',
+        level: lvl === 'R' ? 'main' : lvl === 'M' ? 'middle' : 'upper',
         side: sd === 'U' ? 'upper' : sd === 'L' ? 'lower' : null,
         index: parseInt(idx, 10),
         variant: null,
@@ -207,7 +207,7 @@ export function parseLineName(name) {
   const row = rawRow.toUpperCase();
   // A lowercase row letter always denotes a canopy line: the level suffixes
   // only ever appear with an uppercase row.
-  const level = levelCode === 'R' ? 'riser' : levelCode === 'M' ? 'middle' : 'upper';
+  const level = levelCode === 'R' ? 'main' : levelCode === 'M' ? 'middle' : 'upper';
   return {
     name: String(name).trim(),
     row,
@@ -248,7 +248,7 @@ export function resolveCascadeLevels(lines) {
     const d = l.depthFromCanopy;
     return {
       ...l,
-      level: d === 1 ? 'upper' : (d === maxDepth ? 'riser' : 'middle'),
+      level: d === 1 ? 'upper' : (d === maxDepth ? 'main' : 'middle'),
       cascadeDepth: d,
       cascadeLevels: maxDepth,
     };
@@ -374,11 +374,11 @@ export function parseLineTable(text) {
 export function summarise(lineSet) {
   const byRow = {};
   for (const l of lineSet.lines) {
-    const r = (byRow[l.row] ||= { row: l.row, upper: [], middle: [], riser: [] });
+    const r = (byRow[l.row] ||= { row: l.row, upper: [], middle: [], main: [] });
     r[l.level].push(l);
   }
   for (const r of Object.values(byRow)) {
-    for (const k of ['upper', 'middle', 'riser']) r[k].sort((a, b) => a.index - b.index);
+    for (const k of ['upper', 'middle', 'main']) r[k].sort((a, b) => a.index - b.index);
   }
 
   const rows = Object.values(byRow).sort((a, b) => a.row.localeCompare(b.row));
@@ -388,7 +388,7 @@ export function summarise(lineSet) {
   // risers turns a two-liner into a three-liner and changes what the whole
   // module reports about a wing's rigging.
   const mainRows = rows.filter((r) => LOAD_BEARING_ROWS.includes(r.row));
-  const risers = mainRows.filter((r) => r.riser.length > 0);
+  const risers = mainRows.filter((r) => r.main.length > 0);
 
   const totalLength = lineSet.lines.reduce((s, l) => s + l.lengthMM * l.quantity, 0) / 1000;
 
@@ -400,7 +400,7 @@ export function summarise(lineSet) {
     riserCount: risers.length,
     // A row with anchors but no riser lines hangs off a neighbouring riser —
     // the usual arrangement for D on a three-riser wing.
-    dependentRows: mainRows.filter((r) => r.riser.length === 0 && r.upper.length > 0)
+    dependentRows: mainRows.filter((r) => r.main.length === 0 && r.upper.length > 0)
       .map((r) => r.row),
     // Reported separately, since they are real rows but not riser rows.
     brakeRows: rows.filter((r) => r.row === 'K').map((r) => r.row),
@@ -413,7 +413,7 @@ export function summarise(lineSet) {
     levels: {
       upper: lineSet.lines.filter((l) => l.level === 'upper').length,
       middle: lineSet.lines.filter((l) => l.level === 'middle').length,
-      riser: lineSet.lines.filter((l) => l.level === 'riser').length,
+      riser: lineSet.lines.filter((l) => l.level === 'main').length,
     },
   };
 }
@@ -518,7 +518,7 @@ export function inferTopology(lineSet, totals, row, { tolerance = 12 } = {}) {
  * the most branches recovers it without being told.
  */
 export function inferRiserLength(lineSet, topology, row) {
-  const risers = lineSet.lines.filter((l) => l.row === row && l.level === 'riser');
+  const risers = lineSet.lines.filter((l) => l.row === row && l.level === 'main');
   const middles = lineSet.lines.filter((l) => l.row === row && l.level === 'middle');
   if (!risers.length) return null;
 
@@ -645,6 +645,17 @@ export function buildLinePlan({
   levelFractions = [0.64, 0.78],
   loadMode = 1,
   tipDirectAnchors = 2,
+  // Main lines per row.
+  //
+  // A real wing has a *fixed* number of mains regardless of size. The Geo 7
+  // carries A:3 B:3 C:5 in XS, MS and L alike; the Alpina 5 carries A:4 B:4
+  // in every size. Grouping by a constant chunk size instead makes the main
+  // count scale with the anchor count, which produced 16 mains against a
+  // real 10 on the Alpina and 19 against 7 on the Zeno.
+  //
+  // Null keeps the old behaviour, because a design that has not said how many
+  // mains it wants should not silently get three.
+  mainsPerRow = null,
   // Rows that share their cascade below the top level, as Advance's TAU DLS
   // does with AB and CD. Each entry is a group of row letters.
   mergeRows = null,
@@ -693,7 +704,10 @@ export function buildLinePlan({
       // this way each junction is placed along the path to the centre of
       // gravity of everything above it, which is the handbook's construction.
       const groups = chunkBy(cascaded, groupSize);
-      const riserGroups = chunkBy(groups, groupSize);
+      // Either a fixed number of mains, or the old constant-chunk grouping.
+      const riserGroups = mainsPerRow
+        ? chunkInto(groups, mainsPerRow)
+        : chunkBy(groups, groupSize);
 
       const riserNodePoints = riserGroups.map((rg) => {
         const all = rg.flat();
@@ -770,7 +784,7 @@ export function buildLinePlan({
           : lines.filter((l) => l.row === row && l.level === 'middle').length + 1;
         lines.push({
           row,
-          level: owns ? 'riser' : 'middle',
+          level: owns ? 'main' : 'middle',
           index,
           name: `${row}${owns ? 'R' : 'M'}${index}`,
           riser: riser.name,
@@ -863,7 +877,7 @@ function mergeCascades(plan, groups, levelFractions) {
       const rNode = lerpPt(maillon, centroid3(allTops.map((t) => t.to)), levelFractions[0]);
       plan.lines.push({
         row: rows[0], rows: [...rows], combined: true,
-        level: 'riser', index: r + 1, name: `${label}R${r + 1}`,
+        level: 'main', index: r + 1, name: `${label}R${r + 1}`,
         riser: riserName, from: maillon, to: rNode, lengthMM: mm(maillon, rNode),
         anchors: [...new Set(allTops.map((t) => t.index))],
       });
@@ -1413,7 +1427,7 @@ export function buildBrakePlan({
   riserGroups.forEach((rg, r) => {
     const rNode = lerpPt(pulley, centroidPts(rg.map((p) => p.point)), levelFractions[0]);
     lines.push({
-      row: 'K', level: 'riser', index: r + 1, name: `KR${r + 1}`,
+      row: 'K', level: 'main', index: r + 1, name: `KR${r + 1}`,
       riser: 'K', from: pulley, to: rNode,
       lengthMM: mmDist(pulley, rNode),
       anchors: rg.map((p) => p.anchor),
@@ -1444,7 +1458,7 @@ export function buildBrakePlan({
 
   // The shared lower line: handle to pulley, carrying the whole cascade.
   const lower = {
-    row: 'K', level: 'riser', side: 'lower', index: 1, name: 'KL1',
+    row: 'K', level: 'main', side: 'lower', index: 1, name: 'KL1',
     riser: 'K', from: handle, to: pulley,
     lengthMM: mmDist(handle, pulley),
     anchors: points.map((p) => p.anchor),
@@ -1457,7 +1471,7 @@ export function buildBrakePlan({
   for (const l of lines) {
     if (l.level !== 'upper') continue;
     const mid = lines.find((x) => x.level === 'middle' && x.anchors.includes(l.index));
-    const ris = lines.find((x) => x.level === 'riser' && !x.shared && x.anchors.includes(l.index));
+    const ris = lines.find((x) => x.level === 'main' && !x.shared && x.anchors.includes(l.index));
     totals[l.index] = Math.round(
       l.lengthMM + (mid?.lengthMM ?? 0) + (ris?.lengthMM ?? 0) + lower.lengthMM,
     );
