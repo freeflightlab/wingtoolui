@@ -656,6 +656,25 @@ export function buildLinePlan({
   // Null keeps the old behaviour, because a design that has not said how many
   // mains it wants should not silently get three.
   mainsPerRow = null,
+  // Attachment density, per row.
+  //
+  // `everyNthRib` is one integer applied to every row, and real wings do not
+  // work that way. Measured across the reference tables, the front row is
+  // attached far more densely than the rear, and the more so the fewer risers
+  // the wing has:
+  //
+  //   Geo 7 (3-liner)    A:14 B:14 C:15 D:14   of 25 ribs — near uniform
+  //   Swift 6            A:17 B:17 C:8  D:8    — rear half as dense
+  //   Alpina 5 (2-liner) A:31 B:19 C:12        of 34 ribs
+  //   Zeno 2 (2-liner)   A:30 B:14 C:8         of 40 ribs
+  //
+  // Which is what the structure asks for: the leading edge needs support at
+  // nearly every cell to hold its shape, while the rear carries less load and
+  // less shape. A single integer cannot say that — at 2 it undershoots a
+  // two-liner by a third, at 1 it overshoots by a quarter.
+  //
+  // Accepts a count per row: `{ A: 30, B: 14, C: 8 }`.
+  anchorsPerRow = null,
   // Rows that share their cascade below the top level, as Advance's TAU DLS
   // does with AB and CD. Each entry is a group of row letters.
   mergeRows = null,
@@ -678,15 +697,33 @@ export function buildLinePlan({
       if (frac == null) continue;
 
       const anchors = [];
-      wing.ribs.forEach((rib, i) => {
-        if (i % everyNthRib !== 0) return;
-        anchors.push({
-          anchor: anchors.length + 1,
-          ribIndex: i,
-          chord: rib.chord,
-          point: pointOnSurface(rib.lower, frac),
+      const want = anchorsPerRow ? anchorsPerRow[row] : null;
+      if (want) {
+        // Spread `want` anchors evenly over the ribs, rather than taking
+        // every nth. A fractional spacing is exactly what the real wings
+        // show, and it cannot be reached by an integer stride.
+        const n = Math.max(1, Math.min(want, wing.ribs.length));
+        for (let k = 0; k < n; k++) {
+          const i = Math.round((k * (wing.ribs.length - 1)) / Math.max(1, n - 1));
+          const rib = wing.ribs[i];
+          anchors.push({
+            anchor: anchors.length + 1,
+            ribIndex: i,
+            chord: rib.chord,
+            point: pointOnSurface(rib.lower, frac),
+          });
+        }
+      } else {
+        wing.ribs.forEach((rib, i) => {
+          if (i % everyNthRib !== 0) return;
+          anchors.push({
+            anchor: anchors.length + 1,
+            ribIndex: i,
+            chord: rib.chord,
+            point: pointOnSurface(rib.lower, frac),
+          });
         });
-      });
+      }
       if (!anchors.length) continue;
 
       // Real wings shorten the cascade at the tip: the outermost anchors get

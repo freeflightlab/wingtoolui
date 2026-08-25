@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1129-test validation suite and a benchmark with regression budgets
+- [x] 1137-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -372,10 +372,13 @@ Turning geometry into something a person can actually sew.
 - [x] **Main lines are a fixed count** — `mainsPerRow`, because a real wing
       carries the same mains in every size (Geo 7: A:3 B:3 C:5 in XS, MS and
       L alike). Mains now land exactly on the three-liners.
-- [ ] **Per-row attachment density** — real wings attach every 1.5 to 2.2
-      ribs and differ per row; `everyNthRib` is one integer for all rows and
-      cannot express it. At 2 it undershoots two-liners by 15-37%, at 1 it
-      overshoots by 22-45%.
+- [x] **Per-row attachment density** — `anchorsPerRow`. The fewer risers a
+      wing has, the more its front row carries the shape: a three-liner is
+      near-uniform, a two-liner runs A:30 B:14 C:8. Worst error across four
+      real line tables falls from 37% to 6%, with the Zeno 2 exact.
+- [ ] **Derive the per-row densities** rather than being told them — the
+      front-to-rear ratio tracks riser count (0.9, 2.1, 2.6, 3.8 for 3, 3, 2,
+      2 risers), which looks like a law worth fitting.
 - [ ] **Stabilo lines** — the outermost row on its own riser, present on most
       reference wings and not generated.
 - [x] **Marking and registration** — notches paired at equal fractions of each

@@ -153,13 +153,36 @@ lines, and measuring the real wings says why:
 | Alpina 5 ML | 34 | 20.7 | every 1.65 ribs |
 | Zeno 2 ML | 40 | 26.0 | every 1.54 ribs |
 
-**Real spacing is 1.5 to 2.2 ribs, and it differs per row.** The generator's
-`everyNthRib` is a single integer applied to every row, which cannot express
-that: at 2 it undershoots the two-liners by 15–37%, and at 1 it overshoots by
-22–45%. The truth is between, and it is not the same between for each row.
+Broken down per row, the pattern is not "the front row is densest" — the
+Geo 7 has C:15 against A:14. It is about **riser count**:
 
-That is the next thing to fix, and it is a change to what the parameter *is*,
-not to its value.
+| wing | risers | per-row uppers | front-to-rear ratio |
+| --- | --- | --- | --- |
+| Geo 7 MS | 3 | A:14 B:14 C:15 D:14 | 0.9 |
+| Swift 6 MS | 3 | A:17 B:17 C:8 D:8 | 2.1 |
+| Alpina 5 ML | 2 | A:31 B:19 C:12 | 2.6 |
+| Zeno 2 ML | 2 | A:30 B:14 C:8 | 3.8 |
+
+**The fewer risers, the more the front row must carry the shape on its own.**
+A three-liner spreads its rows nearly uniformly; a two-liner attaches the A
+row at almost every rib and thins out sharply toward the trailing edge.
+
+`anchorsPerRow` takes a count per row and spreads that many anchors evenly
+across the half-wing, which reaches the fractional spacings an integer stride
+cannot. Given the real per-row counts, the generator reproduces the real line
+tables:
+
+| wing | real | modelled | error |
+| --- | --- | --- | --- |
+| Geo 7 MS | 112 | 115 | +3% |
+| Swift 6 MS | 114 | 107 | −6% |
+| Alpina 5 ML | 118 | 119 | +1% |
+| Zeno 2 ML | 102 | **102** | 0% |
+
+**Worst error across four wings: 6%, down from 37%.**
+
+`everyNthRib` still works and is still the default, because a design that has
+not specified per-row densities should not be given someone else's.
 
 **Two-liners do not match, and the main count says why.** A real two-liner
 cascades its C row into B and ends with far fewer main lines than the
