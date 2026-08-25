@@ -174,6 +174,38 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
     stale.join(', ') || `${docFiles.length} documents checked`);
 }
 
+/* ---- 2c. the documentation has not drifted ----------------------------- */
+//
+// docs/line-plans.md grew to 458 lines covering naming, seven sheet formats,
+// merged rows, per-row density, main counts and the stabilo — with two
+// subsections both called "Generating one" and the stabilo sitting outside
+// the numbering. None of that fails a test, and nobody re-reads a long file
+// to notice.
+{
+  const docFiles = readdirSync('docs').filter((f) => f.endsWith('.md'));
+  const long = docFiles.filter((f) => readFileSync(`docs/${f}`, 'utf8').split('\n').length > 500);
+  say(long.length === 0, 'no document has grown past 500 lines',
+    long.map((f) => `${f} (${readFileSync(`docs/${f}`, 'utf8').split('\n').length})`).join(', ')
+      || `${docFiles.length} documents`);
+
+  const dupes = [];
+  const unnumbered = [];
+  for (const f of docFiles) {
+    const md = readFileSync(`docs/${f}`, 'utf8');
+    const subs = [...md.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
+    if (subs.length !== new Set(subs).size) dupes.push(f);
+    // Top-level sections should be numbered consistently: either all of them
+    // carry a number or none do.
+    const tops = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+    const numbered = tops.filter((t) => /^\d+\./.test(t)).length;
+    if (numbered > 0 && numbered !== tops.length) unnumbered.push(f);
+  }
+  say(dupes.length === 0, 'no document repeats a subsection heading',
+    dupes.join(', ') || 'headings are distinct');
+  say(unnumbered.length === 0, 'and section numbering is consistent within each',
+    unnumbered.join(', ') || 'consistent');
+}
+
 /* ---- 3a. Phase 1 still does what the roadmap says ---------------------- */
 //
 // A separate walk of the Phase 1 list, item by item. Kept out of the main

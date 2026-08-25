@@ -102,6 +102,10 @@ not be able to cause, so `combinedRowShare` sums the rows a line actually
 serves. Merging is how a cascade cuts line count without cutting anchor count,
 and it is why a merged line is the thickest at its level.
 
+## 3. Generating a plan
+
+How closely a generated plan matches a real one, and what governs it.
+
 ### Validated against real line tables
 
 Every reference sheet lists a **K row** alongside A/B/C/D. A generated plan
@@ -246,7 +250,7 @@ them changes the closure error and the total load carried by *nothing at all*.
 That check existed for exactly this. A plan that looked more realistic had
 quietly broken the load model, and nothing else would have shown it.
 
-### Generating one
+### Generating a merged cascade
 
 `buildLinePlan` takes `mergeRows: [['A','B'],['C','D']]`. Each row keeps its
 own top lines — they attach at different chord positions and cannot be shared
@@ -281,138 +285,7 @@ the level the parser resolves, not the text.*
 
 ---
 
-## 3. Topology is recoverable from lengths alone
-
-The sheets give a cut list and a totals matrix, but never state which branch
-feeds which anchor. It can be recovered.
-
-For anchor *i* on row X, the published carabiner-to-canopy total is
-
-```
-total_i = riser + (riser-level line) + (middle line) + X_i
-```
-
-so `total_i − X_i` is the part of the path shared with its neighbours.
-Anchors on the same branch give the **same remainder**, so the remainders
-collapse into one value per branch, and the grouping falls out without any
-topology being assumed. If names and lengths disagree, the remainders scatter
-instead — which is what makes this a check rather than just a calculation.
-
-On the Geo 7 MS, row A: 14 anchors → **6 branches** `[1-4] [5,6] [7,8] [9,10]
-[11,12] [13,14]`, and the file declares exactly **6 middle lines**, AM1–AM6.
-
-### Two refinements the data forced
-
-**Equal length ≠ same branch.** Sharing a remainder is necessary but not
-sufficient. On the Geo 7 the branch serving anchors 1–4 and the one serving
-9–10 agree to within a millimetre, and naive clustering merges them into a
-six-anchor branch that does not exist. Since a real branch serves *neighbouring*
-anchors, splitting each cluster into contiguous runs separates the coincidences
-from the genuine sharing.
-
-**Where two adjacent branches are genuinely the same length**, they still
-merge — AM1 and AM2 are both 1921 mm and serve anchors 1–2 and 3–4, reading as
-one four-anchor branch. That is a limit of inferring from lengths, not an error
-in the file. `inferTopology` reports `middleLineCount` alongside `branchCount`
-so the discrepancy is visible rather than hidden.
-
----
-
-## 4. Riser length is recoverable too
-
-The totals include the riser webbing, but no sheet states its length. Since
-`remainder = riser + riserLine + middleLine` and the riser is the one quantity
-shared by every branch, trying each combination and keeping the value that
-explains the most branches recovers it.
-
-Geo 7 MS, solved independently per row:
-
-| Row | Riser | Branches explained | Spread |
-| --- | --- | --- | --- |
-| A | 527 mm | 5 | 6 mm |
-| B | 529 mm | 5 | 3 mm |
-| C | 514 mm | 5 | 20 mm |
-
-Three independent solves agreeing within a few millimetres. The residual
-spread is the loop and sewing allowance, which the sheets track separately as
-"Prod adj." — typically 11 mm.
-
----
-
-## 5. Where the junctions actually sit
-
-The most useful calibration in the data.
-
-Geo 7 MS, row A, 6951 mm from carabiner to canopy:
-
-| Segment | Length | Cumulative |
-| --- | --- | --- |
-| riser | 527 mm | 7.6% |
-| AR1 | 3948 mm | **64%** |
-| AM1 | 1921 mm | **92%** |
-| A1 | 556 mm | 100% |
-
-So the **first junction sits 64% of the way up**, and the second covers **78%
-of what remains**, leaving the upper lines the last 22%. The upper lines are
-the short ones — 250–650 mm across the whole inventory.
-
-An earlier construction placed both junctions barely a third of the way up.
-The wing still built, the totals were still roughly right — but the upper
-lines came out several times longer than any real wing's, and total line
-length was 543 m against a real 263 m. Correcting the fractions brought it to
-318 m for a slightly larger wing. There is a test pinning mean upper-line
-length to the 100–900 mm band, because this failure is invisible in the totals.
-
----
-
-## 6. Tip lines skip the middle cascade
-
-On the Geo 7, A13 and A14 are 1205 mm and 977 mm where every inboard A line is
-300–500 mm, and they have **no middle line above them**: the outermost anchors
-take one long line straight to the main level. `tipDirectAnchors` reproduces
-this.
-
-Worth noting what it does *not* change: total carabiner-to-canopy length is
-barely affected, because the junctions lie near the straight line from maillon
-to anchor whatever the level count. It changes the cut list and the number of
-pieces, not the trim.
-
----
-
-## 7. Comparing a generated plan with a real one
-
-`comparePlans` reports two numbers, and the distinction matters:
-
-- **mean offset** — overall length difference, set by line length and wing
-  size. Not interesting on its own.
-- **shape deviation** — the spread once that offset is removed. *This* is the
-  trim distribution across the span.
-
-Comparing a parametric wing of roughly Geo 7 MS proportions against the real
-thing gives a mean offset of ~215 mm and a mean shape deviation of ~104 mm,
-with the largest deviations at the tip anchors. Those are genuine differences
-between two different wings — a flatter arc puts the tip anchors further from
-the pilot — not errors in the cascade. The tool is for diffing a design against
-reference wings, not for claiming a match.
-
----
-
-## 8. Not yet modelled
-
-- **Brake cascade geometry.** Brake lines (`K`, `KM`, `KMU`, `KRU`/`KRL`) are
-  parsed and named but not generated: they run to the trailing edge with a
-  deliberately uneven distribution and a pulley.
-- **Collapse / stabilo lines** (`Z` row on the Lyght) — parsed, not generated.
-- **Line materials and load.** The sheets group by material code
-  (`LIN-8001-050-BLUE`, `LIN-PPSL200`) with sheathed and unsheathed types.
-  Selecting a diameter needs the load model.
-- **Left/right asymmetry.** Quantities of 2 and 4 encode mirror pairs;
-  asymmetric colour or line plans are not represented.
-- **Riser hardware** — maillons, pulleys, speed system travel, trimmers.
-
----
-
-## The stabilo, and why naming does not find it
+## 4. The stabilo, and why naming does not find it
 
 The stabilo is the outermost line group. It holds the tip against folding
 under, and it is what a pilot pulls for big ears. Every reference wing has
@@ -447,7 +320,7 @@ The first case matters as much as the others: a wing with no separate stabilo
 is reported as having none, with a note saying so, rather than the outermost
 ordinary anchors being silently relabelled.
 
-### Generating one
+### Generating a stabilo
 
 `addStabilo` runs it to its own main line, as every reference wing does — the
 SAGE puts it on the A2 riser, UP gives it `st` mains of its own.
@@ -456,3 +329,25 @@ It carries handling load, not lift, so like the brakes it is excluded from the
 span-load distribution. A test asserts that adding a stabilo changes the
 closure error by **nothing at all** — the same guard that caught the brake
 regression.
+
+## 5. Not yet modelled
+
+- **Brake cascade geometry.** Brake lines (`K`, `KM`, `KMU`, `KRU`/`KRL`) are
+  parsed and named but not generated: they run to the trailing edge with a
+  deliberately uneven distribution and a pulley.
+- **Collapse / stabilo lines** (`Z` row on the Lyght) — parsed, not generated.
+- **Line materials and load.** The sheets group by material code
+  (`LIN-8001-050-BLUE`, `LIN-PPSL200`) with sheathed and unsheathed types.
+  Selecting a diameter needs the load model.
+- **Left/right asymmetry.** Quantities of 2 and 4 encode mirror pairs;
+  asymmetric colour or line plans are not represented.
+- **Riser hardware** — maillons, pulleys, speed system travel, trimmers.
+
+---
+
+---
+
+## 6. Reading real line sheets
+
+Recovering topology, riser length and junction positions from a
+manufacturer's published numbers is covered in `docs/line-sheets.md`.
