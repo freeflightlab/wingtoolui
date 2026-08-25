@@ -567,3 +567,185 @@ export function trimEnvelope({
       && barAlone.flyable && trimAlone.flyable && !both.flyable),
   };
 }
+
+/* --------------------------------------------- risers as webbing (PMA) -- */
+
+/**
+ * The riser, properly.
+ *
+ * This project called the deepest level of the line cascade "riser lines" for
+ * a long time, and that was wrong. The PMA standard is explicit:
+ *
+ *   **Riser** — textile element between the main lines and the suspension
+ *   point on the harness, via a connecting element.
+ *
+ *   **Main lines** — lines which are attached directly to the riser
+ *   connectors.
+ *
+ * So a riser is *webbing*, not a line. It runs from the pilot's karabiner up
+ * to a maillon, and the line cascade begins above that maillon. Ozone label
+ * their main lines `AR1` — A-Riser-1, the line that meets the A riser — which
+ * is a label, not a claim that the line is a riser.
+ *
+ * ---------------------------------------------------------------------------
+ * Why it matters beyond naming
+ * ---------------------------------------------------------------------------
+ * **Total line length** in the PMA sense is measured from the sail down to
+ * the inside of the riser loop at the harness, so it is lines *plus* risers:
+ *
+ *     M = L + R
+ *
+ * Manufacturers' length sheets differ on whether R is included, and the
+ * project has already tripped over this: the riser length was recovered from
+ * Ozone's totals by solving for the one quantity every branch shares, and PHI
+ * quotes a "line length" whose fixed part turned out to be roughly its riser.
+ * A total that does not say which convention it uses cannot be compared with
+ * a manual.
+ *
+ * **Risers differ by size.** PHI runs 570 mm on its two smallest sizes and
+ * 600 mm on the rest; Skywalk 520 mm and 540 mm. They step rather than scale,
+ * which is why the affine line-length law had an intercept.
+ */
+
+/**
+ * Build the riser set as webbing.
+ *
+ * @param {object} o
+ * @param {number} o.lengthMM       trim length, karabiner to maillon
+ * @param {string[]} o.rows         which rows meet which riser
+ * @param {number} o.webbingWidthMM
+ * @param {number} o.webbingGsm     areal weight of the webbing
+ */
+export function buildRiserWebbing({
+  lengthMM = 500,
+  rows = ['A', 'B', 'C'],
+  webbingWidthMM = 20,
+  webbingGsm = 0.220,
+  speedSystem = true,
+  travelMM = 0,
+  trimmerTravelMM = 0,
+  maillonsPerSide = null,
+} = {}) {
+  const sides = 2;
+  const perSide = rows.length;
+
+  // The speed system needs its own webbing: a length from the karabiner up
+  // through the pulleys and back, on the risers it acts upon.
+  const speedWebbingMM = speedSystem ? lengthMM * 1.6 : 0;
+
+  const strapMM = perSide * lengthMM + speedWebbingMM;
+  const areaM2 = (strapMM / 1000) * (webbingWidthMM / 1000) * sides;
+
+  return {
+    lengthMM,
+    rows,
+    ridersPerSide: perSide,
+    maillons: (maillonsPerSide ?? perSide) * sides,
+    strapMetres: (strapMM / 1000) * sides,
+    webbingAreaM2: areaM2,
+    // Webbing only. Maillons, pulleys and handles are hardware and counted
+    // as such rather than smeared into a mass per metre.
+    webbingMassKg: areaM2 * webbingGsm,
+    speedSystem,
+    travelMM,
+    trimmerTravelMM,
+    // Length at full bar and full trim, which is what a length sheet measured
+    // in the accelerated position would show.
+    acceleratedLengthMM: lengthMM - travelMM,
+    trimmedLengthMM: lengthMM + trimmerTravelMM,
+  };
+}
+
+/**
+ * Total line length in the PMA sense: sail to the inside of the riser loop.
+ *
+ * `M = L + R`. Reported with the convention stated, because a bare total is
+ * ambiguous — the same wing measures 6.9 m or 7.4 m depending on whether the
+ * riser is in it, and both numbers appear in manufacturers' sheets.
+ */
+export function totalLineLength({
+  lineLengthMM, riser = null, includeRisers = true, trimmerPosition = 'closed',
+}) {
+  const riserMM = riser
+    ? (trimmerPosition === 'open' ? riser.trimmedLengthMM : riser.lengthMM)
+    : 0;
+  return {
+    lineLengthMM,
+    riserLengthMM: riserMM,
+    totalMM: lineLengthMM + (includeRisers ? riserMM : 0),
+    includesRisers: includeRisers,
+    // PMA note: with trimmers, the reference position for the measurement is
+    // whatever the manufacturer specifies, so it has to travel with the
+    // number rather than be assumed closed.
+    trimmerPosition: riser && riser.trimmerTravelMM ? trimmerPosition : 'none',
+    convention: includeRisers
+      ? 'PMA: sail to the inside of the riser loop, risers included'
+      : 'lines only, excluding risers',
+  };
+}
+
+/* ------------------------------------------------- the riser as webbing -- */
+
+/**
+ * The riser, properly.
+ *
+ * This project called the deepest cascade level "riser" for a long time, and
+ * that was wrong. The PMA standard is explicit:
+ *
+ *   **Riser** — textile element between the main lines and the suspension
+ *   point on the harness, via a connecting element.
+ *
+ *   **Main lines** — lines which are attached directly to the riser
+ *   connectors.
+ *
+ * So a riser is a short length of **webbing**, not a line. The line cascade
+ * ends at the maillons; the riser runs from those maillons down to the
+ * karabiner. The two are different materials, made differently, measured
+ * differently and replaced separately.
+ *
+ * ---------------------------------------------------------------------------
+ * Why it matters beyond naming
+ * ---------------------------------------------------------------------------
+ * **Total line length includes the riser.** PMA Figure 4 defines it as the
+ * distance from the sail at the attachment point to the inside of the riser
+ * loop at the harness — M = L + R. That is why some manufacturers' length
+ * sheets include the risers and some do not, and why comparing two sheets
+ * without knowing which convention each used produces a constant offset of a
+ * few hundred millimetres across every line.
+ *
+ * **Risers differ by size.** They are webbing cut to a length, not geometry
+ * derived from the wing, so they step between sizes rather than scaling with
+ * it — 520 mm on the two small SAGEs, 540 mm on the three large ones.
+ *
+ * **Risers are not one length.** A three-riser wing has an A, a B and a C
+ * riser, and on the bar they are no longer equal — which is the whole point
+ * of a speed system.
+ */
+
+/**
+ * Riser lengths across a size family.
+ *
+ * Webbing is cut to a length, so risers step between sizes rather than
+ * scaling with the wing. Given the published lengths this reports the steps
+ * and how many sizes share each — which is what a maker actually does.
+ */
+export function riserSteps(sizes) {
+  const byLength = new Map();
+  for (const s of sizes) {
+    if (s.riserMM == null) continue;
+    if (!byLength.has(s.riserMM)) byLength.set(s.riserMM, []);
+    byLength.get(s.riserMM).push(s.name ?? s.size);
+  }
+  const steps = [...byLength.entries()]
+    .map(([mm, names]) => ({ riserMM: mm, sizes: names }))
+    .sort((a, b) => a.riserMM - b.riserMM);
+  return {
+    steps,
+    distinctLengths: steps.length,
+    sizesCovered: sizes.filter((s) => s.riserMM != null).length,
+    // A family with as many riser lengths as sizes is scaling them, not
+    // stepping — worth distinguishing, because it is the unusual case.
+    scalesRatherThanSteps: steps.length === sizes.filter((s) => s.riserMM != null).length
+      && steps.length > 2,
+  };
+}
