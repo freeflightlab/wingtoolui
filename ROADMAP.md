@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1269-test validation suite and a benchmark with regression budgets
+- [x] 1282-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -464,7 +464,14 @@ Making it pleasant to use across a real project.
       few small panels — cell 24 upper is 29% efficient against the root's
       96% — so they are the ones to fit around the large ones. A placement
       problem, not a pairing one.
-- [ ] **Design comparison**: hold two designs side by side, diff their numbers.
+- [x] **Design comparison** — two designs side by side, with the direction of
+      each metric declared, trades named as trades, and no overall score.
+      Immediately showed that a third more cells costs 2.5% of glide through
+      20% more line drag. See `docs/comparing.md`.
+- [x] **A search tool for what already exists** (`tools/find.mjs`) — searches
+      names *and* doc comments, including private helpers, because all five
+      functions written twice in this project were named differently the
+      second time. All five would now be found before writing.
 - [ ] **Undo/redo and named revisions.**
 - [x] **Reference wings as loadable starting points** — twenty published
       sizes from seven families, in the interface. Loads the size only, and
