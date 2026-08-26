@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1222-test validation suite and a benchmark with regression budgets
+- [x] 1269-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -357,10 +357,24 @@ validation notes flagged.
 
 ## Phase 3 — construction detail
 
-- [x] **Collision checking between rib internals** — holes, cross-ports and
-      tabs were each placed correctly and independently, and overlapped by up
-      to 270 mm on the root rib. A rib that passes every individual rule can
-      still be uncuttable.
+- [x] **A rib opening does two jobs** — lightening holes *are* the
+      cross-ports, and modelling them as separate sets was the error the
+      collision check exposed. On a normal rib the openings exceed the flow
+      requirement six-fold, so weight sizes them, not flow.
+- [x] **Openings unified** — a lightening hole is already a cross-port, so
+      they are designed once against both constraints. The holes give 6.4x the
+      flow requirement, so weight governs; `allRibOpenings` names any rib where
+      it does not. The collision is gone by construction.
+- [x] **A hole in a rib is a cross-port** — quantified: the openings give 6 to
+      63 times the flow area a cross-port needs, so they are sized by weight
+      on every rib of the test wing. `ribOpenings` already designed one set
+      against both constraints; what was missing was the measurement.
+- [x] **Collision checking between rib internals** — `checkRibInternals`
+      compares holes, ports, diagonals and tabs as chordwise intervals,
+      separating collisions from tight clearances. Note: the 270 mm overlap
+      first reported for this was between two low-level functions the tool
+      never combines; `ribOpenings` already treated a rib as having one set of
+      openings. The check remains useful for diagonals and tabs.
 
 - [x] **Design length is not manufacturing length** — four distinct lengths
       (flying, reference at 5 daN, sewn, cut), with the conversions between

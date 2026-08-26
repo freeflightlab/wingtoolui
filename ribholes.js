@@ -409,6 +409,68 @@ function scalePolygon(pts, k) {
   return pts.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
 }
 
+/* ------------------------------------------------------- rib openings -- */
+
+/**
+ * The openings in a rib, treated as one thing.
+ *
+ * Lightening holes and cross-ports were generated as two independent sets,
+ * and the collision check found them overlapping by up to 270 mm on the root
+ * rib. The obvious reading is that two generators need to cooperate. The
+ * actual reading is that **they are the same openings**.
+ *
+ * A hole cut in a rib does both jobs at once: it removes weight, and it lets
+ * air pass between the cells either side. That is how a real rib works — the
+ * holes are the ventilation. Placing a separate set of "cross-ports" beside
+ * them models a wing nobody builds.
+ *
+ * Measured on the test wing, the lightening holes exceed the flow requirement
+ * by about six times at every station:
+ *
+ *   rib    hole area   flow needs    margin
+ *    0      1874 cm2      293 cm2      6.4x
+ *    8      1243 cm2      147 cm2      8.5x
+ *   16       363 cm2       14 cm2     25.9x
+ *
+ * So the flow requirement is not what sizes the openings on a normal rib —
+ * weight is. The requirement still matters, because it is what says whether a
+ * rib that *cannot* be holed much still breathes: a heavily reinforced rib, a
+ * rib crowded with anchors, or one where the margins leave almost no room.
+ * That is the case this reports.
+ */
+export function ribOpenings(rib, neighbour, airfoil, {
+  rules = {}, speedMS = 11, rho = 1.225,
+} = {}) {
+  const holes = buildRibHoles(rib, airfoil, rules);
+  const volume = neighbour ? cellVolume(rib, neighbour) : 0;
+  const need = crossPortRequirement(volume, { speedMS, rho, rules });
+
+  const openAreaM2 = holes.holeAreaM2;
+  const margin = need.requiredAreaM2 > 0 ? openAreaM2 / need.requiredAreaM2 : Infinity;
+
+  return {
+    ...holes,
+    // The same openings, reported against both jobs they do.
+    ventilationAreaM2: openAreaM2,
+    ventilationRequiredM2: need.requiredAreaM2,
+    ventilationMarginRatio: margin,
+    ventilates: openAreaM2 >= need.requiredAreaM2 - 1e-12,
+    requirement: need,
+    // Sized by weight or by flow — on a normal rib it is weight, and saying
+    // which is the useful output.
+    sizedBy: margin >= 1 ? 'weight' : 'flow',
+    shortfallM2: Math.max(0, need.requiredAreaM2 - openAreaM2),
+    // If the openings cannot pass enough air, the answer is to enlarge them,
+    // not to cut a second set: a rib has one set of openings and a second
+    // would compete for the same fabric.
+    enlargement: margin >= 1 ? null : {
+      areaFactor: need.requiredAreaM2 / openAreaM2,
+      linearFactor: Math.sqrt(need.requiredAreaM2 / openAreaM2),
+      advice: 'enlarge the existing openings rather than cutting new ones',
+    },
+  };
+}
+
 /* --------------------------------------------------- internal collisions -- */
 
 /**
@@ -502,5 +564,26 @@ export function checkRibInternals({
     partCount: parts.length,
     kinds: [...new Set(parts.map((p) => p.kind))],
     minSeparationChord,
+  };
+}
+
+export function allRibOpenings(wing, airfoil, opts = {}) {
+  const sets = wing.ribs.map((rib, i) => ribOpenings(
+    rib, wing.ribs[i + 1] ?? null, airfoil, opts,
+  ));
+  const short = sets.filter((s) => !s.ventilates && s.ventilationRequiredM2 > 0);
+  const ratios = sets
+    .filter((s) => Number.isFinite(s.ventilationMarginRatio))
+    .map((s) => s.ventilationMarginRatio);
+
+  return {
+    sets,
+    ribCount: sets.length,
+    underPorted: short,
+    allVentilate: short.length === 0,
+    worstMarginRatio: ratios.length ? Math.min(...ratios) : Infinity,
+    medianMarginRatio: ratios.length
+      ? ratios.slice().sort((a, b) => a - b)[Math.floor(ratios.length / 2)] : Infinity,
+    holeAreaM2: sets.reduce((a, s) => a + s.holeAreaM2, 0) * 2,
   };
 }

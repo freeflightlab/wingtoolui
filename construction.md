@@ -362,15 +362,56 @@ assertion of mine that expected `A1`.
 
 ---
 
-## 9. Rib internals compete for the same fabric
+## 9. A rib opening does two jobs
+
+The collision check found lightening holes and cross-ports overlapping by up
+to 270 mm on the root rib. The obvious reading is that two generators need to
+cooperate. **The actual reading is that they are the same openings.**
+
+A hole cut in a rib removes weight *and* lets air pass between the cells
+either side. That is how a real rib works — the holes are the ventilation.
+Placing a separate set of cross-ports beside them models a wing nobody builds.
+
+Measured, the lightening holes exceed the flow requirement everywhere:
+
+| rib | hole area | flow needs | margin |
+| --- | --- | --- | --- |
+| 0 | 1874 cm² | 293 cm² | 6.4× |
+| 8 | 1243 cm² | 147 cm² | 8.5× |
+| 16 | 363 cm² | 14 cm² | 25.9× |
+
+**So the flow requirement is not what sizes the openings on a normal rib —
+weight is.** `ribOpenings` reports which, and on every station of the test
+wing the answer is weight.
+
+### The requirement still matters
+
+It is what says whether a rib that *cannot* be holed much still breathes.
+Heavy margins, a crowded rib, a demanding reinflation target:
+
+| case | available | needed | |
+| --- | --- | --- | --- |
+| normal | 1874 cm² | 293 cm² | ok |
+| heavy margins | 564 cm² | 293 cm² | ok |
+| very heavy margins | 207 cm² | 293 cm² | **86 cm² short** |
+| both, with a 0.3 s target | 207 cm² | 1467 cm² | **1259 cm² short** |
+
+And the lever a designer actually has is cell count: the requirement scales
+with cell *volume*, so splitting the same wing into more cells makes a target
+reachable that a coarse wing cannot meet. A 12-cell wing cannot refill in
+0.3 s; a 40-cell one can.
+
+---
+
+## 10. Rib internals compete for the same fabric
 
 Lightening holes, cross-ports, diagonal landings and attachment tabs are each
 generated correctly and **independently**. Each respects its own margins —
 nose band, surface margin, anchor clearance, webs between holes.
 
-Nothing was checking that two of them do not want the same chordwise band of
-the same rib. They do, because they are all placed into the space the anchors
-leave. On the root rib of the test wing:
+Nothing checks that two of them do not want the same chordwise band of the
+same rib — and they can, because they are all placed into the space the
+anchors leave:
 
 ```
 lightening hole 1 overlaps cross-port 3 by 110 mm
@@ -388,13 +429,27 @@ axis they compete on, and separates two cases that want different responses:
   which is buildable and fragile
 
 `checkTabClearance` had been doing this for tabs against lightening holes
-only. This is the general form, and it was written because the documentation
-audit flagged "cross-ports and their interaction" as an open gap and it turned
-out to be a real one.
+only. This is the general form.
+
+### A correction to how this was first reported
+
+The check was written after a demonstration showing lightening holes and
+cross-ports overlapping by 270 mm, and that demonstration was misleading.
+
+It called `buildRibHoles` and `buildCrossPorts` and compared the results. **The
+tool never does that.** `ribOpenings` — section 9 above — already existed and
+is what the interface and the exports use. The overlap was between two
+low-level functions the tool does not combine, reported as though it were a
+fault in the wing.
+
+The check is still worth having: diagonals and tabs really can land on the
+same station as an opening, and nothing else checks it. But it did not find
+the bug it was said to have found, and the claim is corrected here rather than
+quietly dropped.
 
 ---
 
-## 10. Not covered
+## 11. Not covered
 
 - **Hole shape.** The generator produces one tapered opening per available
   gap. Real ribs use a variety of shapes, and some makers cut several small

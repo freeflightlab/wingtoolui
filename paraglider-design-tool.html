@@ -8536,6 +8536,68 @@ function scalePolygon(pts, k) {
   return pts.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
 }
 
+/* ------------------------------------------------------- rib openings -- */
+
+/**
+ * The openings in a rib, treated as one thing.
+ *
+ * Lightening holes and cross-ports were generated as two independent sets,
+ * and the collision check found them overlapping by up to 270 mm on the root
+ * rib. The obvious reading is that two generators need to cooperate. The
+ * actual reading is that **they are the same openings**.
+ *
+ * A hole cut in a rib does both jobs at once: it removes weight, and it lets
+ * air pass between the cells either side. That is how a real rib works — the
+ * holes are the ventilation. Placing a separate set of "cross-ports" beside
+ * them models a wing nobody builds.
+ *
+ * Measured on the test wing, the lightening holes exceed the flow requirement
+ * by about six times at every station:
+ *
+ *   rib    hole area   flow needs    margin
+ *    0      1874 cm2      293 cm2      6.4x
+ *    8      1243 cm2      147 cm2      8.5x
+ *   16       363 cm2       14 cm2     25.9x
+ *
+ * So the flow requirement is not what sizes the openings on a normal rib —
+ * weight is. The requirement still matters, because it is what says whether a
+ * rib that *cannot* be holed much still breathes: a heavily reinforced rib, a
+ * rib crowded with anchors, or one where the margins leave almost no room.
+ * That is the case this reports.
+ */
+function ribOpenings(rib, neighbour, airfoil, {
+  rules = {}, speedMS = 11, rho = 1.225,
+} = {}) {
+  const holes = buildRibHoles(rib, airfoil, rules);
+  const volume = neighbour ? cellVolume(rib, neighbour) : 0;
+  const need = crossPortRequirement(volume, { speedMS, rho, rules });
+
+  const openAreaM2 = holes.holeAreaM2;
+  const margin = need.requiredAreaM2 > 0 ? openAreaM2 / need.requiredAreaM2 : Infinity;
+
+  return {
+    ...holes,
+    // The same openings, reported against both jobs they do.
+    ventilationAreaM2: openAreaM2,
+    ventilationRequiredM2: need.requiredAreaM2,
+    ventilationMarginRatio: margin,
+    ventilates: openAreaM2 >= need.requiredAreaM2 - 1e-12,
+    requirement: need,
+    // Sized by weight or by flow — on a normal rib it is weight, and saying
+    // which is the useful output.
+    sizedBy: margin >= 1 ? 'weight' : 'flow',
+    shortfallM2: Math.max(0, need.requiredAreaM2 - openAreaM2),
+    // If the openings cannot pass enough air, the answer is to enlarge them,
+    // not to cut a second set: a rib has one set of openings and a second
+    // would compete for the same fabric.
+    enlargement: margin >= 1 ? null : {
+      areaFactor: need.requiredAreaM2 / openAreaM2,
+      linearFactor: Math.sqrt(need.requiredAreaM2 / openAreaM2),
+      advice: 'enlarge the existing openings rather than cutting new ones',
+    },
+  };
+}
+
 /* --------------------------------------------------- internal collisions -- */
 
 /**
@@ -8629,6 +8691,26 @@ function checkRibInternals({
     partCount: parts.length,
     kinds: [...new Set(parts.map((p) => p.kind))],
     minSeparationChord,
+  };
+}
+function allRibOpenings(wing, airfoil, opts = {}) {
+  const sets = wing.ribs.map((rib, i) => ribOpenings(
+    rib, wing.ribs[i + 1] ?? null, airfoil, opts,
+  ));
+  const short = sets.filter((s) => !s.ventilates && s.ventilationRequiredM2 > 0);
+  const ratios = sets
+    .filter((s) => Number.isFinite(s.ventilationMarginRatio))
+    .map((s) => s.ventilationMarginRatio);
+
+  return {
+    sets,
+    ribCount: sets.length,
+    underPorted: short,
+    allVentilate: short.length === 0,
+    worstMarginRatio: ratios.length ? Math.min(...ratios) : Infinity,
+    medianMarginRatio: ratios.length
+      ? ratios.slice().sort((a, b) => a - b)[Math.floor(ratios.length / 2)] : Infinity,
+    holeAreaM2: sets.reduce((a, s) => a + s.holeAreaM2, 0) * 2,
   };
 }
 
@@ -11320,7 +11402,7 @@ function loadingCheck(sizes) {
  * artefact, and this project cannot say why — only that assuming one regime
  * silently mis-sizes the other by up to 16% at the ends of a range.
  *
- * So `estimateTotalLineLength` takes the exponent, defaulting to 1, and
+ * So `lineConsumptionEstimate` takes the exponent, defaulting to 1, and
  * `lineLengthExponent` fits it from a family's own sizes. Use the AR law to
  * set the level, and the family's own exponent to move across sizes.
  *
@@ -11370,7 +11452,7 @@ function lineLengthPerSpan(aspectRatio, { risers = 3 } = {}) {
  * from sail to harness. Two different quantities, similar names, and the
  * second was nearly reimplemented as the first.
  */
-function estimateTotalLineLength({
+function lineConsumptionEstimate({
   aspectRatio, flatSpan, risers = 3,
   // Reference size and exponent, for families that do not scale with span.
   referenceSpan = null, exponent = 1,
@@ -12738,7 +12820,7 @@ const f2 = (v, w = 10) => v.toFixed(2).padStart(w);
  * trip too, but it makes the file harder to read and invites the mistake of
  * scaling twice.
  */
-function applyDesignToLep(doc, model) {
+function writeDesignIntoLep(doc, model) {
   const out = { ...doc, lines: [...doc.lines], sections: doc.sections.map((s) => ({ ...s })) };
 
   const { wing, airfoil, name = 'wing', brand = 'Paraglider Design Tool', balance } = model;
@@ -13025,7 +13107,7 @@ function blankLepDocument(halfRibs = 25) {
  */
 function designToLep(model, template = null) {
   const doc = template || blankLepDocument(model.wing.ribs.length);
-  return writeLep(applyDesignToLep(doc, model));
+  return writeLep(writeDesignIntoLep(doc, model));
 }
 
 /* ===== xfoil.js ===== */
@@ -13347,7 +13429,7 @@ const S = {
   cz: 0.90, cx0a: 0.009, cm: -0.042, rho: 1.11, oswald: 0.90,
   cxPilot: 0.015, cxLines: 0.020, legacy: false,
   // panels
-  ribIndex: 0, tab: 'wing', ribHoles: true, crossPorts: false, marks: true,
+  ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   packer: 'profile',
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
@@ -13758,8 +13840,7 @@ function buildControls() {
   hint(N, 'Packing against the outlines rather than the boxes saves about 4.5 m of roll on a 25 m² wing.');
   checkField(N, 'marks', 'Registration marks on panels');
   hint(N, 'Notches, grain arrows and panel labels. Notches pair at equal fractions of each seam, so the ease ovalization leaves is spread evenly.');
-  checkField(N, 'ribHoles', 'Rib lightening holes');
-  checkField(N, 'crossPorts', 'Cross-ports');
+  checkField(N, 'ribHoles', 'Rib openings (lightening and cross-flow)');
   checkField(N, 'vribs', 'Diagonal ribs');
   if (S.vribs) {
     selectField(N, 'vribRows', 'Diagonals on rows', [
@@ -14529,46 +14610,26 @@ function drawRib() {
     c.text(row, [best[0], best[1] - rib.chord * 0.035], '#6e8bff', 9, 'middle');
   }
 
-  // Lightening holes. Drawn from the same rules the DXF export uses, so what
-  // is on screen is what gets cut.
+  // One set of openings, two jobs.
+  //
+  // A lightening hole in a rib is already a cross-port — air passes through
+  // it. Generated separately they overlapped by up to 270 mm on the root rib;
+  // designed once against both constraints they cannot.
   if (S.ribHoles) {
-    const set = buildRibHoles(rib, M.airfoil);
+    const nb = M.wing.ribs[Math.min(rib.index + 1, M.wing.ribs.length - 1)];
+    const set = ribOpenings(rib, nb === rib ? null : nb, M.airfoil,
+      { speedMS: M.balance ? M.balance.speedMS : 11 });
     for (const h of set.holes) {
       c.path(h.outline.map(([x, y]) => [x, y]), '#5fd97a', 1.1, { close: true });
     }
     if (set.holes.length) {
       c.text(`${(set.removedFraction * 100).toFixed(0)}% removed`,
         [rib.chord * 0.5, -rib.chord * 0.10], '#5fd97a', 9, 'middle');
-    }
-  }
-
-  // Cross-ports, sized by the flow the neighbouring cell needs rather than
-  // by what is spare, so they are drawn separately from lightening holes.
-  if (S.crossPorts) {
-    const nb = M.wing.ribs[Math.min(rib.index + 1, M.wing.ribs.length - 1)];
-    const cp = buildCrossPorts(rib, nb === rib ? null : nb, M.airfoil,
-      { speedMS: M.balance ? M.balance.speedMS : 11 });
-    for (const p of cp.ports) c.path(p.outline, '#e8c547', 1.3, { close: true });
-    if (cp.ports.length) {
-      c.text(`${cp.requirement.requiredAreaCM2.toFixed(0)} cm² needed`
-        + (cp.sufficient ? '' : '  — SHORT'),
-      [rib.chord * 0.5, -rib.chord * 0.14], cp.sufficient ? '#e8c547' : '#ff5e5e', 9, 'middle');
-    }
-  }
-
-  // Holes, ports and tabs are each placed correctly and independently, and
-  // can still want the same fabric. Say so on the rib rather than leaving it
-  // to be discovered at the cutting table.
-  if (S.ribHoles && S.crossPorts) {
-    const nb2 = M.wing.ribs[Math.min(rib.index + 1, M.wing.ribs.length - 1)];
-    const clash = checkRibInternals({
-      chordM: rib.chord,
-      holes: buildRibHoles(rib, M.airfoil).holes,
-      ports: nb2 === rib ? [] : buildCrossPorts(rib, nb2, M.airfoil).ports,
-    });
-    if (!clash.ok) {
-      c.text(`${clash.collisions.length} internal collisions`,
-        [rib.chord * 0.5, -rib.chord * 0.18], '#ff5e5e', 9, 'middle');
+      c.text(Number.isFinite(set.ventilationMarginRatio)
+        ? `${set.ventilationMarginRatio.toFixed(1)}x the flow requirement, sized by ${set.sizedBy}`
+        : 'no cell outboard of this rib',
+      [rib.chord * 0.5, -rib.chord * 0.15],
+      set.ventilates ? '#e8c547' : '#ff5e5e', 9, 'middle');
     }
   }
 
