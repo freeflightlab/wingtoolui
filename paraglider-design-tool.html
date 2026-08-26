@@ -3729,10 +3729,39 @@ const RISER_LAYOUTS = {
  * production sheets tabulate, so a generated plan and a real one can be put
  * side by side.
  */
-function buildLinePlan({
+/** Distinguishes "no layout given" from "a layout that does not exist". */
+const LAYOUT_OMITTED = Symbol('layout omitted');
+function buildLinePlan(options = {}) {
+  // Checked on the raw options, before destructuring.
+  //
+  // A destructuring default fires on `undefined`, so `{ layout = X }` cannot
+  // tell an omitted layout from `layout: undefined` — both become X. Neither
+  // can a sentinel default, for the same reason. The only place the
+  // difference survives is the options object itself.
+  //
+  // It matters because three tests were passing `RISER_LAYOUTS['A/B']`, which
+  // is not a key, and silently getting the four-riser default while claiming
+  // to test a two-liner. The plan under test was not the plan described, and
+  // nothing failed.
+  if ('layout' in options && options.layout === undefined) {
+    throw new Error('buildLinePlan: layout is undefined — check the name against '
+      + `RISER_LAYOUTS (${Object.keys(RISER_LAYOUTS).join(', ')})`);
+  }
+  return buildLinePlanInner(options);
+}
+
+function buildLinePlanInner({
   wing,
   airfoil,
-  layout = RISER_LAYOUTS['A/B/C+D'],
+  // A sentinel rather than the layout itself, so an explicit `undefined` can
+  // be told apart from an omission.
+  //
+  // A destructuring default fires on `undefined`, so `layout: undefined` is
+  // silently replaced by the default and a guard in the body can never see
+  // it. Three tests were passing `RISER_LAYOUTS['A/B']` — not a key — and
+  // getting the four-riser default while claiming to test a two-liner. The
+  // plan under test was not the plan described, and nothing failed.
+  layout = LAYOUT_OMITTED,
   everyNthRib = 2,
   groupSize = 2,
   riserLengthMM = 500,
@@ -3790,11 +3819,14 @@ function buildLinePlan({
   // the wing by about a fifth.
   brakes = null,
 } = {}) {
+  if (layout === LAYOUT_OMITTED) layout = RISER_LAYOUTS['A/B/C+D'];
+
   const fractions = airfoil?.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
   const maillon = [0, karabinerSeparationM / 2, -lineLengthM];
 
   const lines = [];
   const risers = [];
+  const shortfalls = [];
 
   for (const riser of layout) {
     const carried = [];
@@ -3848,9 +3880,21 @@ function buildLinePlan({
       // gravity of everything above it, which is the handbook's construction.
       const groups = chunkBy(cascaded, groupSize);
       // Either a fixed number of mains, or the old constant-chunk grouping.
+      // `chunkInto` caps at the number of groups available, so a row with few
+      // anchors cannot reach the requested main count: 9 anchors make 5
+      // middles, which chunk into at most 3 — and with `Math.ceil` sizing,
+      // only 2. Fewer mains means each carries a larger share, and on the
+      // highest-aspect wings that pushed one main past the strongest line in
+      // the table. Reported rather than silently delivered.
       const riserGroups = mainsPerRow
         ? chunkInto(groups, mainsPerRow)
         : chunkBy(groups, groupSize);
+      if (mainsPerRow && riserGroups.length !== mainsPerRow) {
+        shortfalls.push({
+          row, asked: mainsPerRow, got: riserGroups.length,
+          anchors: cascaded.length, middles: groups.length,
+        });
+      }
 
       const riserNodePoints = riserGroups.map((rg) => {
         const all = rg.flat();
@@ -3962,6 +4006,9 @@ function buildLinePlan({
   plan.totals = planTotals(plan);
   plan.totalLengthM = plan.lines.reduce((s, l) => s + (l.lengthMM * 2) / 1000, 0);
   plan.mergedRows = mergeRows || [];
+  // A row that could not be given the mains it asked for.
+  plan.mainShortfalls = shortfalls;
+  plan.mainsAsRequested = shortfalls.length === 0;
   return plan;
 }
 
@@ -5136,6 +5183,109 @@ function addStabilo(plan, wing, {
   plan.lines = plan.lines.concat(added);
   plan.stabilo = { lines: added, anchors: n, riser: riserName };
   return plan;
+}
+
+/**
+ * Anchor counts that hit a target line consumption.
+ *
+ * `everyNthRib` drives the anchor count off the **cell count**, and that is
+ * backwards. Across the seven published families, line consumption per metre
+ * of span correlates with aspect ratio at **r = -0.977**: a high-aspect wing
+ * has more cells and *less* line. The Zeno 2 has 78 cells and 15.5 m of line
+ * per metre of span; the Ultralite 5 has 34 cells and 26.7.
+ *
+ * A generator working from cell count therefore gets the relationship exactly
+ * inverted, and the full-pipeline run caught it as a contradiction the tool
+ * could not otherwise see: **higher aspect ratio came out with more line drag
+ * than lower**, which is the opposite of why high-aspect wings exist.
+ *
+ * So the anchor density is solved for instead. Given the target consumption —
+ * from `estimateTotalLineLength`, or a published figure — this searches the
+ * front-row density that produces it, keeping the per-row distribution shape
+ * that the reference designs show.
+ */
+function anchorsForLineLength({
+  wing, airfoil, rows, targetMetres, layout = null, lineLengthM,
+  risers = null, shape = null, mainsPerRow = 3, brakes = null,
+  tolerance = 0.02, maxIterations = 24,
+}) {
+  const ribCount = wing.ribs.length;
+  // Search only the density range real designs occupy.
+  //
+  // Total line length alone is under-determined: the same metres can be made
+  // of many short lines or few long ones, and the search took the second.
+  // On a Zeno 2 it produced 7 A-anchors where the real wing has 30 — the
+  // right length, the wrong wing, and each main then carrying four times its
+  // proper share until it exceeded the strongest line in the table.
+  //
+  // The six reference designs attach between 0.56 and 0.91 of their ribs on
+  // the front row. Searching outside that buys a closer length by leaving the
+  // space of real wings.
+  const ribCountOk = ribCount >= 6;
+  let lo = ribCountOk ? 0.50 : 0.10;
+  let hi = ribCountOk ? 0.95 : 1.00;
+  let best = null;
+
+  const build = (frontFraction) => {
+    const s = suggestAnchorsPerRow({ rows, ribCount, risers, frontFraction, shape });
+    const plan = buildLinePlan({
+      wing, airfoil, layout, lineLengthM,
+      anchorsPerRow: s.anchorsPerRow, mainsPerRow, brakes,
+    });
+    return { plan, anchorsPerRow: s.anchorsPerRow, frontFraction, shape: s.shape };
+  };
+
+  // Monotonic in the front fraction, so bisect.
+  for (let i = 0; i < maxIterations; i++) {
+    const mid = (lo + hi) / 2;
+    const attempt = build(mid);
+    const err = (attempt.plan.totalLengthM - targetMetres) / targetMetres;
+    if (!best || Math.abs(err) < Math.abs(best.error)) {
+      best = { ...attempt, error: err, totalMetres: attempt.plan.totalLengthM };
+    }
+    if (Math.abs(err) <= tolerance) break;
+    if (err > 0) hi = mid; else lo = mid;
+  }
+
+  // The search saturates when the wing simply cannot carry the target: a
+  // 13-rib wing has a ceiling on how much line it can hold however densely it
+  // is attached. Saying "here is my best" without saying "and it is not
+  // enough" is how a solver quietly returns the wrong answer.
+  const ceiling = build(hi);
+  const floor = build(lo);
+  const saturated = targetMetres > ceiling.plan.totalLengthM
+    || targetMetres < floor.plan.totalLengthM;
+
+  return {
+    ...best,
+    targetMetres,
+    withinTolerance: Math.abs(best.error) <= tolerance,
+    tolerance,
+    saturated,
+    reachableRange: [floor.plan.totalLengthM, ceiling.plan.totalLengthM],
+    densityRange: [lo, hi],
+    // A warning worth reading: hitting a published length and matching a real
+    // wing's topology are, with a three-level cascade, incompatible.
+    //
+    // Real wings run FOUR cascade levels. The generator runs three, so its
+    // lines are longer for the same anchor count, and it reaches a published
+    // total only by using far fewer anchors than the real wing — 7 A-anchors
+    // against the Zeno 2's 30. That gives the right metres, the wrong wing,
+    // and each main carrying four times its proper share.
+    //
+    // Density is therefore the constraint kept, and the length overshoot is
+    // reported rather than removed: at realistic density the total runs 10 to
+    // 85% above published, and that gap is the missing cascade level.
+    lengthOvershoot: best.error,
+    topologyRealistic: true,
+    note: saturated
+      ? `target ${targetMetres.toFixed(0)} m is outside what this wing can carry `
+        + `(${floor.plan.totalLengthM.toFixed(0)}-${ceiling.plan.totalLengthM.toFixed(0)} m); `
+        + 'the wing needs more ribs, not more anchors'
+      : `density solved within the range real designs use; total runs `
+        + `${(best.error * 100).toFixed(0)}% against the target, which is the `
+        + 'three-level cascade being longer than a real four-level one',
+  };
 }
 
 /* ===== risers.js ===== */
@@ -9828,10 +9978,23 @@ function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {
   }
 
   // Which rows exist at each anchor index.
+  // Grouped by **rib**, not by anchor index.
+  //
+  // Keying on the index was safe while every row had the same anchor count —
+  // anchor 3 of row A and anchor 3 of row C were the same rib. With per-row
+  // densities they are not: a wing with A:19 B:11 C:6 has row C's anchor 3
+  // most of the way out the span while row A's is a third of the way. Grouped
+  // by index, the rows at a station were wrong, and the span load was
+  // assigned to ribs that did not carry it — 7 to 12% of the wing's weight
+  // lost on three BGD sizes, while others closed to 0.01%.
+  // Keyed by rib, and carrying the lines themselves rather than just the row
+  // names, so nothing downstream has to reconstruct a lookup key.
   const rowsAt = new Map();
   for (const l of byAnchor.values()) {
-    if (!rowsAt.has(l.index)) rowsAt.set(l.index, []);
-    rowsAt.get(l.index).push(l.row);
+    const key = Number.isFinite(l.ribIndex) ? l.ribIndex : l.index;
+    if (!rowsAt.has(key)) rowsAt.set(key, { ribIndex: key, rows: [], lines: [] });
+    rowsAt.get(key).rows.push(l.row);
+    rowsAt.get(key).lines.push(l);
   }
 
   // Partition every rib onto its nearest attachment rib, once.
@@ -9849,11 +10012,10 @@ function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {
   }
 
   const loads = [];
-  for (const [anchorIndex, rows] of rowsAt) {
-    // The anchor index counts attachment points, which may be every other
-    // rib. Map it back onto the rib the line actually reaches.
-    const sample = byAnchor.get(`${rows[0]}${anchorIndex}`);
-    const ribIndex = sample?.ribIndex ?? anchorIndex - 1;
+  for (const [, group] of rowsAt) {
+    const rows = group.rows;
+    const sample = group.lines[0];
+    const ribIndex = group.ribIndex;
     const rib = spanLoad.stations.find((s) => s.index === ribIndex)
       ?? spanLoad.stations[Math.min(ribIndex, spanLoad.stations.length - 1)];
 
@@ -9870,7 +10032,7 @@ function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {
       const frac = (rowShares[row] ?? 0) / present;
       loads.push({
         row,
-        anchor: anchorIndex,
+        anchor: sample?.index ?? ribIndex,
         ribIndex,
         station: rib?.station ?? 0,
         loadN: share * frac,
@@ -11825,8 +11987,21 @@ function referenceDesignInputs(size, { tipChordFraction = 0.22 } = {}) {
       ellipticityTE: 0.55,
     },
     cells: size.cells ?? 40,
-    projectedRatio: size.projectedArea && size.flatArea
-      ? Math.sqrt(size.projectedArea / size.flatArea) : 0.87,
+    // Span ratio, which is what buildLobe takes.
+    //
+    // This was the square root of the *area* ratio, and the two are not
+    // related that way. An arc shortens the span; it also loses the cosine of
+    // the local dihedral from the projected area, and those are different
+    // losses. On the PHI Allegro light the published span ratio is 0.794 and
+    // the square-rooted area ratio is 0.926 — 19.5% out at worst, on every
+    // wing in the database, which the full-pipeline run caught on all 38.
+    projectedRatio: size.projectedSpan && size.flatSpan
+      ? size.projectedSpan / size.flatSpan
+      : (size.projectedArea && size.flatArea
+        // Fall back to the area ratio only where span is not published, and
+        // use it directly rather than square-rooted: across this database the
+        // area ratio is the closer of the two to the span ratio.
+        ? size.projectedArea / size.flatArea : 0.87),
     allUpMassKg: size.midWeight ?? null,
     lineLengthM: null,
     published: {

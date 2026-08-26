@@ -173,10 +173,23 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
   }
 
   // Which rows exist at each anchor index.
+  // Grouped by **rib**, not by anchor index.
+  //
+  // Keying on the index was safe while every row had the same anchor count —
+  // anchor 3 of row A and anchor 3 of row C were the same rib. With per-row
+  // densities they are not: a wing with A:19 B:11 C:6 has row C's anchor 3
+  // most of the way out the span while row A's is a third of the way. Grouped
+  // by index, the rows at a station were wrong, and the span load was
+  // assigned to ribs that did not carry it — 7 to 12% of the wing's weight
+  // lost on three BGD sizes, while others closed to 0.01%.
+  // Keyed by rib, and carrying the lines themselves rather than just the row
+  // names, so nothing downstream has to reconstruct a lookup key.
   const rowsAt = new Map();
   for (const l of byAnchor.values()) {
-    if (!rowsAt.has(l.index)) rowsAt.set(l.index, []);
-    rowsAt.get(l.index).push(l.row);
+    const key = Number.isFinite(l.ribIndex) ? l.ribIndex : l.index;
+    if (!rowsAt.has(key)) rowsAt.set(key, { ribIndex: key, rows: [], lines: [] });
+    rowsAt.get(key).rows.push(l.row);
+    rowsAt.get(key).lines.push(l);
   }
 
   // Partition every rib onto its nearest attachment rib, once.
@@ -194,11 +207,10 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
   }
 
   const loads = [];
-  for (const [anchorIndex, rows] of rowsAt) {
-    // The anchor index counts attachment points, which may be every other
-    // rib. Map it back onto the rib the line actually reaches.
-    const sample = byAnchor.get(`${rows[0]}${anchorIndex}`);
-    const ribIndex = sample?.ribIndex ?? anchorIndex - 1;
+  for (const [, group] of rowsAt) {
+    const rows = group.rows;
+    const sample = group.lines[0];
+    const ribIndex = group.ribIndex;
     const rib = spanLoad.stations.find((s) => s.index === ribIndex)
       ?? spanLoad.stations[Math.min(ribIndex, spanLoad.stations.length - 1)];
 
@@ -215,7 +227,7 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
       const frac = (rowShares[row] ?? 0) / present;
       loads.push({
         row,
-        anchor: anchorIndex,
+        anchor: sample?.index ?? ribIndex,
         ribIndex,
         station: rib?.station ?? 0,
         loadN: share * frac,

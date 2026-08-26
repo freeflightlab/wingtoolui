@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1282-test validation suite and a benchmark with regression budgets
+- [x] 1299-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -327,6 +327,21 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Full-pipeline validation** (`tests/full-pipeline.mjs`) — all 38
+      published sizes through every stage, checked against each other and
+      against physics. Found four defects every module test passed: a
+      square-rooted area ratio used as a span ratio (19.5% out on every wing),
+      anchor density driven by cell count (inverting the aspect-ratio/drag
+      relationship), anchor loads grouped by index rather than rib (12% of the
+      wing's weight lost), and an unknown layout name silently defaulted.
+      See `docs/full-pipeline.md`.
+- [ ] **The fourth cascade level** — real wings run four, the generator three,
+      so its lines are longer for the same anchor count and total consumption
+      runs +38% against published. The single most valuable outstanding item.
+- [ ] **Low-Reynolds profile drag** — minimum sink comes out at 0.69 m/s on
+      the two smallest wings, below anything real. The estimated polar is
+      optimistic at low Reynolds number.
 
 - [x] **Reference data collection** — `docs/collecting-reference-data.md` is a
       self-contained brief for building the database in a separate
