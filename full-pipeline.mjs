@@ -103,7 +103,7 @@ for (const [family, sizes] of Object.entries(fams)) {
       const solved = anchorsForLineLength({
         wing, airfoil: af, rows: Object.keys(af.anchors), targetMetres: target,
         layout: RISER_LAYOUTS[risers === 2 ? 'A/B+C' : 'A/B/C+D'],
-        lineLengthM: size.flatSpan * 0.62, risers, mainsPerRow: 3,
+        lineLengthM: size.flatSpan * 0.464, risers, mainsPerRow: 3,
         brakes: { anchors: 13, levelCounts: [6, 3, 1] },
       });
       const plan = solved.plan;

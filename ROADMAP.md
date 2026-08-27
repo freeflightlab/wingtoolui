@@ -336,9 +336,11 @@ validation notes flagged.
       relationship), anchor loads grouped by index rather than rib (12% of the
       wing's weight lost), and an unknown layout name silently defaulted.
       See `docs/full-pipeline.md`.
-- [ ] **The fourth cascade level** — real wings run four, the generator three,
-      so its lines are longer for the same anchor count and total consumption
-      runs +38% against published. The single most valuable outstanding item.
+- [x] **Cascade junction and line length measured, not assumed** — the second
+      junction was at 0.78 against a measured 0.860, and the line length 30%
+      long. Total consumption +38% to +16% against published.
+- [ ] **The last +16%** — likely the fourth cascade level real wings have and
+      the generator does not.
 - [ ] **Low-Reynolds profile drag** — minimum sink comes out at 0.69 m/s on
       the two smallest wings, below anything real. The estimated polar is
       optimistic at low Reynolds number.

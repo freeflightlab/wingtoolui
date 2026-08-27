@@ -757,7 +757,19 @@ function buildLinePlanInner({
   // the other two wings agree closely. An earlier default of 0.55 and 0.30
   // put both junctions barely a third of the way up, which made the top-level
   // lines several times longer than any real wing's.
-  levelFractions = [0.64, 0.78],
+  // Where the cascade junctions sit, as fractions of the way from the maillon
+  // to the canopy. Measured from five production line tables.
+  //
+  // The sound measurement is the **middle-to-main length ratio within one
+  // wing**, since both are means over the same cascade: Geo 7 0.429, Alpina 5
+  // 0.446, Zeno 2 0.229, Swift 6 0.308, Lyght 0.304 — mean 0.343. With the
+  // first junction at 0.64 that puts the second at 0.64 x 1.343 = 0.860.
+  //
+  // An earlier attempt averaged each level separately and read junctions off
+  // the totals. That is not a path down the cascade — the mean upper and the
+  // mean main belong to different branches — and it gave 0.888. Close by
+  // luck, wrong by method.
+  levelFractions = [0.64, 0.860],
   loadMode = 1,
   tipDirectAnchors = 2,
   // Main lines per row.

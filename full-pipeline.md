@@ -77,7 +77,29 @@ neither a default nor a sentinel can tell an omission from an explicit
 
 ## 5. What remains, stated rather than hidden
 
-**Total line length runs +38% against published** (−6% to +85%).
+**Total line length runs +16% against published** (−3% to +48%), down from
++38% after two measured corrections:
+
+- **The second cascade junction was at 0.78 against a measured 0.860.** The
+  sound measurement is the middle-to-main length ratio *within one wing*,
+  since both are means over the same cascade — Geo 7 0.429, Alpina 5 0.446,
+  Zeno 2 0.229, Swift 6 0.308, Lyght 0.304, mean 0.343, which puts the second
+  junction at 0.64 × 1.343.
+
+  An earlier attempt averaged each level separately and read the junctions off
+  the totals. That is *not* a path down the cascade — the mean upper and the
+  mean main belong to different branches — and it gave 0.888. Close by luck,
+  wrong by method.
+
+  Two measurements disagree slightly: the five-wing ratio says 0.860, while a
+  shape comparison against one wing prefers 0.78 (250 mm against 254). Five
+  wings is the better evidence. The shape tolerance was widened to admit the
+  4 mm difference, and it is worth noting *why* it was 250 — it had been tuned
+  to whatever the old junction produced, which is how a wrong value survives a
+  test suite.
+
+- **The line length itself was 30% too long.** Real mains imply a total line
+  of 0.464 × flat span, against the 0.62 in use.
 
 This is a genuine conflict, not an oversight. Hitting a published length and
 matching a real wing's topology are, with a three-level cascade,
