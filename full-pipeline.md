@@ -101,6 +101,26 @@ neither a default nor a sentinel can tell an omission from an explicit
 - **The line length itself was 30% too long.** Real mains imply a total line
   of 0.464 × flat span, against the 0.62 in use.
 
+### What the remaining gap is *not*
+
+It was attributed here to "the fourth cascade level real wings have." **That
+was wrong.** Counting levels in the reference tables: Geo 7, Alpina 5, Zeno 2,
+Swift 6 and Lyght all run exactly **three** — upper, middle, main. The
+generator is not missing a level.
+
+Measured level by level against the Zeno 2, the total is nearly exact (81.3 m
+against 81.6 per side) and the *distribution* is wrong: the middles come out
+1944 mm against a real 886 mm. The same comparison on the Geo 7 shows middles
+of 1753 mm against 1663 — close. So it is a two-liner problem, not a general
+one.
+
+A second hypothesis — that junction position depends on riser count, as anchor
+density does — is also **not supported**. Grouped, two-liners average
+[0.650, 0.858] and three-liners [0.683, 0.932], but the spread within each
+group (0.608 to 0.713 on the first junction) is larger than the difference
+between them. Junction placement is a design choice, and a single value inside
+the observed range is the honest default.
+
 This is a genuine conflict, not an oversight. Hitting a published length and
 matching a real wing's topology are, with a three-level cascade,
 *incompatible*:

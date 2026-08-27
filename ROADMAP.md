@@ -339,8 +339,12 @@ validation notes flagged.
 - [x] **Cascade junction and line length measured, not assumed** — the second
       junction was at 0.78 against a measured 0.860, and the line length 30%
       long. Total consumption +38% to +16% against published.
-- [ ] **The last +16%** — likely the fourth cascade level real wings have and
-      the generator does not.
+- [ ] **The last +16%, and it is not a missing cascade level.** All five
+      reference wings run three levels, as the generator does. Measured level
+      by level, the two-liners' middle lines come out twice their real length
+      while three-liners match — so it is specific to two-liners, and it is
+      not explained by junction position either (the within-group spread
+      exceeds the between-group difference).
 - [ ] **Low-Reynolds profile drag** — minimum sink comes out at 0.69 m/s on
       the two smallest wings, below anything real. The estimated polar is
       optimistic at low Reynolds number.

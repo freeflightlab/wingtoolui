@@ -769,6 +769,19 @@ function buildLinePlanInner({
   // the totals. That is not a path down the cascade — the mean upper and the
   // mean main belong to different branches — and it gave 0.888. Close by
   // luck, wrong by method.
+  // Measured, and NOT predicted by riser count.
+  //
+  // Junction positions across five production wings:
+  //
+  //   Geo 7     0.644 0.920      Alpina 5  0.608 0.879
+  //   Swift 6   0.722 0.944      Zeno 2    0.713 0.876
+  //                              Lyght     0.629 0.820
+  //
+  // Grouped by riser count that is [0.650, 0.858] for two-liners and
+  // [0.683, 0.932] for three — but the spread *within* each group (0.608 to
+  // 0.713 on the first junction) is larger than the difference *between*
+  // them. Riser count does not explain it; it is a design choice, and a
+  // single value inside the observed range is the honest default.
   levelFractions = [0.64, 0.860],
   loadMode = 1,
   tipDirectAnchors = 2,
