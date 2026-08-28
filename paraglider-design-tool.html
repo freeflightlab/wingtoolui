@@ -2534,6 +2534,182 @@ function addSeamAllowance(panel, mm = 10) {
   return { left: L, right: R, allowanceMM: mm };
 }
 
+/* ------------------------------------------------ billow from pressure -- */
+
+/**
+ * How much a panel actually bulges, from pressure and tension.
+ *
+ * `applyOvalization` takes the billow as a flat 6% — a design input, applied
+ * uniformly, with a chordwise shape profile bolted on. That has been one of
+ * the oldest assumptions in this project, and it is not how a sail behaves.
+ *
+ * ---------------------------------------------------------------------------
+ * The physics
+ * ---------------------------------------------------------------------------
+ * A strip of fabric spanning between two ribs, with a pressure difference
+ * across it, takes up a circular arc. The balance is the membrane equation:
+ *
+ *     R = T / dp
+ *
+ * where `T` is the tension per unit length carried by the cloth and `dp` the
+ * pressure difference. Given the rib spacing `s`, the chord of that arc, the
+ * bulge height follows from the geometry of a circular segment:
+ *
+ *     h = R - sqrt(R^2 - (s/2)^2)
+ *
+ * and the extra cloth the arc needs over the straight line is the difference
+ * between the arc length and the chord.
+ *
+ * Three things fall out that a flat percentage cannot give:
+ *
+ *   - **Billow varies along the chord**, because `dp` does. The suction peak
+ *     near the leading edge pulls far harder than the trailing edge.
+ *   - **Billow varies along the span**, because rib spacing does — and it
+ *     grows with the *square* of the spacing, so a wing with fewer cells
+ *     bulges disproportionately more.
+ *   - **It scales with flight state.** At speed the dynamic pressure rises
+ *     and the sail pulls tighter over the same cloth.
+ *
+ * The cut width is still a design decision — a panel is cut to a chosen
+ * excess and the air decides the shape. What this gives is the excess that
+ * *matches* the shape the pressure wants, so the sail is neither slack nor
+ * straining the seams.
+ */
+
+/** Bulge height and excess width for one strip. */
+function billowFromPressure({
+  spacingM, pressurePa, tensionNPerM, maxRatio = 0.25,
+}) {
+  if (!(spacingM > 0)) throw new Error('billowFromPressure needs a rib spacing');
+  if (!(pressurePa > 0)) {
+    // No pressure difference, no bulge. Flat is the correct answer, not an
+    // infinite radius dressed up as one.
+    return {
+      radiusM: Infinity, heightM: 0, excessRatio: 0, halfAngleRad: 0, flat: true,
+    };
+  }
+
+  const R = tensionNPerM / pressurePa;
+  const half = spacingM / 2;
+
+  // A radius smaller than half the spacing cannot span it: the cloth would
+  // have to close on itself. That is a real limit, not a rounding case.
+  if (R <= half) {
+    return {
+      radiusM: R,
+      heightM: half,
+      excessRatio: maxRatio,
+      halfAngleRad: Math.PI / 2,
+      overLimit: true,
+      note: 'the tension cannot hold this spacing against this pressure; the '
+        + 'cloth would need to bulge past a half-circle',
+    };
+  }
+
+  const height = R - Math.sqrt(R * R - half * half);
+  const halfAngle = Math.asin(half / R);
+  const arc = 2 * R * halfAngle;
+  const excess = (arc - spacingM) / spacingM;
+
+  return {
+    radiusM: R,
+    heightM: height,
+    arcLengthM: arc,
+    halfAngleRad: halfAngle,
+    // The extra cloth the bulge needs, as a fraction of the flat spacing —
+    // directly comparable with the flat 6%.
+    excessRatio: excess,
+    heightRatio: height / spacingM,
+    flat: false,
+  };
+}
+
+/**
+ * The billow a whole panel wants, chordwise.
+ *
+ * Takes the chordwise pressure distribution the project already computes and
+ * returns the excess at each station, so the panel can be cut to the shape the
+ * air will make rather than to a constant.
+ */
+function panelBillowProfile({
+  spacingM, loading, tensionNPerM, dynamicPressurePa,
+}) {
+  const stations = loading.stations ?? loading;
+  const out = stations.map((st) => {
+    // Pressure difference across the surface, from the local coefficient.
+    const dp = Math.abs(st.deltaCp ?? st.cp ?? 0) * dynamicPressurePa;
+    const b = billowFromPressure({ spacingM, pressurePa: dp, tensionNPerM });
+    return {
+      chordFraction: st.x ?? st.chordFraction,
+      pressurePa: dp,
+      excessRatio: b.excessRatio,
+      heightM: b.heightM,
+      overLimit: !!b.overLimit,
+    };
+  });
+
+  const ratios = out.map((o) => o.excessRatio);
+  return {
+    stations: out,
+    meanExcess: ratios.reduce((a, b) => a + b, 0) / ratios.length,
+    maxExcess: Math.max(...ratios),
+    // Where the sail pulls hardest, which is where the seams are worked.
+    peakAt: out.reduce((m, o) => (o.excessRatio > m.excessRatio ? o : m), out[0]),
+    anyOverLimit: out.some((o) => o.overLimit),
+  };
+}
+
+/**
+ * What tension does a chosen billow imply?
+ *
+ * The inversion matters more than the forward calculation, because the flat
+ * 6% is what this project and the handbook have both been using, and nobody
+ * has asked what it assumes.
+ *
+ * Solved by bisection on the radius, since the excess grows monotonically as
+ * the radius falls.
+ */
+function tensionForBillow({
+  spacingM, excessRatio, pressurePa, tolerance = 1e-10, maxIterations = 200,
+}) {
+  if (!(excessRatio > 0)) {
+    return { tensionNPerM: Infinity, radiusM: Infinity, heightM: 0, flat: true };
+  }
+  const half = spacingM / 2;
+  const excessAt = (R) => {
+    const a = Math.asin(Math.min(1, half / R));
+    return (2 * R * a - spacingM) / spacingM;
+  };
+
+  // A radius just above half the spacing gives the largest reachable excess.
+  let lo = half * (1 + 1e-9);
+  let hi = spacingM * 1e6;
+  if (excessAt(lo) < excessRatio) {
+    return {
+      tensionNPerM: null, radiusM: null, heightM: null,
+      unreachable: true,
+      maxExcessRatio: excessAt(lo),
+      note: 'no radius gives that much excess: the cloth cannot bulge past a '
+        + 'half-circle between the ribs',
+    };
+  }
+
+  for (let i = 0; i < maxIterations; i++) {
+    const mid = (lo + hi) / 2;
+    if (excessAt(mid) > excessRatio) lo = mid; else hi = mid;
+    if (hi - lo < tolerance * spacingM) break;
+  }
+  const R = (lo + hi) / 2;
+  return {
+    radiusM: R,
+    tensionNPerM: R * pressurePa,
+    heightM: R - Math.sqrt(Math.max(0, R * R - half * half)),
+    heightRatio: (R - Math.sqrt(Math.max(0, R * R - half * half))) / spacingM,
+    excessRatio,
+    flat: false,
+  };
+}
+
 /* ===== equilibrium.js ===== */
 /* equilibrium.js — Chapter 4: longitudinal equilibrium.
  *

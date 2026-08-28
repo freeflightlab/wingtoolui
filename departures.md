@@ -323,3 +323,61 @@ responsive to it. The invariance is the more useful of the two, because it is
 the kind of property that silently breaks when a rotation order is changed.
 
 ---
+
+---
+
+### 25 Billow is taken as a flat 6% where it follows from pressure
+
+`applyOvalization` takes the billow as a flat 6%, applied uniformly with a
+chordwise shape profile bolted on. That is one of the oldest assumptions in
+this project, and it is not how a sail behaves.
+
+#### The physics
+
+A strip of fabric between two ribs, with a pressure difference across it,
+takes up a circular arc. The membrane balance is
+
+```
+R = T / dp                       h = R - sqrt(R^2 - (s/2)^2)
+```
+
+with `T` the tension per unit length of cloth, `dp` the pressure difference
+and `s` the rib spacing. The extra cloth the arc needs is the difference
+between arc length and chord.
+
+Three things fall out that a flat percentage cannot give:
+
+- **Billow varies along the chord**, because `dp` does — the suction peak near
+  the leading edge pulls far harder than the trailing edge.
+- **Billow grows with the square of rib spacing.** Doubling the spacing
+  quadruples the excess (measured: 4.05x), so a wing with fewer cells bulges
+  disproportionately more.
+- **It scales with flight state**, through dynamic pressure.
+
+#### What the flat 6% actually assumes
+
+The inversion is the useful direction, because 6% is what this project and the
+handbook have both been using and nobody had asked what it implies. At 300 Pa:
+
+| spacing | implied radius | implied tension | bulge height |
+| --- | --- | --- | --- |
+| 0.20 m | 0.180 m | 54 N/m | 30 mm (15% of spacing) |
+| 0.30 m | 0.270 m | 81 N/m | 45 mm (15%) |
+| 0.40 m | 0.361 m | 108 N/m | 61 mm (15%) |
+| 0.50 m | 0.451 m | 135 N/m | 76 mm (15%) |
+
+**The bulge height stays at exactly 15% of the spacing while the implied
+tension rises in proportion to it.** So the flat 6% is a constant *shape*, not
+a constant tension — it silently assumes the cloth pulls harder on a wing with
+fewer cells. That may even be roughly true, since fewer cells means more load
+per rib, but it was never a stated assumption and it had never been checked.
+
+Both directions are asserted, and the inversion round-trips through the
+forward model to 1e-7.
+
+#### Degenerate cases
+
+No pressure gives flat, not an infinite radius. A tension too low to span the
+ribs against the pressure is reported as `overLimit` rather than returning a
+bulge past a half-circle. An excess no arc can reach is refused with the
+maximum that is reachable.
