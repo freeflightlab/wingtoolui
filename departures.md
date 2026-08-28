@@ -375,6 +375,31 @@ per rib, but it was never a stated assumption and it had never been checked.
 Both directions are asserted, and the inversion round-trips through the
 forward model to 1e-7.
 
+#### Wired into the cutter
+
+The model is now what `applyOvalization` uses when given a `pressure` option,
+so panels are cut to the shape the air will make. The flat amount remains the
+default, so nothing that was working changes.
+
+The rib spacing the membrane equation needs is **not a separate input**: the
+panel width at each station *is* the local spacing, so it comes from the panel
+itself and varies along the chord as it should.
+
+| | flat 6% | from pressure |
+| --- | --- | --- |
+| peak billow | 13% chord | **9% chord** |
+| mean excess | 5.01% | 0.80% |
+| at the LE seam | 0 | 0 |
+| responds to speed | no | 0.19% at 200 Pa, 4.13% at 800 |
+
+**One thing the first version got wrong.** Applied on its own, the pressure
+model put its peak at *0% chord*, because that is where suction peaks. But the
+panel is seamed at the leading edge and again at the trailing edge, so the
+cloth is held there and cannot bulge however hard the air pulls. The existing
+transition profile encodes exactly that boundary condition, and bypassing it
+produced a physically impossible shape. Pressure now sets the magnitude and
+the transitions still set the boundaries — both asserted.
+
 #### Degenerate cases
 
 No pressure gives flat, not an infinite radius. A tension too low to span the

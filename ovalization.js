@@ -77,6 +77,19 @@ export function wideningProfile(t, { fromLE, fromTE }) {
 export function applyOvalization(panel, {
   amount = 0.06,
   transitions = DEFAULT_TRANSITIONS.upper,
+  // Derive the widening from pressure instead of taking a flat amount.
+  //
+  // `{ loading, tensionNPerM, dynamicPressurePa }` — the chordwise loading
+  // the project already computes, the tension the cloth carries, and the
+  // dynamic pressure of the flight state.
+  //
+  // The rib spacing the membrane equation needs is not a separate input: the
+  // **panel width at each station is the local spacing**, so it comes from
+  // the panel itself and varies along the chord exactly as it should.
+  //
+  // Left null, the flat amount and its shape profile are used unchanged, so
+  // nothing that was working changes.
+  pressure = null,
 } = {}) {
   const { left, right } = panel;
   const n = left.length;
@@ -84,11 +97,41 @@ export function applyOvalization(panel, {
 
   const outL = [];
   const outR = [];
+  const excesses = [];
 
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1);
-    const scale = wideningProfile(t, transitions) * half;
     const width = Math.hypot(right[i][0] - left[i][0], right[i][1] - left[i][1]);
+
+    let scale;
+    if (pressure) {
+      // Pressure difference at this chord station, interpolated from the
+      // loading, and the excess the cloth needs to take up the arc.
+      const dp = Math.abs(interpolateCp(pressure.loading, t))
+        * pressure.dynamicPressurePa;
+      const b = billowFromPressure({
+        spacingM: Math.max(width, 1e-6),
+        pressurePa: dp,
+        tensionNPerM: pressure.tensionNPerM,
+      });
+      // Pressure sets the magnitude; the transition profile still sets the
+      // boundary conditions.
+      //
+      // Applied on its own, the pressure model puts its peak billow at 0%
+      // chord, because that is where suction peaks. But the panel is *seamed*
+      // at the leading edge and again at the trailing edge, so the cloth is
+      // held there and cannot bulge however hard the air pulls. The
+      // transitions exist for exactly that, and bypassing them produced a
+      // physically impossible shape.
+      const boundary = wideningProfile(t, transitions);
+      const applied = b.excessRatio * boundary;
+      excesses.push(applied);
+      scale = applied / 2;
+    } else {
+      scale = wideningProfile(t, transitions) * half;
+      excesses.push(scale * 2);
+    }
+
     const push = width * scale;
 
     // Unit vector from left seam to right seam at this station.
@@ -99,7 +142,35 @@ export function applyOvalization(panel, {
     outR.push([right[i][0] + ux * push, right[i][1] + uy * push]);
   }
 
-  return { left: outL, right: outR, seamLengths: panel.seamLengths, ovalized: true };
+  return {
+    left: outL,
+    right: outR,
+    seamLengths: panel.seamLengths,
+    ovalized: true,
+    // What was actually applied, so a flat amount and a pressure-derived one
+    // can be compared rather than assumed equivalent.
+    source: pressure ? 'pressure' : 'flat',
+    excessRatios: excesses,
+    meanExcess: excesses.reduce((a, b) => a + b, 0) / excesses.length,
+    maxExcess: Math.max(...excesses),
+  };
+}
+
+/** Pressure coefficient at a chord fraction, linearly between stations. */
+function interpolateCp(loading, t) {
+  const st = (loading.stations ?? loading)
+    .map((s) => ({ x: s.x ?? s.chordFraction, cp: s.deltaCp ?? s.cp ?? 0 }))
+    .sort((a, b) => a.x - b.x);
+  if (!st.length) return 0;
+  if (t <= st[0].x) return st[0].cp;
+  if (t >= st[st.length - 1].x) return st[st.length - 1].cp;
+  for (let i = 1; i < st.length; i++) {
+    if (t <= st[i].x) {
+      const f = (t - st[i - 1].x) / (st[i].x - st[i - 1].x);
+      return st[i - 1].cp + f * (st[i].cp - st[i - 1].cp);
+    }
+  }
+  return st[st.length - 1].cp;
 }
 
 /**
