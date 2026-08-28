@@ -2814,6 +2814,79 @@ function polarSweep(input, alphas, czFn, cmFn) {
   });
 }
 
+/**
+ * Solve the balance using coefficients derived from the wing itself.
+ *
+ * Chapter 4's equilibrium takes lift, moment and the Oswald factor as typed-in
+ * numbers. `aero.js` computes all three from the actual section and planform —
+ * thin-aerofoil theory for the lift slope and `Cm0`, lifting line for the
+ * Oswald factor — and in this project the two have never been connected. A
+ * designer changing the section or the aspect ratio has had to notice that the
+ * balance was still using whatever was typed beside them.
+ *
+ * ---------------------------------------------------------------------------
+ * It does not iterate, and the first version wrongly did
+ * ---------------------------------------------------------------------------
+ * `solveEquilibrium` **takes** the angle of attack; it does not solve for one.
+ * What it solves for is the calage — where the pilot must hang to trim at that
+ * angle. So there is no fixed point to chase, and a version written to iterate
+ * to one "converged in 1 iteration" because the field it was watching did not
+ * exist. A loop that always exits immediately is worse than no loop: it looks
+ * like convergence.
+ *
+ * The coupling is therefore a single pass, which is all it ever needed to be.
+ */
+function solveEquilibriumFromWing({
+  planform, airfoil, atm = null, alphaDeg = 6, ...rest
+} = {}) {
+  const m = planform.area && planform.span ? planform : planformMetrics(planform);
+  const section = thinAirfoil(airfoil, alphaDeg);
+  const ll = liftingLine({ planform, alphaDeg, N: 24 });
+
+  // Thin-aerofoil theory gives a slope and a zero-lift angle, not a lift
+  // coefficient. Cz is what follows from them at this angle.
+  const cz = section.liftSlopePerRad
+    * ((alphaDeg - section.alphaL0Deg) * Math.PI) / 180;
+
+  // Omit rho entirely when there is no atmosphere, rather than passing
+  // `undefined`.
+  //
+  // A destructuring default does not fire on an explicit `undefined` — it
+  // fires on an absent key. `{ rho: undefined }` therefore reaches the solver
+  // as undefined, and every speed comes back NaN. This is the same trap that
+  // let `RISER_LAYOUTS['A/B']` silently become the default layout, in the
+  // opposite direction: there a bad value was absorbed, here a good default
+  // was defeated.
+  const solved = solveEquilibrium({
+    area: m.area,
+    span: m.span,
+    chord: m.mac,
+    ...(atm ? { rho: atm.density } : {}),
+    alphaDeg,
+    cz,
+    cm: section.cm0,
+    oswald: ll.e,
+    ...rest,
+  });
+
+  return {
+    ...solved,
+    section,
+    liftingLine: ll,
+    // What the coupling supplied, so it can be checked rather than trusted.
+    derivedFrom: {
+      cz,
+      cm: section.cm0,
+      oswald: ll.e,
+      aspectRatio: ll.AR,
+      alphaL0Deg: section.alphaL0Deg,
+      liftSlopePerRad: section.liftSlopePerRad,
+    },
+    note: 'Cz from the section lift slope and zero-lift angle, Cm0 from the '
+      + 'section, Oswald factor from lifting line over the real planform',
+  };
+}
+
 /* ===== lines.js ===== */
 /* lines.js — Chapter 8: line geometry.
  *

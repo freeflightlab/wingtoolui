@@ -167,3 +167,39 @@ drag is optimistic at low Reynolds number.
 
 **One wing, the Zeno 2 L, still cannot size every line** — the highest aspect
 ratio in the database with the fewest mains reachable.
+
+---
+
+## 6. The polar fed back into the balance
+
+Chapter 4's equilibrium took lift, moment and the Oswald factor as typed-in
+numbers, while `aero.js` computed all three from the section and planform. The
+two were never connected, so **changing the section changed nothing about the
+trim**.
+
+`solveEquilibriumFromWing` closes it: Cz from the section's lift slope and
+zero-lift angle, Cm0 from the section, the Oswald factor from lifting line over
+the real planform.
+
+| section | Cz | Cm0 | trim | glide | calage |
+| --- | --- | --- | --- | --- | --- |
+| NACA 4412 | 1.079 | −0.0948 | 34.3 km/h | 10.15 | 0.499 |
+| NACA 4415 | 1.083 | −0.0942 | 34.2 km/h | 10.16 | 0.498 |
+| NACA 2414 | 0.870 | −0.0472 | 38.2 km/h | 9.69 | 0.447 |
+
+Dropping camber from 4% to 2% now moves trim speed by **4 km/h** and the
+calage by **11%** — which it should, and previously did not.
+
+### Two mistakes worth recording
+
+**It does not iterate, and my first version did.** `solveEquilibrium` *takes*
+the angle of attack; it solves for the calage, not for a trim angle. A version
+written to iterate to a fixed point reported "converged in 1 iteration"
+because the field it watched did not exist. **A loop that always exits
+immediately is worse than no loop: it looks like convergence.**
+
+**Every speed came back NaN**, because the coupling passed `rho: undefined`
+when given no atmosphere. A destructuring default fires on an *absent* key,
+not on an explicit `undefined`. This is the same trap that let
+`RISER_LAYOUTS['A/B']` become the default layout, running the other way: there
+a bad value was absorbed, here a good default was defeated.

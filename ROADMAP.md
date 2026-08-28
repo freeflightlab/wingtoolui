@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1307-test validation suite and a benchmark with regression budgets
+- [x] 1316-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -310,10 +310,10 @@ validation notes flagged.
       speed system's travel and plot speed against sink.
 - [ ] **NACA 5-digit and modified 4-digit sections**, matching the generator
       this project was cross-checked against.
-- [ ] **Feed the polar back into the balance solve.** The polar now computes
-      CL, CD, Cm and the Oswald factor properly, but chapter 4's equilibrium
-      still takes them as typed-in numbers. Wiring the two together closes the
-      loop between section, planform and trim.
+- [x] **The polar fed back into the balance** — `solveEquilibriumFromWing`
+      derives Cz from the section lift slope and zero-lift angle, Cm0 from the
+      section, and the Oswald factor from lifting line over the real planform.
+      Camber now moves trim speed by 4 km/h and the calage by 11%.
 - [ ] **Riser-aware line plans.** The cascade generator still assumes one
       riser per anchor row; real wings put four rows on three risers. The
       importer already models this correctly — the generator needs to follow.
@@ -377,8 +377,11 @@ validation notes flagged.
       holding 11 of 24 core modules with no build script, tests or data: the
       built HTML is self-contained, so nothing about using it revealed that it
       could no longer be rebuilt.
-- [ ] **Run the audit in the same breath as the suite** — it is a separate
-      command, so it can go stale between runs.
+- [x] **One command runs everything** (`node tools/check.mjs`) — suite,
+      Phase 1 audit, full pipeline, benchmark and self-audit, with the
+      pipeline's 3 known problems pinned as a baseline so the number cannot
+      drift up unnoticed. Four commands meant three got skipped, and this item
+      staying open for most of the project was the evidence.
 
 ## Phase 3 — construction detail
 
