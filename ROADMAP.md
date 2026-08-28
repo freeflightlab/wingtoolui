@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1299-test validation suite and a benchmark with regression budgets
+- [x] 1307-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -339,12 +339,16 @@ validation notes flagged.
 - [x] **Cascade junction and line length measured, not assumed** — the second
       junction was at 0.78 against a measured 0.860, and the line length 30%
       long. Total consumption +38% to +16% against published.
-- [ ] **The last +16%, and it is not a missing cascade level.** All five
-      reference wings run three levels, as the generator does. Measured level
-      by level, the two-liners' middle lines come out twice their real length
-      while three-liners match — so it is specific to two-liners, and it is
-      not explained by junction position either (the within-group spread
-      exceeds the between-group difference).
+- [x] **`recoverLevelFractions`** — reads the cascade junction back from any
+      real line table. It is a design parameter spanning 0.786 to 0.925, not
+      a constant.
+- [ ] **The last +16%: two-liner middle lines run too far sideways.** Three
+      explanations ruled out by measurement — not a missing fourth level (all
+      five wings run three), not riser count (within-group spread exceeds
+      between-group), and not the junction fraction (an 18% change moves the
+      middle length 2%). The generator's middles are 1812 mm against the
+      Zeno 2's 886 while the Geo 7 matches; the branching ratio is right at
+      3.0 against 3.14. It is the lateral run that is wrong.
 - [ ] **Low-Reynolds profile drag** — minimum sink comes out at 0.69 m/s on
       the two smallest wings, below anything real. The estimated polar is
       optimistic at low Reynolds number.

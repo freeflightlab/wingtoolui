@@ -114,12 +114,35 @@ against 81.6 per side) and the *distribution* is wrong: the middles come out
 of 1753 mm against 1663 — close. So it is a two-liner problem, not a general
 one.
 
-A second hypothesis — that junction position depends on riser count, as anchor
-density does — is also **not supported**. Grouped, two-liners average
+Three explanations were tried and each ruled out by measurement.
+
+**A missing fourth cascade level** — no. All five reference wings run three.
+
+**Junction position depending on riser count**, as anchor density does — no. Grouped, two-liners average
 [0.650, 0.858] and three-liners [0.683, 0.932], but the spread within each
 group (0.608 to 0.713 on the first junction) is larger than the difference
 between them. Junction placement is a design choice, and a single value inside
-the observed range is the honest default.
+the observed range is the honest default. `recoverLevelFractions` reads it
+back from any real line table, and across the five it spans **0.786 to
+0.925**: Zeno 2 0.786, Lyght 0.835, Swift 6 0.837, Geo 7 0.915, Alpina 5
+0.925.
+
+**The junction fraction itself** — also no, and this is the useful one.
+Setting each wing to its *own* recovered junction barely moves the answer:
+changing it from 0.786 to 0.925, an 18% change, moves the generated middle
+length by about **2%** (1812 mm to 1849). The middles are dominated by the
+**lateral run needed to gather their anchors**, not by the radial fraction the
+junction controls.
+
+So the open question is not the junction and not the level count. It is that
+the generator's middle lines run further sideways than a real wing's: 1812 mm
+against the Zeno 2's 886, while the Geo 7 matches at 1842 against 1663. The
+branching ratio is not the cause either — the generator gathers 3.0 middles
+per main against the Zeno's 3.14.
+
+Three hypotheses eliminated with measurement is worth more than a fourth
+guessed at, and the residual is now bounded: **+16% overall, concentrated
+entirely in two-liner middle lines.**
 
 This is a genuine conflict, not an oversight. Hitting a published length and
 matching a real wing's topology are, with a three-level cascade,

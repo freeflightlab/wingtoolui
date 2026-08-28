@@ -5313,6 +5313,65 @@ function anchorsForLineLength({
   };
 }
 
+/**
+ * Recover the cascade junction positions from a real line table.
+ *
+ * `levelFractions` is a **design parameter, not a constant**. Across five
+ * production wings the second junction runs from 0.786 to 0.925:
+ *
+ *   Zeno 2   0.786      Lyght     0.835      Swift 6  0.837
+ *   Geo 7    0.915      Alpina 5  0.925              mean 0.860
+ *
+ * A single default sits in the middle and is about 10% wrong at both ends,
+ * which is most of what remains of the line-length gap: modelled with the
+ * mean, the Zeno 2's middle lines come out roughly twice their real length,
+ * while the Geo 7's match closely. Grouping by riser count does not help —
+ * the spread within a group is larger than the difference between groups.
+ *
+ * So it is recovered from the wing being copied rather than guessed. The
+ * sound measurement is the **middle-to-main length ratio within one wing**,
+ * since both are means over the same cascade:
+ *
+ *     (f2 - f1) / f1 = mean middle length / mean main length
+ *
+ * Averaging each level separately and reading junctions off the totals does
+ * not work — the mean upper and the mean main belong to different branches.
+ */
+function recoverLevelFractions(lineTable, { firstJunction = 0.64 } = {}) {
+  const mean = (level) => {
+    const v = lineTable.lines
+      .filter((l) => l.row !== 'K' && l.level === level && l.lengthMM)
+      .map((l) => l.lengthMM);
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+  };
+
+  const upper = mean('upper');
+  const middle = mean('middle');
+  const main = mean('main');
+  if (!middle || !main) {
+    return {
+      levelFractions: null,
+      note: 'the table does not carry both middle and main lengths',
+    };
+  }
+
+  const ratio = middle / main;
+  const second = firstJunction * (1 + ratio);
+  return {
+    levelFractions: [firstJunction, second],
+    middleToMain: ratio,
+    meanUpperMM: upper,
+    meanMiddleMM: middle,
+    meanMainMM: main,
+    // Outside the range seen in production, which is worth knowing before
+    // copying it.
+    withinObservedRange: second >= 0.78 && second <= 0.93,
+    observedRange: [0.786, 0.925],
+    note: 'from the middle-to-main length ratio, which is the only measure '
+      + 'taken over the same cascade',
+  };
+}
+
 /* ===== risers.js ===== */
 /* risers.js — risers, the speed system, and accelerated flight.
  *
