@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1344-test validation suite and a benchmark with regression budgets
+- [x] 1359-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -384,6 +384,13 @@ validation notes flagged.
       staying open for most of the project was the evidence.
 
 ## Phase 3 — construction detail
+
+- [x] **Cell intake geometry** — the opening placed and checked against the
+      stagnation point, which moves 3.3% of chord across the speed range. Two
+      distinct failure modes reported separately. See `docs/intake.md`.
+- [x] **`thinAirfoil` was being passed an angle where it takes a sample
+      count** — a 9% error in the zero-lift angle of the coupled equilibrium
+      solve, silent because both arguments are numbers. Guarded.
 
 - [x] **A rib opening does two jobs** — lightening holes *are* the
       cross-ports, and modelling them as separate sets was the error the
