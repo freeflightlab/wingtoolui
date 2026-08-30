@@ -34,6 +34,16 @@ import { nonDimensional } from './atmosphere.js';
  * thin-airfoil theory is written in: x = (1 - cos t)/2.
  */
 export function camberLine(airfoil, n = 200) {
+  // `n` is a sample count, not a physical quantity.
+  //
+  // `thinAirfoil(af, 6)` once meant six samples and read like six degrees,
+  // and put a 9% error into the zero-lift angle without failing anything.
+  // Every function with this shape carries the same hazard, so every one
+  // of them refuses a value too small to be a plausible sample count.
+  if (!(n >= 20)) {
+    throw new Error(`camberLine: n is a sample count, not a physical `
+      + `quantity (got ${n})`);
+  }
   const { upper, lower } = splitSurfaces(airfoil);
   const at = (poly, x) => {
     for (let i = 1; i < poly.length; i++) {

@@ -73,3 +73,33 @@ attack is small.
 
 A new model requiring an old one to be correct is a good way to find out that
 it wasn't.
+
+## 5. The whole family, swept
+
+The hazard is in the signature, not in any one call. Five functions share the
+shape `(object, n = large)`:
+
+```
+aero      camberLine          n = 200
+aero      thinAirfoil       opts = 400
+planform  flatArea            n = 400
+planform  planformMetrics     n = 400
+planform  planformOutline     n = 120
+```
+
+A sweep of every call site in `src/`, `tests/` and `tools/` found **no other
+live misuse** — the single hit was my own comment describing the bug. But a
+signature that admits the mistake will eventually see it, so all five now
+refuse a value too small to be a plausible sample count, and say what the
+argument actually means.
+
+The property that made the original bug findable is now a test in its own
+right: **a section's zero-lift angle does not depend on the angle it is
+evaluated at.**
+
+## 6. In the interface
+
+The rib view draws the intake check: whether the opening spans the stagnation
+travel, and a red warning when it does not. Both states are exercised by the
+interface test, because a warning that has never been seen to appear is not
+known to work.

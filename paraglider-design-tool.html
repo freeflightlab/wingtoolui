@@ -748,11 +748,31 @@ function ribStations(planform, nCells, distribution = 'cosine') {
 
 /** Flat area of the whole wing (both halves), by Simpson integration. */
 function flatArea(planform, n = 400) {
+  // `n` is a sample count, not a physical quantity.
+  //
+  // `thinAirfoil(af, 6)` once meant six samples and read like six degrees,
+  // and put a 9% error into the zero-lift angle without failing anything.
+  // Every function with this shape carries the same hazard, so every one
+  // of them refuses a value too small to be a plausible sample count.
+  if (!(n >= 20)) {
+    throw new Error(`flatArea: n is a sample count, not a physical `
+      + `quantity (got ${n})`);
+  }
   return 2 * simpson((y) => planform.chord(y), 0, planform.halfSpan, n);
 }
 
 /** Summary numbers from handbook Table 1: area, span, chords, AR, centroid. */
 function planformMetrics(planform, n = 400) {
+  // `n` is a sample count, not a physical quantity.
+  //
+  // `thinAirfoil(af, 6)` once meant six samples and read like six degrees,
+  // and put a 9% error into the zero-lift angle without failing anything.
+  // Every function with this shape carries the same hazard, so every one
+  // of them refuses a value too small to be a plausible sample count.
+  if (!(n >= 20)) {
+    throw new Error(`planformMetrics: n is a sample count, not a physical `
+      + `quantity (got ${n})`);
+  }
   const s = planform.halfSpan;
   const area = flatArea(planform, n);
   const span = planform.span;
@@ -794,6 +814,16 @@ function planformMetrics(planform, n = 400) {
 
 /** Closed outline of the full planform, for drawing. */
 function planformOutline(planform, n = 120) {
+  // `n` is a sample count, not a physical quantity.
+  //
+  // `thinAirfoil(af, 6)` once meant six samples and read like six degrees,
+  // and put a 9% error into the zero-lift angle without failing anything.
+  // Every function with this shape carries the same hazard, so every one
+  // of them refuses a value too small to be a plausible sample count.
+  if (!(n >= 20)) {
+    throw new Error(`planformOutline: n is a sample count, not a physical `
+      + `quantity (got ${n})`);
+  }
   const s = planform.halfSpan;
   const pts = [];
   for (let i = -n; i <= n; i++) {
@@ -1383,6 +1413,16 @@ const CONSTANTS = { G0, R_AIR, GAMMA, EARTH_R, M_AIR, R_STAR };
  * thin-airfoil theory is written in: x = (1 - cos t)/2.
  */
 function camberLine(airfoil, n = 200) {
+  // `n` is a sample count, not a physical quantity.
+  //
+  // `thinAirfoil(af, 6)` once meant six samples and read like six degrees,
+  // and put a 9% error into the zero-lift angle without failing anything.
+  // Every function with this shape carries the same hazard, so every one
+  // of them refuses a value too small to be a plausible sample count.
+  if (!(n >= 20)) {
+    throw new Error(`camberLine: n is a sample count, not a physical `
+      + `quantity (got ${n})`);
+  }
   const { upper, lower } = splitSurfaces(airfoil);
   const at = (poly, x) => {
     for (let i = 1; i < poly.length; i++) {
@@ -14349,6 +14389,7 @@ const S = {
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   ovalFromPressure: false, sailTension: 300,
+  showIntake: false, intakeLower: 9, intakeUpper: 1,
   packer: 'profile',
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
   mergeRows: 'none',
@@ -14757,6 +14798,9 @@ function buildControls() {
   checkField(N, 'brakeLines', 'Brake lines in the plan');
   checkField(N, 'stabilo', 'Stabilo line');
   checkField(N, 'ovalFromPressure', 'Billow from pressure, not a flat amount');
+  checkField(N, 'showIntake', 'Cell intake against stagnation travel');
+  numberField(N, 'intakeLower', 'Intake, lower cut (% chord)', 0, 30, 0.5);
+  numberField(N, 'intakeUpper', 'Intake, upper cut (% chord)', 0, 10, 0.5);
   numberField(N, 'sailTension', 'Sail tension (N/m)', 50, 1500, 25);
   selectField(N, 'paper', 'Printable pattern paper', [
     ['A4', 'A4 portrait'], ['A4L', 'A4 landscape'],
@@ -15545,6 +15589,22 @@ function drawRib() {
   // designed once against both constraints they cannot.
   if (S.ribHoles) {
     const nb = M.wing.ribs[Math.min(rib.index + 1, M.wing.ribs.length - 1)];
+    // The cell intake. Air enters at total pressure only where the flow
+    // stagnates, and the stagnation point moves with angle of attack — so
+    // the opening has to span the whole travel, not sit at the nose.
+    if (S.showIntake) {
+      const it = buildIntake({
+        wing: M.wing, airfoil: M.airfoil, thinAirfoilFn: thinAirfoil,
+        alphaAcceleratedDeg: 2, alphaSlowDeg: 12,
+        spec: { lowerCutM: S.intakeLower / 100, upperCutM: S.intakeUpper / 100 },
+      });
+      c.text(it.coversEnvelope
+        ? `intake spans ${(it.travel.travelFraction * 100).toFixed(1)}% stagnation travel`
+        : 'INTAKE MISSES THE STAGNATION POINT',
+      [rib.chord * 0.5, -rib.chord * 0.22],
+      it.coversEnvelope ? '#5ec8ff' : '#ff5e5e', 9, 'middle');
+    }
+
     const set = ribOpenings(rib, nb === rib ? null : nb, M.airfoil,
       { speedMS: M.balance ? M.balance.speedMS : 11 });
     for (const h of set.holes) {
