@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1364-test validation suite and a benchmark with regression budgets
+- [x] 1381-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -384,6 +384,12 @@ validation notes flagged.
       staying open for most of the project was the evidence.
 
 ## Phase 3 — construction detail
+
+- [x] **Rib stress and reinforcement reach** — rib cloth cannot carry an
+      anchor load at all, even at 1 g, so the model sizes how far the
+      reinforcement must reach. Outboard ribs need tape to the seam and
+      inboard do not, because reach follows the load and room follows the
+      chord. See `docs/rib-stress.md`.
 
 - [x] **Cell intake geometry** — the opening placed and checked against the
       stagnation point, which moves 3.3% of chord across the speed range. Two
