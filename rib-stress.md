@@ -25,35 +25,52 @@ So the useful question is not "does the cloth hold" — it does not, ever — bu
 **how far the reinforcement must reach before bare cloth can take over.** That
 sets the tab *length*, which nothing in this project had sized.
 
-## 2. The design rule that falls out
+## 2. A correction: the spanwise rule was an artefact
 
-The load spreads as it travels into the rib, so the line load falls with
-distance. The reinforcement can stop where the spread load drops below what
-bare cloth carries.
+I first wrote this section as a design rule, using a 2080 N anchor load at the
+8 g case:
 
-At the 8 g design case, with the same 2080 N load on every rib:
-
-| chord | room available | reach needed | verdict |
+| chord | room | reach | verdict |
 | --- | --- | --- | --- |
-| 2.45 m | 613 mm | 497 mm | stops inside the rib |
-| 1.80 m | 450 mm | 497 mm | **tape to the seam** |
-| 1.20 m | 300 mm | 497 mm | **tape to the seam** |
-| 0.55 m | 138 mm | 497 mm | **tape to the seam** |
+| 2.45 m | 613 mm | 497 mm | stops inside |
+| 0.55 m | 138 mm | 497 mm | tape to the seam |
 
-**The rule changes along the span**, and for a reason worth stating: the reach
-is set by the *load*, which barely falls outboard, while the room available
-scales with the *chord*, which falls fast. Inboard ribs have room for the tape
-to stop; outboard ribs do not, so their reinforcement must run to the surface
-seam.
+**The mechanism is real** — the reach is set by the *load*, which barely falls
+outboard, while the room scales with the *chord*, which falls fast, so at a
+high enough load the rule does change along the span.
 
-That both columns come from the same load is asserted, so the conclusion
-cannot be mistaken for a load effect.
+**But 2080 N is not a real anchor load.** Running the model on a wing's own
+loads instead of an invented one:
+
+```
+half a 95 kg wing        466 N
+spread over              44 anchors
+per anchor               10.6 N mean, 30.7 N worst
+```
+
+The 260 N I used at 1 g was **ten times too high**. I had assumed a
+plausible-sounding number instead of taking one from the load model that was
+sitting right there. It is the same lesson as the PMA measuring tension
+exceeding flight load: **per-item loads on a paraglider are small precisely
+because there are many items.**
+
+At real loads the longest reach anywhere on the test wing is **44 mm**, and
+**no rib needs tape to the surface seam** — not at the root, not at the tip,
+not on a tandem. That is a useful positive result: reinforcement can be short.
+It is not the result I first reported.
 
 ## 3. What it catches
 
 A lightening hole in an anchor's load path removes the cloth that would have
 carried the spread load. `checkRibStress` reports which anchors have a hole in
 their path by name, alongside which needs the longest reinforcement.
+
+**The path has to end where the reinforcement can stop.** Scanning a fixed
+fraction of chord instead flagged a hole "in the load path" 500 mm beyond the
+point where bare cloth was already carrying the load unaided — every rib on
+the wing, which is the same as flagging none. Bounded properly it flags 6 of
+11, all outboard, where the chord is short enough for the holes to sit close
+to the anchors.
 
 ## 4. The PMA connection
 

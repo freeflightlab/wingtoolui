@@ -10162,9 +10162,21 @@ function anchorLoadPath({
   const spread = Math.tan((spreadAngleDeg * Math.PI) / 180);
   const out = [];
 
-  // Distance travelled into the cloth, as a fraction of chord, up to the
-  // 100 mm the PMA test uses.
-  const maxDistM = Math.max(0.10, chordM * 0.25);
+  // How far to walk into the cloth.
+  //
+  // Scanning a fixed 25% of chord reported a hole "in the load path" even
+  // when it sat 500 mm beyond the point where the spread load had already
+  // fallen below what bare cloth carries — every rib on the test wing was
+  // flagged, which is the same as flagging none.
+  //
+  // The path that matters ends where the reinforcement can stop. Beyond that
+  // the cloth is carrying the load unaided and a hole there is an ordinary
+  // hole, not an interruption. The 100 mm floor stays, because that is where
+  // the PMA needle goes.
+  const spreadForReach = Math.tan((spreadAngleDeg * Math.PI) / 180);
+  const neededWidthM = loadN / clothLineLoadNPerM;
+  const reachM = Math.max(0, (neededWidthM - tabWidthM) / (2 * spreadForReach));
+  const maxDistM = Math.min(Math.max(0.10, reachM), chordM * 0.25);
 
   for (let i = 0; i <= stations; i++) {
     const distM = (i / stations) * maxDistM;
@@ -10338,6 +10350,65 @@ function predictedTearMargin({ stress, cloth = 'Porcher Skytex 27 hard' }) {
     passesNew: predictedDaN >= 0.6,
     note: 'the inspector pulls against cloth already carrying the line load, '
       + 'so the design\'s own rib tension is part of what the test measures',
+  };
+}
+
+/**
+ * Every rib on the wing, against its own loads and its own holes.
+ *
+ * The model above works on numbers handed to it. This runs it over a real
+ * wing: the anchor loads from `analyseLoads`, the openings from
+ * `ribOpenings`, and the chord of each rib — which is what makes the spanwise
+ * rule visible, because the reach is set by the load and the room by the
+ * chord, and only one of those falls outboard.
+ */
+function checkWingRibStress({
+  wing, anchorLoads, openingsFor = null, airfoil,
+  cloth = 'Porcher Skytex 27 hard', tabWidthM = 0.02, designFactor = 8,
+}) {
+  const byRib = new Map();
+  for (const a of anchorLoads) {
+    if (!Number.isFinite(a.ribIndex)) continue;
+    if (!byRib.has(a.ribIndex)) byRib.set(a.ribIndex, []);
+    byRib.get(a.ribIndex).push({
+      name: `${a.row}${a.anchor}`,
+      chordFraction: airfoil.anchors?.[a.row] ?? 0.1,
+      loadN: a.loadN,
+    });
+  }
+
+  const ribs = [];
+  for (const [ribIndex, anchors] of [...byRib.entries()].sort((x, y) => x[0] - y[0])) {
+    const rib = wing.ribs[ribIndex];
+    if (!rib) continue;
+    const holes = openingsFor ? (openingsFor(rib, ribIndex) ?? []) : [];
+    ribs.push(checkRibStress({
+      rib, anchors, holes, cloth, tabWidthM, designFactor,
+    }));
+  }
+
+  const toSeam = ribs.filter((r) => r.allReachSeam);
+  const withHoles = ribs.filter((r) => r.throughHoles.length);
+
+  // Where along the span the rule changes, which is the number a builder
+  // needs: inboard of it the tape can stop, outboard it cannot.
+  let crossover = null;
+  for (let i = 0; i < ribs.length; i++) {
+    if (ribs[i].allReachSeam) { crossover = ribs[i].ribIndex; break; }
+  }
+
+  return {
+    ribs,
+    ribCount: ribs.length,
+    ribsNeedingTapeToSeam: toSeam.length,
+    ribsWithHolesInLoadPath: withHoles.map((r) => r.ribIndex),
+    crossoverRib: crossover,
+    designFactor,
+    cloth,
+    note: crossover === null
+      ? 'every rib has room for the reinforcement to stop inside it'
+      : `inboard of rib ${crossover} the reinforcement can stop; outboard of `
+        + 'it the tape must run to the surface seam',
   };
 }
 
