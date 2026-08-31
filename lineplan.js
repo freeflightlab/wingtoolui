@@ -2414,3 +2414,83 @@ export function recoverLevelFractions(lineTable, { firstJunction = 0.64 } = {}) 
       + 'taken over the same cascade',
   };
 }
+
+/**
+ * Which way a prefix-level scheme counts.
+ *
+ * Two makers number cascade levels with a prefix, and they count in opposite
+ * directions:
+ *
+ *   Advance TAU DLS   `1A3` is at the **canopy**, `4AB1` at the riser
+ *   LEparagliding     `1A1` is the **riser**, `4A1` at the canopy
+ *
+ * The PMA standard counts the main lines as level 1, so LEP follows the
+ * standard and Advance does not. Neither is wrong; they are conventions, and
+ * a parser that assumes one silently inverts the other — reporting a riser as
+ * an upper line and a canopy line as a main.
+ *
+ * The direction is recoverable from the lengths, because a cascade converges:
+ * the level nearest the canopy has the most lines and the shortest ones. That
+ * is a fact about the geometry rather than about the naming, so it works
+ * whichever convention a sheet uses and whether or not it says which.
+ */
+export function detectPrefixDirection(lines) {
+  const byDepth = new Map();
+  for (const l of lines) {
+    if (!Number.isFinite(l.depthFromCanopy) || !(l.lengthMM > 0)) continue;
+    if (!byDepth.has(l.depthFromCanopy)) byDepth.set(l.depthFromCanopy, []);
+    byDepth.get(l.depthFromCanopy).push(l.lengthMM);
+  }
+  if (byDepth.size < 2) {
+    return { direction: null, note: 'too few levels to tell' };
+  }
+
+  const depths = [...byDepth.keys()].sort((a, b) => a - b);
+  const stat = (d) => {
+    const v = byDepth.get(d);
+    return { count: v.length, mean: v.reduce((a, b) => a + b, 0) / v.length };
+  };
+  const lo = stat(depths[0]);
+  const hi = stat(depths[depths.length - 1]);
+
+  // The canopy end has more lines and shorter ones.
+  const canopyIsHigh = hi.count > lo.count && hi.mean < lo.mean;
+  const canopyIsLow = lo.count > hi.count && lo.mean < hi.mean;
+
+  return {
+    direction: canopyIsHigh ? 'riser-first' : (canopyIsLow ? 'canopy-first' : null),
+    depths,
+    atLowest: lo,
+    atHighest: hi,
+    note: canopyIsHigh
+      ? 'depth 1 is at the riser: the highest depth has more and shorter '
+        + 'lines, so it is the canopy end (LEparagliding, and the PMA '
+        + 'convention)'
+      : (canopyIsLow
+        ? 'depth 1 is at the canopy: the lowest depth has more and shorter '
+          + 'lines (Advance TAU DLS)'
+        : 'the lengths do not separate the two directions'),
+  };
+}
+
+/** Relabel prefix levels once the direction is known. */
+export function applyPrefixDirection(lines, direction) {
+  const depths = lines.map((l) => l.depthFromCanopy).filter(Number.isFinite);
+  if (!depths.length) return lines;
+  const max = Math.max(...depths);
+
+  return lines.map((l) => {
+    if (!Number.isFinite(l.depthFromCanopy)) return l;
+    // Depth measured from the canopy, whichever way the sheet counts.
+    const fromCanopy = direction === 'riser-first'
+      ? (max - l.depthFromCanopy) + 1 : l.depthFromCanopy;
+    return {
+      ...l,
+      depthFromCanopy: fromCanopy,
+      level: fromCanopy === 1 ? 'upper'
+        : (l.depthFromCanopy === (direction === 'riser-first' ? 1 : max)
+          ? 'main' : `cascade-${fromCanopy}`),
+      prefixDirection: direction,
+    };
+  });
+}

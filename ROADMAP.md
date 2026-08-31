@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1459-test validation suite and a benchmark with regression budgets
+- [x] 1472-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -352,6 +352,19 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Swoop2 imported and validated** — Laboratori d'envol's own 18 m2
+      design, LEP 3.30p. Flat area, span, chord, cells and ribs all reproduce
+      exactly, and 37 sections parse where the reader was documented for 8.
+      See `docs/swoop2.md`.
+- [x] **Prefix levels count in opposite directions** — Advance numbers from
+      the canopy, LEparagliding from the riser (the PMA convention). The
+      parser assumed Advance and inverted every LEP cascade.
+      `detectPrefixDirection` reads the direction from the geometry rather
+      than the naming.
+- [ ] **Validate loads and panels against the Swoop2** — the geometry
+      reproduces; the design also publishes line loads and 3D surfaces, which
+      would test the load model and the development.
 
 - [x] **Every wing held to the physics** (`tests/reference-sweep.mjs`) — 56
       line sheets against five invariants, not just against the parser. 74 of
