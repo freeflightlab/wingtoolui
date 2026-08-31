@@ -14,9 +14,9 @@ step checked against wings that have actually flown.
 
 ## Status
 
-**Phase 1 complete and verified. Phase 2 well advanced.**
+**Phase 1 complete and verified. Phases 2 and 3 well advanced. Phase 4 begun.**
 
-**941 tests** and a benchmark with regression budgets. The suite is not smoke
+**1394 tests** and a benchmark with regression budgets. The suite is not smoke
 testing: every check asserts a value that can be verified independently — an
 exact closed-form answer, a conservation property, a manufacturer's published
 figure, or a number printed in the source.
@@ -25,47 +25,50 @@ figure, or a number printed in the source.
 
 ## Running it
 
-The built tool is a **single HTML file with no dependencies and no network
-access**. Open `dist/paraglider-design-tool.html` in any browser — double
-clicking works, no server needed.
+**To use the tool**, open `dist/paraglider-design-tool.html` in any browser.
+Double-clicking works. It is a single file with no dependencies, no build step
+and no network access — nothing leaves the machine.
+
+**To work on it** you need Node 18 or later and Python 3. Nothing else; there
+are no packages to install.
 
 ```bash
-python3 build.py               # bundle src/ into dist/paraglider-design-tool.html
-node tools/make-diagrams.mjs   # regenerate the figures used in docs/
-node tests/run-tests.js    # 941 checks against known geometry and the sources
-node tests/benchmark.js        # timings, scaling, and budget regressions
-node tools/audit.mjs           # check the project's claims against its code
+git clone https://github.com/freeflightlab/wingtoolui
+cd wingtoolui
+
+npm run build       # bundle src/ into dist/paraglider-design-tool.html
+npm run check       # everything, six stages, one command
 ```
 
-The audit is separate from the suite because it checks things a test run
-cannot: that every module reaches the bundle, that no export is left without a
-caller, that numbers written in the documentation still match what the code
-produces, and that the test count quoted here is the count a run gives.
+`npm run check` is the one that matters. Individual stages, if a single one is
+being worked on:
 
-Figures in `docs/` are generated from the project's own modules and reference
-data by `tools/make-diagrams.mjs`, so a diagram cannot drift away from the code
-it illustrates. The suite checks each is valid SVG and that every figure a
-document references exists.
+| command | what it runs |
+| --- | --- |
+| `npm test` | 1394 unit checks against known geometry and the sources |
+| `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
+| `npm run test:pipeline` | all 38 published wings through every stage |
+| `npm run test:ui` | the interface: every control, every button pressed |
+| `npm run bench` | timings, scaling, and budget regressions |
+| `npm run audit` | the project's claims against its own code |
 
-No package manager, no toolchain, nothing to install. Node runs the tests;
-Python concatenates files.
+And two tools that are not tests:
 
-### What a checkout needs
+| command | what it does |
+| --- | --- |
+| `npm run find -- <terms>` | search what already exists, before writing it again |
+| `npm run catalogue` | regenerate the reference-database inventory |
 
-`MANIFEST.txt` lists every file — 24 core modules, the interface sources,
-`build.py`, the tests, the tools and 72 reference data files. Regenerate it
-with `node tools/manifest.mjs`.
+The scripts are thin wrappers — `node tools/check.mjs` and the rest work
+directly if you prefer.
 
-This matters more than it sounds. **`dist/paraglider-design-tool.html` is
-self-contained**, so a tree missing half its sources still opens and runs
-perfectly. Nothing about using the tool reveals that it can no longer be
-rebuilt. `node tools/audit.mjs` checks the tree against the manifest and says
-plainly what is absent; `build.py` reports every missing module at once rather
-than failing on the first, and accepts either the nested layout or a flattened
-one.
+`check.mjs` runs all six in one command, because six commands meant five got
+skipped. The full-pipeline stage carries a **pinned baseline of 3 known
+problems**: treating them as failures would make the command red every run and
+train everyone to ignore it, while letting the number drift up silently would
+be worse. Exceeding the baseline fails.
 
----
-
+`phase1-audit.mjs` walks the Phase 1 roadmap rather than the modules: 81
 ## What it does
 
 **Geometry.** Planform, aerofoil, arc and twist, through three rotations, to a
@@ -85,8 +88,10 @@ fed back into the balance.
 **Interoperability.** Reads and writes `leparagliding.txt`; reads production
 line sheets in four manufacturers' formats; imports aerofoils in three.
 
-**Output.** DXF R12 cutting files for panels, ribs and diagonals, true-scale
-SVG, line schedules, and reloadable project files.
+**Output.** Printable patterns tiled to A4 or A3 at exactly 1:1, a PMA §6.2.1 data sheet, the record an inspection company needs
+for the life of the wing. DXF R12 cutting files for panels, ribs and diagonals — with
+registration notches, grain arrows and labels on their own layers — plus
+true-scale SVG, line schedules, and reloadable project files.
 
 ---
 
@@ -123,7 +128,7 @@ src/core/          the maths — pure functions, no DOM, individually testable
   flatdev.js       ch.5  triangle-pair unrolling of panels
   ovalization.js   ch.6  billow geometry and panel widening
   lines.js         ch.8  weighted-centroid line cascade
-  risers.js        ch.9  speed system, accelerated polar, brake coupling
+  risers.js        ch.9  speed system, trimmers, accelerated polar, brakes
   atmosphere.js    ISA to 20 km, density, Reynolds and Mach
   aero.js          section polar, lifting line, wing polar
   pressure.js      chordwise loading, row load shares from the section
@@ -133,10 +138,15 @@ src/core/          the maths — pure functions, no DOM, individually testable
   family.js        a whole family through the pipeline, sized per size
   vribs.js         ch.7  diagonal and horizontal ribs, development, load path
   ribholes.js      lightening holes placed around margins and load paths
-  reinforcement.js mylar, dacron and tapes, and the remaining mass gap
+  reinforcement.js mylar, dacron, tapes, rods, tabs, and the mass gap
+  intake.js        cell openings, placed against the stagnation point
+  ribstress.js     what rib cloth carries, and how far tape must reach
+  compare.js       two designs side by side, with trades named as trades
   bom.js           bill of materials: roll length, cut length, hardware
   xfoil.js         export to and import from XFOIL
   export.js        DXF R12, SVG, nesting, fabric estimation
+  marking.js       notches, grain and labels for a buildable cutting file
+  pairing.js       panel orientation, profile packing, nesting diagnosis
   viewfit.js       fitting drawings and charts to frames
 
 src/ui/            index.html + style.css + app.js
@@ -225,6 +235,15 @@ Against production data from Ozone, PHI and BGD:
 
 | file | covers |
 | --- | --- |
+| `docs/collecting-reference-data.md` | how to add a wing to the reference database |
+| `docs/full-pipeline.md` | every real wing through the whole tool, and what it found |
+| `docs/rib-stress.md` | why rib cloth never carries an anchor load |
+| `docs/intake.md` | the cell opening, and where the flow stagnates |
+| `docs/comparing.md` | putting two designs side by side, without scoring them |
+| `docs/lengths.md` | flying, reference, sewn and cut length — and why they differ |
+| `docs/departures.md` | every place the code differs from the handbook, and why |
+| `docs/line-sheets.md` | what can be recovered from a maker's published numbers |
+| `docs/environment-and-aero.md` | atmosphere, Reynolds number, and the wing polar |
 | `docs/validation.md` | every discrepancy found in the sources, and why |
 | `docs/source-map.md` | handbook chapter to implementation |
 | `docs/lep-format.md` | LEparagliding interoperability |
@@ -235,7 +254,9 @@ Against production data from Ozone, PHI and BGD:
 | `docs/speed-system.md` | risers, accelerated polar, the collapse floor |
 | `docs/viewports.md` | fitting, zoom, tabs, the rib view |
 | `docs/diagonal-ribs.md` | diagonal ribs, development, the attachment trade-off |
-| `docs/construction.md` | rib holes and the bill of materials |
+| `docs/construction.md` | rib holes, cross-ports, reinforcement, the bill |
+| `docs/nesting.md` | where the material goes, and what does not save it |
+| `docs/inspection.md` | the riser, and the PMA standard as a design check |
 
 `ROADMAP.md` carries the phased plan and every open question.
 
@@ -256,6 +277,9 @@ untested wing safe to fly.
 ---
 
 ## Credit and licence
+
+**No licence is set yet** — see `LICENSING.md` for what bears on the choice.
+Without one, default copyright applies.
 
 The design method, equations and worked example are the work of **Laboratori
 d'envol**, published freely at laboratoridenvol.com, whose software is released
