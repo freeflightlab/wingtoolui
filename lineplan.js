@@ -25,10 +25,17 @@
 
 // 'S' is the stabilo — the outermost line, on its own riser on many wings.
 // 'Z' is a collapse line. Both are real rows that carry names of their own.
-const ROWS = ['A', 'B', 'C', 'D', 'E', 'K', 'S', 'Z'];
+// Rows A to I, not A to E.
+//
+// Five was enough for every double-surface wing in the reference set. A
+// single-surface wing is different: it has no cells to gather loads into, so
+// every attachment point gets its own row. Niviuk's Skin 4 P runs a through
+// i — nine load-bearing rows — and rows F to I were being rejected as
+// unrecognised, silently dropping a fifth of its line plan.
+const ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'S', 'Z'];
 
 /** The rows that carry flight load. K is the brake, S the stabilo, Z collapse. */
-const LOAD_BEARING_ROWS = ['A', 'B', 'C', 'D', 'E'];
+const LOAD_BEARING_ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
 const BRAKE = 'K';
 const COLLAPSE = 'Z';
 
@@ -157,10 +164,41 @@ export function parseLineName(name) {
   // `resolveCascadeLevels` maps it to upper/middle/riser once the whole set
   // is known. And a combined row is not a naming quirk: one line really does
   // carry two rows' load, which is how a merged cascade reduces line count.
-  const prefixMatch = raw.match(/^(\d)([A-Z]{1,2})(\d+)$/);
+  // Two or three letters, because a brake or stabilo row is not one letter.
+  const prefixMatch = raw.match(/^(\d)([A-Z]{1,3})(\d+)$/);
   if (prefixMatch) {
     const depth = parseInt(prefixMatch[1], 10);
-    const letters = prefixMatch[2].split('');
+    const group = prefixMatch[2];
+
+    // A whole-row name wins over a combined pair.
+    //
+    // `2BR3` is genuinely ambiguous: Advance's convention would read it as
+    // rows B and R combined at level 2, and Niviuk mean the brake row at
+    // level 2. Split blindly it became rows B and R, R is not a row, and the
+    // name was rejected — seven brake and stabilo lines per Niviuk sheet
+    // silently dropped.
+    //
+    // Known multi-letter rows are checked first, because a row that exists is
+    // a better reading than a pair that does not.
+    const MULTI = { BR: 'K', ST: 'S', BRK: 'K' };
+    if (MULTI[group]) {
+      return {
+        name: raw,
+        row: MULTI[group],
+        rows: [MULTI[group]],
+        combined: false,
+        depthFromCanopy: depth,
+        level: depth === 1 ? 'upper' : `cascade-${depth}`,
+        side: null,
+        index: parseInt(prefixMatch[3], 10),
+        variant: null,
+        isBrake: MULTI[group] === 'K',
+        convention: 'prefix-level',
+        groupName: group,
+      };
+    }
+
+    const letters = group.split('');
     if (!letters.every((c) => ROWS.includes(c))) return null;
     return {
       name: raw,

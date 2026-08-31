@@ -20,7 +20,7 @@ the convention.
 More wings make those checks stronger and would settle several open questions
 listed in §6.
 
-**Current database: 13 wings, 4 manufacturers, 63 size sheets.** The full
+**Current database: 18 wings, 6 manufacturers, 80 size sheets.** The full
 inventory is in `data/reference/CATALOGUE.md`.
 
 ---
@@ -186,9 +186,14 @@ Specific open questions, so collection can be aimed rather than broad:
 | The real collapse dynamic factor | any published collapse or shock-load test data |
 | Trimmer geometry | riser lengths at trim, full bar, and full trimmer, for any wing that has trimmers |
 
-Wings that would help most: anything **not** from Ozone, UP, PHI, BGD or
-Skywalk — the database is heavily Ozone-weighted. Advance, Nova, Gin, Niviuk,
-Supair, Swing, Sol, Icaro, Flow, 777, AirDesign are all unrepresented.
+Wings that would help most: anything **not** from Ozone, UP, PHI, BGD, Skywalk
+or Niviuk — the database is still Ozone-weighted. Advance, Nova, Gin, Supair,
+Swing, Sol, Icaro, Flow, 777 and AirDesign are all unrepresented.
+
+**Single-surface wings are now the most valuable single category.** Niviuk's
+Skin 4 P and Bi Skin 2 P showed that the line-length law does not cover them —
+they carry 69% more line for the same area — and two of them is not enough to
+fit a replacement.
 
 Tandems and paramotor wings are also thin: one tandem and no paramotor wing
 with published trimmer travel.

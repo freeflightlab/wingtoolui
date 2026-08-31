@@ -423,3 +423,30 @@ matching the published area to within 5%, which is the kind of cross-check
 provenance header on every file, and the parser could not read a file that
 followed its own instructions — because the one file that existed carried no
 comments.
+
+### Line sheets, and two parser gaps they exposed
+
+Niviuk publish a per-line table for every size — reference, material, strength,
+colour, length — and a total-line-length table measured to the harness. They
+are the first source here to give both for the same wing.
+`tools/import-niviuk.mjs` converts a manual into the project's own sheet
+format. Five wings, 546 lines, nothing dropped.
+
+Getting to "nothing dropped" took two fixes.
+
+**A known row name must beat a combined pair.** `2BR3` is genuinely ambiguous:
+Advance's prefix convention reads it as rows B and R combined at level 2, and
+Niviuk mean the brake row at level 2. Split blindly it became rows B and R, R
+is not a row, and the name was rejected — **seven brake and stabilo lines per
+sheet silently dropped.** Known multi-letter rows are now checked first,
+because a row that exists is a better reading than a pair that does not.
+
+**Rows run to I, not to E.** Five was enough for every double-surface wing in
+the reference set. A single-surface wing is different: with no cells to gather
+loads into, every attachment point gets its own row. The Skin 4 P runs **a
+through i — nine load-bearing rows** — and F to I were being rejected as
+unrecognised, dropping a fifth of its line plan.
+
+That is the same structural fact as the line-length result above, seen from
+the other side: a single-surface wing replaces internal structure with lines,
+so it has more of them, in more rows, and they carry more of the shape.
