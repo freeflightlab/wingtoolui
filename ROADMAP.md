@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1408-test validation suite and a benchmark with regression budgets
+- [x] 1434-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -140,8 +140,14 @@ material published after the handbook:
       it, so gusts do not govern the design. Flagged as an extrapolation:
       Pratt-Walker was fitted for mass ratios of 5 to 100 and a paraglider is
       0.67.
-- [ ] **Validate alleviation below a mass ratio of 5** — nothing in this
-      project checks Pratt-Walker there, and every paraglider is there.
+- [x] **Pratt-Walker checked from first principles** — `gustResponse`
+      integrates the equation of motion with nothing fitted. It agrees to 3%
+      at mu = 6, inside the fitted range, and diverges by 16% at a
+      paraglider's 0.67 — with Pratt-Walker the conservative one there. The
+      integration is quasi-steady and says so.
+- [ ] **Unsteady lift in the gust response** — the integration takes lift as
+      following angle of attack instantly. The Kussner lag would tighten the
+      comparison at low mass ratio.
 - [x] **Asymmetric and collapse load cases** — a tip collapse sheds far less
       lift than its span fraction (25% of span sheds 17% of lift), a frontal
       collapse moves the A row's load onto C, and sized on the full envelope
@@ -336,6 +342,15 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Niviuk added: a sixth manufacturer, 17 sizes, 4 families** — the
+      line-length law, fitted without any Niviuk data, holds on their
+      conventional wings within 20%. It fails on their single-surface wings by
+      26 to 44%, and the reason is structural: a Skin 4 P and a Hook 6 of the
+      same 20 m2 differ by 69% more line and 68% less weight. A single-surface
+      wing has no internal structure, so the lines carry all the shape.
+- [ ] **A line-length law for single-surface wings** — the existing one is
+      fitted only on double-surface wings and under-predicts these badly.
 
 - [x] **The interface test presses real buttons** — it used to call the export
       functions directly, which tests the functions and not the wiring. Two

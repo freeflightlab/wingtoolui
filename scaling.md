@@ -208,7 +208,7 @@ r = −0.93. Both effects are real.
 
 ### The law that transfers
 
-![Line length per metre of span against aspect ratio](img/line-length-law.svg)
+![Line length per metre of span against aspect ratio](line-length-law.svg)
 
 *Seven families from four manufacturers. The dashed line is the fitted law;
 the pink point is Skywalk's SAGE, which was not in the fit and lands within
@@ -380,3 +380,46 @@ would glide better on relatively less line drag does not get it.
   strength scales with its area, so a family's linesets are not similar
   either; sizing each from its own loads is the right approach and is what
   `loads.js` does.
+
+---
+
+## 8. Niviuk, out of sample
+
+Four families and 17 sizes from a sixth manufacturer, none of it in the fit.
+
+| family | AR | published | law predicts | error |
+| --- | --- | --- | --- | --- |
+| Hook 6 | 5.30 | 205 m | 243 m | +18% |
+| Artik R 2 | 6.50 | 183 m | 197 m | +8% |
+| Skin 4 P | 4.90 | 287 m | 212 m | **-26%** |
+| Bi Skin 2 P | 5.50 | 522 m | 295 m | **-44%** |
+
+The conventional wings hold. **The single-surface wings do not, and the reason
+is structural rather than statistical.** Same maker, same area, same year:
+
+| | Hook 6 (20) | Skin 4 P (20) |
+| --- | --- | --- |
+| flat area | 20 m² | 20 m² |
+| cells | 47 | 39 |
+| total line | 205 m | **346 m** |
+| glider weight | 3.97 kg | **1.29 kg** |
+
+**69% more line, 68% less weight.** A single-surface wing has no internal
+structure, so the lines carry all the shape — it trades cloth and ribs for
+line. The law was fitted only on double-surface wings and cannot be expected
+to cover them.
+
+### A transcription hazard worth recording
+
+The ARTIK R 2 table's text layer absorbs the size header as a data row,
+shifting every label by one. Read literally it says **20 cells, aspect ratio
+68**. The corrected reading is 68 cells, AR 6.5 — checked against span² / AR
+matching the published area to within 5%, which is the kind of cross-check
+`docs/collecting-reference-data.md` asks for.
+
+### And a parser gap the file exposed
+
+`parseSizeFamilies` had no comment handling. The collection brief requires a
+provenance header on every file, and the parser could not read a file that
+followed its own instructions — because the one file that existed carried no
+comments.

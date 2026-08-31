@@ -9,7 +9,7 @@
  * each other and against physics. A stage that is right alone can still be
  * wrong in company.
  */
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { planformFromDesignInputs, planformMetrics } from '../src/core/planform.js';
 import { buildLobe, lobeMetrics } from '../src/core/lobe.js';
 import { buildWing, projectedArea } from '../src/core/wing3d.js';
@@ -30,7 +30,16 @@ import {
 } from '../src/core/scaling.js';
 import { lineGeometryCheck } from '../src/core/pma.js';
 
-const fams = parseSizeFamilies(readFileSync('data/reference/size-families.tsv', 'utf8'));
+// Every specification file, not just the first one written.
+//
+// This read `size-families.tsv` by name. When Niviuk arrived as a sixth
+// manufacturer in its own file the pipeline ignored it entirely and reported
+// "38 wings completed" as though nothing had changed — a silent omission in
+// the one check meant to catch silent omissions.
+const fams = {};
+for (const specFile of readdirSync('data/reference').filter((x) => /-spec\.tsv$|families\.tsv$/.test(x))) {
+  Object.assign(fams, parseSizeFamilies(readFileSync(`data/reference/${specFile}`, 'utf8')));
+}
 const problems = [];
 const rows = [];
 const overshoot = [];
