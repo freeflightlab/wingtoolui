@@ -159,8 +159,7 @@ export function rowSharesFor({
   };
 }
 
-export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {
-  const byAnchor = new Map();
+export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {  const byAnchor = new Map();
   for (const l of plan.lines) {
     if (l.level !== 'upper') continue;
     // Brakes carry pilot input, not lift. Once the brake cascade joined the
@@ -1033,16 +1032,73 @@ function alphaChangeFor(riser, bar, chordM) {
 export function gustLoadFactor({
   speedMS, gustMS = 7.5, liftSlopePerRad = 5.0,
   wingLoadingNPerM2, rho = 1.225,
+  // Mean chord and gravity, needed for the alleviation factor. Without them
+  // the sharp-edged result is returned and says so, rather than a wrong
+  // alleviation being invented from defaults.
+  meanChordM = null, gravity = 9.81,
 }) {
-  const dn = (rho * speedMS * liftSlopePerRad * gustMS) / (2 * wingLoadingNPerM2);
+  // Sharp-edged gust: the wing meets the full gust velocity instantly.
+  const sharp = (rho * speedMS * liftSlopePerRad * gustMS) / (2 * wingLoadingNPerM2);
+
+  // Gust alleviation.
+  //
+  // A sharp-edged gust overstates the load, because the wing does not meet the
+  // full gust velocity instantly — it accelerates upward as the gust builds,
+  // reducing the change in angle of attack it actually sees. The standard
+  // treatment is the Pratt-Walker factor used in CS-23 and FAR-23:
+  //
+  //     mu = 2 * (W/S) / (rho * c * a * g)        mass ratio
+  //     Kg = 0.88 * mu / (5.3 + mu)               alleviation factor
+  //
+  // The mass ratio is where a paraglider is unusual. It scales with wing
+  // loading, and a paraglider's is around 3.5 kg/m² against 60 or more for a
+  // light aircraft — so mu is tiny and Kg is small. **A paraglider is heavily
+  // alleviated**, and treating its gust case as sharp-edged overstates the
+  // load by a factor of several.
+  //
+  // That is a physical result, not a safety margin to spend: it says where the
+  // conservatism in the 8 g case comes from.
+  let mu = null;
+  let kg = null;
+  let extrapolated = false;
+  if (meanChordM > 0) {
+    mu = (2 * wingLoadingNPerM2) / (rho * meanChordM * liftSlopePerRad * gravity);
+    kg = (0.88 * mu) / (5.3 + mu);
+    // Pratt and Walker fitted this to aeroplanes, where the mass ratio runs
+    // from about 5 to 100. A paraglider comes out near 0.7 — an order of
+    // magnitude below anything in the original data.
+    //
+    // The formula still behaves sensibly there (Kg falls smoothly toward
+    // zero, and a wing that cannot resist being pushed up does see very
+    // little angle-of-attack change), but it is an extrapolation and is
+    // reported as one. Nothing in this project validates it at mu < 5.
+    extrapolated = mu < 5;
+  }
+
+  const dn = kg === null ? sharp : sharp * kg;
   return {
     deltaN: dn,
     loadFactor: 1 + dn,
+    sharpEdgedDeltaN: sharp,
+    sharpEdgedLoadFactor: 1 + sharp,
+    massRatio: mu,
+    alleviationFactor: kg,
+    alleviated: kg !== null,
+    // Pratt-Walker was fitted for mass ratios of about 5 to 100.
+    extrapolatedBelowFitRange: extrapolated,
+    fitRange: [5, 100],
     speedMS,
     gustMS,
     // At twice the speed the same gust gives twice the increment, which is
     // why the certification case is flown fast.
     perMS: dn / (speedMS || 1),
+    note: kg === null
+      ? 'sharp-edged: no mean chord given, so no alleviation applied'
+      : `alleviated by ${(kg).toFixed(3)} at a mass ratio of ${mu.toFixed(2)}`
+        + (extrapolated
+          ? '; Pratt-Walker was fitted for mass ratios of 5 to 100, so this '
+            + 'is an extrapolation well below its validation range'
+          : ''),
   };
 }
 

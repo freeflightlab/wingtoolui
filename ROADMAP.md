@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1394-test validation suite and a benchmark with regression budgets
+- [x] 1408-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -134,9 +134,14 @@ material published after the handbook:
 - [x] **Gust load factor**, connecting speed to the design case: a 7.5 m/s
       gust gives 7.4 g at trim and 11.0 g at full speed, bracketing the 8 g
       certification test.
-- [ ] **Gust alleviation** — the gust model is sharp-edged, with no
-      alleviation factor. Conservative, but a real wing's fabric and line
-      stretch shed some of it.
+- [x] **Gust alleviation** — Pratt-Walker, which cuts a paraglider's gust
+      case by 10.2x because its mass ratio is so low. The sharp-edged figure
+      exceeded the 8 g certification case; the alleviated one is well under
+      it, so gusts do not govern the design. Flagged as an extrapolation:
+      Pratt-Walker was fitted for mass ratios of 5 to 100 and a paraglider is
+      0.67.
+- [ ] **Validate alleviation below a mass ratio of 5** — nothing in this
+      project checks Pratt-Walker there, and every paraglider is there.
 - [x] **Asymmetric and collapse load cases** — a tip collapse sheds far less
       lift than its span fraction (25% of span sheds 17% of lift), a frontal
       collapse moves the A row's load onto C, and sized on the full envelope

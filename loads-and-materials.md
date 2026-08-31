@@ -354,3 +354,57 @@ have to be sized for the bar rather than for trim. In anchor loads on the test
 wing: A falls 177 → 129 N while D rises 78 → 100 N.
 
 Now asserted, including that the shares sum to one at every angle.
+
+---
+
+## 12. Gust alleviation, and why a paraglider has so much of it
+
+The gust model was **sharp-edged**: the wing meets the full gust velocity
+instantly. It does not. The wing accelerates upward as the gust builds, so it
+sees less change in angle of attack than the sharp-edged case assumes.
+
+The standard treatment is the Pratt-Walker factor from CS-23 and FAR-23:
+
+```
+mu = 2 (W/S) / (rho c a g)          mass ratio
+Kg = 0.88 mu / (5.3 + mu)           alleviation factor
+```
+
+The mass ratio is where a paraglider is unusual — it scales with wing loading,
+and a paraglider's is about 3.5 kg/m² against 60 or more for a light aircraft:
+
+| aircraft | W/S (N/m²) | mu | Kg | sharp | alleviated |
+| --- | --- | --- | --- | --- | --- |
+| paraglider | 34 | 0.67 | 0.098 | 11.13 | **2.00** |
+| hang glider | 70 | 1.06 | 0.147 | 5.92 | 1.72 |
+| microlight | 250 | 5.94 | 0.465 | 2.38 | 1.64 |
+| light aircraft | 700 | 15.53 | 0.656 | 1.49 | 1.32 |
+
+**A paraglider is heavily alleviated because it is so lightly loaded** — a
+wing that cannot resist being pushed up sees very little angle-of-attack
+change. The factor here is **10.2x**.
+
+### What it changes
+
+The sharp-edged figure of 11.13 **exceeds the 8 g certification case**, which
+would say gusts govern the design. Alleviated, it is 2.00 — well under. So the
+8 g case is not gust-driven, and collapse dynamics remain the thing that
+actually breaks lines.
+
+That is where a large part of the conservatism in the 8 g case comes from, and
+it is worth knowing rather than assuming the margin is spent on gusts.
+
+### The caveat that has to travel with it
+
+Pratt and Walker fitted this to **aeroplanes**, with mass ratios from about 5
+to 100. A paraglider comes out near **0.67** — an order of magnitude below
+anything in the original data.
+
+The formula behaves sensibly there (Kg falls smoothly toward zero, which is
+physically right for a wing that gets pushed up rather than flying through the
+gust), but it is an extrapolation. The result carries
+`extrapolatedBelowFitRange: true` and says so in its note, and both are
+asserted. **Nothing in this project validates it below mu = 5.**
+
+Given no mean chord, the sharp-edged result is returned unchanged and marked
+as such, rather than an alleviation being invented from defaults.

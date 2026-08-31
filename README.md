@@ -16,7 +16,7 @@ step checked against wings that have actually flown.
 
 **Phase 1 complete and verified. Phases 2 and 3 well advanced. Phase 4 begun.**
 
-**1394 tests** and a benchmark with regression budgets. The suite is not smoke
+**1408 tests** and a benchmark with regression budgets. The suite is not smoke
 testing: every check asserts a value that can be verified independently — an
 exact closed-form answer, a conservation property, a manufacturer's published
 figure, or a number printed in the source.
@@ -45,7 +45,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1394 unit checks against known geometry and the sources |
+| `npm test` | 1408 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 38 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
