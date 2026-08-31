@@ -1,3 +1,15 @@
+// Unimplemented stub methods THROW rather than returning empty.
+//
+// Two checks in this project were silently defeated by this file. A button
+// test used `querySelectorAll`, which returned `[]` unconditionally, and
+// reported "0 buttons pressed, none threw" — as a pass. A line-plan test read
+// `innerHTML`, whose getter returns '' always, and failed a view that was
+// working perfectly.
+//
+// A stub that returns empty does not fail; it agrees with you. Both of those
+// probes would have passed a completely broken interface just as happily. So
+// the methods this file does not implement now say so.
+//
 // Boot the real bundle against a minimal DOM shim to catch runtime errors.
 const fs = require('fs');
 const html = fs.readFileSync('dist/paraglider-design-tool.html','utf8');
@@ -7,11 +19,25 @@ const ids = ['wingName','readout','g-planform','g-airfoil','g-lobe','g-balance',
   'g-panels','g-files','vp-plan','vp-front','vp-section','vp-cut',
   'note-plan','note-front','note-section','note-cut','status','balanceTable'];
 
+// Seed the DOM from the real markup, not from a hand-written id list.
+//
+// The harness invented nodes by id on demand, so anything the app finds by
+// class — every tab, every viewport group — did not exist for it. The tab
+// wiring ran against nothing and passed.
+const SEED = [];
+for (const m of html.matchAll(/<(div|button)[^>]*\bclass="([^"]+)"[^>]*\bdata-tab="([^"]+)"[^>]*>/g)) {
+  SEED.push({ tag: m[1], className: m[2], dataTab: m[3] });
+}
+
 const nodes = {};
+// Every node created, so the selectors below can be implemented rather than
+// stubbed. A registry is the difference between a selector that finds things
+// and one that can only ever return nothing.
+const created = [];
 function mk(tag='div'){
   const n = {
     tagName:tag, children:[], _text:'', className:'', style:{}, files:[],
-    setAttribute(){}, getAttribute(){return null;},
+    setAttribute(){}, getAttribute(){throw new Error('stub DOM: getAttribute is not implemented; it can only ever return null.');},
     addEventListener(){}, removeEventListener(){},
     append(...c){ c.forEach(x=>{ if(x&&typeof x==='object') n.children.push(x); }); },
     appendChild(c){ n.children.push(c); return c; },
@@ -22,13 +48,22 @@ function mk(tag='div'){
     classList:{ toggle(){}, add(){}, remove(){}, contains(){return false;} },
     setPointerCapture(){},
     get textContent(){return n._text;}, set textContent(v){n._text=String(v);},
-    get innerHTML(){return '';}, set innerHTML(v){ n.children=[]; },
+    get innerHTML(){throw new Error('stub DOM: innerHTML is not implemented — a probe reading it can only ever see empty. Count node.children instead.');}, set innerHTML(v){ n.children=[]; },
     get lastChild(){ return n.children[n.children.length-1]; },
-    querySelector(){return null;}, contains(){return false;},
+    querySelector(sel){const all=document.querySelectorAll(sel);return all.length?all[0]:null;}, contains(){return false;},
   };
+  created.push(n);
   return n;
 }
 for (const id of ids) nodes[id]=mk();
+
+// Materialise the seeded nodes so the selectors can find them.
+for (const sd of SEED) {
+  const n = mk(sd.tag);
+  n.className = sd.className;
+  n.dataset.tab = sd.dataTab;
+  if (sd.id) nodes[sd.id] = n;
+}
 
 global.document = {
   createElement: (t)=>mk(t),
@@ -36,7 +71,19 @@ global.document = {
   getElementById: (id)=> nodes[id] || (nodes[id]=mk()),
   createTextNode:(t)=>({nodeType:3,textContent:t}),
   querySelector:(sel)=>mk('div'),
-  querySelectorAll:(sel)=>[],
+  // Implemented against a registry of created nodes, not stubbed out.
+  //
+  // Returning [] unconditionally let the app's tab wiring run without ever
+  // touching a tab, and let a button test report "0 pressed, none threw" as a
+  // pass. It now matches on class and tag, so the tab switching this drives
+  // is genuinely exercised.
+  querySelectorAll:(sel)=>{
+    const m=/^\.(.+)$/.exec(sel);
+    const cls=m?m[1]:null;
+    return created.filter((n)=>(cls
+      ? String(n.className||'').split(/\s+/).includes(cls)
+      : String(n.tagName||'').toLowerCase()===sel.toLowerCase()));
+  },
   body: mk('body'),
   addEventListener(){},
 };
@@ -237,6 +284,30 @@ try {
     process.exit(1);
   }
   console.log(`  ok   ${pressed} export buttons pressed, none threw`);
+
+  // The selectors must actually find things. They returned [] and null
+  // unconditionally for most of this project, which let the app's tab wiring
+  // run without ever touching a tab.
+  const vptabs = document.querySelectorAll('.vptab');
+  const viewports = document.querySelectorAll('.viewports');
+  if (vptabs.length < 3 || viewports.length < 3) {
+    console.log(`  FAIL selectors found ${vptabs.length} tabs, `
+      + `${viewports.length} viewport groups`);
+    process.exit(1);
+  }
+  // Counting both is not enough: renaming a viewport's data-tab leaves the
+  // count identical while breaking the tab. What must hold is that every tab
+  // has a viewport group to show.
+  const tabNames = vptabs.map((n) => n.dataset.tab).filter(Boolean).sort();
+  const vpNames = viewports.map((n) => n.dataset.tab).filter(Boolean).sort();
+  const orphanTabs = tabNames.filter((t) => !vpNames.includes(t));
+  const orphanViews = vpNames.filter((v) => !tabNames.includes(v));
+  if (orphanTabs.length || orphanViews.length) {
+    if (orphanTabs.length) console.log(`  FAIL tabs with no viewport: ${orphanTabs.join(', ')}`);
+    if (orphanViews.length) console.log(`  FAIL viewports with no tab: ${orphanViews.join(', ')}`);
+    process.exit(1);
+  }
+  console.log(`  ok   ${tabNames.length} tabs each have a viewport: ${tabNames.join(', ')}`);
 } catch(e){ console.log('  FAIL buttons: '+e.message); process.exit(1); }
 
 try {

@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1434-test validation suite and a benchmark with regression budgets
+- [x] 1444-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -343,12 +343,30 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **The stub DOM no longer lies quietly** — five methods returned empty
+      unconditionally, and two checks had already been defeated by them: a
+      button test that reported "0 pressed, none threw" as a pass, and a
+      line-plan test that failed a working view. `querySelectorAll` and
+      `querySelector` are now implemented against a registry of created
+      nodes, the DOM is seeded from the real markup rather than a hand-written
+      id list, and the rest throw. The interface test now verifies every tab
+      has a matching viewport — checked by breaking it.
+
+- [x] **A Lines view** — the cascade drawn as a rigging diagram, coloured by
+      row, with a row filter and a table of every line's level, length, load
+      and material. The cascade model had been built since Phase 2 and was
+      never drawable.
+
 - [x] **Niviuk added: a sixth manufacturer, 17 sizes, 4 families** — the
       line-length law, fitted without any Niviuk data, holds on their
       conventional wings within 20%. It fails on their single-surface wings by
       26 to 44%, and the reason is structural: a Skin 4 P and a Hook 6 of the
       same 20 m2 differ by 69% more line and 68% less weight. A single-surface
       wing has no internal structure, so the lines carry all the shape.
+- [x] **Niviuk line sheets imported** — `tools/import-niviuk.mjs`, five
+      wings, 546 lines, nothing dropped. Two parser gaps fixed on the way: a
+      prefixed brake row read as a combined pair (seven lines lost per sheet),
+      and rows stopping at E when a single-surface wing runs to I.
 - [ ] **A line-length law for single-surface wings** — the existing one is
       fitted only on double-surface wings and under-predicts these badly.
 
