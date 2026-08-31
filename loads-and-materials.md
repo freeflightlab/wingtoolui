@@ -408,3 +408,45 @@ asserted. **Nothing in this project validates it below mu = 5.**
 
 Given no mean chord, the sharp-edged result is returned unchanged and marked
 as such, rather than an alleviation being invented from defaults.
+
+### Checking the extrapolation from first principles
+
+There is no data here to validate Pratt-Walker at mu = 0.67. There is,
+however, an equation of motion with nothing empirical in it:
+
+```
+m z'' = ½ρVSa (w − z')
+```
+
+The wing sees the gust velocity minus its own upward velocity. It accelerates
+up, which reduces what it sees, which reduces the acceleration. **That
+feedback is the alleviation** — no fitted constants involved. Integrating it
+for a 1-cosine gust gives an independent answer:
+
+| mu | Kg (Pratt-Walker) | Kg (integrated) | difference |
+| --- | --- | --- | --- |
+| 0.39 | 0.061 | 0.049 | −19.1% |
+| **0.67** (paraglider) | 0.098 | 0.083 | **−16.0%** |
+| 2.50 | 0.282 | 0.271 | −3.9% |
+| **5.94** | 0.465 | 0.480 | **+3.3%** |
+| 18.72 | 0.686 | 0.749 | +9.2% |
+
+**They agree to 3% at mu ≈ 6 — inside the fitted range — which is the check
+that the integration itself is sound.** Outside it they diverge, and the
+direction is what matters: at paraglider mass ratios the integration gives
+*less* alleviation, so **Pratt-Walker predicts more load. Using it there is
+conservative by 19%.**
+
+That does not validate the extrapolation, but it bounds it, and it bounds it
+on the safe side.
+
+**The caveat on the caveat:** the integration is *quasi-steady* — lift is
+taken to follow angle of attack instantly, where the Küssner function
+describes the lag as circulation builds. It declares `quasiSteady: true`. So
+where the two agree, both are probably right; where they diverge, only the
+direction should be trusted.
+
+One assertion of mine was backwards here: I wrote "a longer gust gradient
+alleviates more" expecting a *bigger* factor. A longer gradient gives the wing
+more time to accelerate away, so it alleviates more and the factor is
+**smaller** — 0.026 over 40 chords against 0.194 over 5.

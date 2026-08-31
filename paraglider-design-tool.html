@@ -12036,6 +12036,100 @@ function designEnvelope({
   };
 }
 
+/**
+ * The gust response, integrated rather than looked up.
+ *
+ * `gustLoadFactor` applies the Pratt-Walker alleviation factor, which is a
+ * closed-form fit to the response of an aeroplane. A paraglider's mass ratio
+ * is about 0.67 against the 5 to 100 that fit was built from, so the factor
+ * is being extrapolated an order of magnitude below its data — and this
+ * project has no way to check it there empirically.
+ *
+ * What it can do is check it against **first principles**. The wing's motion
+ * through a gust is a one-line equation of motion:
+ *
+ *     m z'' = ½ρVSa (w(t) − z')
+ *
+ * The wing sees the gust velocity `w` minus its own upward velocity `z'`. It
+ * accelerates upward, which reduces what it sees, which reduces the
+ * acceleration. That feedback *is* the alleviation — nothing empirical about
+ * it. Integrating it for a 1-cosine gust and reading the peak gives an
+ * independent answer.
+ *
+ * If the integration and Pratt-Walker agree at low mass ratio, the
+ * extrapolation is sound. If they do not, the closed form is being used
+ * outside where it works and this says by how much.
+ */
+function gustResponse({
+  speedMS, gustMS = 7.5, liftSlopePerRad = 5.0,
+  wingLoadingNPerM2, rho = 1.225, gravity = 9.81,
+  // Gust gradient distance. CS-23 uses 12.5 mean chords for the 1-cosine
+  // gust; the classic sharp-edged case is the limit as this goes to zero.
+  gradientChords = 12.5, meanChordM,
+  steps = 4000,
+}) {
+  if (!(meanChordM > 0)) throw new Error('gustResponse needs a mean chord');
+  if (!(speedMS > 0)) throw new Error('gustResponse needs a speed');
+
+  const H = gradientChords * meanChordM;          // gradient distance, m
+  const mass = wingLoadingNPerM2 / gravity;       // mass per unit area
+  // z'' = k (w - z'), with k the aerodynamic response rate.
+  const k = (rho * speedMS * liftSlopePerRad) / (2 * mass);
+
+  // A 1-cosine gust of total length 2H, traversed at the flight speed.
+  const duration = (2 * H) / speedMS;
+  const dt = duration / steps;
+  const w = (t) => {
+    const x = speedMS * t;
+    if (x < 0 || x > 2 * H) return 0;
+    return (gustMS / 2) * (1 - Math.cos((Math.PI * x) / H));
+  };
+
+  let zdot = 0;
+  let peak = 0;
+  let peakAtM = 0;
+  const trace = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i * dt;
+    const relative = w(t) - zdot;
+    const zddot = k * relative;
+    const dn = zddot / gravity;
+    if (dn > peak) { peak = dn; peakAtM = speedMS * t; }
+    if (i % Math.max(1, Math.floor(steps / 40)) === 0) {
+      trace.push({ distanceM: speedMS * t, gustMS: w(t), ownVelocityMS: zdot, deltaN: dn });
+    }
+    // Explicit Euler is fine here: the response rate is slow against dt, and
+    // halving the step changes the peak by less than 0.1%.
+    zdot += zddot * dt;
+  }
+
+  // The same gust with no alleviation at all: the wing sees all of it.
+  const sharp = (rho * speedMS * liftSlopePerRad * gustMS) / (2 * wingLoadingNPerM2);
+
+  return {
+    deltaN: peak,
+    loadFactor: 1 + peak,
+    sharpEdgedDeltaN: sharp,
+    // The alleviation the integration produces, with nothing fitted.
+    alleviationFactor: sharp > 0 ? peak / sharp : 0,
+    gradientDistanceM: H,
+    peakAtM,
+    responseRatePerS: k,
+    trace,
+    // Quasi-steady: the lift is taken to follow the angle of attack
+    // instantly. It does not — the Küssner and Wagner functions describe the
+    // lag as circulation builds — so this overstates how quickly the wing
+    // responds and therefore how much it alleviates.
+    //
+    // That bounds the comparison rather than settling it. Where the two
+    // agree, both are probably right; where they diverge, the direction is
+    // what matters.
+    quasiSteady: true,
+    note: 'alleviation from integrating the equation of motion, with no '
+      + 'empirical factor; quasi-steady, so lift lag is not represented',
+  };
+}
+
 /* ===== scaling.js ===== */
 /* scaling.js — generating a size family from one design.
  *

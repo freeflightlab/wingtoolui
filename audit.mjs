@@ -115,7 +115,7 @@ say(orphans.length === 0, 'no exported function is unused',
 /* ---- 3. numbers in the docs still hold -------------------------------- */
 const { rowSharesFromPressure, chordwiseLoading } = await import('../src/core/pressure.js');
 const { naca4 } = await import('../src/core/airfoil.js');
-const { lineLengthPerSpan, LINE_LENGTH_PER_SPAN, estimateTotalLineLength }
+const { lineLengthPerSpan, LINE_LENGTH_PER_SPAN, lineConsumptionEstimate }
   = await import('../src/core/scaling.js');
 const { PRACTICAL_FLOOR, DEFAULT_LOAD_CASE, gustLoadFactor } = await import('../src/core/loads.js');
 const { alphaChange, riserSet } = await import('../src/core/risers.js');
@@ -133,7 +133,7 @@ const claims = [
     LINE_LENGTH_PER_SPAN.slope, -5.120, 0.001],
   ['the law gives 17.95 m/m at AR 6.4', lineLengthPerSpan(6.4), 17.95, 0.02],
   ['SAGE size 75 predicted at 203.6 m',
-    estimateTotalLineLength({ aspectRatio: 6.4, flatSpan: 11.34 }).totalLineLengthM, 203.6, 0.2],
+    lineConsumptionEstimate({ aspectRatio: 6.4, flatSpan: 11.34 }).totalLineLengthM, 203.6, 0.2],
   ['the practical floor is 0.50 mm', PRACTICAL_FLOOR.diameterMM, 0.50, 1e-9],
   ['symmetric certification is 12x',
     DEFAULT_LOAD_CASE.limitG * DEFAULT_LOAD_CASE.safetyFactor, 12.0, 1e-9],
@@ -150,6 +150,87 @@ for (const [what, got, want, tol] of claims) {
   if (!ok) { bad++; console.log(`       ${what}: docs say ${want}, code gives ${got}`); }
 }
 say(bad === 0, 'documented numbers match the code', `${claims.length} claims checked`);
+
+/* ---- 2a. no two exports do the same job -------------------------------- */
+//
+// Five functions have now been written twice in this project: an inspection
+// module duplicating pma.js, buildRiserAssembly duplicating
+// buildRiserWebbing, a chunkInto, a totalLineLength, and buildRibOpenings
+// duplicating ribOpenings — that last one reaching the same 6.4x measurement
+// independently.
+//
+// The "unused export" check catches them afterwards. This catches the shape
+// before it gets that far: two exports whose names differ only by a common
+// verb prefix are almost always the same job done twice.
+{
+  const coreSrcAll = coreFiles.map((f) => readFileSync(`src/core/${f}`, 'utf8'));
+  const exports = [];
+  coreFiles.forEach((f, i) => {
+    for (const m of coreSrcAll[i].matchAll(/^export (?:function|const) (\w+)/gm)) {
+      exports.push({ file: f, name: m[1] });
+    }
+  });
+  const strip = (n) => n.replace(
+    /^(build|make|create|compute|calculate|get|solve|apply|find|estimate)/, '',
+  ).toLowerCase();
+  const byRoot = new Map();
+  for (const e of exports) {
+    const k = strip(e.name);
+    if (!k) continue;
+    if (!byRoot.has(k)) byRoot.set(k, []);
+    byRoot.get(k).push(`${e.file}:${e.name}`);
+  }
+  const twins = [...byRoot.entries()]
+    .filter(([, v]) => v.length > 1)
+    .map(([k, v]) => `${k}: ${v.join(' / ')}`);
+  say(twins.length === 0, 'no two exports differ only by a verb prefix',
+    twins.join(' | ') || `${exports.length} exports checked`);
+}
+
+/* ---- 1z. the repository is complete ------------------------------------ */
+//
+// The repository was once flat, with thirteen of twenty-five core modules
+// never committed and no build script. The built tool still worked, which is
+// exactly why nobody noticed — a bundle in `dist/` outlives the sources that
+// made it.
+//
+// So completeness is checked against the build script and the imports, not
+// against the bundle.
+{
+  const buildSrc = readFileSync('build.py', 'utf8');
+  const listed = [...new Set(
+    [...buildSrc.matchAll(/"(\w+\.js)"/g)].map((m) => m[1]),
+  )].filter((f) => f !== 'app.js');
+  const onDisk = readdirSync('src/core').filter((f) => f.endsWith('.js'));
+
+  const absent = listed.filter((f) => !existsSync(`src/core/${f}`));
+  say(absent.length === 0, 'every module the build names is committed',
+    absent.join(', ') || `${listed.length} modules`);
+
+  const orphan = onDisk.filter((f) => !listed.includes(f));
+  say(orphan.length === 0, 'and every committed module is in the build',
+    orphan.join(', ') || 'no orphans');
+
+  for (const f of ['build.py', 'src/ui/app.js', 'src/ui/index.html', 'src/ui/style.css']) {
+    say(existsSync(f), `${f} is present`, '');
+  }
+
+  // Every relative import must resolve. A module can be committed and still
+  // reference one that is not.
+  let imports = 0;
+  const unresolved = [];
+  for (const d of ['src/core', 'src/ui', 'tests', 'tools']) {
+    for (const f of readdirSync(d).filter((x) => /\.(js|mjs|cjs)$/.test(x))) {
+      for (const m of readFileSync(`${d}/${f}`, 'utf8').matchAll(/from '(\.[^']+\.js)'/g)) {
+        imports++;
+        const target = `${d}/${m[1]}`.replace(/\/[^/]+\/\.\./g, '');
+        if (!existsSync(target)) unresolved.push(`${d}/${f} -> ${m[1]}`);
+      }
+    }
+  }
+  say(unresolved.length === 0, 'and every relative import resolves',
+    unresolved.slice(0, 3).join(', ') || `${imports} imports`);
+}
 
 /* ---- 2b. terminology matches the standard ------------------------------ */
 //
