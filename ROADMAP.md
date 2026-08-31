@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1444-test validation suite and a benchmark with regression budgets
+- [x] 1451-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -280,9 +280,13 @@ material published after the handbook:
       encode mirror pairs; asymmetric line or colour plans do not yet exist.
 - [ ] **Riser hardware** — maillons, pulleys, speed-system travel and trimmer
       geometry, feeding the calage variation study (LEP section 28).
-- [ ] **Reference wing library** — the 17 imported production line sets as
-      selectable comparison targets, so a design can be diffed against a real
-      wing of similar size while it is being drawn.
+- [x] **Total line lengths imported** — `tools/import-niviuk-totals.mjs`,
+      all six Hook 6 sizes, cross-checked against the printed page. These are
+      the PMA measurement, sail to harness, and what `comparePlans` needs.
+- [ ] **Reference wing library in the interface** — the imported production
+      line sets as selectable comparison targets, so a design can be diffed
+      against a real wing while it is being drawn. The data and the
+      comparison both exist; the picker does not.
 - [ ] **Read the remaining LEP sections into the model** — 9-11 (the line
       cascade matrix, richer than this project's centroid method), 12 (V-ribs),
       29 (3D shaping), 34 (line characteristics), 35 (equilibrium inputs).

@@ -450,3 +450,28 @@ unrecognised, dropping a fifth of its line plan.
 That is the same structural fact as the line-length result above, seen from
 the other side: a single-surface wing replaces internal structure with lines,
 so it has more of them, in more rows, and they carry more of the shape.
+
+### Total line lengths, and a tool that read the wrong table in silence
+
+Niviuk's section 10.7 prints, per size, the distance from each attachment
+point to the harness — the PMA total, risers included. That is what an
+inspector measures against and what `comparePlans` needs to diff a design
+against a real wing.
+
+`tools/import-niviuk-totals.mjs` extracts them. All six Hook 6 sizes, checked
+against the printed page: A1 reads 6390, 6700, 6996, 7280, 7553, 7944 mm.
+
+Two things it got wrong first, both silent:
+
+**It anchored on the contents page.** "10.7 TOTAL LINE LENGTH" appears in the
+table of contents before it appears as a heading, so a forward search found
+the listing rather than the table. It then extracted nothing and reported
+"0 anchors" without error.
+
+**Before that it anchored on the wrong table entirely** — the size headings
+appear twice in a manual, once over the per-line table in 10.6 and once over
+the totals in 10.7. The first match is the wrong one.
+
+Both produced an empty file rather than a wrong one, which is the better
+failure, but neither said anything was amiss. The cross-check that settled it
+was reading six values off the printed page and comparing.
