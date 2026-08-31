@@ -407,6 +407,31 @@ export function parseLineTable(text) {
   let adjCol = 3;
   let commentCol = 5;
 
+  // The layout above is Ozone's. Other makers order the columns differently,
+  // and a header naming them wins over the default.
+  //
+  // UP's Meru sheets run name, length, quantity, loop, cutting length — so
+  // reading column 2 as the sewn length took the *loop* length, and column 1
+  // as the quantity took the real length. Every Meru line came out as "2 mm"
+  // and nothing noticed, because a parse that returns numbers looks like a
+  // parse that worked.
+  //
+  // The headers are bilingual ("Länge length", "Anzahl Quantity"), so the
+  // match is on the English word appearing anywhere in the cell.
+  const headerRow = rows.find((r) => r.some((c) => /\blength\b/i.test(c || ''))
+    && r.some((c) => /\bquantity\b/i.test(c || '')));
+  if (headerRow) {
+    const find = (re) => headerRow.findIndex((c) => re.test(c || ''));
+    const iLen = find(/\blength\b/i);
+    const iQty = find(/\bquantity\b/i);
+    if (iLen >= 0 && iQty >= 0) {
+      sewnCol = iLen;
+      qtyCol = iQty;
+      const iCut = headerRow.findIndex((c) => /cutting\s+length/i.test(c || ''));
+      if (iCut >= 0) adjCol = iCut;
+    }
+  }
+
   for (const r of rows) {
     const first = (r[0] || '').trim();
     if (!first && !r.some(Boolean)) continue;

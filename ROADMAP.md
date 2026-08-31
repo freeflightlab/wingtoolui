@@ -353,6 +353,16 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **Every wing held to the physics** (`tests/reference-sweep.mjs`) — 56
+      line sheets against five invariants, not just against the parser. 74 of
+      103 reference files had been reached by nothing stronger than "does it
+      parse". It found a real bug on the first run: UP's Meru sheets order
+      their columns differently, so every Meru line was being read as "2 mm"
+      — the quantity column. Column positions now come from the header.
+- [ ] **Split multi-size sheets** — three UP sheets list one column per size,
+      so a single line name carries several lengths. Recognised and skipped
+      rather than misread.
+
 - [x] **The stub DOM no longer lies quietly** — five methods returned empty
       unconditionally, and two checks had already been defeated by them: a
       button test that reported "0 pressed, none threw" as a pass, and a
