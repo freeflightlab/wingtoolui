@@ -61,6 +61,7 @@ const S = {
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
+  lineRow: 'all',
   ovalFromPressure: false, sailTension: 300,
   showIntake: false, intakeLower: 9, intakeUpper: 1,
   packer: 'profile',
@@ -470,6 +471,10 @@ function buildControls() {
   const N = clear('g-panels');
   checkField(N, 'brakeLines', 'Brake lines in the plan');
   checkField(N, 'stabilo', 'Stabilo line');
+  selectField(N, 'lineRow', 'Line plan: highlight row', [
+    ['all', 'all rows'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D'],
+    ['K', 'brakes'], ['S', 'stabilo'],
+  ]);
   checkField(N, 'ovalFromPressure', 'Billow from pressure, not a flat amount');
   checkField(N, 'showIntake', 'Cell intake against stagnation travel');
   numberField(N, 'intakeLower', 'Intake, lower cut (% chord)', 0, 30, 0.5);
@@ -692,6 +697,7 @@ function draw() {
   drawReadout();
   if (S.tab === 'rib') { drawRib(); drawBalanceTable(); return; }
   if (S.tab === 'analysis') { drawPolar(); drawAtmosphere(); drawBalanceTable(); return; }
+  if (S.tab === 'lines') { drawLinePlan(); drawCascadeTable(); return; }
   drawPlan();
   drawFront();
   drawSection();
@@ -1251,6 +1257,126 @@ function markZoom(id, on) {
  * the chord line, and the rib's own washin, dihedral and yaw, since those are
  * what make it different from its neighbours.
  */
+/**
+ * The line plan, seen from the front.
+ *
+ * This project has modelled cascades since Phase 2 — seven naming
+ * conventions, per-row anchor densities, merged rows, brakes, the stabilo,
+ * loads at every anchor — and none of it has ever been drawable. A design
+ * tool that computes a line plan and cannot show it is asking to be trusted
+ * on the one thing the user most wants to check.
+ *
+ * Front elevation, because that is the view a rigging diagram uses and the
+ * one that makes a cascade legible: anchors along the span at the top, the
+ * cascade converging down to the maillons.
+ */
+function drawLinePlan() {
+  const plan = M.linePlan;
+  if (!plan) return;
+
+  // Both sides, so the cascade reads as a wing rather than half of one.
+  const pts = [];
+  for (const l of plan.lines) {
+    if (!l.from || !l.to) continue;
+    pts.push([l.from[1], l.from[2]], [l.to[1], l.to[2]]);
+    pts.push([-l.from[1], l.from[2]], [-l.to[1], l.to[2]]);
+  }
+  if (!pts.length) return;
+
+  const c = canvas('vp-lineplan', pts);
+  c.grid(1);
+
+  // Colour by row, so a cascade can be followed by eye. Brakes and the
+  // stabilo are deliberately distinct: they carry handling load, not lift.
+  const ROW_COLOUR = {
+    A: '#ff5e5e', B: '#ffa23e', C: '#e8c547', D: '#5ec8ff',
+    E: '#9d7bff', F: '#7bffb2', G: '#ff7bd5', H: '#b2ff7b', I: '#7bd5ff',
+    K: '#8a8a8a', S: '#00e0a0', Z: '#ff00d0',
+  };
+  const LEVEL_WIDTH = { upper: 0.5, middle: 0.9, main: 1.4 };
+
+  const wanted = (l) => (S.lineRow === 'all' ? true : l.row === S.lineRow);
+
+  for (const side of [1, -1]) {
+    for (const l of plan.lines) {
+      if (!l.from || !l.to) continue;
+      const on = wanted(l);
+      const colour = ROW_COLOUR[l.row] || '#cccccc';
+      c.path(
+        [[side * l.from[1], l.from[2]], [side * l.to[1], l.to[2]]],
+        colour,
+        LEVEL_WIDTH[l.level] ?? 0.7,
+        { opacity: on ? 0.95 : 0.08 },
+      );
+    }
+  }
+
+  // Anchors, so the attachment density is visible — the thing that took
+  // three rounds to get right and has never been seen.
+  for (const side of [1, -1]) {
+    for (const l of plan.lines.filter((x) => x.level === 'upper' && x.to)) {
+      if (!wanted(l)) continue;
+      c.dot([side * l.to[1], l.to[2]], ROW_COLOUR[l.row] || '#fff', 1.6);
+    }
+  }
+
+  // The maillons: where the cascade ends and the risers begin.
+  for (const side of [1, -1]) {
+    for (const r of plan.risers || []) {
+      if (!r.maillon) continue;
+      c.dot([side * r.maillon[1], r.maillon[2]], '#ffffff', 3);
+    }
+  }
+
+  const shown = plan.lines.filter(wanted).length;
+  c.text(`${shown * 2} lines${S.lineRow === 'all' ? '' : ` in row ${S.lineRow}`}`,
+    [0, 0.02], '#8a8a8a', 10, 'middle');
+}
+
+/** The cascade as a table: every line, its level, length and load. */
+function drawCascadeTable() {
+  const host = clear('g-balance');
+  const plan = M.linePlan;
+  if (!plan) { host.append(el('div', 'muted', 'No line plan.')); return; }
+
+  const loads = new Map();
+  if (M.loads && M.loads.tensions) {
+    for (const t of M.loads.tensions.lines) loads.set(t.name, t.tensionN);
+  }
+  const sized = new Map();
+  if (M.lineSelection) {
+    for (const l of M.lineSelection.lines) if (l.line) sized.set(l.name, l.line.code);
+  }
+
+  const rows = plan.lines
+    .filter((l) => (S.lineRow === 'all' ? true : l.row === S.lineRow))
+    .sort((a, b) => (a.row === b.row
+      ? (a.level.localeCompare(b.level) || (a.index ?? 0) - (b.index ?? 0))
+      : a.row.localeCompare(b.row)));
+
+  const t = el('table', 'tbl');
+  const head = el('tr');
+  for (const h of ['line', 'row', 'level', 'length mm', 'load N', 'material']) {
+    head.append(el('th', '', h));
+  }
+  t.append(head);
+  for (const l of rows.slice(0, 400)) {
+    const tr = el('tr');
+    const load = loads.get(l.name);
+    for (const v of [
+      l.name, l.row, l.level,
+      l.lengthMM != null ? String(Math.round(l.lengthMM)) : '—',
+      load != null ? load.toFixed(1) : '—',
+      sized.get(l.name) || '—',
+    ]) tr.append(el('td', '', v));
+    t.append(tr);
+  }
+  host.append(t);
+  if (rows.length > 400) {
+    host.append(el('div', 'muted', `${rows.length - 400} more not shown.`));
+  }
+}
+
 function drawRib() {
   const note = document.getElementById('note-rib');
   const rib = M.wing.ribs[Math.min(S.ribIndex, M.wing.ribs.length - 1)];

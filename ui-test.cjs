@@ -144,6 +144,21 @@ try {
     globalThis.__rib(i);
     console.log('  ok   rib '+i+' draws (chord '+m.wing.ribs[i].chord.toFixed(3)+' m)');
   }
+  // The lines view, which is what the whole cascade model is for.
+  globalThis.__tab('lines');
+  const S3=globalThis.__S;
+  for (const row of ['all','A','B','K']) {
+    S3.lineRow=row; globalThis.__rebuild();
+    // A canvas that draws nothing also throws nothing, so the elements are
+    // counted. Not via innerHTML: the stub's getter returns '' always, so a
+    // probe reading it can only ever report zero — it failed a working view
+    // and would have passed a broken one just the same.
+    const svg=document.getElementById('vp-lineplan');
+    const n=(svg&&svg.children)?svg.children.length:0;
+    if(n<10){console.log('  FAIL line plan row '+row+' drew only '+n+' elements');process.exit(1);}
+    console.log('  ok   line plan row '+row.padEnd(4)+' drew '+String(n).padStart(4)+' elements');
+  }
+  S3.lineRow='all';
   globalThis.__tab('wing');
 } catch(e){ console.log('  FAIL tab/rib: '+e.message); process.exit(1); }
 
