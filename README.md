@@ -16,7 +16,7 @@ step checked against wings that have actually flown.
 
 **Phase 1 complete and verified. Phases 2 and 3 well advanced. Phase 4 begun.**
 
-**1444 tests** and a benchmark with regression budgets. The suite is not smoke
+**1451 tests** and a benchmark with regression budgets. The suite is not smoke
 testing: every check asserts a value that can be verified independently — an
 exact closed-form answer, a conservation property, a manufacturer's published
 figure, or a number printed in the source.
@@ -45,7 +45,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1444 unit checks against known geometry and the sources |
+| `npm test` | 1451 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -125,6 +125,13 @@ its level, length, load and selected material.
 This existed only as numbers for most of the project's life. A design tool
 that computes a line plan and cannot show it is asking to be trusted on the
 one thing a user most wants to check.
+
+**A design can be diffed against a real wing.** Six Niviuk Hook 6 sizes are
+embedded — measured total line lengths, sail to harness — and selecting one
+reports two numbers that mean different things: the **mean offset**, which is
+the overall length a designer sets deliberately, and the **shape deviation**,
+which is the spread once that offset is removed and is what actually differs.
+On a Hook-6-sized design the shape deviation is about 100 mm over 40 anchors.
 
 ## Architecture
 

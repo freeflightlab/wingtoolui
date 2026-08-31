@@ -61,7 +61,7 @@ const S = {
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
-  lineRow: 'all',
+  lineRow: 'all', compareTo: '',
   ovalFromPressure: false, sailTension: 300,
   showIntake: false, intakeLower: 9, intakeUpper: 1,
   packer: 'profile',
@@ -471,6 +471,17 @@ function buildControls() {
   const N = clear('g-panels');
   checkField(N, 'brakeLines', 'Brake lines in the plan');
   checkField(N, 'stabilo', 'Stabilo line');
+  // Diff the design against a real wing.
+  //
+  // The measurements have been in data/reference/ and `comparePlans` has
+  // existed since Phase 2, and until now nothing in the interface could reach
+  // either. A comparison nobody can run is a comparison nobody trusts.
+  selectField(N, 'compareTo', 'Compare against a real wing', [
+    ['', 'none'],
+    ...(typeof REFERENCE_TOTALS === 'object'
+      ? Object.keys(REFERENCE_TOTALS).sort().map((k) => [k, k.replace(/^niviuk-/, 'Niviuk ')])
+      : []),
+  ]);
   selectField(N, 'lineRow', 'Line plan: highlight row', [
     ['all', 'all rows'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D'],
     ['K', 'brakes'], ['S', 'stabilo'],
@@ -1372,6 +1383,28 @@ function drawCascadeTable() {
     t.append(tr);
   }
   host.append(t);
+
+  // The diff, when a real wing is selected.
+  if (S.compareTo && typeof REFERENCE_TOTALS === 'object'
+      && REFERENCE_TOTALS[S.compareTo] && plan.totals) {
+    const cmp = comparePlans(plan.totals, REFERENCE_TOTALS[S.compareTo]);
+    if (!cmp.count) {
+      host.append(el('div', 'muted',
+        'No overlapping anchors: the real wing has a different row set.'));
+    } else {
+      const d = el('div', 'note');
+      d.append(el('div', '', `Against ${S.compareTo.replace(/^niviuk-/, 'Niviuk ')}: `
+        + `${cmp.count} anchors compared`));
+      d.append(el('div', 'muted',
+        `mean offset ${cmp.meanOffsetMM.toFixed(0)} mm — the overall length `
+        + 'difference, which a designer sets deliberately'));
+      d.append(el('div', 'muted',
+        `shape deviation ${cmp.meanShapeMM.toFixed(0)} mm — the spread once `
+        + 'that offset is removed, which is what actually differs'));
+      host.append(d);
+    }
+  }
+
   if (rows.length > 400) {
     host.append(el('div', 'muted', `${rows.length - 400} more not shown.`));
   }

@@ -14865,6 +14865,8 @@ function runPackage(airfoil, { reynolds, mach, nCrit = 7, alphaRange, alphaStep 
     polarFile,
   };
 }
+
+const REFERENCE_TOTALS = {"niviuk-hook6-20":{"1":{"A":6390,"B":6289,"C":6328,"D":6436,"K":6490},"2":{"A":6347,"B":6244,"C":6288,"D":6392,"K":6279},"3":{"A":6311,"B":6256,"C":6343,"D":6444,"K":6215},"4":{"A":6275,"B":6182,"C":6235,"D":6326,"K":6212},"5":{"A":6233,"B":6134,"C":6201,"D":6065},"6":{"A":6093,"B":6040,"C":6114,"D":6014},"7":{"A":5996,"B":5996,"C":6083,"D":6065},"8":{"A":5934,"B":5991,"C":6099,"D":6054},"9":{"A":5755,"B":5730,"C":5718,"D":5928},"10":{"A":5654,"B":5653,"C":5822},"11":{"A":5733}},"niviuk-hook6-22":{"1":{"A":6700,"B":6593,"C":6635,"D":6748,"K":6787},"2":{"A":6656,"B":6546,"C":6594,"D":6703,"K":6565},"3":{"A":6618,"B":6561,"C":6652,"D":6757,"K":6498},"4":{"A":6580,"B":6484,"C":6538,"D":6633,"K":6495},"5":{"A":6536,"B":6433,"C":6502,"D":6341},"6":{"A":6389,"B":6334,"C":6410,"D":6288},"7":{"A":6286,"B":6288,"C":6377,"D":6341},"8":{"A":6220,"B":6282,"C":6393,"D":6329},"9":{"A":6032,"B":6007,"C":5993,"D":6197},"10":{"A":5926,"B":5926,"C":6091},"11":{"A":6005}},"niviuk-hook6-24":{"1":{"A":6996,"B":6882,"C":6928,"D":7046,"K":7140},"2":{"A":6950,"B":6834,"C":6885,"D":6999,"K":6909},"3":{"A":6910,"B":6851,"C":6947,"D":7057,"K":6839},"4":{"A":6870,"B":6770,"C":6827,"D":6926,"K":6835},"5":{"A":6825,"B":6717,"C":6790,"D":6674},"6":{"A":6671,"B":6614,"C":6693,"D":6619},"7":{"A":6562,"B":6565,"C":6658,"D":6674},"8":{"A":6493,"B":6559,"C":6675,"D":6662},"9":{"A":6297,"B":6269,"C":6255,"D":6525},"10":{"A":6185,"B":6184,"C":6408},"11":{"A":6310}},"niviuk-hook6-26":{"1":{"A":7280,"B":7162,"C":7210,"D":7332,"K":7468},"2":{"A":7234,"B":7114,"C":7168,"D":7286,"K":7228},"3":{"A":7194,"B":7134,"C":7234,"D":7348,"K":7155},"4":{"A":7154,"B":7050,"C":7110,"D":7214,"K":7154},"5":{"A":7108,"B":6997,"C":7072,"D":6988},"6":{"A":6948,"B":6891,"C":6972,"D":6931},"7":{"A":6837,"B":6840,"C":6937,"D":6990},"8":{"A":6765,"B":6834,"C":6955,"D":6977},"9":{"A":6559,"B":6532,"C":6516,"D":6834},"10":{"A":6443,"B":6443,"C":6714},"11":{"A":6613}},"niviuk-hook6-28":{"1":{"A":7553,"B":7428,"C":7480,"D":7607,"K":7740},"2":{"A":7507,"B":7380,"C":7438,"D":7561,"K":7491},"3":{"A":7468,"B":7405,"C":7511,"D":7629,"K":7417},"4":{"A":7427,"B":7320,"C":7383,"D":7490,"K":7417},"5":{"A":7381,"B":7266,"C":7343,"D":7245},"6":{"A":7215,"B":7156,"C":7240,"D":7187},"7":{"A":7100,"B":7105,"C":7204,"D":7248},"8":{"A":7026,"B":7099,"C":7223,"D":7236},"9":{"A":6812,"B":6783,"C":6767,"D":7088},"10":{"A":6692,"B":6690,"C":6963},"11":{"A":6859}},"niviuk-hook6-31":{"1":{"A":7944,"B":7813,"C":7868,"D":8002,"K":8161},"2":{"A":7899,"B":7766,"C":7828,"D":7957,"K":7901},"3":{"A":7861,"B":7795,"C":7907,"D":8032,"K":7824},"4":{"A":7819,"B":7707,"C":7773,"D":7886,"K":7827},"5":{"A":7773,"B":7653,"C":7733,"D":7647},"6":{"A":7599,"B":7538,"C":7625,"D":7586},"7":{"A":7479,"B":7485,"C":7588,"D":7652},"8":{"A":7402,"B":7480,"C":7608,"D":7641},"9":{"A":7176,"B":7145,"C":7128,"D":7487},"10":{"A":7049,"B":7048,"C":7356},"11":{"A":7246}}};
 /* app.js — UI layer. Owns the design state, renders the controls, redraws the
  * four viewports, and writes the export files. All geometry comes from the
  * core modules; nothing is recomputed here. */
@@ -14928,7 +14930,7 @@ const S = {
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
-  lineRow: 'all',
+  lineRow: 'all', compareTo: '',
   ovalFromPressure: false, sailTension: 300,
   showIntake: false, intakeLower: 9, intakeUpper: 1,
   packer: 'profile',
@@ -15338,6 +15340,17 @@ function buildControls() {
   const N = clear('g-panels');
   checkField(N, 'brakeLines', 'Brake lines in the plan');
   checkField(N, 'stabilo', 'Stabilo line');
+  // Diff the design against a real wing.
+  //
+  // The measurements have been in data/reference/ and `comparePlans` has
+  // existed since Phase 2, and until now nothing in the interface could reach
+  // either. A comparison nobody can run is a comparison nobody trusts.
+  selectField(N, 'compareTo', 'Compare against a real wing', [
+    ['', 'none'],
+    ...(typeof REFERENCE_TOTALS === 'object'
+      ? Object.keys(REFERENCE_TOTALS).sort().map((k) => [k, k.replace(/^niviuk-/, 'Niviuk ')])
+      : []),
+  ]);
   selectField(N, 'lineRow', 'Line plan: highlight row', [
     ['all', 'all rows'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D'],
     ['K', 'brakes'], ['S', 'stabilo'],
@@ -16239,6 +16252,28 @@ function drawCascadeTable() {
     t.append(tr);
   }
   host.append(t);
+
+  // The diff, when a real wing is selected.
+  if (S.compareTo && typeof REFERENCE_TOTALS === 'object'
+      && REFERENCE_TOTALS[S.compareTo] && plan.totals) {
+    const cmp = comparePlans(plan.totals, REFERENCE_TOTALS[S.compareTo]);
+    if (!cmp.count) {
+      host.append(el('div', 'muted',
+        'No overlapping anchors: the real wing has a different row set.'));
+    } else {
+      const d = el('div', 'note');
+      d.append(el('div', '', `Against ${S.compareTo.replace(/^niviuk-/, 'Niviuk ')}: `
+        + `${cmp.count} anchors compared`));
+      d.append(el('div', 'muted',
+        `mean offset ${cmp.meanOffsetMM.toFixed(0)} mm — the overall length `
+        + 'difference, which a designer sets deliberately'));
+      d.append(el('div', 'muted',
+        `shape deviation ${cmp.meanShapeMM.toFixed(0)} mm — the spread once `
+        + 'that offset is removed, which is what actually differs'));
+      host.append(d);
+    }
+  }
+
   if (rows.length > 400) {
     host.append(el('div', 'muted', `${rows.length - 400} more not shown.`));
   }

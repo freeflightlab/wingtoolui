@@ -15,6 +15,7 @@ The collision check below turns that into a build failure instead.
 
 import re
 import sys
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -159,12 +160,31 @@ def build():
 
     core_js = "\n\n".join(chunks)
 
+    # Real measured line lengths, embedded so the tool can diff a design
+    # against a production wing offline.
+    #
+    # The data has been in data/reference/ since the Niviuk import and the
+    # comparison has existed since Phase 2, but nothing in the interface could
+    # reach either — the tool is a single offline file, so anything it needs
+    # has to be built in.
+    totals = {}
+    for f in sorted((ROOT / "data" / "reference").glob("*-totals.tsv")):
+        rows = {}
+        for line in f.read_text().splitlines():
+            if not line or line.startswith("#") or line.startswith("anchor"):
+                continue
+            a, row, mm = line.split("\t")
+            rows.setdefault(a, {})[row] = int(mm)
+        key = f.name.replace("-totals.tsv", "")
+        totals[key] = rows
+    reference_js = "const REFERENCE_TOTALS = " + json.dumps(totals, separators=(",", ":")) + ";"
+
     shell = (UI / "index.html").read_text()
     app = (UI / "app.js").read_text()
     css = (UI / "style.css").read_text()
 
     html = shell.replace("/*__CSS__*/", css)
-    html = html.replace("/*__CORE__*/", core_js)
+    html = html.replace("/*__CORE__*/", core_js + "\n\n" + reference_js)
     html = html.replace("/*__APP__*/", app)
 
     DIST.mkdir(exist_ok=True)

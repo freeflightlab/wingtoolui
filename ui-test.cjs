@@ -48,7 +48,11 @@ function mk(tag='div'){
     classList:{ toggle(){}, add(){}, remove(){}, contains(){return false;} },
     setPointerCapture(){},
     get textContent(){return n._text;}, set textContent(v){n._text=String(v);},
-    get innerHTML(){throw new Error('stub DOM: innerHTML is not implemented — a probe reading it can only ever see empty. Count node.children instead.');}, set innerHTML(v){ n.children=[]; },
+    // Setting innerHTML is legitimate — the app uses it to clear and to
+    // write small fragments. Only the GETTER is meaningless here, because it
+    // could only ever return empty, so only reading throws.
+    get innerHTML(){ throw new Error('stub DOM: reading innerHTML can only ever see empty. Count node.children instead.'); },
+    set innerHTML(v){ n.children=[]; n._text=String(v); },
     get lastChild(){ return n.children[n.children.length-1]; },
     querySelector(sel){const all=document.querySelectorAll(sel);return all.length?all[0]:null;}, contains(){return false;},
   };
@@ -97,7 +101,7 @@ global.requestAnimationFrame = (f)=>setTimeout(f,0);
 let errors = [];
 const origErr = console.error;
 try {
-  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
+  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__REFERENCE_TOTALS=typeof REFERENCE_TOTALS==="object"?REFERENCE_TOTALS:{}; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
 } catch(e){ errors.push('boot: '+e.message+'\n'+e.stack.split('\n').slice(0,4).join('\n')); }
 
 if (!errors.length) {
@@ -206,8 +210,33 @@ try {
     console.log('  ok   line plan row '+row.padEnd(4)+' drew '+String(n).padStart(4)+' elements');
   }
   S3.lineRow='all';
+
+  // The comparison against a real wing. It must produce numbers, not just
+  // avoid throwing — the diff is the whole point of embedding the data.
+  const keys = Object.keys(globalThis.__REFERENCE_TOTALS || {});
+  if (!keys.length) { console.log('  FAIL no reference totals embedded'); process.exit(1); }
+  S3.compareTo = keys[0];
+  globalThis.__rebuild();
+  // Walk the children for their text, rather than JSON.stringify-ing the
+  // node — stringify touches every getter, including the innerHTML one that
+  // deliberately throws.
+  const tbl = document.getElementById('g-balance');
+  const gather = (n, out = []) => {
+    if (!n) return out;
+    if (n._text) out.push(n._text);
+    for (const c of n.children || []) gather(c, out);
+    return out;
+  };
+  const txt = gather(tbl).join(' ');
+  if (!/anchors compared/.test(txt) || !/shape deviation/.test(txt)) {
+    console.log('  FAIL comparison produced no diff for ' + keys[0]);
+    process.exit(1);
+  }
+  console.log('  ok   diffed against ' + keys[0] + ', ' + keys.length + ' wings selectable');
+  S3.compareTo = '';
+  globalThis.__rebuild();
   globalThis.__tab('wing');
-} catch(e){ console.log('  FAIL tab/rib: '+e.message); process.exit(1); }
+} catch(e){ console.log('  FAIL tab/rib: '+e.message); console.log(e.stack.split('\n').slice(1,4).join('\n')); process.exit(1); }
 
 // Press every export button, rather than only the __exports() hook they
 // bypass. The bill of materials existed since Phase 3 with no button, and
