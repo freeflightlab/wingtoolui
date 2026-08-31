@@ -327,3 +327,30 @@ Real, small, and now measured rather than either ignored or assumed large.
 It is **off by default**. The wake model is first-order — a single upstream
 shielder, no wake merging, no unsteadiness — and a 2.7% correction from a
 first-order model should be offered, not imposed.
+
+---
+
+## 11. Where the load goes on the bar
+
+The roadmap carried this as an open item: *"loads shift forward on the bar,
+changing what each row carries; loads.js still assumes trim."*
+
+**Both halves were wrong.** `rowShareMode: 'pressure'` has derived the shares
+from the section since Phase 2 — a capability I nearly reimplemented before
+checking — and the shift is **aft**, not forward:
+
+| alpha | A | B | C | D |
+| --- | --- | --- | --- | --- |
+| 12° (slow) | 43.9% | 23.7% | 18.3% | 14.2% |
+| 6° (trim) | 38.0% | 24.7% | 20.5% | 16.8% |
+| 2° (bar) | 27.7% | 26.5% | 24.4% | 21.3% |
+
+Taking the bar lowers the angle of attack, the centre of pressure moves aft,
+and the rear rows take more. The A row **sheds 27% of its share** between trim
+and full bar while D gains a quarter.
+
+That is why rear-riser steering works accelerated and why the C and D lines
+have to be sized for the bar rather than for trim. In anchor loads on the test
+wing: A falls 177 → 129 N while D rises 78 → 100 N.
+
+Now asserted, including that the shares sum to one at every angle.

@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1385-test validation suite and a benchmark with regression budgets
+- [x] 1394-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -98,8 +98,12 @@ material published after the handbook:
       incomplete record marked as such.
 - [ ] **B-handle and C-handle geometry** — handle heights and the steering
       travel they give, which the riser assembly does not yet carry.
-- [ ] **Line loads under acceleration** — loads shift forward on the bar,
-      changing what each row carries; `loads.js` still assumes trim.
+- [x] **Line loads under acceleration** — this item was wrong twice over.
+      `rowShareMode: 'pressure'` has derived the shares from the section since
+      Phase 2, so `loads.js` did not assume trim; and the load moves **aft**
+      on the bar, not forward. The A row sheds 27% of its share between trim
+      and full bar while D gains a quarter, which is why rear-riser steering
+      works accelerated and why C and D must be sized for it. Now asserted.
 - [ ] **Collapse and stabilo lines** — the `Z` row on the Lyght; parsed, not
       generated.
 - [x] **Load distribution through the cascade** — lifting-line lift to load
@@ -336,6 +340,12 @@ validation notes flagged.
       returned `[]` unconditionally, so no button test could ever have worked.
       Buttons are now collected where they are created, pressed, and checked
       for duplicate labels. Folded into `tools/check.mjs`.
+- [x] **Settings are checked against the files they produce** — five probes
+      toggle a setting, press every button and compare what `save()` wrote.
+      A first version watched the export helpers instead and reported a false
+      failure, because `__exports().marked` calls the marked writer whatever
+      the setting says: the same mistake as testing functions instead of
+      buttons, one round later. Verified the probe can fail.
 
 - [x] **Full-pipeline validation** (`tests/full-pipeline.mjs`) — all 38
       published sizes through every stage, checked against each other and

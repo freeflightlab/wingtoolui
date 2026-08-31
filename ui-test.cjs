@@ -50,7 +50,7 @@ global.requestAnimationFrame = (f)=>setTimeout(f,0);
 let errors = [];
 const origErr = console.error;
 try {
-  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__controls=buildControls; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
+  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
 } catch(e){ errors.push('boot: '+e.message+'\n'+e.stack.split('\n').slice(0,4).join('\n')); }
 
 if (!errors.length) {
@@ -168,6 +168,50 @@ try {
     try { b.fn(); pressed++; }
     catch (e) { failed.push(`${b.text}: ${e.message.slice(0,60)}`); }
   }
+  // A setting that changes nothing in the output is the same class of defect
+  // as a model with no button.
+  //
+  // Watched through save(), not through the export helpers. A first version
+  // watched `__exports().marked`, which calls markedPanelsToDXF directly
+  // whatever the setting says — so it could never change, and reported a
+  // false failure. That is the same mistake as testing the functions instead
+  // of the buttons, made again one round later.
+  const pressAll = () => {
+    globalThis.__saved = {};
+    globalThis.__buttons.length = 0;
+    globalThis.__controls();
+    for (const b of globalThis.__buttons) { try { b.fn(); } catch (e) { /* reported above */ } }
+    return Object.fromEntries(
+      Object.entries(globalThis.__saved).map(([k, v]) => [k, v.length]));
+  };
+  const S2 = globalThis.__S;
+  const baseline = pressAll();
+  const probes = [
+    ['marks', () => { S2.marks = !S2.marks; }],
+    ['applyOval', () => { S2.applyOval = !S2.applyOval; }],
+    ['cells', () => { S2.cells += 4; }],
+    ['rollWidth', () => { S2.rollWidth = S2.rollWidth === 1.8 ? 1.4 : 1.8; }],
+    ['stabilo', () => { S2.stabilo = !S2.stabilo; }],
+  ];
+  const inert = [];
+  for (const [name, mutate] of probes) {
+    mutate();
+    globalThis.__rebuild();
+    const after = pressAll();
+    const changed = Object.keys(baseline)
+      .some((k) => after[k] !== undefined && after[k] !== baseline[k]);
+    if (!changed) inert.push(name);
+    mutate();
+    globalThis.__rebuild();
+  }
+  if (inert.length) {
+    for (const i of inert) {
+      console.log(`  FAIL setting changes no exported file: ${i}`);
+    }
+    process.exit(1);
+  }
+  console.log(`  ok   ${probes.length} settings each change an exported file`);
+
   const dupes = [...seen.entries()].filter(([, n]) => n > 1);
   if (dupes.length) {
     for (const [t, n] of dupes) console.log(`  FAIL duplicate button "${t}" x${n}`);

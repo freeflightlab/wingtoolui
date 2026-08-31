@@ -10951,8 +10951,7 @@ function rowSharesFor({
     alphaDeg,
   };
 }
-function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {
-  const byAnchor = new Map();
+function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {  const byAnchor = new Map();
   for (const l of plan.lines) {
     if (l.level !== 'upper') continue;
     // Brakes carry pilot input, not lift. Once the brake cascade joined the
