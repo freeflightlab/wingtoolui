@@ -15167,15 +15167,19 @@ function buildControls() {
 
   const F = clear('g-files');
   const grid = el('div', 'btn-grid');
-  button(grid, 'Panels DXF', () => save(`${S.name}-panels.dxf`,
-    panelsToDXF(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn primary');
+  // One 'Panels DXF' button, not two.
+  //
+  // There were two with the same label: a plain one and the marks-aware one
+  // below. The plain one came first and shadowed the other, so turning
+  // registration marks on had no effect on the button most people would
+  // press. Nothing caught it because no test had ever pressed a button.
   button(grid, 'Ribs DXF', () => save(`${S.name}-ribs.dxf`, ribsToDXF(M.wing)), 'btn');
   button(grid, 'Panels DXF', () => save(`${S.name}-panels.dxf`,
     S.marks
       ? markedPanelsToDXF(seamed(), {
         rollWidth: S.rollWidth, gap: S.panelGap / 100, packer: S.packer,
       })
-      : panelsToDXF(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn');
+      : panelsToDXF(seamed(), { rollWidth: S.rollWidth, gap: S.panelGap / 100 })), 'btn primary');
   button(grid, 'Printable pattern', () => {
     const t = tiledPages(seamed(), {
       paper: S.paper, rollWidth: S.rollWidth, gap: S.panelGap / 100,
@@ -15186,6 +15190,54 @@ function buildControls() {
     setStatus(`${t.pages.length} pages at ${S.paper}, `
       + `${t.blankPagesSkipped} blank tiles skipped. Check the 100 mm bar before cutting.`);
   }, 'btn');
+  button(grid, 'Bill of materials', () => {
+    // The BOM has existed since Phase 3 and has never been reachable from the
+    // interface — a headline feature with no button.
+    const bom = buildBOM({
+      panels: seamed(),
+      nested: M.nested,
+      wing: M.wing,
+      ribHoles: M.ribHoles,
+      plan: M.linePlan,
+      selection: M.lineSelection,
+      rollWidth: S.rollWidth,
+      gap: S.panelGap / 100,
+    });
+    save(`${S.name}-bom.txt`, bomText(bom));
+    setStatus(bom.missing && bom.missing.length
+      ? `Bill written, incomplete: ${bom.missing.join(', ')}.`
+      : 'Bill of materials written.');
+  }, 'btn');
+
+  button(grid, 'Rib stress report', () => {
+    if (!M.loads) { setStatus('No loads to check.'); return; }
+    const r = checkWingRibStress({
+      wing: M.wing,
+      anchorLoads: M.loads.anchorLoads,
+      airfoil: M.airfoil,
+      openingsFor: (rib, i) => {
+        const nb = M.wing.ribs[Math.min(i + 1, M.wing.ribs.length - 1)];
+        return nb === rib ? [] : ribOpenings(rib, nb, M.airfoil).holes;
+      },
+    });
+    const lines = [
+      `# Rib stress, ${S.name}`,
+      `# ${r.note}`,
+      '',
+      ['rib', 'chord_m', 'longest_reach_mm', 'tape_to_seam', 'holes_in_path'].join('\t'),
+    ];
+    for (const x of r.ribs) {
+      lines.push([
+        x.ribIndex, M.wing.ribs[x.ribIndex].chord.toFixed(3),
+        (x.longest.reach.reachM * 1000).toFixed(0),
+        x.allReachSeam, x.throughHoles.join(' ') || '-',
+      ].join('\t'));
+    }
+    save(`${S.name}-rib-stress.tsv`, `${lines.join('\n')}\n`);
+    setStatus(`${r.ribCount} ribs checked, `
+      + `${r.ribsWithHolesInLoadPath.length} with a hole in a load path.`);
+  }, 'btn');
+
   button(grid, 'PMA data sheet', () => {
     if (!M.linePlan) { setStatus('No line plan to publish.'); return; }
     const rec = exchangeRecord({

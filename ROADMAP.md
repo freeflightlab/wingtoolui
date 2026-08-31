@@ -328,6 +328,15 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **The interface test presses real buttons** — it used to call the export
+      functions directly, which tests the functions and not the wiring. Two
+      things had survived that gap: a duplicate `Panels DXF` button whose
+      plain version shadowed the marks-aware one, and a bill of materials with
+      no button at all since Phase 3. The stub DOM's `querySelectorAll` also
+      returned `[]` unconditionally, so no button test could ever have worked.
+      Buttons are now collected where they are created, pressed, and checked
+      for duplicate labels. Folded into `tools/check.mjs`.
+
 - [x] **Full-pipeline validation** (`tests/full-pipeline.mjs`) — all 38
       published sizes through every stage, checked against each other and
       against physics. Found four defects every module test passed: a

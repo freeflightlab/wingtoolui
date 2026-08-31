@@ -19,6 +19,11 @@ const stages = [
   // number drift up silently is worse, so the baseline is pinned.
   ['full pipeline', 'node tests/full-pipeline.mjs',
     /(\d+) wings completed[^,]*, (\d+) problems/, { baseline: 3 }],
+  // The interface is a stage in its own right. Its harness used to call the
+  // export functions directly, which tests the functions and not the wiring —
+  // and that is how a duplicate 'Panels DXF' button and a bill of materials
+  // with no button at all both survived. It now presses the real buttons.
+  ['interface', 'node tools/ui-test.cjs', /(all UI paths OK)/],
   ['benchmark', 'node tests/benchmark.js', /(All budgets met)/],
   ['self-audit', 'node tools/audit.mjs', /(audit clean)/],
 ];
