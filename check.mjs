@@ -12,16 +12,19 @@ import { execSync } from 'child_process';
 const stages = [
   ['unit suite', 'node tests/run-tests.js', /(\d+) passed, (\d+) failed/],
   ['Phase 1 audit', 'node tests/phase1-audit.mjs', /(\d+) checks, (\d+) failed/],
-  // The pipeline carries a known, documented baseline of 4 problems: an
-  // optimistic low-Reynolds polar on two small wings, and two wings that
-  // cannot size every line — the Zeno 2 L and the Artik R 2 27, both the
-  // largest size of the highest-aspect family in their maker's range. Adding
-  // Niviuk raised the wing count from 38 to 55 and the baseline from 3 to 4;
-  // the new failure is the same known class, not a new one. Treating those as failures would make the whole
+  // The pipeline carries a known, documented baseline of 2 problems: the
+  // Zeno 2 L and the Artik R 2 27 cannot size every line, both being the
+  // largest size of the highest-aspect family in their maker's range.
+  //
+  // It was 4. The two sink-rate failures went when the minimum-sink search
+  // was capped at a usable lift coefficient — it had been reporting a
+  // minimum at CL 1.37 and 24 km/h, which is not a flight state. The
+  // baseline is tightened rather than left where it was, so the two that
+  // remain cannot be joined quietly by a third. Treating those as failures would make the whole
   // command red every time and train everyone to ignore it — but letting the
   // number drift up silently is worse, so the baseline is pinned.
   ['full pipeline', 'node tests/full-pipeline.mjs',
-    /(\d+) wings completed[^,]*, (\d+) problems/, { baseline: 4 }],
+    /(\d+) wings completed[^,]*, (\d+) problems/, { baseline: 2 }],
   // The interface is a stage in its own right. Its harness used to call the
   // export functions directly, which tests the functions and not the wiring —
   // and that is how a duplicate 'Panels DXF' button and a bill of materials

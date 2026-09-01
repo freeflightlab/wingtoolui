@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1508-test validation suite and a benchmark with regression budgets
+- [x] 1514-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -468,9 +468,13 @@ validation notes flagged.
       middle length 2%). The generator's middles are 1812 mm against the
       Zeno 2's 886 while the Geo 7 matches; the branching ratio is right at
       3.0 against 3.14. It is the lateral run that is wrong.
-- [ ] **Low-Reynolds profile drag** — minimum sink comes out at 0.69 m/s on
-      the two smallest wings, below anything real. The estimated polar is
-      optimistic at low Reynolds number.
+- [x] **Minimum sink was outside the flyable envelope** — the polar is flat
+      past CL 1.0, so the search put the minimum at CL 1.37 and 24 km/h.
+      `maxUsableCL` caps it; glide is unaffected. Not a profile-drag error:
+      doubling it moves sink toward reality and glide away from it.
+- [ ] **A residual 10% in minimum sink** — the cap does not close it and
+      profile drag is demonstrably not the cause. Needs a published sink
+      polar to calibrate against; there is none in the reference set.
 
 - [x] **Reference data collection** — `docs/collecting-reference-data.md` is a
       self-contained brief for building the database in a separate

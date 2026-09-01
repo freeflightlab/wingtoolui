@@ -1532,7 +1532,23 @@ function thinAirfoil(airfoil, opts = 400) {
  * separation bubble, which is exactly what dominates a paraglider section at
  * the Reynolds numbers it actually flies. Treat it as a floor.
  */
-function profileDrag({ reynolds, thickness, transition = 0.35 }) {
+/**
+ * `surfaceFactor` — a paraglider is not a smooth aerofoil.
+ *
+ * The calculation below is a flat-plate skin friction with a form factor:
+ * right for a polished rigid section, and optimistic for a wing whose surface
+ * is fabric, scalloped between ribs by the billow, seamed at every cell and
+ * open at the nose. Published estimates put a ram-air wing at somewhere
+ * between 1.3 and 2 times a smooth section of the same thickness.
+ *
+ * It defaults to 1.0 — the smooth-aerofoil value — so nothing changes for
+ * anyone who does not set it, and the assumption is visible rather than
+ * folded into a constant. `estimateSectionPolar` already marks its output
+ * `source: 'estimated'`; this says *which* estimate.
+ */
+function profileDrag({
+  reynolds, thickness, transition = 0.35, surfaceFactor = 1.0,
+}) {
   const Re = Math.max(1e3, reynolds);
   const cfLam = 1.328 / Math.sqrt(Re);
   const cfTurb = 0.455 / Math.pow(Math.log10(Re), 2.58);
@@ -1540,17 +1556,19 @@ function profileDrag({ reynolds, thickness, transition = 0.35 }) {
   const tc = thickness;
   const formFactor = 1 + 2 * tc + 60 * Math.pow(tc, 4);
   const wetted = 2.02;                 // wetted area / planform area
-  return cf * formFactor * wetted;
+  return cf * formFactor * wetted * surfaceFactor;
 }
 
 /**
  * A 2D section polar from theory plus correlation. `source: 'estimated'`
  * marks it so nothing downstream can mistake it for measured data.
  */
-function estimateSectionPolar(airfoil, { reynolds, mach = 0, alphas = null }) {
+function estimateSectionPolar(airfoil, {
+  reynolds, mach = 0, alphas = null, surfaceFactor = 1.0,
+}) {
   const ta = thinAirfoil(airfoil);
   const t = airfoil.metrics.maxThickness;
-  const cd0 = profileDrag({ reynolds, thickness: t });
+  const cd0 = profileDrag({ reynolds, thickness: t, surfaceFactor });
 
   // Maximum lift falls off with Reynolds number. This is a rough fit to the
   // usual behaviour of cambered sections, not a prediction.
@@ -1693,6 +1711,10 @@ function wingPolar({
   planform, airfoil, atm, mass, area = null, chordRef = null,
   twistAt = null, cxLines = 0.020, cxPilot = 0.015,
   alphaRange = [-4, 16], step = 0.5, sectionPolar = null, N = 24,
+  // The highest lift coefficient the wing can actually be flown at.
+  maxUsableCL = 0.9,
+  // How much rougher the real fabric surface is than a smooth aerofoil.
+  surfaceFactor = 1.0,
 }) {
   const S = area ?? 2 * simpson((y) => planform.chord(y), 0, planform.halfSpan, 400);
   const cRef = chordRef ?? S / planform.span;
@@ -1714,7 +1736,7 @@ function wingPolar({
     for (let iter = 0; iter < 6; iter++) {
       nd = nonDimensional({ speed: V, chord: cRef, atm, span: planform.span });
       if (!sectionPolar) {
-        sp = estimateSectionPolar(airfoil, { reynolds: nd.reynolds, mach: nd.mach });
+        sp = estimateSectionPolar(airfoil, { reynolds: nd.reynolds, mach: nd.mach, surfaceFactor });
       }
       ll = liftingLine({
         planform, alphaDeg: a, twistAt,
@@ -1765,7 +1787,22 @@ function wingPolar({
     points.push(pt);
     if (!pt.stalled && ll.CL > 0) {
       if (!best || glide > best.glideRatio) best = pt;
-      if (!minSink || sinkRate < minSink.sinkRate) minSink = pt;
+      // Only inside the flyable envelope.
+      //
+      // The polar is very flat past about CL 1.0 — sink falls from 0.854 to
+      // 0.820 m/s between alpha 8 and 14 — so an unconstrained search puts
+      // the minimum at the top of the alpha range, at CL 1.37 and 24 km/h.
+      // That is not a flight state: a paraglider's usable lift coefficient is
+      // limited by pitch stability and the collapse floor, not by where the
+      // aerofoil finally stalls, and it loses the front of the wing long
+      // before it gets there.
+      //
+      // Reported minimum sink was 0.70 to 0.78 m/s across every wing tested,
+      // against a real 0.95 to 1.15. Capped at a usable CL it lands where it
+      // should, and the cap is a design assumption the caller can set.
+      if (pt.CL <= maxUsableCL && (!minSink || sinkRate < minSink.sinkRate)) {
+        minSink = pt;
+      }
     }
   }
 
