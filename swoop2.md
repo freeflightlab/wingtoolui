@@ -157,8 +157,38 @@ tool's cutting files were three times wrong, and they never were.
 The reader now runs against every DXF the interface exports, in the interface
 test — verified by breaking the writer and watching it fail.
 
-### What is still not done
+### Rebuilding outlines from loose segments
 
-The Swoop2's 2D file draws its panels as **83,776 individual LINE segments**,
-not polylines. Reconstructing closed outlines from unordered segments is a
-graph problem, and comparing development against that file still needs it.
+`outlinesFromSegments` puts closed outlines back together from unordered
+`LINE` entities: endpoints snapped to a tolerance, an adjacency built, loops
+walked out of it. Exact on a shuffled square and triangle, and exact on this
+project's own 50 panels exploded into 2,400 shuffled segments and rebuilt —
+same count, same area to nine decimal places.
+
+Where more than two segments meet, the walk **stops rather than guessing**. A
+junction is where two outlines touch, and guessing there is how a
+reconstruction quietly merges two panels into one.
+
+### And it does not crack the Swoop2, for a reason worth stating
+
+Run against the real file, it finds 1,335 closed loops totalling 0.111 m² —
+against the ~18 m² of developed panel that is actually in there. It does not
+work, and the connectivity says why:
+
+```
+degree 1:   2,009 points      loose ends
+degree 2:  54,732 points      clean outline, 75%
+degree 3+: 16,463 points      junctions
+```
+
+The file draws **everything on one layer** — panel outlines, registration
+marks, hole boundaries, seam lines — with shared endpoints. Only 75% of points
+join exactly two segments, where a clean set of outlines would be near 100%.
+Connectivity alone cannot separate a panel from the marks drawn on it.
+
+Separating them needs either layer information the file does not carry, or
+spatial clustering rather than graph walking. That is the honest state:
+**the reconstruction is correct and the input is not separable by it.**
+
+The tool is still worth having — it works on any file that draws its cut lines
+cleanly, and it is proven against known answers rather than against itself.

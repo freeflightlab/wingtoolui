@@ -14277,6 +14277,95 @@ function outlineArea(points) {
   return Math.abs(a) / 2;
 }
 
+/**
+ * Rebuild closed outlines from unordered line segments.
+ *
+ * Some tools draw a cut file as polylines and some as loose segments.
+ * Laboratori d'envol's own 2D DXF for the Swoop2 draws its panels as **83,776
+ * individual LINE entities**, so comparing this project's development against
+ * the method author's own output needs the outlines put back together.
+ *
+ * The segments arrive in no order and with no grouping. What joins them is
+ * coincident endpoints, and "coincident" in a file written at six decimal
+ * places means within a tolerance rather than exactly equal. So endpoints are
+ * snapped to a grid, an adjacency is built, and closed loops are walked out
+ * of it.
+ *
+ * `tolerance` is in the file's own units and matters: too tight and a loop
+ * breaks at a rounding difference, too loose and two panels lying edge to
+ * edge on the roll merge into one. Both failures are reported rather than
+ * silently returned as a smaller number of larger shapes.
+ */
+function outlinesFromSegments(segments, { tolerance = 1e-4 } = {}) {
+  const key = (p) => `${Math.round(p[0] / tolerance)},${Math.round(p[1] / tolerance)}`;
+
+  // Adjacency: node -> [{ to, point, used }]
+  const nodes = new Map();
+  const at = (p) => {
+    const k = key(p);
+    if (!nodes.has(k)) nodes.set(k, { point: p, edges: [] });
+    return k;
+  };
+
+  const edges = [];
+  for (const s of segments) {
+    if (!s.points || s.points.length !== 2) continue;
+    const [a, b] = s.points;
+    if (Math.hypot(b[0] - a[0], b[1] - a[1]) < tolerance) continue;  // zero length
+    const ka = at(a);
+    const kb = at(b);
+    const e = { a: ka, b: kb, used: false, layer: s.layer };
+    edges.push(e);
+    nodes.get(ka).edges.push(e);
+    nodes.get(kb).edges.push(e);
+  }
+
+  const loops = [];
+  const open = [];
+
+  for (const start of edges) {
+    if (start.used) continue;
+    start.used = true;
+    const path = [nodes.get(start.a).point, nodes.get(start.b).point];
+    let here = start.b;
+    const first = start.a;
+    let closed = false;
+
+    // Walk while exactly one unused edge continues the path. A junction with
+    // several choices is where two outlines touch, and guessing there is how
+    // a reconstruction quietly merges two panels.
+    for (;;) {
+      const options = nodes.get(here).edges.filter((e) => !e.used);
+      if (options.length !== 1) break;
+      const next = options[0];
+      next.used = true;
+      const other = next.a === here ? next.b : next.a;
+      path.push(nodes.get(other).point);
+      here = other;
+      if (other === first) { closed = true; break; }
+    }
+
+    if (closed) loops.push(path.slice(0, -1));
+    else if (path.length > 2) open.push(path);
+  }
+
+  return {
+    loops,
+    open,
+    segmentCount: edges.length,
+    nodeCount: nodes.size,
+    tolerance,
+    // A junction is where more than two segments meet: two outlines touching,
+    // or a genuine branch. Reported because it is where reconstruction can go
+    // wrong, and a caller may want to retry at a different tolerance.
+    junctions: [...nodes.values()].filter((n) => n.edges.length > 2).length,
+    note: open.length
+      ? `${loops.length} closed, ${open.length} paths left open — try a `
+        + 'different tolerance, or the file genuinely has open edges'
+      : `${loops.length} closed outlines, nothing left over`,
+  };
+}
+
 /* ===== lep.js ===== */
 /* lep.js — interoperability with LEparagliding data files.
  *

@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1490-test validation suite and a benchmark with regression budgets
+- [x] 1498-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -374,9 +374,14 @@ validation notes flagged.
       wedge back to (0,0) whose size varied with distance from it. The export
       was correct; round trip now matches to 0.000005%. Every exported DXF is
       read back in the interface test.
-- [ ] **Reconstruct panels from LINE segments** — the Swoop2's 2D file draws
-      its panels as 83,776 segments rather than polylines, so comparing
-      development against it needs outline reconstruction.
+- [x] **Outline reconstruction from loose segments** —
+      `outlinesFromSegments`, exact on known shapes and on this project's own
+      50 panels exploded into 2,400 shuffled segments. Stops at junctions
+      rather than guessing.
+- [ ] **Separate the Swoop2's panels from its marks** — reconstruction does
+      not crack that file: everything is on one layer with shared endpoints,
+      and only 75% of points join exactly two segments. Needs spatial
+      clustering, not graph walking.
 
 - [x] **Every wing held to the physics** (`tests/reference-sweep.mjs`) — 56
       line sheets against five invariants, not just against the parser. 74 of
