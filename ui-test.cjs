@@ -170,13 +170,20 @@ if (errors.length){ console.log('\nERRORS:'); errors.forEach(e=>console.log(' - 
 try {
   const fsx = require('fs');
   const L = globalThis.__lep;
-  const doc = L.parseLep(fsx.readFileSync('/tmp/lepdata/gnuC2-27.txt','utf8'));
+  // The Swoop2 from the repository, not a sample living in /tmp.
+  //
+  // This read '/tmp/lepdata/gnuC2-27.txt', which was never committed. The
+  // check passed for as long as that scratch file happened to exist and
+  // failed the moment it did not — a test depending on something outside the
+  // checkout is a test that does not run for anyone else.
+  const doc = L.parseLep(
+    fsx.readFileSync('data/reference/lep/swoop2-20260829.lep', 'utf8'));
   const design = L.lepToDesign(doc);
   globalThis.__setLEP({ doc, design, info: L.describeLep(doc) });
   globalThis.__rebuild();
   const m = globalThis.__getM();
   console.log(`  ok   LEP import: ${m.metrics.area.toFixed(2)} m2, AR ${m.metrics.aspectRatio.toFixed(2)}, ${m.panels.length} panels, proj span ${m.lobeM.projectedSpan.toFixed(2)} m`);
-  const out = L.designToLep({ wing: m.wing, airfoil: m.airfoil, name: 'gnuC2-27', balance: m.balance }, doc);
+  const out = L.designToLep({ wing: m.wing, airfoil: m.airfoil, name: 'Swoop2', balance: m.balance }, doc);
   console.log(`  ok   LEP export: ${out.split('\n').length} lines, re-reads as ${L.describeLep(L.parseLep(out)).name}`);
   globalThis.__setLEP(null);
   globalThis.__rebuild();
@@ -272,12 +279,26 @@ try {
     globalThis.__buttons.length = 0;
     globalThis.__controls();
     for (const b of globalThis.__buttons) { try { b.fn(); } catch (e) { /* reported above */ } }
-    return Object.fromEntries(
-      Object.entries(globalThis.__saved).map(([k, v]) => [k, v.length]));
+    // The content, not its length.
+    //
+    // Comparing byte lengths missed a setting that changed 378 to 382 in
+    // every row of a file: same number of characters, entirely different
+    // cutting lengths. A probe that can only see length changes passes a
+    // control that does nothing whenever the numbers happen to be the same
+    // width.
+    return Object.fromEntries(Object.entries(globalThis.__saved));
   };
   const S2 = globalThis.__S;
   const baseline = pressAll();
   const probes = [
+    // The assumptions made adjustable. A control that changes nothing is
+    // worse than no control: it says the user has a choice when they do not.
+    ['karabinerSep', () => { S2.karabinerSep = S2.karabinerSep === 42 ? 60 : 42; }],
+    ['loopAllowance', () => { S2.loopAllowance = S2.loopAllowance === 130 ? 200 : 130; }],
+    ['rowShareMode', () => {
+      S2.rowShareMode = S2.rowShareMode === 'convention' ? 'pressure' : 'convention';
+    }],
+    ['printMargin', () => { S2.printMargin = S2.printMargin === 10 ? 20 : 10; }],
     ['marks', () => { S2.marks = !S2.marks; }],
     ['applyOval', () => { S2.applyOval = !S2.applyOval; }],
     ['cells', () => { S2.cells += 4; }],

@@ -93,9 +93,17 @@ if (!existsSync('MANIFEST.txt')) {
 /* ---- 2. exports are used somewhere ------------------------------------ */
 const allSrc = coreFiles.map((f) => readFileSync(`src/core/${f}`, 'utf8')).join('\n');
 const uiSrc = readFileSync('src/ui/app.js', 'utf8');
-const testSrc = readFileSync('tests/run-tests.js', 'utf8');
+// Every test file, not just the unit suite.
+//
+// This read `run-tests.js` alone, so a function used only by the Phase 1
+// audit, the full-pipeline run or the reference sweep counted as unused. It
+// flagged `lineBudget`, which the Phase 1 audit exercises by name — a real
+// consumer the check could not see.
+const testSrc = readdirSync('tests')
+  .filter((f) => /\.(js|mjs)$/.test(f))
+  .map((f) => readFileSync(`tests/${f}`, 'utf8')).join('\n');
 const roadmapSrc = readFileSync('ROADMAP.md', 'utf8');
-const toolSrc = readdirSync('tools').filter((f) => f.endsWith('.mjs'))
+const toolSrc = readdirSync('tools').filter((f) => /\.(mjs|cjs)$/.test(f))
   .map((f) => readFileSync(`tools/${f}`, 'utf8')).join('\n');
 const consumers = `${allSrc}\n${uiSrc}\n${testSrc}\n${toolSrc}`;
 

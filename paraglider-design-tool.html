@@ -15289,6 +15289,14 @@ const S = {
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '',
   ovalFromPressure: false, sailTension: 300,
+  // Assumptions that were constants inside the core. Each is a design
+  // decision rather than a fact, so each is the user's to make.
+  karabinerSep: 42,        // cm between the karabiners
+  loopAllowance: 130,      // mm of line consumed by the loops at each end
+  cdCylinder: 1.1,         // drag coefficient of a line in cross-flow
+  measureTension: 5,       // daN, the tension the PMA measures lengths at
+  rowShareMode: 'convention',
+  printMargin: 10, printOverlap: 15,
   showIntake: false, intakeLower: 9, intakeUpper: 1,
   packer: 'profile',
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
@@ -15459,8 +15467,38 @@ function rebuild() {
       everyNthRib: 2, lineLengthM: S.lineLength,
       mergeRows: MERGES[S.mergeRows] || null,
       brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
+      karabinerSeparationM: S.karabinerSep / 100,
     });
     if (S.stabilo) addStabilo(linePlan, wing, { anchors: 2 });
+
+    // Loads, which the rib-stress report and the Lines table both read.
+    //
+    // `M.loads` was referenced in three places and assigned in none, so both
+    // of those features silently showed nothing. A field that is only ever
+    // read is a feature that was never wired.
+    let loads = null;
+    let lineSelection = null;
+    let lengths = null;
+    try {
+      loads = analyseLoads({
+        plan: linePlan,
+        planform,
+        stations: wing.stations,
+        totalMassKg: S.pilotMass + S.wingMass + S.lineMass,
+        alphaDeg: S.alphaDeg,
+        wingAreaM2: metrics.area,
+        rowShareMode: S.rowShareMode,
+        airfoil,
+        anchors: airfoil.anchors,
+      });
+      lineSelection = selectLines(loads.tensions, {});
+      lengths = lengthChain(lineSelection, {
+        loopAllowanceMM: S.loopAllowance,
+        measurementDaN: S.measureTension,
+      });
+    } catch (e) {
+      loads = null;
+    }
 
     // Nesting is the one expensive step — a few hundred milliseconds on a
     // big wing — so it is deferred rather than run on every slider frame.
@@ -15478,7 +15516,7 @@ function rebuild() {
     M = {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
-      linePlan,
+      linePlan, loads, lineSelection, lengths,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
@@ -15697,6 +15735,22 @@ function buildControls() {
   const N = clear('g-panels');
   checkField(N, 'brakeLines', 'Brake lines in the plan');
   checkField(N, 'stabilo', 'Stabilo line');
+
+  // Assumptions, made adjustable. Every one was a constant inside a core
+  // module, and a tool that hides a design decision makes it for the user
+  // without saying so.
+  hint(N, 'The values below were fixed constants in the model. Each is a '
+    + 'design decision rather than a fact, so each is yours to set.');
+  numberField(N, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
+  numberField(N, 'loopAllowance', 'Loop allowance per line (mm)', 0, 300, 5);
+  numberField(N, 'cdCylinder', 'Line drag coefficient', 0.8, 1.4, 0.05);
+  numberField(N, 'measureTension', 'Length measuring tension (daN)', 1, 15, 0.5);
+  selectField(N, 'rowShareMode', 'Row load shares from', [
+    ['convention', 'the handbook convention'],
+    ['pressure', 'the section pressure distribution'],
+  ]);
+  numberField(N, 'printMargin', 'Printed pattern margin (mm)', 5, 25, 1);
+  numberField(N, 'printOverlap', 'Printed pattern overlap (mm)', 5, 40, 1);
   // Diff the design against a real wing.
   //
   // The measurements have been in data/reference/ and `comparePlans` has
@@ -15761,6 +15815,7 @@ function buildControls() {
   button(grid, 'Printable pattern', () => {
     const t = tiledPages(seamed(), {
       paper: S.paper, rollWidth: S.rollWidth, gap: S.panelGap / 100,
+      marginMM: S.printMargin, overlapMM: S.printOverlap,
     });
     // One file holding every page, so a builder prints once.
     const all = t.pages.map((p) => p.svg).join('\n<!-- page break -->\n');
@@ -16769,16 +16824,51 @@ function drawRib() {
 
 /* --------------------------------------------------------------- output -- */
 
+/**
+ * Line lengths, from the plan the rest of the tool uses.
+ *
+ * This exported `M.cascade` — chapter 8's weighted-centroid cascade — while
+ * the Lines view, the loads, the bill of materials and the PMA sheet all use
+ * `M.linePlan`. Two line models, and the export read the one the user's
+ * settings do not reach: changing the karabiner separation moved the plan and
+ * left the exported lengths untouched.
+ *
+ * `buildCascade` still draws the front view, which is what it is for.
+ */
 function linesCSV() {
-  const out = ['row,level,terminal,rib_index,length_m'];
-  for (const s of M.cascade.lengths) {
-    out.push([s.row, s.level, s.terminal ? 1 : 0, s.ribIndex ?? '', s.length.toFixed(4)].join(','));
+  const plan = M.linePlan;
+  const byName = new Map();
+  if (M.lengths) for (const l of M.lengths.lines) byName.set(l.name, l);
+  const sized = new Map();
+  if (M.lineSelection) {
+    for (const l of M.lineSelection.lines) if (l.line) sized.set(l.name, l.line.code);
   }
-  const budget = lineBudget(M.cascade);
+
+  const out = ['name,row,level,rib_index,flying_mm,sewn_mm,cut_mm,load_N,material'];
+  for (const l of plan.lines) {
+    const c = byName.get(l.name);
+    out.push([
+      l.name, l.row, l.level, l.ribIndex ?? '',
+      l.lengthMM != null ? Math.round(l.lengthMM) : '',
+      c ? c.sewnLengthMM : '',
+      c ? c.cutLengthMM : '',
+      c && Number.isFinite(c.flightN) ? c.flightN.toFixed(1) : '',
+      sized.get(l.name) || '',
+    ].join(','));
+  }
+
   out.push('');
-  out.push('# total by row');
-  for (const [row, len] of Object.entries(budget.byRow)) out.push(`${row},,,,${len.toFixed(3)}`);
-  out.push(`TOTAL,,,,${budget.total.toFixed(3)}`);
+  out.push('# totals, both sides');
+  const byRow = {};
+  for (const l of plan.lines) byRow[l.row] = (byRow[l.row] || 0) + (l.lengthMM || 0) * 2;
+  for (const [row, mm] of Object.entries(byRow)) {
+    out.push(`# row ${row},,,,${(mm / 1000).toFixed(3)} m`);
+  }
+  out.push(`# TOTAL,,,,${plan.totalLengthM.toFixed(3)} m`);
+  if (M.lengths) {
+    out.push(`# cut length,,,,${M.lengths.cutMetres.toFixed(3)} m `
+      + `(loops ${S.loopAllowance} mm per line)`);
+  }
   return out.join('\n');
 }
 

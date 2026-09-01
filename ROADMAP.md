@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1498-test validation suite and a benchmark with regression budgets
+- [x] 1508-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -352,6 +352,18 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Assumptions exposed as controls** — 33 of 75 numeric defaults in core
+      modules could not be reached from the interface. The design decisions
+      among them are now settings, each asserted to change both the model and
+      an exported file. See `docs/assumptions.md`.
+- [x] **`M.loads` was never assigned** — read in three places, computed in
+      none, so the rib-stress report and the Lines table load column had
+      always shown nothing.
+- [x] **Two line models, one export using the wrong one** — `linesCSV` read
+      the chapter 8 cascade while everything else used the line plan.
+- [x] **A test depending on a file outside the checkout** — the interface
+      test read a LEP sample from `/tmp`. It now reads the committed Swoop2.
 
 - [x] **Swoop2 imported and validated** — Laboratori d'envol's own 18 m2
       design, LEP 3.30p. Flat area, span, chord, cells and ribs all reproduce
