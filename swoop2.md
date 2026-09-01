@@ -62,7 +62,45 @@ Swoop2       depth 4: 48 lines at  775 mm   ->  riser-first
 through unchanged. Both directions are asserted, along with the case of too
 few levels to tell — reported rather than guessed.
 
-## 3. What this does not settle
+## 3. The published loads, and a bug they found
+
+The design also publishes a load in kilograms for every one of its 93 lines.
+That tests the load model rather than the importer.
+
+**The load closes at every cascade level** — 25.3 kg per side at levels 1, 2
+and 3, and 24.2 at level 4. That is the same invariant this project's own
+closure check asserts, here confirmed against the source method's own
+arithmetic rather than against itself.
+
+### Ten per cent of the load was going to a row that does not exist
+
+The Swoop2 is a **three-riser** wing. Its published riser loads give:
+
+```
+A 38.3%    B 38.3%    C 23.4%
+```
+
+The handbook convention is A 35 / B 35 / C 20 / D 10, written for a four-row
+wing. Applied unchanged to a three-row wing it returns that table verbatim —
+**assigning 10% of the load to a D row the wing does not have**, and leaving
+every real row carrying a tenth less than it should.
+
+Renormalised over the rows the wing actually has:
+
+```
+A 38.9%    B 38.9%    C 22.2%
+```
+
+Within about a point of the published figures, which is what says the
+convention is right and the arithmetic was wrong. A four-row wing is left
+untouched, and the result reports `renormalised` so the difference is visible
+rather than silent.
+
+This is the value of validating against the method's author: the convention
+had been checked against four-row wings for the whole project, and every one
+of them hid the bug.
+
+## 4. What this does not settle
 
 The geometry reproduces exactly, which validates the importer and the
 planform arithmetic. It does **not** validate the aerodynamics, the load

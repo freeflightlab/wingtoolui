@@ -11090,7 +11090,34 @@ function rowSharesFor({
   mode = 'convention', airfoil = null, anchors = null, alphaDeg = 6,
   conventionShares = LOAD_ROW_SHARES,
 } = {}) {
-  if (mode !== 'pressure') return { shares: conventionShares, source: 'convention' };
+  if (mode !== 'pressure') {
+    // Restricted to the rows the wing actually has, and renormalised.
+    //
+    // The convention table is A 35 / B 35 / C 20 / D 10, written for a
+    // four-row wing. Returned unchanged for a three-row wing it assigns
+    // **10% of the load to a D row that does not exist**, and the remaining
+    // rows each carry a tenth less than they should.
+    //
+    // Laboratori d'envol's own Swoop2 is a three-riser wing, and its
+    // published riser loads give A 38.3% / B 38.3% / C 23.4%. The convention
+    // renormalised over three rows gives 38.9 / 38.9 / 22.2 — within about a
+    // point, which is what says the convention is right and the arithmetic
+    // was wrong.
+    if (!anchors) return { shares: conventionShares, source: 'convention' };
+
+    const present = Object.keys(anchors).filter((r) => r in conventionShares);
+    if (!present.length) return { shares: conventionShares, source: 'convention' };
+
+    const total = present.reduce((a, r) => a + conventionShares[r], 0);
+    const shares = {};
+    for (const r of present) shares[r] = conventionShares[r] / total;
+    return {
+      shares,
+      source: 'convention',
+      renormalised: present.length !== Object.keys(conventionShares).length,
+      rows: present,
+    };
+  }
   if (!airfoil) throw new Error('Pressure-derived row shares need the section.');
   const a = anchors || airfoil.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
   const r = rowSharesFromPressure(airfoil, a, alphaDeg);
