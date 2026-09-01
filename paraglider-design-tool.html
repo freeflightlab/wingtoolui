@@ -14217,7 +14217,21 @@ function parseDXF(text) {
       case '8': cur.layer = value; break;
       case '70': cur.closed = (Number(value) & 1) === 1; break;
       case '1': cur.text = value; break;
-      case '10': pendingX = Number(value); break;
+      // A classic POLYLINE header carries a mandatory dummy point at the
+      // origin — DXF calls it the elevation point — before its VERTEX
+      // entities begin. Reading it as a vertex puts a spurious (0,0) into
+      // every outline.
+      //
+      // That is exactly what produced a 3.24x area discrepancy on a round
+      // trip, varying from 4.1x to 10.8x per panel: a shoelace polygon with
+      // an extra point at the origin encloses a wedge back to (0,0), and the
+      // size of that wedge depends on how far the panel sits from it.
+      //
+      // The export was correct all along. The cutting files this tool has
+      // produced are fine; the reader written to check them was not.
+      case '10':
+        if (!(open && !vertexOpen)) pendingX = Number(value);
+        break;
       case '20':
         if (pendingX !== null) { cur.points.push([pendingX, Number(value)]); pendingX = null; }
         break;

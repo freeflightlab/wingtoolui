@@ -101,7 +101,7 @@ global.requestAnimationFrame = (f)=>setTimeout(f,0);
 let errors = [];
 const origErr = console.error;
 try {
-  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__REFERENCE_TOTALS=typeof REFERENCE_TOTALS==="object"?REFERENCE_TOTALS:{}; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
+  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__REFERENCE_TOTALS=typeof REFERENCE_TOTALS==="object"?REFERENCE_TOTALS:{}; globalThis.__parseDXF=parseDXF; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
 } catch(e){ errors.push('boot: '+e.message+'\n'+e.stack.split('\n').slice(0,4).join('\n')); }
 
 if (!errors.length) {
@@ -313,6 +313,30 @@ try {
     process.exit(1);
   }
   console.log(`  ok   ${pressed} export buttons pressed, none threw`);
+
+  // Every DXF the buttons wrote, read back and checked.
+  //
+  // Pressing a button proves it does not throw. It does not prove the file is
+  // a file a cutter can use — this project wrote DXF for its whole life
+  // without once reading one back.
+  const dxfs = Object.entries(globalThis.__saved || {})
+    .filter(([name]) => /\.dxf$/i.test(name));
+  const badDxf = [];
+  for (const [name, text] of dxfs) {
+    const parsed = globalThis.__parseDXF(text);
+    if (!parsed.polylines.length && !parsed.segments.length) {
+      badDxf.push(`${name}: no geometry`);
+    } else if (parsed.unreadTypes.length) {
+      badDxf.push(`${name}: unreadable ${parsed.unreadTypes.join(',')}`);
+    } else if (parsed.polylines.some((p) => p.points.length < 3)) {
+      badDxf.push(`${name}: a polyline with under three points`);
+    }
+  }
+  if (badDxf.length) {
+    for (const b of badDxf) console.log(`  FAIL exported DXF ${b}`);
+    process.exit(1);
+  }
+  console.log(`  ok   ${dxfs.length} exported DXF files read back and valid`);
 
   // The selectors must actually find things. They returned [] and null
   // unconditionally for most of this project, which let the app's tab wiring

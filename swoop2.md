@@ -131,16 +131,34 @@ found nothing.
 is still awaiting vertices, so flushing *before* clearing that flag left every
 polyline unpushed and the reader returned only `TEXT`.
 
-### The comparison is not done, and here is why
+### The 3.24x, explained — and it was the reader
+
+The round trip came out **3.24 times** the area that went in, varying from
+4.1x to 10.8x per panel. That varying ratio was the clue: a uniform scale
+error is uniform.
+
+A classic `POLYLINE` header carries a **mandatory dummy point at the origin**
+— DXF calls it the elevation point — before its `VERTEX` entities begin. Read
+as a vertex it puts a spurious `(0,0)` into every outline, and a shoelace
+polygon with an extra point at the origin encloses a wedge back to it. The
+size of that wedge depends on how far the panel sits from the origin, which
+is why the ratio varied.
+
+```
+nested    17.996100 m2
+from DXF  17.996101 m2      0.000005%
+```
+
+**The export was correct all along.** The cutting files this project has
+produced are fine; the reader written to check them was not. Worth stating
+plainly, because for a while there was a number on the table suggesting the
+tool's cutting files were three times wrong, and they never were.
+
+The reader now runs against every DXF the interface exports, in the interface
+test — verified by breaking the writer and watching it fail.
+
+### What is still not done
 
 The Swoop2's 2D file draws its panels as **83,776 individual LINE segments**,
 not polylines. Reconstructing closed outlines from unordered segments is a
-graph problem, and it has not been done here.
-
-Separately, and more awkwardly: the round trip of this project's own panels
-gives a total area **3.24 times** the area of the panels that went in, and I
-have not explained it. The reader is exact on a known shape, so the fault is
-either in how the outline is closed for the comparison or in the export
-itself. It is recorded as an open question rather than smoothed over, because
-a 3.24x discrepancy in a cutting file would matter a great deal if it is the
-export that is wrong.
+graph problem, and comparing development against that file still needs it.

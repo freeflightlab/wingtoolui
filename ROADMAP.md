@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1487-test validation suite and a benchmark with regression budgets
+- [x] 1490-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -369,11 +369,11 @@ validation notes flagged.
       exist. Renormalised, it matches the published shares within a point.
 - [x] **A DXF reader** — `parseDXF`, exact on a known shape. The tool had
       written DXF since Phase 1 and never read one back.
-- [ ] **Explain a 3.24x area discrepancy** — round-tripping this project's
-      own panels through its own DXF gives 3.24x the area that went in. The
-      reader is exact on a known rectangle, so the fault is in how the
-      comparison closes the outline or in the export. Unexplained, and it
-      would matter if it is the export.
+- [x] **The 3.24x area discrepancy explained** — the reader was treating a
+      POLYLINE's mandatory origin elevation point as a vertex, enclosing a
+      wedge back to (0,0) whose size varied with distance from it. The export
+      was correct; round trip now matches to 0.000005%. Every exported DXF is
+      read back in the interface test.
 - [ ] **Reconstruct panels from LINE segments** — the Swoop2's 2D file draws
       its panels as 83,776 segments rather than polylines, so comparing
       development against it needs outline reconstruction.
