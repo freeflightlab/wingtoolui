@@ -382,6 +382,35 @@ try {
     process.exit(1);
   }
   console.log(`  ok   ${tabNames.length} tabs each have a viewport: ${tabNames.join(', ')}`);
+
+  // Controls: every setting reachable, none bound twice.
+  //
+  // Thirty of seventy-four controls had been dumped into one group — line
+  // plan, assumptions, rib openings and printing together. Splitting them
+  // duplicated three, because the same setting was bound in two groups at
+  // once and nothing checked.
+  const src = require('fs').readFileSync('src/ui/app.js', 'utf8');
+  const boundKeys = [...src.matchAll(
+    /(?:slider|numberField|checkField|selectField)\([^,]+, '(\w+)'/g)].map((m) => m[1]);
+  const counts = {};
+  for (const k of boundKeys) counts[k] = (counts[k] || 0) + 1;
+  const twice = Object.entries(counts).filter(([, n]) => n > 1);
+  if (twice.length) {
+    for (const [k, n] of twice) console.log(`  FAIL setting ${k} has ${n} controls`);
+    process.exit(1);
+  }
+
+  const declared = [...src.match(/const S = \{[\s\S]*?\n\};/)[0]
+    .matchAll(/(\w+):/g)].map((m) => m[1]);
+  const internalOnly = ['name', 'nCrit', 'airfoilCustom', 'ribIndex', 'tab'];
+  const unreachable = declared.filter(
+    (k) => !boundKeys.includes(k) && !internalOnly.includes(k));
+  if (unreachable.length) {
+    console.log(`  FAIL settings with no control: ${unreachable.join(', ')}`);
+    process.exit(1);
+  }
+  console.log(`  ok   ${boundKeys.length} controls, each bound once, `
+    + `every setting reachable`);
 } catch(e){ console.log('  FAIL buttons: '+e.message); process.exit(1); }
 
 try {

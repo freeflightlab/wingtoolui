@@ -506,45 +506,52 @@ function buildControls() {
   balanceHost.id = 'balanceTable';
   B.append(balanceHost);
 
-  const N = clear('g-panels');
-  checkField(N, 'brakeLines', 'Brake lines in the plan');
-  checkField(N, 'stabilo', 'Stabilo line');
+  // Lines and risers: what the cascade is made of.
+  const LN = clear('g-lines');
+  checkField(LN, 'brakeLines', 'Brake lines in the plan');
+  checkField(LN, 'stabilo', 'Stabilo line');
 
-  // Assumptions, made adjustable. Every one was a constant inside a core
-  // module, and a tool that hides a design decision makes it for the user
-  // without saying so.
-  hint(N, 'The values below were fixed constants in the model. Each is a '
-    + 'design decision rather than a fact, so each is yours to set.');
-  numberField(N, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
-  numberField(N, 'loopAllowance', 'Loop allowance per line (mm)', 0, 300, 5);
-  numberField(N, 'cdCylinder', 'Line drag coefficient', 0.8, 1.4, 0.05);
-  numberField(N, 'measureTension', 'Length measuring tension (daN)', 1, 15, 0.5);
-  selectField(N, 'rowShareMode', 'Row load shares from', [
-    ['convention', 'the handbook convention'],
-    ['pressure', 'the section pressure distribution'],
+  numberField(LN, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
+  selectField(LN, 'compareTo', 'Compare against a real wing', [
+    ['', 'none'],
+    ...(typeof REFERENCE_TOTALS === 'object'
+      ? Object.keys(REFERENCE_TOTALS).sort()
+        .map((k) => [k, k.replace(/^niviuk-/, 'Niviuk ')])
+      : []),
   ]);
-  numberField(N, 'printMargin', 'Printed pattern margin (mm)', 5, 25, 1);
-  numberField(N, 'printOverlap', 'Printed pattern overlap (mm)', 5, 40, 1);
+  selectField(LN, 'lineRow', 'Line plan: highlight row', [
+    ['all', 'all rows'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D'],
+    ['K', 'brakes'], ['S', 'stabilo'],
+  ]);
   // Diff the design against a real wing.
   //
   // The measurements have been in data/reference/ and `comparePlans` has
   // existed since Phase 2, and until now nothing in the interface could reach
   // either. A comparison nobody can run is a comparison nobody trusts.
-  selectField(N, 'compareTo', 'Compare against a real wing', [
-    ['', 'none'],
-    ...(typeof REFERENCE_TOTALS === 'object'
-      ? Object.keys(REFERENCE_TOTALS).sort().map((k) => [k, k.replace(/^niviuk-/, 'Niviuk ')])
-      : []),
-  ]);
-  selectField(N, 'lineRow', 'Line plan: highlight row', [
-    ['all', 'all rows'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D'],
-    ['K', 'brakes'], ['S', 'stabilo'],
-  ]);
+  // Internal structure: what is inside the wing.
+  const IN = clear('g-internal');
+  checkField(IN, 'ribHoles', 'Rib openings (lightening and cross-flow)');
+  hint(IN, 'A rib has one set of openings, not two: the lightening holes are '
+    + 'the cross-ports. On the test wing they pass 6 to 64 times the air the '
+    + 'neighbouring cell needs.');
+  checkField(IN, 'showIntake', 'Cell intake against stagnation travel');
+  numberField(IN, 'intakeLower', 'Intake, lower cut (% chord)', 0, 30, 0.5);
+  numberField(IN, 'intakeUpper', 'Intake, upper cut (% chord)', 0, 10, 0.5);
+  hint(IN, 'The opening must contain the stagnation point across the whole '
+    + 'speed range, which is why intakes are cut back along the lower '
+    + 'surface rather than being a hole at the nose.');
+  checkField(IN, 'vribs', 'Diagonal ribs');
+  if (S.vribs) {
+    selectField(IN, 'vribRows', 'Diagonals on rows', [
+      ['B', 'B'], ['C', 'C'], ['BC', 'B and C'],
+    ]);
+    slider(IN, 'vribSpread', 'Diagonal base width', 6, 40, 1, (v) => v.toFixed(0), '% c');
+    slider(IN, 'vribReach', 'Diagonal reach', 1, 3, 1, (v) => `${v} cell${v > 1 ? 's' : ''}`);
+  }
+
+  // Panels and cutting.
+  const N = clear('g-panels');
   checkField(N, 'ovalFromPressure', 'Billow from pressure, not a flat amount');
-  checkField(N, 'showIntake', 'Cell intake against stagnation travel');
-  numberField(N, 'intakeLower', 'Intake, lower cut (% chord)', 0, 30, 0.5);
-  numberField(N, 'intakeUpper', 'Intake, upper cut (% chord)', 0, 10, 0.5);
-  numberField(N, 'sailTension', 'Sail tension (N/m)', 50, 1500, 25);
   selectField(N, 'paper', 'Printable pattern paper', [
     ['A4', 'A4 portrait'], ['A4L', 'A4 landscape'],
     ['A3', 'A3 portrait'], ['A3L', 'A3 landscape'],
@@ -555,21 +562,31 @@ function buildControls() {
   hint(N, 'Packing against the outlines rather than the boxes saves about 4.5 m of roll on a 25 m² wing.');
   checkField(N, 'marks', 'Registration marks on panels');
   hint(N, 'Notches, grain arrows and panel labels. Notches pair at equal fractions of each seam, so the ease ovalization leaves is spread evenly.');
-  checkField(N, 'ribHoles', 'Rib openings (lightening and cross-flow)');
-  checkField(N, 'vribs', 'Diagonal ribs');
-  if (S.vribs) {
-    selectField(N, 'vribRows', 'Diagonals on rows', [
-      ['BC', 'B and C'], ['B', 'B only'], ['C', 'C only'], ['BCD', 'B, C and D'],
-    ]);
-    slider(N, 'vribSpread', 'Diagonal base width', 6, 40, 1, (v) => v.toFixed(0), '% c');
-    slider(N, 'vribReach', 'Diagonal reach', 1, 3, 1, (v) => `${v} cell${v > 1 ? 's' : ''}`);
-  }
   checkField(N, 'applyOval', 'Add ovalization');
   slider(N, 'ovalAmount', 'Total widening', 0, 12, 0.1, (v) => v.toFixed(1), '%');
   slider(N, 'seamAllowance', 'Seam allowance', 0, 25, 1, (v) => v.toFixed(0), ' mm');
   slider(N, 'pointsPerSurface', 'Points per surface', 20, 120, 5, (v) => v.toFixed(0));
   slider(N, 'rollWidth', 'Fabric roll width', 0.8, 2.0, 0.01, (v) => v.toFixed(2), ' m');
   slider(N, 'panelGap', 'Gap between panels', 0, 10, 0.5, (v) => v.toFixed(1), ' cm');
+
+  // Assumptions: values that were constants inside the model.
+  const AS = clear('g-assume');
+  hint(AS, 'Each of these was a fixed constant in a core module. They are '
+    + 'design decisions rather than facts, so each is yours to set — and each '
+    + 'is checked to change the exported files, not just the screen.');
+  numberField(AS, 'loopAllowance', 'Loop allowance per line (mm)', 0, 300, 5);
+  hint(AS, 'Material, not rounding: 130 mm over 88 lines is 11 m of cord.');
+  numberField(AS, 'measureTension', 'Length measuring tension (daN)', 1, 15, 0.5);
+  hint(AS, 'The PMA measures at 5 daN. That exceeds the 1 g load on every '
+    + 'line, so a reference length is longer than a flying length.');
+  selectField(AS, 'rowShareMode', 'Row load shares from', [
+    ['convention', 'the handbook convention'],
+    ['pressure', 'the section pressure distribution'],
+  ]);
+  numberField(AS, 'cdCylinder', 'Line drag coefficient', 0.8, 1.4, 0.05);
+  numberField(AS, 'sailTension', 'Sail tension (N/m)', 50, 1500, 25);
+  numberField(AS, 'printMargin', 'Printed pattern margin (mm)', 5, 25, 1);
+  numberField(AS, 'printOverlap', 'Printed pattern overlap (mm)', 5, 40, 1);
 
   const F = clear('g-files');
   const grid = el('div', 'btn-grid');

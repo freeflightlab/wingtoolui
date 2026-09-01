@@ -50,7 +50,38 @@ It compared exported files by **byte length**. A setting that changed `378` to
 compares content now, and was verified to fail on a deliberately inert
 setting.
 
-## 3. And two in the checks themselves
+## 3. The controls were in one heap
+
+Exposing the assumptions made a second problem obvious: **30 of 74 controls
+sat in a single group** called "Panels & cutting" — the line plan, the
+assumptions, the rib openings, the diagonals and the printing, all together.
+
+They are now nine groups that match what a designer is working on:
+
+| group | controls |
+| --- | --- |
+| Planform | 9 |
+| Airfoil | 9 |
+| Arc & twist | 11 |
+| Environment | 2 |
+| Balance | 13 |
+| **Lines & risers** | 5 |
+| **Internal structure** | 8 |
+| Panels & cutting | 10 |
+| **Assumptions** | 7 |
+
+Splitting them **duplicated three settings** — `mergeRows`, `compareTo` and
+`lineRow` each ended up with two controls, because the same setting was bound
+in two groups at once and nothing checked. One of the duplicates carried the
+wrong option values: `mergeRows` was offered as `ab`/`cd`/`abcd` where the
+model expects `AB`/`CD`/`AB+CD`, so choosing a merge would have silently done
+nothing.
+
+The interface test now asserts every setting has **exactly one** control and
+that none is unreachable — verified by adding a duplicate and watching it
+fail.
+
+## 4. And two in the checks themselves
 
 The unused-export check read `tests/run-tests.js` alone, so a function used
 only by the Phase 1 audit, the full-pipeline run or the reference sweep
