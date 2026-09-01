@@ -770,3 +770,125 @@ function pageSVG(shapes, x0, y0, o) {
   out.push('</svg>');
   return out.join('\n');
 }
+
+/* ------------------------------------------------------------ reading DXF -- */
+
+/**
+ * Read a DXF back.
+ *
+ * This project has written DXF since Phase 1 — panels, ribs, diagonals,
+ * marked panels — and has never read one. Every cutting file it has produced
+ * was checked by counting the polylines it *meant* to write, which is not the
+ * same as checking what a cutter would find in the file.
+ *
+ * A round trip closes that: write a panel set, read it back, and confirm the
+ * geometry that comes out is the geometry that went in. It also gives a way
+ * to check a DXF from elsewhere, which is how a published design's own
+ * cutting file can be compared with a generated one.
+ *
+ * Minimal by intent — group codes come in pairs, and this reads the entities
+ * this project emits plus the LINE segments other tools emit instead. It is
+ * not a DXF library and does not pretend to be: blocks, splines and
+ * transformations are not handled, and a file using them will come back with
+ * fewer entities than it has rather than with wrong ones.
+ */
+export function parseDXF(text) {
+  const raw = text.split(/\r?\n/);
+  const pairs = [];
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    pairs.push([raw[i].trim(), raw[i + 1]]);
+  }
+
+  const entities = [];
+  let cur = null;
+  let pendingX = null;
+  let open = false;        // inside a POLYLINE awaiting its VERTEX entities
+  let vertexOpen = false;
+
+  const flush = () => {
+    if (cur && !open) { entities.push(cur); cur = null; }
+  };
+
+  for (const [code, value] of pairs) {
+    if (code === '0') {
+      // A classic POLYLINE carries its points in following VERTEX entities,
+      // not inside itself. This project's own writer emits that form — so a
+      // reader that only looked inside the polyline found zero points in
+      // every file the tool has ever produced.
+      if (value === 'VERTEX' && open) {
+        vertexOpen = true;
+        pendingX = null;
+        continue;
+      }
+      if (value === 'SEQEND') {
+        // Clear `open` BEFORE flushing: flush() refuses to emit while a
+        // polyline is still awaiting vertices, so flushing first left every
+        // polyline unpushed and the reader returned only TEXT.
+        vertexOpen = false;
+        open = false;
+        flush();
+        pendingX = null;
+        continue;
+      }
+      vertexOpen = false;
+      flush();
+      if (['LWPOLYLINE', 'POLYLINE', 'LINE', 'CIRCLE', 'TEXT'].includes(value)) {
+        cur = { type: value, layer: null, points: [], closed: false };
+        open = /POLYLINE/.test(value);
+      } else {
+        open = false;
+      }
+      pendingX = null;
+      continue;
+    }
+    if (!cur) continue;
+
+    switch (code) {
+      case '8': cur.layer = value; break;
+      case '70': cur.closed = (Number(value) & 1) === 1; break;
+      case '1': cur.text = value; break;
+      case '10': pendingX = Number(value); break;
+      case '20':
+        if (pendingX !== null) { cur.points.push([pendingX, Number(value)]); pendingX = null; }
+        break;
+      // A LINE's second endpoint.
+      case '11': cur.x2 = Number(value); break;
+      case '21':
+        if (cur.x2 !== undefined) { cur.points.push([cur.x2, Number(value)]); delete cur.x2; }
+        break;
+      case '40': cur.radius = Number(value); break;
+      default: break;
+    }
+  }
+  open = false;
+  flush();
+
+  const polylines = entities.filter((e) => /POLYLINE/.test(e.type) && e.points.length > 1);
+  const segments = entities.filter((e) => e.type === 'LINE' && e.points.length === 2);
+
+  return {
+    entities,
+    polylines,
+    segments,
+    circles: entities.filter((e) => e.type === 'CIRCLE'),
+    texts: entities.filter((e) => e.type === 'TEXT'),
+    layers: [...new Set(entities.map((e) => e.layer).filter(Boolean))],
+    // What could not be read, so a file that needs more than this says so
+    // rather than coming back looking complete.
+    unreadTypes: [...new Set(raw.filter((_, i) => i % 2 === 1)
+      .filter((v, i) => raw[i * 2] === '  0'))].filter(
+      (t) => !['LWPOLYLINE', 'POLYLINE', 'LINE', 'CIRCLE', 'TEXT', 'SECTION',
+        'ENDSEC', 'EOF', 'TABLE', 'ENDTAB', 'VERTEX', 'SEQEND'].includes(t)),
+  };
+}
+
+/** Signed area of a closed outline, for comparing what was written with what was meant. */
+export function outlineArea(points) {
+  let a = 0;
+  for (let i = 0; i < points.length; i++) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[(i + 1) % points.length];
+    a += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(a) / 2;
+}

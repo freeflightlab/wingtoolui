@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1479-test validation suite and a benchmark with regression budgets
+- [x] 1487-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -367,9 +367,16 @@ validation notes flagged.
       bug: the four-row convention table was returned unchanged for
       three-row wings, assigning 10% of the load to a D row that does not
       exist. Renormalised, it matches the published shares within a point.
-- [ ] **Validate panel development against the Swoop2** — the design ships
-      2D and 3D DXF and STL surfaces, which would test the development
-      against the method's own output.
+- [x] **A DXF reader** — `parseDXF`, exact on a known shape. The tool had
+      written DXF since Phase 1 and never read one back.
+- [ ] **Explain a 3.24x area discrepancy** — round-tripping this project's
+      own panels through its own DXF gives 3.24x the area that went in. The
+      reader is exact on a known rectangle, so the fault is in how the
+      comparison closes the outline or in the export. Unexplained, and it
+      would matter if it is the export.
+- [ ] **Reconstruct panels from LINE segments** — the Swoop2's 2D file draws
+      its panels as 83,776 segments rather than polylines, so comparing
+      development against it needs outline reconstruction.
 
 - [x] **Every wing held to the physics** (`tests/reference-sweep.mjs`) — 56
       line sheets against five invariants, not just against the parser. 74 of

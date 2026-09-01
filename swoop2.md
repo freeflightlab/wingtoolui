@@ -106,3 +106,41 @@ The geometry reproduces exactly, which validates the importer and the
 planform arithmetic. It does **not** validate the aerodynamics, the load
 model, or the panel development against this wing — the design publishes its
 own line loads and 3D surfaces, and comparing those is the obvious next step.
+
+---
+
+## 5. Reading DXF back, and one thing left unexplained
+
+Comparing panel development against the Swoop2's own cutting file needs a DXF
+reader, and this project had never had one. It has **written** DXF since
+Phase 1 — panels, ribs, diagonals, marked panels — and every file was checked
+by counting the polylines it *meant* to write, which is not the same as
+checking what a cutter would find in it.
+
+`parseDXF` closes that. On a synthetic 2 x 3 rectangle it returns an area of
+exactly 6. Panels and ribs round-trip with every entity accounted for.
+
+Two bugs on the way, both in the reader:
+
+**It found zero points in every file this tool has ever written.** The writer
+emits the classic `POLYLINE` form, where the points live in following `VERTEX`
+entities rather than inside the polyline. A reader that only looked inside
+found nothing.
+
+**Then it found zero polylines.** The flush refuses to emit while a polyline
+is still awaiting vertices, so flushing *before* clearing that flag left every
+polyline unpushed and the reader returned only `TEXT`.
+
+### The comparison is not done, and here is why
+
+The Swoop2's 2D file draws its panels as **83,776 individual LINE segments**,
+not polylines. Reconstructing closed outlines from unordered segments is a
+graph problem, and it has not been done here.
+
+Separately, and more awkwardly: the round trip of this project's own panels
+gives a total area **3.24 times** the area of the panels that went in, and I
+have not explained it. The reader is exact on a known shape, so the fault is
+either in how the outline is closed for the comparison or in the export
+itself. It is recorded as an open question rather than smoothed over, because
+a 3.24x discrepancy in a cutting file would matter a great deal if it is the
+export that is wrong.
