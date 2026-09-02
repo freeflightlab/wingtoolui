@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1527-test validation suite and a benchmark with regression budgets
+- [x] 1552-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -54,9 +54,14 @@ not verify.
 Newly identified from the author's wider site, which carries a decade of
 material published after the handbook:
 
-- [ ] **3D shaping of the leading edge** — a four-part study on forming the
-      nose in ripstop, including negative shaping. Changes panel geometry near
-      the LE and is standard on modern wings.
+- [x] **3D shaping: dart geometry and placement** — `shaping3d.js`. Darts
+      sized, spread, checked for folding, and cut out of the panel. See
+      `docs/shaping.md`.
+- [ ] **Derive the shaping requirement from the wing** — two attempts were
+      wrong: developable distortion is 0.002% and the dihedral change per cell
+      is half a degree. The driver is the doubly-curved nose, which needs the
+      nose radius and surface curvature together. `shapingForWing` asks for
+      the figure rather than guessing it.
 - [x] **LEP file interoperability** — `leparagliding.txt` read and written,
       with all 33 unmodelled sections preserved byte for byte. Validated
       against the published gnuC2-27 (27.00 m² recovered from a file named
@@ -352,6 +357,17 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Split A risers, and a riser-aware plan** — `A-A'/B/C` and
+      `A-A'/B` added, the layout exposed as a control with the split
+      position beside it, and the riser drawn in the Lines view and listed in
+      the cascade table. Every Niviuk in the reference set is a split-A wing
+      and the tool could not draw one. See `docs/risers.md`.
+- [x] **A phantom in the validation set** — the corpus reader routed
+      `magnum4` and `vibegt`, neither of which had ever been committed.
+      Family names are now asserted to have files.
+- [ ] **Vibe GT, Magnum 4 and Enzo 3 sheets** — named in an old routing
+      branch but never present. Genuinely missing from the repository.
 
 - [x] **Controls grouped by subject** — 30 of 74 sat in one group. Now nine
       groups; splitting them exposed three settings bound twice, one with

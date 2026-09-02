@@ -757,7 +757,80 @@ export const RISER_LAYOUTS = {
     { name: 'D', rows: ['D'] },
   ],
   'single': [{ name: 'A', rows: ['A', 'B', 'C', 'D'] }],
+
+  // Split-A layouts, which is what most modern wings actually use.
+  //
+  // `A'` carries the outboard part of the A row on its own riser. Pulling it
+  // folds the wing tips — big ears — while the main A riser holds the centre
+  // flying. Every Niviuk in the reference set is one of these: the Hook 6 is
+  // A-A'/B/C and the Artik R 2 is A-A'/B, a two-liner.
+  //
+  // The split is by anchor position along the span rather than by row, so it
+  // is described with `splitFrom`: the span fraction outboard of which the A
+  // anchors go to the second riser.
+  "A-A'/B/C": [
+    { name: 'A', rows: ['A'], splitTo: "A'", splitFrom: 0.62 },
+    { name: "A'", rows: [], fromSplit: 'A' },
+    { name: 'B', rows: ['B'] },
+    { name: 'C', rows: ['C', 'D'] },
+  ],
+  "A-A'/B": [
+    { name: 'A', rows: ['A'], splitTo: "A'", splitFrom: 0.62 },
+    { name: "A'", rows: [], fromSplit: 'A' },
+    { name: 'B', rows: ['B', 'C', 'D'] },
+  ],
+  'A/B/C': [
+    { name: 'A', rows: ['A'] },
+    { name: 'B', rows: ['B'] },
+    { name: 'C', rows: ['C', 'D'] },
+  ],
 };
+
+/**
+ * Apply a layout's split-A rule to a built plan.
+ *
+ * A split A riser is not a different row — the lines are the same A lines. It
+ * is a different *riser*, taking the outboard A anchors so they can be pulled
+ * down on their own. So the split happens after the cascade is built, by
+ * reassigning anchors outboard of `splitFrom` to the second riser.
+ *
+ * Returns what was moved, because a split that catches no anchors is a riser
+ * with nothing on it and the caller should know rather than find an empty
+ * maillon later.
+ */
+export function applyRiserSplit(plan, layout, { halfSpanM = null } = {}) {
+  const rule = layout.find((r) => r.splitTo);
+  if (!rule) return { moved: 0, riser: null, note: 'layout has no split riser' };
+
+  const span = halfSpanM ?? Math.max(
+    ...plan.lines.map((l) => Math.abs(l.to ? l.to[1] : 0)), 1e-9);
+  const cut = rule.splitFrom * span;
+
+  let moved = 0;
+  for (const l of plan.lines) {
+    if (!rule.rows.includes(l.row)) continue;
+    // The anchor end of an upper line is what sits on the span.
+    const y = l.to ? Math.abs(l.to[1]) : null;
+    if (y === null) continue;
+    if (l.level === 'upper' && y >= cut) {
+      l.riser = rule.splitTo;
+      l.splitRiser = true;
+      moved++;
+    }
+  }
+
+  return {
+    moved,
+    riser: rule.splitTo,
+    splitFromM: cut,
+    splitFraction: rule.splitFrom,
+    note: moved === 0
+      ? `no anchors outboard of ${cut.toFixed(2)} m: the ${rule.splitTo} riser `
+        + 'would carry nothing'
+      : `${moved} anchors moved to the ${rule.splitTo} riser, outboard of `
+        + `${cut.toFixed(2)} m`,
+  };
+}
 
 /**
  * Build a named, riser-based line plan from a wing.
