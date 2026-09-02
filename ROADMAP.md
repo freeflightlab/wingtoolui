@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1565-test validation suite and a benchmark with regression budgets
+- [x] 1579-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -691,8 +691,11 @@ describing geometry and starts predicting behaviour.
       `spanLoadDistribution` in loads.js has used `liftingLine` since the load
       model was built. Listed here as open long after it shipped, which is
       what the roadmap staleness probe in `tools/audit.mjs` now catches.
-- [ ] **Inflated-shape estimate**: the built shape and the flying shape differ,
-      and every measurement in the handbook is of the flying one.
+- [x] **Inflated-shape estimate** — `inflated.js`. Billowing adds 4% wetted
+      area, 0.8% of chord in thickness, and moves camber only because the two
+      surfaces bulge unequally. It does NOT explain the missing 10% in minimum
+      sink: the area effect is half a percent and roughness trades sink
+      against glide. See `docs/inflated.md`.
 
 Phase 5 items should be treated as research, not as features. Anything here
 that produces a number a person might trust needs validation against measured
