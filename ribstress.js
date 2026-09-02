@@ -333,3 +333,160 @@ export function checkWingRibStress({
         + 'it the tape must run to the surface seam',
   };
 }
+
+/* ----------------------------------------------------------- panel stress -- */
+
+/** Sail cloth, by the load it carries per metre of width. */
+export const SAIL_CLOTH = {
+  // Tensile strengths as line loads. A ripstop is directional: the warp and
+  // weft carry differently, and the bias carries least. The weaker of the two
+  // principal directions is what a panel is limited by, because a panel is
+  // loaded in both at once.
+  'Porcher Skytex 27': { warpNPerM: 5600, weftNPerM: 5200, gsm: 27 },
+  'Porcher Skytex 32': { warpNPerM: 6600, weftNPerM: 6100, gsm: 32 },
+  'Porcher Skytex 38': { warpNPerM: 7900, weftNPerM: 7300, gsm: 38 },
+  'Dominico 30D': { warpNPerM: 6200, weftNPerM: 5800, gsm: 34 },
+};
+
+/**
+ * What the sail cloth carries, and whether the seams can hold it.
+ *
+ * A panel between two ribs is a membrane under pressure. It carries load in
+ * two directions at once, and they are not the same:
+ *
+ * **Spanwise** — across the cell, rib to rib. The cloth bulges into an arc
+ * and the tension follows the membrane equation, `T = p R`. This is the large
+ * one, and `ovalization.js` already computes it: it is the same tension that
+ * sets how much the panel billows.
+ *
+ * **Chordwise** — along the cell, nose to tail. The panel is held at both
+ * ends and the surface curvature is much gentler, so the tension is lower.
+ * It matters for the seams, which run chordwise and carry it in shear.
+ *
+ * The seams are the part worth checking. Cloth fails at a few thousand newtons
+ * per metre; a sewn seam carries rather less, and it is the seam that decides
+ * whether a panel holds.
+ */
+export function panelStress({
+  spacingM, pressurePa, chordM,
+  cloth = 'Porcher Skytex 27', seamStrengthNPerM = 2500,
+  excessRatio = 0.06, designFactor = 1,
+  tensionForBillowFn,
+}) {
+  const spec = SAIL_CLOTH[cloth];
+  if (!spec) throw new Error(`Unknown sail cloth: ${cloth}`);
+  if (!(spacingM > 0)) throw new Error('panelStress needs a rib spacing');
+  if (!(chordM > 0)) throw new Error('panelStress needs a chord');
+
+  const p = pressurePa * designFactor;
+
+  // Spanwise: the membrane arc between ribs.
+  const billow = tensionForBillowFn({ spacingM, excessRatio, pressurePa: p });
+  const spanwise = billow.tensionNPerM;
+
+  // Chordwise: not a free membrane, and modelling it as one was wrong.
+  //
+  // The first version took the same membrane relation over a radius of
+  // chord/2, which made the chordwise tension larger than the spanwise one on
+  // every panel. That is backwards. A panel is not free chordwise — it is
+  // sewn to a rib along its whole length at each end, and the rib holds the
+  // aerofoil shape against the pressure. **That is what ribs are for.**
+  //
+  // So the chordwise load path is into the ribs through the seams, not into
+  // the cloth as membrane tension. What the cloth carries chordwise is the
+  // small residual between rib stations, over the aerofoil's own radius of
+  // curvature, which is large everywhere except at the nose.
+  //
+  // It is reported as the shear the seam has to pass into the rib rather than
+  // as a second membrane tension, because that is the load that actually has
+  // somewhere to fail.
+  const chordwiseIntoRibsNPerM = (p * spacingM) / 2;
+
+  // The cloth's limit is its weaker principal direction, because the panel is
+  // loaded in both at once and the weave cannot choose.
+  const clothLimit = Math.min(spec.warpNPerM, spec.weftNPerM);
+  // The membrane tension is the spanwise one; that is what the cloth carries.
+  const worst = spanwise;
+
+  return {
+    spanwiseNPerM: spanwise,
+    // Shear the seam passes into the rib, not a second membrane tension.
+    chordwiseIntoRibsNPerM,
+    worstNPerM: worst,
+    billowRadiusM: billow.radiusM,
+    cloth,
+    clothLimitNPerM: clothLimit,
+    clothUtilisation: worst / clothLimit,
+    // The seam runs chordwise and carries the spanwise tension across itself.
+    seamStrengthNPerM,
+    seamUtilisation: spanwise / seamStrengthNPerM,
+    designFactor,
+    ok: worst <= clothLimit && spanwise <= seamStrengthNPerM,
+    membraneModel: 'spanwise only; chordwise load goes into the ribs',
+    // Which fails first, which is the useful answer: it says what to change.
+    limitedBy: (spanwise / seamStrengthNPerM) > (worst / clothLimit)
+      ? 'seam' : 'cloth',
+    note: (spanwise / seamStrengthNPerM) > (worst / clothLimit)
+      ? 'the seam is the limit, not the cloth: a stronger fabric would not '
+        + 'help, a wider seam or closer ribs would'
+      : 'the cloth is the limit, so a stronger fabric would help',
+  };
+}
+
+/**
+ * Every panel on the wing, from the loads the wing actually carries.
+ *
+ * The pressure comes from the flight state rather than being supplied: it is
+ * the same chordwise loading the rest of the project uses, at the same
+ * dynamic pressure.
+ */
+export function checkWingPanelStress({
+  wing, dynamicPressurePa, peakCp = 1.5,
+  cloth = 'Porcher Skytex 27', seamStrengthNPerM = 2500,
+  designFactor = 1, tensionForBillowFn,
+}) {
+  const panels = [];
+  for (let i = 0; i < wing.ribs.length - 1; i++) {
+    const a = wing.ribs[i];
+    const b = wing.ribs[i + 1];
+    const spacing = Math.abs((b.station ?? 0) - (a.station ?? 0));
+    if (!(spacing > 0)) continue;
+    const chord = (a.chord + b.chord) / 2;
+    panels.push({
+      cell: i,
+      spacingM: spacing,
+      chordM: chord,
+      ...panelStress({
+        spacingM: spacing,
+        chordM: chord,
+        pressurePa: peakCp * dynamicPressurePa,
+        cloth,
+        seamStrengthNPerM,
+        designFactor,
+        tensionForBillowFn,
+      }),
+    });
+  }
+
+  const failing = panels.filter((p) => !p.ok);
+  const worst = panels.slice()
+    .sort((a, b) => Math.max(b.clothUtilisation, b.seamUtilisation)
+      - Math.max(a.clothUtilisation, a.seamUtilisation))[0] ?? null;
+
+  return {
+    panels,
+    failing,
+    ok: failing.length === 0,
+    worst,
+    // The root cell is the widest and carries the most, which is why wings
+    // are built with closer ribs in the middle than a constant spacing would
+    // give.
+    seamLimited: panels.filter((p) => p.limitedBy === 'seam').length,
+    clothLimited: panels.filter((p) => p.limitedBy === 'cloth').length,
+    designFactor,
+    note: failing.length === 0
+      ? `all ${panels.length} panels hold; worst is cell ${worst?.cell} at `
+        + `${(Math.max(worst?.clothUtilisation ?? 0, worst?.seamUtilisation ?? 0) * 100).toFixed(0)}%`
+      : `${failing.length} of ${panels.length} panels exceed cloth or seam`,
+  };
+}

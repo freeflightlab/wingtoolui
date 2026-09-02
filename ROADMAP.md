@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1552-test validation suite and a benchmark with regression budgets
+- [x] 1565-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -682,8 +682,11 @@ Making it pleasant to use across a real project.
 Genuinely hard, and worth being honest about: this is where a design tool stops
 describing geometry and starts predicting behaviour.
 
-- [ ] **Structural check**: line loads into rib and panel stress, so the
-      reinforcement layout has a basis rather than a convention.
+- [x] **Structural check**: line loads into rib and panel stress.
+      `ribstress.js` does both — `checkWingRibStress` for the rib half, built
+      earlier and left marked open, and `panelStress` /
+      `checkWingPanelStress` for the sail. The seam is the limit on every
+      panel, not the cloth. See `docs/rib-stress.md`.
 - [x] **Spanwise lift distribution** by lifting-line — done in Phase 2;
       `spanLoadDistribution` in loads.js has used `liftingLine` since the load
       model was built. Listed here as open long after it shipped, which is

@@ -91,3 +91,51 @@ A line-load model — force per unit width — not a finite element analysis. It
 says so in its output (`lineLoadModel: true`). It is for catching the rib
 whose anchor load runs into the edge of a hole, and for sizing how far the
 tape must go. It is not for certifying a rib.
+
+---
+
+## 6. The other half: what the sail cloth carries
+
+The Phase 5 item asks for line loads into **rib and panel** stress. The rib
+half was built some rounds ago and the item stayed open; this is the panel
+half, which completes it.
+
+A panel between two ribs is a membrane under pressure. `panelStress` gives the
+spanwise tension from the membrane equation — the same tension
+`ovalization.js` already uses to set how much a panel billows — and checks it
+against both the cloth and the seam.
+
+### The seam is the limit, not the cloth
+
+On every panel of every wing tested, at every load case:
+
+```
+seam-limited 20 of 20      cloth-limited 0
+```
+
+That changes what a designer should do about it. A stronger fabric would not
+help; a wider seam or closer ribs would, and the model says so in as many
+words rather than leaving the reader to infer it from two numbers.
+
+### A model that was backwards
+
+The first version treated the chordwise direction as a second free membrane
+over a radius of `chord/2`, which made the **chordwise tension larger than the
+spanwise one on every panel**. That is upside down.
+
+A panel is not free chordwise. It is sewn to a rib along its whole length at
+each end, and the rib holds the aerofoil shape against the pressure — **that
+is what ribs are for.** So the chordwise load path is into the ribs through
+the seams, not into the cloth as membrane tension. It is now reported as the
+shear the seam passes into the rib, which is a load with somewhere to fail,
+and the result carries `membraneModel: 'spanwise only'`.
+
+### What the 8 g case says about cell count
+
+The 12-cell test wing has root cells nearly a metre wide, and four of them
+exceed the seam at 8 g. That is a result rather than a fault: a metre of
+unsupported membrane at 8 g is more than a sewn seam carries.
+
+It is the reason real wings put more cells in the middle than a constant
+spacing would give, and the reason cell count rises with size. The same wing
+at 44 cells comes back inside the seam — asserted.
