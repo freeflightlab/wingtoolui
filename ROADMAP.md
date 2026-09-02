@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1514-test validation suite and a benchmark with regression budgets
+- [x] 1527-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -353,6 +353,11 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **Controls grouped by subject** — 30 of 74 sat in one group. Now nine
+      groups; splitting them exposed three settings bound twice, one with
+      option values the model does not accept. The interface test asserts one
+      control per setting and none unreachable.
+
 - [x] **Assumptions exposed as controls** — 33 of 75 numeric defaults in core
       modules could not be reached from the interface. The design decisions
       among them are now settings, each asserted to change both the model and
@@ -401,9 +406,10 @@ validation notes flagged.
       parse". It found a real bug on the first run: UP's Meru sheets order
       their columns differently, so every Meru line was being read as "2 mm"
       — the quantity column. Column positions now come from the header.
-- [ ] **Split multi-size sheets** — three UP sheets list one column per size,
-      so a single line name carries several lengths. Recognised and skipped
-      rather than misread.
+- [x] **Multi-size sheets split** — `splitMultiSizeSheet`, three files into
+      twelve per-size sheets, all checked against the physics. A size named in
+      the header but absent from the rows is reported rather than filled. What
+      a sheet measures is now a `# measure:` key rather than prose.
 
 - [x] **The stub DOM no longer lies quietly** — five methods returned empty
       unconditionally, and two checks had already been defeated by them: a

@@ -2494,3 +2494,91 @@ export function applyPrefixDirection(lines, direction) {
     };
   });
 }
+
+/**
+ * Split a multi-size line sheet into one sheet per size.
+ *
+ * UP publish some sheets with a column per size: a line name, then its length
+ * in the L, M, SM, S and XS wings across the row. Read as a single wing it
+ * mixes an L with an XS, which is what produced "st1 appears twice" and
+ * "uppers longer than mains" when the reference sweep first ran over them.
+ *
+ * The columns are paired to the header positionally, left to right. On the
+ * Makalu 5 the header names five sizes and the rows carry four values, with
+ * the lengths descending L, M, SM, S — so XS is simply absent from the file,
+ * and a size with no data is **reported rather than filled**. Guessing which
+ * column was dropped would be a coin toss, and a wrong guess would assign one
+ * wing's lengths to another.
+ */
+export function splitMultiSizeSheet(text) {
+  const rows = text.split(/\r?\n/).map((l) => l.split('\t'));
+  if (!rows.length) return { sizes: [], sheets: {}, note: 'empty file' };
+
+  const header = rows[0].slice(1).map((h) => h.trim()).filter(Boolean);
+  if (header.length < 2) {
+    return { sizes: [], sheets: {}, note: 'not a multi-size sheet' };
+  }
+
+  const data = rows.filter((r) => r[0] && /^[A-Za-z]/.test(r[0].trim())
+    && r.slice(1).some((c) => /^\d+(\.\d+)?$/.test((c || '').trim())));
+
+  const sheets = {};
+  const counts = header.map(() => 0);
+  for (const size of header) sheets[size] = [];
+
+  for (const r of data) {
+    const name = r[0].trim();
+    const values = r.slice(1).map((c) => (c || '').trim());
+    header.forEach((size, i) => {
+      const v = values[i];
+      if (!/^\d+(\.\d+)?$/.test(v || '')) return;
+      sheets[size].push({ name, lengthMM: Number(v) });
+      counts[i]++;
+    });
+  }
+
+  const empty = header.filter((_, i) => counts[i] === 0);
+  for (const size of empty) delete sheets[size];
+
+  return {
+    sizes: header.filter((_, i) => counts[i] > 0),
+    sheets,
+    lineCounts: Object.fromEntries(
+      Object.entries(sheets).map(([k, v]) => [k, v.length])),
+    // Named in the header but carrying no data.
+    missingSizes: empty,
+    note: empty.length
+      ? `${empty.join(', ')} named in the header but absent from the rows; `
+        + 'reported rather than filled, because guessing which column was '
+        + 'dropped would assign one wing\'s lengths to another'
+      : `${header.length} sizes, all present`,
+  };
+}
+
+/** A split sheet as the project's own plain format, provenance included. */
+export function multiSizeSheetToTSV(split, size, {
+  source = '', note = '',
+  // What the numbers measure, stated as a key rather than as prose.
+  //
+  // The first version wrote "Lengths INCLUDE the risers" and the sweep looked
+  // for "including risers". The words did not match, so four sheets of
+  // sail-to-harness totals were checked as if they were individual lines and
+  // failed for having uppers longer than mains — which is exactly what a
+  // total does. A machine-readable key cannot drift out of step with the
+  // reader the way a sentence can.
+  measure = 'single-line',
+} = {}) {
+  const lines = split.sheets[size];
+  if (!lines) throw new Error(`splitMultiSizeSheet: no data for size ${size}`);
+  if (!['single-line', 'total-including-risers'].includes(measure)) {
+    throw new Error(`multiSizeSheetToTSV: unknown measure "${measure}"`);
+  }
+  const out = [`# ${size}`];
+  if (source) out.push(`# Source: ${source}`);
+  out.push(`# measure: ${measure}`);
+  if (note) out.push(`# ${note}`);
+  out.push('# Split from a multi-size sheet, one column per size');
+  out.push('name\tlength_mm');
+  for (const l of lines) out.push(`${l.name}\t${Math.round(l.lengthMM)}`);
+  return `${out.join('\n')}\n`;
+}

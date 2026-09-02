@@ -117,3 +117,38 @@ Every one of these produced plausible output rather than an error. What caught
 them was reading four values off the printed pages and comparing — the
 cross-check `docs/collecting-reference-data.md` asks for and which is easy to
 skip because the numbers look reasonable either way.
+
+---
+
+## 6. Multi-size sheets, split
+
+UP publish some sheets with a **column per size**: a line name, then its
+length in the L, M, SM and S wings across the row. Read as a single wing that
+mixes an L with an XS, which is what produced "st1 appears twice" and "uppers
+longer than mains" the first time the reference sweep met them.
+
+`splitMultiSizeSheet` turns one file into one sheet per size. Three files,
+**twelve wings recovered**, all parsing cleanly and all now checked against
+the physics in their own right.
+
+### A size named but absent
+
+The Makalu 5 header names five sizes and its rows carry four values, with the
+lengths descending L, M, SM, S. **XS is simply absent from the file.**
+
+A size with no data is reported rather than filled. Guessing which column was
+dropped would be a coin toss, and a wrong guess would assign one wing's
+lengths to another — the worst kind of error this project can make, because
+the output would look entirely reasonable.
+
+### What the numbers measure is a key, not prose
+
+The first version wrote `# Lengths INCLUDE the risers` and the sweep looked
+for `including risers`. The words did not match, so four sheets of
+sail-to-harness totals were checked as if they were individual lines and
+failed for having uppers longer than mains — which is exactly what a total
+does.
+
+Files now carry `# measure: total-including-risers` or `# measure:
+single-line`, and an unknown value is refused rather than written. A key
+cannot drift out of step with its reader the way a sentence can.
