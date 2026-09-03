@@ -749,3 +749,143 @@ export function riserSteps(sizes) {
       && steps.length > 2,
   };
 }
+
+/**
+ * B and C handles: steering on the rear risers.
+ *
+ * A two-liner has no D row and its brakes are for landing. In accelerated
+ * flight the pilot steers on a **handle** attached to the rear riser: pulling
+ * it shortens that riser and rotates the whole wing nose-down, changing the
+ * angle of attack without deforming the trailing edge the way a brake does.
+ *
+ * That is the point of the technique. A brake pulls the trailing edge down,
+ * which adds camber and drag and, at speed, invites a stall from the back. A
+ * rear-riser pull changes the *incidence* instead: the wing pitches, the
+ * angle of attack drops, and the profile keeps its shape.
+ *
+ * ---------------------------------------------------------------------------
+ * What the geometry gives
+ * ---------------------------------------------------------------------------
+ * Pulling a handle by `pullMM` shortens the rear riser by the same amount.
+ * The wing rotates about the line from the karabiner to the front anchors,
+ * and the angle change follows from the riser separation exactly as the
+ * speed system's does — but with the opposite sign, because shortening the
+ * *rear* raises the angle of attack where shortening the front lowers it.
+ *
+ * The handle's mechanical advantage comes from where it sits. A handle low on
+ * the riser gives more travel for the same hand movement and less force; high
+ * up, the reverse. `handleDropM` is that height below the maillon.
+ */
+export function handleGeometry({
+  layout = 'C',
+  riserLengthMM = 500,
+  handleDropM = 0.15,
+  // Anchor positions as chord fractions, which is what sets the lever.
+  frontAnchor = 0.085,
+  rearAnchor = 0.53,
+  chordM = 2.4,
+  pullMM = 0,
+  // How far the handle can be pulled before the riser reaches its stop.
+  //
+  // 200 mm gave 10.6 degrees, where real rear-riser steering gives two to
+  // four over its whole range. The limit is not the pilot's arm — it is that
+  // the wing pitches out of usable flight long before the riser runs out of
+  // webbing. 80 mm is the defensible default and it is the caller's to set,
+  // because it is a design decision rather than a constant.
+  maxPullMM = 80,
+}) {
+  if (!(chordM > 0)) throw new Error('handleGeometry needs a chord');
+  if (pullMM < 0) throw new Error('handleGeometry needs a non-negative pull');
+
+  const pull = Math.min(pullMM, maxPullMM);
+  const clipped = pullMM > maxPullMM;
+
+  // The lever is the anchor separation ALONG THE CHORD, not the riser
+  // separation at the karabiner.
+  //
+  // Using the riser separation of 0.42 m gave 6.8 degrees for 50 mm of pull,
+  // where a real C handle gives two or three degrees over its whole travel.
+  // `alphaChange` in this same module already had the right relation — the
+  // lever is `(xRear - xFront) * chord`, the distance between the front and
+  // rear anchor rows on the wing — and writing a second one rather than
+  // reading the first is how a module ends up disagreeing with itself.
+  const leverM = (rearAnchor - frontAnchor) * chordM;
+  if (!(leverM > 0)) {
+    throw new Error('handleGeometry needs the rear anchor aft of the front one');
+  }
+  const angleRad = Math.atan((pull / 1000) / leverM);
+  const angleDeg = angleRad * (180 / Math.PI);
+
+  // The handle sits below the maillon, so its own travel is what the hand
+  // moves; the riser shortens by the same amount but the hand feels the load
+  // through the lever the drop provides.
+  const leverRatio = handleDropM > 0
+    ? (riserLengthMM / 1000) / handleDropM : Infinity;
+
+  return {
+    layout,
+    pullMM: pull,
+    clipped,
+    maxPullMM,
+    // Positive: pulling a rear handle RAISES the angle of attack.
+    alphaChangeDeg: angleDeg,
+    handleDropM,
+    leverM,
+    leverRatio,
+    note: clipped
+      ? `pull limited to ${maxPullMM} mm: beyond that the riser is at its stop`
+      : `${pull} mm of rear-riser pull raises the angle of attack by `
+        + `${angleDeg.toFixed(2)} degrees`,
+  };
+}
+
+/**
+ * A handle pull against a brake pull, which is the comparison that matters.
+ *
+ * They are not interchangeable. Both slow the wing, and they do it by
+ * different means with different consequences at speed.
+ *
+ * The rear riser changes incidence: the whole wing pitches and the section
+ * keeps its shape. The brake changes the section: the trailing edge comes
+ * down, camber rises, and so does drag. At trim that is what you want for
+ * turning. Accelerated, it is not — the wing is already at a low angle of
+ * attack and pulling the back down invites a stall from the trailing edge.
+ *
+ * This reports both routes to the same angle change so the difference in what
+ * they cost is visible rather than assumed.
+ */
+export function handleAgainstBrake({
+  targetAlphaDeg, frontAnchor = 0.085, rearAnchor = 0.53, chordM = 2.4,
+  brakeTravelPerDegMM = 55,
+}) {
+  if (!(targetAlphaDeg > 0)) {
+    throw new Error('handleAgainstBrake needs a positive angle change');
+  }
+
+  // Rear riser: the pull that gives this rotation, over the same lever
+  // `alphaChange` uses.
+  const leverM = (rearAnchor - frontAnchor) * chordM;
+  const handlePullMM = Math.tan(targetAlphaDeg * (Math.PI / 180)) * leverM * 1000;
+
+  // Brake: travel to add the same effective angle by cambering instead.
+  const brakePullMM = targetAlphaDeg * brakeTravelPerDegMM;
+
+  // The brake also deflects the trailing edge, which the riser does not.
+  const trailingEdgeDropM = (brakePullMM / 1000);
+  const camberAddedFraction = trailingEdgeDropM / chordM;
+
+  return {
+    targetAlphaDeg,
+    handlePullMM,
+    brakePullMM,
+    // What each costs beyond the rotation itself.
+    handleDeformsSection: false,
+    brakeDeformsSection: true,
+    trailingEdgeDropM,
+    camberAddedFraction,
+    note: 'the rear riser changes incidence and leaves the section alone; the '
+      + `brake adds ${(camberAddedFraction * 100).toFixed(1)}% of chord in `
+      + 'camber to reach the same angle, which is drag at trim and a stall '
+      + 'risk accelerated',
+  };
+}

@@ -68,3 +68,54 @@ FAIL every family the reader routes has files  no data for vibegt
 **Vibe GT, Magnum 4 and Enzo 3 are not in this repository.** If those sheets
 exist they would be welcome — `docs/collecting-reference-data.md` is the brief
 — but the tool should not have implied it had them.
+
+---
+
+## 4. B and C handles
+
+A two-liner has no D row and its brakes are for landing. Accelerated, the
+pilot steers on a **handle** attached to a rear riser: pulling it shortens
+that riser and pitches the wing, changing the angle of attack.
+
+That is the whole point of the technique. A brake pulls the trailing edge
+down, which adds camber and drag and, at speed, invites a stall from the back.
+A rear-riser pull changes the **incidence** instead — the wing rotates and the
+profile keeps its shape.
+
+| to gain 3° | travel | cost |
+| --- | --- | --- |
+| rear riser | 56 mm | section unchanged |
+| brake | 165 mm | **+6.9% of chord in camber** |
+
+### The lever is the anchor separation, not the riser separation
+
+My first version used the front-to-rear distance at the karabiner, 0.42 m,
+and gave **6.8° for 50 mm of pull** — where a real handle gives two or three
+degrees over its whole travel.
+
+`alphaChange` in the same module already had the right relation: the lever is
+`(xRear − xFront) × chord`, the distance between the anchor rows **on the
+wing**. Writing a second relation rather than reading the first is how a
+module ends up disagreeing with itself.
+
+Corrected, the C handle gives 3.2° at 60 mm and 4.3° at its stop.
+
+### Why B steering is the more sensitive
+
+The B row sits further forward, so its lever is shorter and the same pull does
+more:
+
+| handle | lever | 60 mm of pull |
+| --- | --- | --- |
+| B (0.30 c) | 0.52 m | **6.6°** |
+| C (0.53 c) | 1.07 m | 3.2° |
+
+Twice the effect for the same hand movement, which is exactly why B steering
+takes a lighter touch.
+
+### What limits the travel
+
+Not the pilot's arm. The wing pitches out of usable flight long before the
+riser runs out of webbing, so `maxPullMM` defaults to 80 mm — a design
+decision, and the caller's to set. A pull past it is clipped and says so
+rather than returning an angle no wing would fly at.

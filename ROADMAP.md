@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1588-test validation suite and a benchmark with regression budgets
+- [x] 1601-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -101,8 +101,12 @@ material published after the handbook:
       inspection company, produced from the design. Sewn length rather than
       cut length, totals including the riser and trimmer position, and an
       incomplete record marked as such.
-- [ ] **B-handle and C-handle geometry** — handle heights and the steering
-      travel they give, which the riser assembly does not yet carry.
+- [x] **B-handle and C-handle geometry** — `handleGeometry` and
+      `handleAgainstBrake`. The lever is the anchor separation along the
+      chord, which `alphaChange` already knew; the B handle's shorter lever
+      gives twice the effect of the C. A brake needs three times the travel
+      to reach the same angle and adds 6.9% of chord in camber doing it. See
+      `docs/risers.md`.
 - [x] **Line loads under acceleration** — this item was wrong twice over.
       `rowShareMode: 'pressure'` has derived the shares from the section since
       Phase 2, so `loads.js` did not assume trim; and the load moves **aft**
