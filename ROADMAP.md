@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1579-test validation suite and a benchmark with regression budgets
+- [x] 1588-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -330,9 +330,11 @@ validation notes flagged.
       every one-sided check for months while unable to return anything but
       zero.
 - [ ] **VH-ribs** — the combined form; LEP section 12 carries all three.
-- [ ] **Diagonals as structure** — treated as load paths and cut patterns,
-      not members with stiffness. Whether a diagonal is in tension across its
-      whole width is not modelled.
+- [x] **Diagonals as structure** — `diagonalTension` and
+      `checkDiagonalTension`. Fabric carries tension only, so a fibre past 90°
+      from the load goes slack. A narrow diagonal works across its whole
+      width; at 45% base spread only 58% of it does, while paying for six
+      times the fabric. See `docs/diagonal-ribs.md`.
 - [ ] **Risers and speed system** *(ch.9)*. Four-riser geometry, travel of each
       riser under acceleration, and the resulting change in calage — which
       makes the balance solve a curve over the speed range rather than a point.
@@ -344,19 +346,26 @@ validation notes flagged.
       derives Cz from the section lift slope and zero-lift angle, Cm0 from the
       section, and the Oswald factor from lifting line over the real planform.
       Camber now moves trim speed by 4 km/h and the calage by 11%.
-- [ ] **Riser-aware line plans.** The cascade generator still assumes one
-      riser per anchor row; real wings put four rows on three risers. The
-      importer already models this correctly — the generator needs to follow.
+- [x] **Riser-aware line plans.** `RISER_LAYOUTS` puts four rows on three
+      risers, and `applyRiserSplit` adds the split A that every Niviuk in the
+      reference set uses. Exposed as a control. See `docs/risers.md`.
 - [ ] **Per-rib balance.** The current solve treats the central section as
       representative, as the handbook does. Solving spanwise would let washin
       and taper feed back into trim.
-- [ ] **Ovalization from pressure**, rather than a flat 6%. The degree of
-      billow depends on spanwise tension, which depends on the arc — the
-      source says so but does not close the loop.
+- [x] **Ovalization from pressure**, rather than a flat 6%.
+      `billowFromPressure` closes the loop and `applyOvalization` takes a
+      `pressure` option, with the panel's own width supplying the spacing.
+      Peak billow moves from 13% to 9% chord. See `docs/departures.md`.
 
 ---
 
 ## Audit
+
+- [x] **Options passed that a function never reads** (`tools/check-options.mjs`)
+      — four defects came from that shape, most seriously a bill of materials
+      built with **no line data** because the interface passed `plan` and
+      `selection` where `buildBOM` expects `linePlan` and `lineSelection`.
+      Now a check stage, verified by reintroducing a bug.
 
 - [x] **Split A risers, and a riser-aware plan** — `A-A'/B/C` and
       `A-A'/B` added, the layout exposed as a control with the split

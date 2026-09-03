@@ -22,7 +22,7 @@ So diagonals are not an optional refinement. Without them, a wing whose lines
 attach every second rib has half its span hanging on nothing — and the tool was
 modelling exactly that wing.
 
-![Diagonal ribs carrying the load from unattached ribs](img/diagonal-ribs.svg)
+![Diagonal ribs carrying the load from unattached ribs](diagonal-ribs.svg)
 
 *Cyan ribs carry a line; grey ribs do not. Each pink triangle runs from an
 attachment point on a loaded rib up to the upper surface of its unloaded
@@ -135,17 +135,19 @@ rather than discovered later.
 
 ## 7. Not covered
 
-- **H-ribs and VH-ribs.** LEP section 12 carries all three types; only the V
-  form is generated. Horizontal straps spread load chordwise rather than
-  spanwise and are a different geometry.
+- **VH-ribs.** LEP section 12 carries all three types; the V and H forms are
+  generated, the combined VH form is not.
 - **Diagonal ribs as structure.** They are treated as load paths and cut
   patterns, not as members with stiffness. Whether a diagonal is in tension
   across its whole width, or slack over part of it, is not modelled.
 - **The effect on the rib itself.** A diagonal pulls on the rib it lands on,
   and that load is carried by the rib fabric and its reinforcement. The rib
   cut is unchanged here.
-- **Cross-ports and their interaction.** Diagonals and cross-ports compete for
-  the same region of a rib, and the source treats them together.
+- **Collision checking between internal parts.** Diagonals, cross-ports and
+  lightening holes are each generated correctly and independently, and nothing
+  checks that two of them are not asked for on the same part of a rib.
+  `checkTabClearance` does exactly this for tabs against lightening holes; the
+  equivalent for diagonals does not exist.
 
 ---
 
@@ -175,3 +177,52 @@ does carry a small distortion after all, and the V form genuinely carries none.
 The test is now two-sided. A measure that only ever returns zero passes any
 one-sided check, so it has to be shown reporting something where something is
 there.
+
+---
+
+## 9. Is the diagonal actually in tension?
+
+`vribLoads` says where a diagonal's load **goes**: from the anchor at the apex
+to the rib along the base. It does not say how the cloth **carries** it, and
+that is a different question.
+
+Fabric carries tension and nothing else — no compression, no bending. So load
+flows only along lines from the apex that are being pulled. A part of the
+triangle whose fibres are not in tension carries nothing at all: it is sewn
+in, it adds weight, and it does no work.
+
+### The limit is the angle
+
+A fibre from the apex to a point on the base carries a share of the load
+proportional to the cosine of its angle from the load direction. **Past 90
+degrees that share is negative** — the fibre would have to push — so it goes
+slack. Asserted in both directions: every slack fibre is past 90°, every taut
+one is not.
+
+### Width is the lever
+
+| base spread | area | fully taut | worst | max angle |
+| --- | --- | --- | --- | --- |
+| 8% chord | 0.057 m² | **20 of 20** | 100% taut | 11° |
+| 18% | 0.128 m² | 16 of 20 | 75% | 130° |
+| 30% | 0.214 m² | 15 of 20 | 67% | 140° |
+| 45% | 0.325 m² | 14 of 20 | 58% | 143° |
+
+A narrow diagonal works across its whole width. A wide one is carrying on a
+fraction of itself while paying for all of it — nearly six times the fabric at
+45% for a triangle that works on 58% of its base.
+
+`checkDiagonalTension` reports the slack area directly, because that is the
+number a designer can act on: it is either too wide or anchored in the wrong
+place, and both are things they can change.
+
+### A parameter that was silently ignored
+
+My first run gave identical results for every width, because the option is
+`baseSpread` and I passed `spread`. The extra key was accepted and dropped,
+so four different calls built the same diagonal and the model looked
+insensitive to the thing it was measuring.
+
+Same shape as the `demoWing({ cells: 40 })` error two rounds ago and the
+`thinAirfoil` one before that: a call that looks right, runs clean, and does
+nothing.

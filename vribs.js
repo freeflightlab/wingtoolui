@@ -294,3 +294,320 @@ function seamLength(v) {
   for (let k = 1; k < v.base.length; k++) s += dist3(v.base[k - 1], v.base[k]);
   return s;
 }
+
+/* --------------------------------------------------------------- H-ribs -- */
+
+/**
+ * Horizontal ribs.
+ *
+ * The V form spreads load **spanwise**: a fan from a point on a loaded rib out
+ * to a line on an unloaded one. The H form does something else entirely — it
+ * is an internal sheet lying roughly horizontally inside a cell, sewn along a
+ * chordwise line on each of the two ribs that bound it. It holds the cell to
+ * its intended width and stops the section ballooning between the ribs, which
+ * is what keeps a high-aspect wing's profile where the designer put it.
+ *
+ * The geometric consequence matters more than it sounds. A V-rib is a cone,
+ * and a cone develops exactly. **An H-rib is a strip between two rib curves,
+ * which is the same class of surface as a sail panel** — developable only
+ * approximately, with a distortion that has to be measured rather than assumed
+ * away. So it goes through `developPanel`, the same triangle-pair unrolling
+ * the wing's own panels use, and carries the same error report.
+ *
+ * Two ribs, one strip, and the height is where the sheet sits between the
+ * chord line and the surface: 0 puts it on the chord, 1 on the upper surface,
+ * -1 on the lower.
+ */
+export function buildHRibs({
+  wing,
+  ribPairs = null,
+  chordFrom = 0.25,
+  chordTo = 0.60,
+  heightFraction = 0.35,
+  points = 16,
+}) {
+  const ribs = wing.ribs;
+  const pairs = ribPairs
+    || ribs.slice(0, -1).map((_, i) => [i, i + 1]);
+
+  const out = [];
+  for (const [i, j] of pairs) {
+    if (!ribs[i] || !ribs[j]) continue;
+
+    const edge = (rib) => {
+      const pts = [];
+      for (let p = 0; p < points; p++) {
+        const f = chordFrom + ((chordTo - chordFrom) * p) / (points - 1);
+        pts.push(betweenSurfaces(rib, f, heightFraction));
+      }
+      return pts;
+    };
+
+    const left = edge(ribs[i]);
+    const right = edge(ribs[j]);
+    const panel = developPanelLocal(left, right);
+
+    out.push({
+      fromRib: i,
+      toRib: j,
+      chordFrom,
+      chordTo,
+      heightFraction,
+      left,
+      right,
+      panel,
+      areaM2: stripArea(left, right),
+      distortion: panel.distortion,
+      widthM: dist3(left[0], right[0]),
+    });
+  }
+
+  return {
+    hribs: out,
+    count: out.length,
+    totalAreaM2: out.reduce((a, h) => a + h.areaM2, 0),
+    // Unlike the cone, this is not exact, so the worst case is reported.
+    worstDistortion: out.length ? Math.max(...out.map((h) => h.distortion)) : 0,
+  };
+}
+
+/** A point between the lower and upper surface at a chord fraction. */
+function betweenSurfaces(rib, frac, height) {
+  const up = pointAt(rib.upper, frac);
+  const lo = pointAt(rib.lower, frac);
+  const t = (height + 1) / 2;      // -1 -> lower, +1 -> upper
+  return [
+    lo[0] + (up[0] - lo[0]) * t,
+    lo[1] + (up[1] - lo[1]) * t,
+    lo[2] + (up[2] - lo[2]) * t,
+  ];
+}
+
+/**
+ * Unroll a strip between two curves.
+ *
+ * Deliberately the same construction as the sail panels: step along in
+ * quadrilaterals, split each on a diagonal, lay the triangles flat. Both seam
+ * lengths are preserved exactly; the diagonal is what absorbs the fact that
+ * the surface is not developable, and the residual is reported.
+ */
+function developPanelLocal(left, right) {
+  const L = [];
+  const R = [];
+  let x0 = 0;
+  let y0 = 0;
+  let theta = 0;
+  let worst = 0;
+
+  for (let i = 0; i < left.length - 1; i++) {
+    const a = dist3(left[i], right[i]);
+    if (a < 1e-12) continue;
+
+    const ax = right[i][0] - left[i][0];
+    const ay = right[i][1] - left[i][1];
+    const az = right[i][2] - left[i][2];
+
+    const lx = left[i + 1][0] - left[i][0];
+    const ly = left[i + 1][1] - left[i][1];
+    const lz = left[i + 1][2] - left[i][2];
+    const a1l = (ax * lx + ay * ly + az * lz) / a;
+    const hl = ribCrossNorm(ax, ay, az, lx, ly, lz) / a;
+
+    const rx = right[i + 1][0] - right[i][0];
+    const ry = right[i + 1][1] - right[i][1];
+    const rz = right[i + 1][2] - right[i][2];
+    const a2r = -(ax * rx + ay * ry + az * rz) / a;
+    const a1r = a - a2r;
+    const hr = ribCrossNorm(ax, ay, az, rx, ry, rz) / a;
+
+    const ct = Math.cos(theta);
+    const st = Math.sin(theta);
+    const l1 = [x0, y0];
+    const r1 = [a * ct + x0, a * st + y0];
+    const l2 = [a1l * ct - hl * st + x0, a1l * st + hl * ct + y0];
+    const r2 = [a1r * ct - hr * st + x0, a1r * st + hr * ct + y0];
+
+    if (i === 0) { L.push(l1); R.push(r1); }
+    L.push(l2);
+    R.push(r2);
+
+    // The diagonal the construction cannot preserve.
+    const trueDiag = dist3(left[i], right[i + 1]);
+    const flatDiag = Math.hypot(r2[0] - l1[0], r2[1] - l1[1]);
+    worst = Math.max(worst, Math.abs(flatDiag - trueDiag) / (trueDiag || 1));
+
+    x0 = l2[0];
+    y0 = l2[1];
+    theta = Math.atan2(r2[1] - l2[1], r2[0] - l2[0]);
+  }
+
+  return { left: L, right: R, distortion: worst };
+}
+
+function ribCrossNorm(ax, ay, az, bx, by, bz) {
+  return Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
+}
+
+function stripArea(left, right) {
+  let a = 0;
+  for (let i = 0; i < left.length - 1; i++) {
+    a += triangleArea(left[i], right[i], right[i + 1]);
+    a += triangleArea(left[i], right[i + 1], left[i + 1]);
+  }
+  return a;
+}
+
+/**
+ * Internal structure for a wing: diagonals where the span needs them,
+ * horizontal sheets where the cells need holding.
+ *
+ * Reported together because they trade against each other. Both cost fabric
+ * and weight; the V form buys attachment spacing, the H form buys profile
+ * accuracy.
+ */
+export function internalStructure({
+  wing, airfoil, anchorRibs = null, vribOptions = {}, hribOptions = null,
+}) {
+  const v = buildVRibs({ wing, airfoil, anchorRibs, ...vribOptions });
+  const h = hribOptions ? buildHRibs({ wing, ...hribOptions })
+    : { hribs: [], count: 0, totalAreaM2: 0, worstDistortion: 0 };
+
+  return {
+    vribs: v,
+    hribs: h,
+    totalAreaM2: v.totalAreaM2 + h.totalAreaM2,
+    pieces: v.count + h.count,
+    unsupportedRibs: v.unsupportedRibs,
+    // The V form develops exactly and the H form does not, so a build that
+    // leans on H ribs carries a distortion the diagonals never introduce.
+    worstDistortion: h.worstDistortion,
+  };
+}
+
+/**
+ * Is a diagonal in tension across its whole width?
+ *
+ * `vribLoads` treats a diagonal as a load path from its anchor to its base:
+ * the line pulls at the apex, the rib takes it along the base. That is where
+ * the load *goes*, but it is not how the cloth carries it.
+ *
+ * A diagonal is a triangle of fabric. Fabric carries tension and nothing
+ * else: no compression, no bending. So load flows only along lines from the
+ * apex to the base that are actually in tension, and a part of the triangle
+ * whose fibres are not being pulled carries nothing at all. It is there,
+ * sewn, adding weight, and doing no work.
+ *
+ * ---------------------------------------------------------------------------
+ * Where the slack is
+ * ---------------------------------------------------------------------------
+ * The load enters at a point and leaves along a line. Between them the
+ * tension field is a fan of straight lines from the apex, and its width at
+ * the base is set by how far the load can spread before the fabric would have
+ * to push rather than pull.
+ *
+ * The limit is the angle: a fibre running from the apex to a point on the
+ * base carries a share of the load proportional to the cosine of its angle
+ * from the load direction. Beyond 90 degrees that share is negative — the
+ * fibre would have to push — so it goes slack.
+ *
+ * A wide, shallow diagonal has base points well past that angle and is
+ * carrying on a fraction of its width. A narrow, deep one works throughout.
+ * This says which, and by how much.
+ */
+export function diagonalTension(vrib, { loadDirection = null } = {}) {
+  const apex = vrib.apex;
+  const base = vrib.base;
+  if (!apex || !base || base.length < 2) {
+    throw new Error('diagonalTension needs a diagonal with an apex and a base');
+  }
+
+  // The load pulls along the line the anchor takes, which is towards the
+  // riser: downward and inboard. Taken as apex-to-base-centre unless given.
+  const mid = base[Math.floor(base.length / 2)];
+  const dir = loadDirection ?? [
+    mid[0] - apex[0], mid[1] - apex[1], mid[2] - apex[2],
+  ];
+  const dl = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+  const u = [dir[0] / dl, dir[1] / dl, dir[2] / dl];
+
+  const fibres = [];
+  for (const b of base) {
+    const v = [b[0] - apex[0], b[1] - apex[1], b[2] - apex[2]];
+    const len = Math.hypot(v[0], v[1], v[2]);
+    if (len < 1e-12) continue;
+    const cos = (v[0] * u[0] + v[1] * u[1] + v[2] * u[2]) / len;
+    fibres.push({
+      point: b,
+      lengthM: len,
+      cosine: cos,
+      angleDeg: Math.acos(Math.max(-1, Math.min(1, cos))) * (180 / Math.PI),
+      // A fibre at more than 90 degrees to the load would have to push.
+      taut: cos > 0,
+      // How much of the load this fibre can carry, relative to one aligned
+      // with it.
+      share: Math.max(0, cos),
+    });
+  }
+
+  const taut = fibres.filter((f) => f.taut);
+  const totalShare = fibres.reduce((a, f) => a + f.share, 0);
+
+  // Where along the base the tension field ends.
+  const firstSlack = fibres.findIndex((f) => !f.taut);
+
+  return {
+    fibres,
+    tautCount: taut.length,
+    totalCount: fibres.length,
+    tautFraction: fibres.length ? taut.length / fibres.length : 0,
+    // Mean cosine over the taut part: how efficiently the working fabric is
+    // aligned with the load.
+    alignment: taut.length
+      ? taut.reduce((a, f) => a + f.cosine, 0) / taut.length : 0,
+    totalShare,
+    worstAngleDeg: fibres.length
+      ? Math.max(...fibres.map((f) => f.angleDeg)) : 0,
+    fullyTaut: taut.length === fibres.length,
+    slackFrom: firstSlack >= 0 ? firstSlack / (fibres.length - 1) : null,
+    note: taut.length === fibres.length
+      ? 'the whole width is in tension'
+      : `${((1 - taut.length / fibres.length) * 100).toFixed(0)}% of the base `
+        + 'is slack: that fabric is sewn in, carries nothing, and adds weight',
+  };
+}
+
+/**
+ * Every diagonal on the wing, and which are working across their width.
+ *
+ * The useful output is not a pass but a ranking: a diagonal that works on
+ * half its width is either too wide or anchored in the wrong place, and both
+ * are things a designer can change.
+ */
+export function checkDiagonalTension(vribs, opts = {}) {
+  const results = vribs.map((v) => ({
+    row: v.row,
+    fromRib: v.fromRib,
+    toRib: v.toRib,
+    areaM2: v.areaM2,
+    tension: diagonalTension(v, opts),
+  }));
+
+  const slack = results.filter((r) => !r.tension.fullyTaut);
+  // Fabric that is sewn in and carries nothing.
+  const wastedArea = slack.reduce(
+    (a, r) => a + r.areaM2 * (1 - r.tension.tautFraction), 0);
+
+  return {
+    diagonals: results,
+    count: results.length,
+    fullyTaut: results.length - slack.length,
+    partlySlack: slack.length,
+    wastedAreaM2: wastedArea,
+    worst: results.slice()
+      .sort((a, b) => a.tension.tautFraction - b.tension.tautFraction)[0] ?? null,
+    note: slack.length === 0
+      ? `all ${results.length} diagonals are in tension across their width`
+      : `${slack.length} of ${results.length} diagonals are partly slack, `
+        + `${(wastedArea * 1e4).toFixed(0)} cm2 of fabric carrying nothing`,
+  };
+}
