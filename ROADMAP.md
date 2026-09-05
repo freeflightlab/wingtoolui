@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1611-test validation suite and a benchmark with regression budgets
+- [x] 1620-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -676,7 +676,11 @@ Making it pleasant to use across a real project.
 - [ ] **Close the remaining placement gap.** 56.9% against a 73% shape
       ceiling. What is left needs true polygon placement rather than two
       skylines.
-- [ ] **Place the tip panels into the gaps.** Shape loss is concentrated in a
+- [x] **Place the tip panels into the gaps.** `pairPanels` now tries both a
+      complementary order (largest with smallest) and the original adjacent
+      one, and takes whichever packs better — neither wins on every wing. See
+      `docs/nesting.md`.
+- [ ] **Shape loss in the small panels.** Concentrated in a
       few small panels — cell 24 upper is 29% efficient against the root's
       96% — so they are the ones to fit around the large ones. A placement
       problem, not a pairing one.

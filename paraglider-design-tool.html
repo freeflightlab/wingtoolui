@@ -7629,24 +7629,62 @@ function pairPanels(items, { gap = 0.01, outlineOf = null } = {}) {
     return (lb.width * lb.height) - (la.width * la.height);
   });
 
-  const pairs = [];
-  const singles = [];
-  for (let i = 0; i < sorted.length; i += 2) {
-    const a = sorted[i];
-    const b = sorted[i + 1];
-    if (!b) { singles.push(a); break; }
-    const lock = interlock(outline(a), outline(b), { gap });
-    if (!lock || lock.saving <= 0) {
-      singles.push(a, b);
-      continue;
+  // Two orders, and the better one wins.
+  //
+  // Pairing adjacent items in a size-sorted list puts the largest panel with
+  // the next largest, which is the wrong way round. A tip panel is small and
+  // strongly curved; a root panel is large with a deep concave side. The tip
+  // nests INTO the root's gap, and two roots do not nest into each other at
+  // all.
+  //
+  // Both orders are tried and measured rather than argued about: adjacent,
+  // and complementary — largest with smallest, working inwards.
+  const orders = {
+    adjacent: (() => {
+      const out = [];
+      for (let i = 0; i < sorted.length; i += 2) out.push([sorted[i], sorted[i + 1]]);
+      return out;
+    })(),
+    complementary: (() => {
+      const out = [];
+      let lo = 0;
+      let hi = sorted.length - 1;
+      while (lo < hi) { out.push([sorted[lo], sorted[hi]]); lo++; hi--; }
+      if (lo === hi) out.push([sorted[lo], undefined]);
+      return out;
+    })(),
+  };
+
+  const tryOrder = (candidatePairs) => {
+    const ps = [];
+    const ss = [];
+    for (const [a, b] of candidatePairs) {
+      if (!a) continue;
+      if (!b) { ss.push(a); continue; }
+      const lk = interlock(outline(a), outline(b), { gap });
+      // A pair that overlaps is not a pair — the guard the original loop had,
+      // which a rewrite that only kept the saving would have thrown away.
+      if (!lk || lk.saving <= 0 || pairOverlap(lk.a.outline, lk.b.outline)) {
+        ss.push(a, b);
+        continue;
+      }
+      ps.push({ items: [a, b], lock: lk });
     }
-    // A pair that overlaps is not a pair.
-    if (pairOverlap(lock.a.outline, lock.b.outline)) {
-      singles.push(a, b);
-      continue;
-    }
-    pairs.push({ items: [a, b], lock });
-  }
+    const saved = ps.reduce((acc, x) => acc + x.lock.saving, 0);
+    return { pairs: ps, singles: ss, totalSaving: saved };
+  };
+
+  const results = Object.fromEntries(
+    Object.entries(orders).map(([k, v]) => [k, tryOrder(v)]));
+  const bestOrder = Object.entries(results)
+    .sort((a, b) => b[1].totalSaving - a[1].totalSaving)[0];
+
+  const pairs = bestOrder[1].pairs;
+  const singles = bestOrder[1].singles;
+  const chosenOrder = bestOrder[0];
+  const orderSavings = Object.fromEntries(
+    Object.entries(results).map(([k, v]) => [k, v.totalSaving]));
+
 
   const savings = pairs.map((p) => p.lock.saving);
   return {
@@ -7654,6 +7692,12 @@ function pairPanels(items, { gap = 0.01, outlineOf = null } = {}) {
     singles,
     paired: pairs.length * 2,
     meanSaving: savings.length ? savings.reduce((x, y) => x + y, 0) / savings.length : 0,
+    // Which order won, and what each scored. Reported rather than assumed:
+    // the adjacent order pairs the largest panel with the next largest, and
+    // a tip panel nests into a root panel's gap where two roots do not nest
+    // into each other at all.
+    order: chosenOrder,
+    orderSavings,
     bestSaving: savings.length ? Math.max(...savings) : 0,
   };
 }

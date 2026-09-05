@@ -152,3 +152,50 @@ diagnosis named.
 `alignToLongAxis` is a genuine reduction in the box a panel needs, and
 `pairOverlap` is an exact test that two placed outlines do not intersect. Both
 are needed by a real packer, and both are tested.
+
+---
+
+## Pairing, and an assumption that was half right
+
+`pairPanels` sorted by size and paired **adjacent** items, putting the largest
+panel with the next largest. That looked wrong: a tip panel is small and
+strongly curved, a root panel is large with a deep concave side, and the tip
+nests *into* the root's gap where two roots do not nest into each other at
+all. The roadmap said the same — "place the tip panels into the gaps".
+
+So I added the complementary order, largest with smallest working inwards,
+expecting it to win.
+
+**It wins on some wings and loses on others:**
+
+| cells | order that wins | adjacent | complementary |
+| --- | --- | --- | --- |
+| 12 | adjacent | 0.165 | 0.135 |
+| 20 | adjacent | 0.375 | 0.305 |
+| 25 | **complementary** | 0.466 | 0.498 |
+| 40 | **complementary** | 0.822 | 1.346 |
+| 60 | adjacent | 2.411 | 2.092 |
+
+So the improvement is not "use complementary". It is **stop assuming, and take
+whichever actually packs better on this wing** — both are tried, both are
+measured, and the result reports which won and what each scored.
+
+Mean saving on the 25-cell wing goes from 3.6% to 5.0%.
+
+### A guard a rewrite nearly dropped
+
+The original loop refused any pair whose outlines overlapped. My first rewrite
+kept only the saving test, which would have accepted overlapping pairs that
+score well on paper and cannot be cut. Folded back in and asserted.
+
+### What the packers are actually worth
+
+Measured on a 25-cell, 23.3 m² wing at 1.4 m roll width:
+
+| | roll used | efficiency |
+| --- | --- | --- |
+| by bounding box | 36.63 m | 45.4% |
+| by profile | **32.24 m** | **51.6%** |
+
+**4.39 m of fabric**, which matches the "about 4.5 m" the code claimed and had
+never been checked in a test. It is asserted now.
