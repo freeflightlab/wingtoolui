@@ -381,6 +381,57 @@ function m(code, diameterMM, newDaN, kinkedDaN, areaMM2, gramsPerM, elong, sheat
 }
 
 /** Read the full measured table from `data/reference/line-materials.tsv`. */
+/**
+ * The line materials a design may be built from.
+ *
+ * `DEFAULT_LINE_TABLE` carries 21 lines. `data/reference/line-materials.tsv`
+ * has **78 across four brands** — Edelrid, Liros, Cousin and DC — and it has
+ * been in the repository, parsed by the corpus sweep, and unreachable when
+ * the model needed to choose one.
+ *
+ * A line table is a design decision. A workshop buys from one supplier, or
+ * has a spool of something specific, and the sizing should work from what is
+ * actually on the shelf rather than from a fixed list.
+ *
+ * Filtering to a brand is not cosmetic: it changes which line gets chosen for
+ * every anchor, and therefore the drag, the mass and the bill of materials.
+ */
+export function lineTableFor(materials, { brand = null, sheathed = null } = {}) {
+  let table = materials;
+
+  if (brand) {
+    const want = brand.toLowerCase();
+    table = table.filter((m) => (m.name || '').toLowerCase().startsWith(want));
+    if (!table.length) {
+      const brands = [...new Set(materials
+        .map((m) => (m.name || '').split(/[ -]/)[0]).filter(Boolean))];
+      throw new Error(`lineTableFor: no materials named "${brand}"; `
+        + `have ${brands.join(', ')}`);
+    }
+  }
+
+  if (sheathed !== null) table = table.filter((m) => !!m.sheathed === sheathed);
+
+  if (!table.length) {
+    throw new Error('lineTableFor: no materials left after filtering, so no '
+      + 'line could be sized');
+  }
+
+  return table;
+}
+
+/** Which brands a materials table offers, for a picker. */
+export function materialBrands(materials) {
+  const counts = {};
+  for (const m of materials) {
+    const b = (m.name || '').split(/[ -]/)[0];
+    if (b) counts[b] = (counts[b] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => ({ name, count }));
+}
+
 export function parseMaterialsTable(tsv) {
   const out = [];
   for (const line of tsv.split(/\r?\n/).slice(1)) {

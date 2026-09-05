@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1628-test validation suite and a benchmark with regression budgets
+- [x] 1637-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -364,6 +364,13 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Material selection** — the 78-material catalogue was in the repository
+      and unreachable; the model used a built-in table of 21. `lineTableFor`
+      and `materialBrands` expose it, and the brand picker is in the tool.
+      Buying from one supplier costs 18 to 36% more line drag, and a
+      four-material catalogue cannot size every line. See
+      `docs/loads-and-materials.md`.
 
 - [x] **Size family from the interface** — `buildFamily` had existed since
       Phase 2 with no way to ask for it. Now a control group and a button.

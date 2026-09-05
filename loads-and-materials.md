@@ -450,3 +450,42 @@ One assertion of mine was backwards here: I wrote "a longer gust gradient
 alleviates more" expecting a *bigger* factor. A longer gradient gives the wing
 more time to accelerate away, so it alleviates more and the factor is
 **smaller** — 0.026 over 40 chords against 0.194 over 5.
+
+---
+
+## 13. Choosing what to build from
+
+`DEFAULT_LINE_TABLE` carries 21 lines. `data/reference/line-materials.tsv`
+has **78 across four brands** — Edelrid 38, Liros 24, DC 12, Cousin 4 — and it
+has been in the repository, parsed by the corpus sweep, and unreachable when
+the model needed to choose one.
+
+A line table is a design decision. A workshop buys from one supplier, or has a
+spool of something specific, and the sizing should work from what is on the
+shelf rather than from a fixed list.
+
+### The choice is not cosmetic
+
+Restricting the table changes which line is chosen at every anchor, and so the
+drag, the mass and the bill of materials:
+
+| table | lines available | sized | line drag |
+| --- | --- | --- | --- |
+| every brand | 78 | 76/76 | **0.00685** |
+| Edelrid | 38 | 76/76 | 0.00810 |
+| Liros | 24 | 76/76 | 0.00935 |
+| Cousin | 4 | **74/76** | 0.00688 |
+
+Buying from one supplier costs **18 to 36% more line drag**, because the
+sizing has fewer diameters to choose from and must round up more often. And a
+catalogue of four materials **cannot size every line** — reported rather than
+left as two lines quietly missing from the bill.
+
+Both are things a designer should decide with the number in front of them
+rather than discover afterwards.
+
+### In the tool
+
+The whole catalogue is embedded in the offline file, and the brand picker sits
+under Assumptions with the sizing basis — kinked strength or new — beside it.
+The choice is verified to change an exported file, not just the screen.

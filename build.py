@@ -72,6 +72,8 @@ MODULES = [
     "compare.js",
     "intake.js",
     "ribstress.js",
+    "shaping3d.js",
+    "inflated.js",
     "bom.js",
     "loads.js",
     "scaling.js",
@@ -178,6 +180,14 @@ def build():
         key = f.name.replace("-totals.tsv", "")
         totals[key] = rows
     reference_js = "const REFERENCE_TOTALS = " + json.dumps(totals, separators=(",", ":")) + ";"
+
+    # The full line-material catalogue, embedded.
+    #
+    # `DEFAULT_LINE_TABLE` carries 21 lines; `data/reference/line-materials.tsv`
+    # has 78 across four brands. The wider table has been in the repository and
+    # unreachable, so a designer could not choose what to build from.
+    mats = (ROOT / "data" / "reference" / "line-materials.tsv").read_text()
+    reference_js += "\nconst LINE_MATERIALS_TSV = " + json.dumps(mats) + ";"
 
     shell = (UI / "index.html").read_text()
     app = (UI / "app.js").read_text()
