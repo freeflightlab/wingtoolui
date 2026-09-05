@@ -365,6 +365,13 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **Every dataset measured, not just parsed** (`tools/corpus-learnings.mjs`)
+      — 86 of 116 reference files reached nothing stronger than a physics
+      check. `ANCHOR_DENSITY` held six hand-entered Ozone designs while the
+      corpus had 25 across six makers. The corpus AGREES with the original
+      figures and widens the three-riser sample from 3 designs to 19. Now a
+      check stage, so a constant cannot drift from its data.
+
 - [x] **Options passed that a function never reads** (`tools/check-options.mjs`)
       — four defects came from that shape, most seriously a bill of materials
       built with **no line data** because the interface passed `plan` and

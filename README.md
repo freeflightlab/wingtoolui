@@ -3,7 +3,7 @@
 An interactive, browser-based paraglider design tool, built from the **LE
 Paraglider Design Handbook** published by [Laboratori
 d'envol](https://laboratoridenvol.com/paragliderdesign/index.html) and
-validated against production data from five manufacturers.
+validated against production data from six manufacturers.
 
 The handbook is a complete design method, but it is a set of pages, equations
 and one FORTRAN listing. This project turns it into something you can drive:
@@ -14,14 +14,18 @@ step checked against wings that have actually flown.
 
 ## Status
 
-**Phase 1 complete and verified. Phases 2 and 3 well advanced. Phase 4 begun.**
+**1601 tests across nine check stages**, all passing. Phases 1 and 5 are
+complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
-**1451 tests** and a benchmark with regression budgets. The suite is not smoke
-testing: every check asserts a value that can be verified independently — an
-exact closed-form answer, a conservation property, a manufacturer's published
-figure, or a number printed in the source.
+The tool takes a wing from planform through to cutting files: geometry,
+aerofoil, arc and twist, equilibrium, line plan and risers, loads and line
+sizing, rib openings and diagonals, panel development, nesting, and DXF or
+printed patterns. It reads and writes LEparagliding files, and it is validated
+against **19 wings from six manufacturers** plus Laboratori d'envol's own
+Swoop2, whose published area, span, chord, cell and rib counts it reproduces
+exactly.
 
----
+What it is not: certified, tested, or flown. See **Safety** below.
 
 ## Running it
 
@@ -45,10 +49,13 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1451 unit checks against known geometry and the sources |
+| `npm test` | 1601 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
+| `npm run test:refs` | every wing in the database against the physics |
+| `npm run check:options` | options passed that a function never reads |
+| `npm run check:corpus` | every dataset measured, against the model's own constants |
 | `npm run bench` | timings, scaling, and budget regressions |
 | `npm run audit` | the project's claims against its own code |
 
@@ -62,7 +69,7 @@ And two tools that are not tests:
 The scripts are thin wrappers — `node tools/check.mjs` and the rest work
 directly if you prefer.
 
-`check.mjs` runs all six in one command, because six commands meant five got
+`check.mjs` runs all nine in one command, because six commands meant five got
 skipped. The full-pipeline stage carries a **pinned baseline of 3 known
 problems**: treating them as failures would make the command red every run and
 train everyone to ignore it, while letting the number drift up silently would
@@ -126,7 +133,7 @@ This existed only as numbers for most of the project's life. A design tool
 that computes a line plan and cannot show it is asking to be trusted on the
 one thing a user most wants to check.
 
-**A design can be diffed against a real wing.** Six Niviuk Hook 6 sizes are
+**A design can be diffed against a real wing.** Twenty-five Niviuk sizes across five wings are
 embedded — measured total line lengths, sail to harness — and selecting one
 reports two numbers that mean different things: the **mean offset**, which is
 the overall length a designer sets deliberately, and the **shape deviation**,
@@ -159,6 +166,8 @@ src/core/          the maths — pure functions, no DOM, individually testable
   reinforcement.js mylar, dacron, tapes, rods, tabs, and the mass gap
   intake.js        cell openings, placed against the stagnation point
   ribstress.js     what rib cloth carries, and how far tape must reach
+  shaping3d.js     darts that let the nose curve in two directions
+  inflated.js      the flying shape against the built one
   compare.js       two designs side by side, with trades named as trades
   bom.js           bill of materials: roll length, cut length, hardware
   xfoil.js         export to and import from XFOIL
@@ -225,29 +234,28 @@ speed is stated as an assumption and inverted from published data.
 
 ## Validation
 
-Against the handbook: the chapter 4 worked example reproduced term by term,
-including the two moment terms its own spreadsheet omits.
+Nine stages, one command:
 
-Against the author's later work: the 2021 rotation study's published output
-matched on all four angles, and the gnuLAB2 section from the aerofoil table
-reproduced to 0.01% on thickness and camber.
-
-Against production data from Ozone, PHI and BGD:
-
-| check | result |
+| stage | catches |
 | --- | --- |
-| Cascade topology inferred from lengths alone vs BGD's stated topology | 4 of 4 rows exact |
-| PHI cascade totals, 42 main-row anchors | close exactly to the millimetre |
-| LEP round trip on a real design | byte-identical, 33 unmodelled sections preserved |
-| gnuC2-27 flat area recovered from its geometry matrix | 27.00 m² |
-| Lynx 2 trim speed / top speed / best glide / min sink | within 3-8% |
-| Canopy isometric scaling, seven families | exponent 1.99-2.08 |
-| Line-length law on a fourth maker, out of sample | within 0.8% |
-| Ozone's own line scaling check, Enzo 3 CCC | 8.8 mm worst against ±20 mm |
-| Speed-system riser shares vs Skywalk's published geometry | 0.467 vs 0.500 |
-| Collapse envelope vs PHI's most load-critical line | 28.6x vs 28x |
+| unit suite | the maths, 1601 checks |
+| Phase 1 audit | roadmap claims that have gone stale |
+| full pipeline | 55 published wings through every stage |
+| interface | features with no button, buttons with no effect |
+| reference sweep | wings that parse but describe impossible geometry |
+| options | calls that look right, run clean, and do nothing |
+| corpus | model constants that have drifted from their data |
+| benchmark | performance regressions |
+| self-audit | unused exports, stale numbers in prose, missing files |
 
----
+The full-pipeline stage carries a **pinned baseline of 2 known problems**, both
+the largest size of the highest-aspect family in their maker's range. Exceeding
+it fails.
+
+Every dataset in `data/reference/` is measured, not merely parsed. The
+`corpus` stage checks the model's own constants against what the wings say —
+`ANCHOR_DENSITY` was six hand-entered Ozone designs when the database held 25
+across six manufacturers.
 
 ## Documentation
 
@@ -257,6 +265,7 @@ Against production data from Ozone, PHI and BGD:
 | `docs/full-pipeline.md` | every real wing through the whole tool, and what it found |
 | `docs/rib-stress.md` | why rib cloth never carries an anchor load |
 | `docs/intake.md` | the cell opening, and where the flow stagnates |
+| `docs/assumptions.md` | which assumptions are the user's, and the bugs found exposing them |
 | `docs/comparing.md` | putting two designs side by side, without scoring them |
 | `docs/lengths.md` | flying, reference, sewn and cut length — and why they differ |
 | `docs/departures.md` | every place the code differs from the handbook, and why |
@@ -265,8 +274,13 @@ Against production data from Ozone, PHI and BGD:
 | `docs/validation.md` | every discrepancy found in the sources, and why |
 | `docs/source-map.md` | handbook chapter to implementation |
 | `docs/lep-format.md` | LEparagliding interoperability |
+| `docs/inflated.md` | the built shape against the flying one |
+| `docs/shaping.md` | 3D shaping of the nose, and two wrong derivations |
+| `docs/risers.md` | riser-aware line plans and split A risers |
 | `docs/line-plans.md` | risers, naming, topology inference |
 | `docs/loads-and-materials.md` | lift to line tension, kinked strength, drag |
+| `docs/niviuk-import.md` | importing a sixth manufacturer, and what its data said |
+| `docs/swoop2.md` | validating against the source method's own design |
 | `docs/scaling.md` | size families, and what does and does not transfer |
 | `docs/brakes.md` | brake cascades and engagement |
 | `docs/speed-system.md` | risers, accelerated polar, the collapse floor |

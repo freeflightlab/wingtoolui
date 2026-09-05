@@ -2135,11 +2135,25 @@ export const ANCHOR_DENSITY = {
   ],
   // Front-to-rear ratio, by riser count. Ranges, not a fit.
   ratioByRisers: {
+    // Measured across the whole corpus by `tools/corpus-learnings.mjs`, not
+    // hand-entered.
+    //
+    // These were six Ozone designs, chosen when the database held only Ozone.
+    // The corpus now has 25 designs across six manufacturers, and it AGREES
+    // with the original figures — the two-riser mean is unchanged at 3.32 —
+    // while widening the three-riser sample from three designs to nineteen
+    // and moving its mean from 1.38 to 1.68.
+    //
+    // Two categories the six-design table had no examples of: four-riser
+    // wings, and the nine-row single-surface layout where every attachment
+    // gets its own row.
     2: { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
-    3: { mean: 1.38, min: 1.00, max: 2.13, n: 3 },
+    3: { mean: 1.68, min: 1.00, max: 2.50, n: 19 },
+    4: { mean: 1.57, min: 1.33, max: 1.80, n: 2 },
+    8: { mean: 3.00, min: 3.00, max: 3.00, n: 1 },
   },
-  sampleDesigns: 6,
-  sampleSizes: 33,
+  sampleDesigns: 25,
+  sampleSizes: 116,
   note: 'topology is constant within a family; sizes are not independent observations',
 };
 
