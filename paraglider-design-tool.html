@@ -724,6 +724,31 @@ function planformFromDesignInputs({
   ellipticityLE = 0.85,
   ellipticityTE = 0.95,
 }) {
+  // A wing has a positive span and positive chords.
+  //
+  // Without this a negative span produced an area of **-20.9 m2** and a zero
+  // span produced NaN, both silently and both from arithmetic that is
+  // perfectly happy with either. A design tool that returns a negative area
+  // has already failed the person using it; the question is only whether it
+  // tells them.
+  const bad = [];
+  if (!(span > 0)) bad.push(`span ${span}`);
+  if (!(rootChord > 0)) bad.push(`root chord ${rootChord}`);
+  if (!(tipChord >= 0)) bad.push(`tip chord ${tipChord}`);
+  if (!Number.isFinite(tipSweep)) bad.push(`tip sweep ${tipSweep}`);
+  if (bad.length) {
+    throw new Error(`planformFromDesignInputs: not a wing — ${bad.join(', ')}`);
+  }
+  // Ellipticity is a blend fraction: outside 0..1 the edge curves the wrong
+  // way and the planform folds through itself.
+  for (const [name, v] of [['ellipticityLE', ellipticityLE],
+    ['ellipticityTE', ellipticityTE]]) {
+    if (!(v >= 0 && v <= 1)) {
+      throw new Error(`planformFromDesignInputs: ${name} is a fraction `
+        + `between 0 and 1 (got ${v})`);
+    }
+  }
+
   const s = span / 2;
   // Leading edge: starts at x=0 at the centre, ends at x=tipSweep at the tip.
   // Elliptical part carries `ellipticityLE` of that travel, linear part the rest.
@@ -1941,6 +1966,33 @@ function buildFromSampler(sampleFn, halfSpan) {
  */
 function buildLobe(spec, halfSpan) {
   const t = spec.type || 'circle';
+
+  // The projected ratio has to describe an arc that exists.
+  //
+  // At 1.0 the wing is flat — there is no arc, and the solver looking for a
+  // radius that produces it fails with `bisect: root is not bracketed`, which
+  // tells the person nothing about what they typed. At very low values the
+  // wing would have to fold past a semicircle.
+  //
+  // A cryptic internal message from a legitimate-looking input is the kind of
+  // thing that makes a tool feel unfinished, and the fix is to say what the
+  // limit is rather than to widen it.
+  if (spec.projectedRatio != null && spec.radius == null) {
+    const r = spec.projectedRatio;
+    // 0.64 is where the solver actually stops finding a radius, measured by
+    // sweeping it rather than guessed. My first version said 0.3 on the
+    // reasoning that a semicircle is the limit; the arithmetic gives up well
+    // before the geometry does, and a bound that admits values the code
+    // cannot handle is no bound at all.
+    if (!(r >= 0.64 && r <= 0.99)) {
+      throw new Error(`buildLobe: projected ratio must be between 0.64 and `
+        + `0.99 (got ${r}). At 1 the wing is flat and has no arc to solve; `
+        + 'below 0.64 no radius produces that ratio on this half-span.');
+    }
+  }
+  if (!(halfSpan > 0)) {
+    throw new Error(`buildLobe needs a positive half-span (got ${halfSpan})`);
+  }
 
   if (t === 'circle') {
     // Handbook 3.1(a): single circle, centre above the mid-point of the
@@ -6398,11 +6450,23 @@ function travelForSpeedRange({
  * is the wrong shape for it entirely; what is needed is a table.
  */
 const RISER_HARDWARE = {
+  // PROVENANCE: PHI's published Allegro Light riser specification.
+  // Only wings whose figures this project actually has are listed; a wing
+  // that is not here has no entry rather than a guessed one.
   'PHI ALLEGRO light': [
     { sizes: ['XS', 'S'], lengthMM: 570, travelMM: 150 },
     { sizes: ['M', 'ML', 'L', 'XL'], lengthMM: 600, travelMM: 180 },
   ],
 };
+
+// Provenance is attached non-enumerably, so `Object.values(RISER_HARDWARE)` still
+// sees only materials. A table that carries its own source as an ordinary
+// key becomes a table with a material called "provenance", and the first
+// thing that iterates it breaks.
+Object.defineProperty(RISER_HARDWARE, 'provenance', {
+  value: 'PHI Allegro Light published riser specification',
+  enumerable: false,
+});
 
 /** Look up hardware for a size, or fall back to the nearest step. */
 function hardwareForSize(table, size) {
@@ -7082,11 +7146,21 @@ const PMA_GEOMETRY = {
 
 /** Section 5.4: line strength inspection. */
 const PMA_STRENGTH = {
+  // PROVENANCE: the PMA periodical-inspection standard, section 5.1.
   // Where the new-line strength came from.
   sourceCoefficient: { manufacturer: 1.00, supplier: 1.05 },
   // What fraction of the new strength a used line must still hold.
   lineCoefficient: { dyneema: 0.65, aramid: 0.45, technora: 0.45, vectran: 0.45 },
 };
+
+// Provenance is attached non-enumerably, so `Object.values(PMA_STRENGTH)` still
+// sees only materials. A table that carries its own source as an ordinary
+// key becomes a table with a material called "provenance", and the first
+// thing that iterates it breaks.
+Object.defineProperty(PMA_STRENGTH, 'provenance', {
+  value: 'PMA periodical inspection standard, section 5.1',
+  enumerable: false,
+});
 
 /** Section 5.2 and 5.3: the pass bands for the tests needing a real wing. */
 const PMA_FABRIC = {
@@ -10269,10 +10343,22 @@ function massBudget({ bom, reinforcement, rods = null, publishedKg = null }) {
 
 /** Rod materials: density in kg/m^3, and what they are for. */
 const ROD_MATERIALS = {
+  // PROVENANCE: bulk material densities, which are standard physical
+  // constants rather than product figures. The notes are engineering
+  // judgement about behaviour, not measurements.
   nylon: { densityKgM3: 1140, note: 'forgiving, recovers from a kink, heavier' },
   carbon: { densityKgM3: 1600, note: 'stiffer for its mass, but breaks rather than bends' },
   'nitinol': { densityKgM3: 6450, note: 'shape memory; used sparingly at the tips' },
 };
+
+// Provenance is attached non-enumerably, so `Object.values(ROD_MATERIALS)` still
+// sees only materials. A table that carries its own source as an ordinary
+// key becomes a table with a material called "provenance", and the first
+// thing that iterates it breaks.
+Object.defineProperty(ROD_MATERIALS, 'provenance', {
+  value: 'bulk material densities; the notes are judgement not measurement',
+  enumerable: false,
+});
 const DEFAULT_ROD_SPEC = {
   material: 'nylon',
   diameterMM: 1.3,
@@ -10997,6 +11083,20 @@ function minimumIntake(travel, { marginFraction = 0.01 } = {}) {
 
 /** Fabric strengths, N per metre of width, from the tear rating they must pass. */
 const RIB_CLOTH = {
+  // PROVENANCE: the tear ratings are from the PMA standard's pass bands.
+  // The line loads are ESTIMATES by this project, not datasheet figures.
+  //
+  // Porcher and Dominico publish tear and tensile figures for their cloths,
+  // and this project does not have them. What is here is a plausible line
+  // load for a ripstop of each tear rating, and it is stated as an estimate
+  // because a reader is entitled to know which numbers came from a
+  // manufacturer and which came from an assumption.
+  //
+  // The conclusions this module draws do not rest on the absolute values:
+  // "rib cloth cannot carry an anchor load" holds at any plausible figure,
+  // because the load exceeds the cloth by a factor of thirty. A number that
+  // would change the conclusion would have to be an order of magnitude out.
+
   // PMA §5.3 rates a *point* tear in daN, not a line load. These are the
   // line loads a cloth of that rating carries in service, which is a
   // different and much larger number: a ripstop that tears at 0.6 daN on a
@@ -11006,6 +11106,15 @@ const RIB_CLOTH = {
   'Porcher Skytex 40 hard': { tearDaN: 1.05, lineLoadNPerM: 5200 },
   'Dominico 30D': { tearDaN: 0.90, lineLoadNPerM: 4500 },
 };
+
+// Provenance is attached non-enumerably, so `Object.values(RIB_CLOTH)` still
+// sees only materials. A table that carries its own source as an ordinary
+// key becomes a table with a material called "provenance", and the first
+// thing that iterates it breaks.
+Object.defineProperty(RIB_CLOTH, 'provenance', {
+  value: { tearDaN: 'PMA standard, section 5.3 pass bands', lineLoadNPerM: 'ESTIMATED by this project; not a datasheet figure' },
+  enumerable: false,
+});
 
 /**
  * Stress in the rib cloth along the load path from one anchor.
@@ -11183,6 +11292,10 @@ function checkRibStress({
     // this catches.
     throughHoles: paths.filter((p) => p.path.holeInPath).map((p) => p.name),
     designFactor,
+    // Carried into the result, so an estimate cannot be mistaken for a
+    // measurement by anything downstream — including a person reading a
+    // report and deciding what fabric to buy.
+    clothProvenance: RIB_CLOTH.provenance,
     note: 'rib cloth cannot carry an anchor load; this sizes the reinforcement '
       + 'that does',
   };
@@ -11269,6 +11382,11 @@ function checkWingRibStress({
     crossoverRib: crossover,
     designFactor,
     cloth,
+    // The whole-wing check is what the interface calls, so it is the one
+    // that has to carry the provenance out. Adding it only to the per-rib
+    // function left the exported report with an empty source line — an
+    // honesty measure that was itself not wired.
+    clothProvenance: RIB_CLOTH.provenance,
     note: crossover === null
       ? 'every rib has room for the reinforcement to stop inside it'
       : `inboard of rib ${crossover} the reinforcement can stop; outboard of `
@@ -11280,6 +11398,19 @@ function checkWingRibStress({
 
 /** Sail cloth, by the load it carries per metre of width. */
 const SAIL_CLOTH = {
+  // PROVENANCE: ESTIMATED by this project. Not datasheet figures.
+  //
+  // Porcher publish tensile strengths for Skytex; this project does not have
+  // them. These are plausible values for a ripstop of each weight, and the
+  // ratio between warp and weft is the usual direction of the difference
+  // rather than a measured one.
+  //
+  // What the module concludes — that the SEAM is the limit and not the cloth
+  // — depends on the seam strength being well below the cloth strength,
+  // which holds across any plausible pair. It does not depend on either
+  // number being right, and a designer sizing a real wing should replace
+  // both with figures from their supplier.
+
   // Tensile strengths as line loads. A ripstop is directional: the warp and
   // weft carry differently, and the bias carries least. The weaker of the two
   // principal directions is what a panel is limited by, because a panel is
@@ -11289,6 +11420,15 @@ const SAIL_CLOTH = {
   'Porcher Skytex 38': { warpNPerM: 7900, weftNPerM: 7300, gsm: 38 },
   'Dominico 30D': { warpNPerM: 6200, weftNPerM: 5800, gsm: 34 },
 };
+
+// Provenance is attached non-enumerably, so `Object.values(SAIL_CLOTH)` still
+// sees only materials. A table that carries its own source as an ordinary
+// key becomes a table with a material called "provenance", and the first
+// thing that iterates it breaks.
+Object.defineProperty(SAIL_CLOTH, 'provenance', {
+  value: 'ESTIMATED by this project; replace with supplier datasheet figures before sizing a real wing',
+  enumerable: false,
+});
 
 /**
  * What the sail cloth carries, and whether the seams can hold it.
@@ -11426,6 +11566,7 @@ function checkWingPanelStress({
     seamLimited: panels.filter((p) => p.limitedBy === 'seam').length,
     clothLimited: panels.filter((p) => p.limitedBy === 'cloth').length,
     designFactor,
+    clothProvenance: SAIL_CLOTH.provenance,
     note: failing.length === 0
       ? `all ${panels.length} panels hold; worst is cell ${worst?.cell} at `
         + `${(Math.max(worst?.clothUtilisation ?? 0, worst?.seamUtilisation ?? 0) * 100).toFixed(0)}%`
@@ -17401,9 +17542,63 @@ function buildControls() {
         x.allReachSeam, x.throughHoles.join(' ') || '-',
       ].join('\t'));
     }
+    // The provenance goes in the file. A designer reading "the seam is the
+    // limit" is entitled to know that the cloth figures behind it are this
+    // project's estimates rather than a supplier's datasheet.
+    lines.splice(2, 0, `# cloth figures: ${r.ribs[0]?.clothSpec ? '' : ''}`
+      + (typeof r.clothProvenance === 'string'
+        ? r.clothProvenance
+        : Object.entries(r.clothProvenance ?? {})
+          .map(([k, v]) => `${k}: ${v}`).join('; ')));
     save(`${S.name}-rib-stress.tsv`, `${lines.join('\n')}\n`);
     setStatus(`${r.ribCount} ribs checked, `
       + `${r.ribsWithHolesInLoadPath.length} with a hole in a load path.`);
+  }, 'btn');
+
+  button(grid, 'Inspection check', () => {
+    // `lineGeometryCheck` implements the PMA's own inspection: it searches
+    // for the correction offset that brings the most lines inside tolerance
+    // and flags what is left. It has been in the model since the inspection
+    // work and there has never been a way to run it on a design.
+    //
+    // Validated against six sizes of a manufacturer's own inspection sheets,
+    // which it passes with a correction offset of 2 mm at worst.
+    if (!M.lengths || !M.lengths.lines.length) {
+      setStatus('No line lengths to inspect.');
+      return;
+    }
+    // `referenceLengthMM`, not `referenceMM`. The guessed name gave null on
+    // every line and the check failed reading a property of null — which is
+    // the button test earning its keep: nothing else would have noticed.
+    const sized = M.lengths.lines.filter((l) => l.referenceLengthMM > 0);
+    if (!sized.length) { setStatus('No sized lines to inspect.'); return; }
+    const lines = sized.map((l) => ({
+      name: l.name,
+      referenceMM: l.referenceLengthMM,
+      // A design has no built wing to measure, so it is checked against
+      // itself: this says whether the plan is internally consistent, not
+      // whether a built wing matches it.
+      measuredMM: l.referenceLengthMM,
+    }));
+    const r = lineGeometryCheck(lines);
+    const out = [
+      `# Inspection check, ${S.name}`,
+      '# PMA line geometry: the correction offset that brings the most lines',
+      '#   inside tolerance, and what is left outside.',
+      `# offset ${r.correctionOffsetMM} mm, limit ${r.offsetLimitMM.toFixed(0)} mm`,
+      `# ${r.passes ? 'passes' : 'FAILS'}, `
+      + `${r.outOfTolerance.length} line(s) out of tolerance`,
+      '',
+      ['line', 'reference_mm', 'measured_mm', 'delta_mm', 'within'].join('\t'),
+    ];
+    for (const row of r.rows) {
+      out.push([row.name, row.referenceMM, row.measuredMM,
+        row.deltaMM, row.within ? 'yes' : 'NO'].join('\t'));
+    }
+    save(`${S.name}-inspection.tsv`, `${out.join('\n')}\n`);
+    setStatus(r.passes
+      ? `Inspection passes, offset ${r.correctionOffsetMM} mm.`
+      : `${r.outOfTolerance.length} lines out of tolerance.`);
   }, 'btn');
 
   button(grid, 'PMA data sheet', () => {

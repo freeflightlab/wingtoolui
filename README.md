@@ -14,6 +14,10 @@ step checked against wings that have actually flown.
 
 ## Status
 
+**An honest assessment of where this is — what is validated, what is
+estimated, what is unexplained, and what a reviewer should check first — is in
+[`ASSESSMENT.md`](ASSESSMENT.md).**
+
 **1601 tests across nine check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
@@ -21,7 +25,7 @@ The tool takes a wing from planform through to cutting files: geometry,
 aerofoil, arc and twist, equilibrium, line plan and risers, loads and line
 sizing, rib openings and diagonals, panel development, nesting, and DXF or
 printed patterns. It reads and writes LEparagliding files, and it is validated
-against **19 wings from six manufacturers** plus Laboratori d'envol's own
+against **21 wings from six manufacturers** plus Laboratori d'envol's own
 Swoop2, whose published area, span, chord, cell and rib counts it reproduces
 exactly.
 
@@ -49,13 +53,14 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1601 unit checks against known geometry and the sources |
+| `npm test` | 1672 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
 | `npm run test:refs` | every wing in the database against the physics |
 | `npm run check:options` | options passed that a function never reads |
 | `npm run check:corpus` | every dataset measured, against the model's own constants |
+| `npm run check:provenance` | every material figure says where it came from |
 | `npm run bench` | timings, scaling, and budget regressions |
 | `npm run audit` | the project's claims against its own code |
 
@@ -69,7 +74,7 @@ And two tools that are not tests:
 The scripts are thin wrappers — `node tools/check.mjs` and the rest work
 directly if you prefer.
 
-`check.mjs` runs all nine in one command, because six commands meant five got
+`check.mjs` runs all ten in one command, because six commands meant five got
 skipped. The full-pipeline stage carries a **pinned baseline of 3 known
 problems**: treating them as failures would make the command red every run and
 train everyone to ignore it, while letting the number drift up silently would
@@ -234,23 +239,25 @@ speed is stated as an assumption and inverted from published data.
 
 ## Validation
 
-Nine stages, one command:
+Ten stages, one command:
 
 | stage | catches |
 | --- | --- |
-| unit suite | the maths, 1601 checks |
+| unit suite | the maths, 1672 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
 | reference sweep | wings that parse but describe impossible geometry |
 | options | calls that look right, run clean, and do nothing |
 | corpus | model constants that have drifted from their data |
+| provenance | estimates presented as if they were measurements |
 | benchmark | performance regressions |
 | self-audit | unused exports, stale numbers in prose, missing files |
 
-The full-pipeline stage carries a **pinned baseline of 2 known problems**, both
-the largest size of the highest-aspect family in their maker's range. Exceeding
-it fails.
+The full-pipeline stage is pinned at **zero**. It ran at 3, then 4, then 2, and
+the last two went when it was pointed at the full line catalogue instead of the
+built-in subset — a validation run using less than the tool does is not
+validating the tool.
 
 Every dataset in `data/reference/` is measured, not merely parsed. The
 `corpus` stage checks the model's own constants against what the wings say —
@@ -286,6 +293,7 @@ across six manufacturers.
 | `docs/speed-system.md` | risers, accelerated polar, the collapse floor |
 | `docs/viewports.md` | fitting, zoom, tabs, the rib view |
 | `docs/diagonal-ribs.md` | diagonal ribs, development, the attachment trade-off |
+| `docs/rods.md` | nylon rods, and drawing the structure |
 | `docs/construction.md` | rib holes, cross-ports, reinforcement, the bill |
 | `docs/nesting.md` | where the material goes, and what does not save it |
 | `docs/inspection.md` | the riser, and the PMA standard as a design check |

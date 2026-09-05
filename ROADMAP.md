@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1645-test validation suite and a benchmark with regression budgets
+- [x] 1672-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -240,9 +240,6 @@ material published after the handbook:
 - [x] **Documentation figures** — generated from the project's own modules
       and data by `tools/make-diagrams.mjs`, so they cannot drift; checked for
       validity and for dangling references.
-- [ ] **Magnum 4, Vibe GT and Enzo 3 line sheets** — converted but not yet
-      folded into the validation set. The Magnum 4 is the first five-riser
-      wing here and the first tandem.
 - [x] **UP Paragliders line sheets** — a sixth naming convention with four
       cascade levels, roman numerals and `main` names; legacy `.xls` read
       directly since xlrd is unavailable. Five wings, 29 sheets.
@@ -364,6 +361,12 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Inspection check on a design** — `lineGeometryCheck` had been tested
+      against the standard's worked example and never against a real wing.
+      The Enzo 3's six inspection sheets pass it with a 2 mm correction offset
+      at worst, against a 118 mm limit. Now a button. See
+      `docs/inspection.md`.
 
 - [x] **Material selection** — the 78-material catalogue was in the repository
       and unreachable; the model used a built-in table of 21. `lineTableFor`
