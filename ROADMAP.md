@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1601-test validation suite and a benchmark with regression budgets
+- [x] 1611-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -364,6 +364,13 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Rods as chord-range groups, and a Structure view** — `rodGroup`,
+      `buildRodGroups` and `checkRodClearance` extend the existing rod model
+      with the group form a real design file uses. Diagonals and rods were
+      computed and never drawn; the Structure tab shows diagonals shaded fibre
+      by fibre for tension, and rods on the rib with their clashes. See
+      `docs/construction.md`.
 
 - [x] **Every dataset measured, not just parsed** (`tools/corpus-learnings.mjs`)
       — 86 of 116 reference files reached nothing stronger than a physics

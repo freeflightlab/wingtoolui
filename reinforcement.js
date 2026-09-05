@@ -427,3 +427,126 @@ export function checkTabClearance(tabSet, holeSet, { chordM } = {}) {
     checked: tabSet.tabs.filter((t) => t.chordFraction != null).length,
   };
 }
+
+/**
+ * Rods as chord-range groups, which is how a real design file describes them.
+ *
+ * `buildRods` above places one rod per rib running back from the nose, which
+ * is the common case and what the handbook describes. Real wings are not
+ * limited to that: LEparagliding's section 21 defines rods as **groups**, each
+ * a chord range over a rib range, and a wing may have several.
+ *
+ * Laboratori d'envol's own Swoop2 has two groups — 12 to 18.5% and 7 to 15%
+ * of chord over ribs 1 to 25, then 23.5 to 29.5% and 63 to 70% — so a rod is
+ * not always at the leading edge and not always alone.
+ *
+ * This is the group form. It sits beside `buildRods` rather than replacing
+ * it, because the simple case is still the common one and the two produce the
+ * same kind of output.
+ */
+export function rodGroup({
+  fromChord, toChord, fromRib, toRib,
+  diameterMM = 1.3, material = 'nylon', surface = 'upper', name = 'rod',
+}) {
+  if (!(toChord > fromChord)) {
+    throw new Error('rodGroup needs toChord aft of fromChord');
+  }
+  if (!(toRib >= fromRib)) {
+    throw new Error('rodGroup needs toRib outboard of fromRib');
+  }
+  const mat = ROD_MATERIALS[material];
+  if (!mat) throw new Error(`Unknown rod material: ${material}`);
+  return {
+    name, fromChord, toChord, fromRib, toRib, surface,
+    diameterMM, material, mat,
+    chordSpan: toChord - fromChord,
+  };
+}
+
+/** Every rod a set of groups produces, with length and mass. */
+export function buildRodGroups({ wing, groups }) {
+  const rods = [];
+  for (const g of groups) {
+    const areaM2 = Math.PI * ((g.diameterMM / 2000) ** 2);
+    for (let i = g.fromRib; i <= Math.min(g.toRib, wing.ribs.length - 1); i++) {
+      const rib = wing.ribs[i];
+      if (!rib) continue;
+      const lengthM = rib.chord * g.chordSpan;
+      rods.push({
+        group: g.name,
+        rib: i,
+        surface: g.surface,
+        fromChord: g.fromChord,
+        toChord: g.toChord,
+        chordM: rib.chord,
+        lengthM,
+        diameterMM: g.diameterMM,
+        massG: lengthM * areaM2 * g.mat.densityKgM3 * 1000,
+      });
+    }
+  }
+
+  const byDiameter = {};
+  for (const r of rods) {
+    const d = byDiameter[r.diameterMM] ||= { count: 0, lengthM: 0, massG: 0 };
+    d.count += 2;
+    d.lengthM += r.lengthM * 2;
+    d.massG += r.massG * 2;
+  }
+
+  const totalLengthM = rods.reduce((a, r) => a + r.lengthM, 0) * 2;
+  const totalMassG = rods.reduce((a, r) => a + r.massG, 0) * 2;
+
+  return {
+    rods,
+    count: rods.length * 2,
+    totalLengthM,
+    totalMassG,
+    byDiameter,
+    note: `${rods.length * 2} rods, ${totalLengthM.toFixed(1)} m, `
+      + `${totalMassG.toFixed(0)} g`,
+  };
+}
+
+/**
+ * Do the rods clash with anything else in the rib?
+ *
+ * A rod occupies a band of chord, and so do the lightening holes and the line
+ * anchors. They are placed by separate rules that do not know about each
+ * other — the trap `checkRibInternals` was written for, met again with a
+ * component it does not know about.
+ *
+ * A rod cannot pass through a hole, and an anchor tab sewn over a rod puts
+ * its load into a hinge.
+ */
+export function checkRodClearance({
+  rods, holes = [], anchors = [], marginChord = 0.01,
+}) {
+  const clashes = [];
+  for (const r of rods) {
+    for (const h of holes) {
+      const from = Math.min(h.fromChord, h.toChord);
+      const to = Math.max(h.fromChord, h.toChord);
+      if (r.fromChord < to + marginChord && r.toChord > from - marginChord) {
+        clashes.push({ kind: 'hole', rib: r.rib, group: r.group });
+      }
+    }
+    for (const a of anchors) {
+      const x = a.chordFraction ?? a;
+      if (x > r.fromChord - marginChord && x < r.toChord + marginChord) {
+        clashes.push({ kind: 'anchor', rib: r.rib, group: r.group, at: x });
+      }
+    }
+  }
+  return {
+    clashes,
+    ok: clashes.length === 0,
+    holeClashes: clashes.filter((c) => c.kind === 'hole').length,
+    anchorClashes: clashes.filter((c) => c.kind === 'anchor').length,
+    marginChord,
+    note: clashes.length === 0
+      ? 'no rod overlaps a hole or an anchor'
+      : `${clashes.length} clash(es): a rod cannot pass through a hole, and an `
+        + 'anchor tab sewn over a rod puts its load into a hinge',
+  };
+}

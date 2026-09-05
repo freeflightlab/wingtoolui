@@ -541,6 +541,7 @@ input[type=range]::-moz-range-thumb {
         <button class="vptab is-on" data-tab="wing" role="tab">Wing</button>
         <button class="vptab" data-tab="rib" role="tab">Rib</button>
         <button class="vptab" data-tab="lines" role="tab">Lines</button>
+        <button class="vptab" data-tab="structure" role="tab">Structure</button>
         <button class="vptab" data-tab="analysis" role="tab">Analysis</button>
         <div class="vptab-tools" id="tabTools"></div>
       </div>
@@ -559,6 +560,17 @@ input[type=range]::-moz-range-thumb {
         <div class="vp">
           <div class="vp-label">Rib <span class="zoomtag" id="zoom-vp-rib">zoomed · dbl-click to reset</span></div>
           <svg id="vp-rib"></svg><div class="vp-note" id="note-rib"></div>
+        </div>
+      </div>
+
+      <div class="viewports two" data-tab="structure" hidden>
+        <div class="vp">
+          <div class="vp-label">Diagonals — tension <span class="zoomtag" id="zoom-vp-diag">zoomed · dbl-click to reset</span></div>
+          <svg id="vp-diag"></svg><div class="vp-note" id="note-diag"></div>
+        </div>
+        <div class="vp">
+          <div class="vp-label">Rods on the rib</div>
+          <svg id="vp-rods"></svg><div class="vp-note" id="note-rods"></div>
         </div>
       </div>
 
@@ -5594,11 +5606,25 @@ const ANCHOR_DENSITY = {
   ],
   // Front-to-rear ratio, by riser count. Ranges, not a fit.
   ratioByRisers: {
+    // Measured across the whole corpus by `tools/corpus-learnings.mjs`, not
+    // hand-entered.
+    //
+    // These were six Ozone designs, chosen when the database held only Ozone.
+    // The corpus now has 25 designs across six manufacturers, and it AGREES
+    // with the original figures — the two-riser mean is unchanged at 3.32 —
+    // while widening the three-riser sample from three designs to nineteen
+    // and moving its mean from 1.38 to 1.68.
+    //
+    // Two categories the six-design table had no examples of: four-riser
+    // wings, and the nine-row single-surface layout where every attachment
+    // gets its own row.
     2: { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
-    3: { mean: 1.38, min: 1.00, max: 2.13, n: 3 },
+    3: { mean: 1.68, min: 1.00, max: 2.50, n: 19 },
+    4: { mean: 1.57, min: 1.33, max: 1.80, n: 2 },
+    8: { mean: 3.00, min: 3.00, max: 3.00, n: 1 },
   },
-  sampleDesigns: 6,
-  sampleSizes: 33,
+  sampleDesigns: 25,
+  sampleSizes: 116,
   note: 'topology is constant within a family; sizes are not independent observations',
 };
 
@@ -10385,6 +10411,129 @@ function checkTabClearance(tabSet, holeSet, { chordM } = {}) {
     ok: problems.length === 0,
     problems,
     checked: tabSet.tabs.filter((t) => t.chordFraction != null).length,
+  };
+}
+
+/**
+ * Rods as chord-range groups, which is how a real design file describes them.
+ *
+ * `buildRods` above places one rod per rib running back from the nose, which
+ * is the common case and what the handbook describes. Real wings are not
+ * limited to that: LEparagliding's section 21 defines rods as **groups**, each
+ * a chord range over a rib range, and a wing may have several.
+ *
+ * Laboratori d'envol's own Swoop2 has two groups — 12 to 18.5% and 7 to 15%
+ * of chord over ribs 1 to 25, then 23.5 to 29.5% and 63 to 70% — so a rod is
+ * not always at the leading edge and not always alone.
+ *
+ * This is the group form. It sits beside `buildRods` rather than replacing
+ * it, because the simple case is still the common one and the two produce the
+ * same kind of output.
+ */
+function rodGroup({
+  fromChord, toChord, fromRib, toRib,
+  diameterMM = 1.3, material = 'nylon', surface = 'upper', name = 'rod',
+}) {
+  if (!(toChord > fromChord)) {
+    throw new Error('rodGroup needs toChord aft of fromChord');
+  }
+  if (!(toRib >= fromRib)) {
+    throw new Error('rodGroup needs toRib outboard of fromRib');
+  }
+  const mat = ROD_MATERIALS[material];
+  if (!mat) throw new Error(`Unknown rod material: ${material}`);
+  return {
+    name, fromChord, toChord, fromRib, toRib, surface,
+    diameterMM, material, mat,
+    chordSpan: toChord - fromChord,
+  };
+}
+
+/** Every rod a set of groups produces, with length and mass. */
+function buildRodGroups({ wing, groups }) {
+  const rods = [];
+  for (const g of groups) {
+    const areaM2 = Math.PI * ((g.diameterMM / 2000) ** 2);
+    for (let i = g.fromRib; i <= Math.min(g.toRib, wing.ribs.length - 1); i++) {
+      const rib = wing.ribs[i];
+      if (!rib) continue;
+      const lengthM = rib.chord * g.chordSpan;
+      rods.push({
+        group: g.name,
+        rib: i,
+        surface: g.surface,
+        fromChord: g.fromChord,
+        toChord: g.toChord,
+        chordM: rib.chord,
+        lengthM,
+        diameterMM: g.diameterMM,
+        massG: lengthM * areaM2 * g.mat.densityKgM3 * 1000,
+      });
+    }
+  }
+
+  const byDiameter = {};
+  for (const r of rods) {
+    const d = byDiameter[r.diameterMM] ||= { count: 0, lengthM: 0, massG: 0 };
+    d.count += 2;
+    d.lengthM += r.lengthM * 2;
+    d.massG += r.massG * 2;
+  }
+
+  const totalLengthM = rods.reduce((a, r) => a + r.lengthM, 0) * 2;
+  const totalMassG = rods.reduce((a, r) => a + r.massG, 0) * 2;
+
+  return {
+    rods,
+    count: rods.length * 2,
+    totalLengthM,
+    totalMassG,
+    byDiameter,
+    note: `${rods.length * 2} rods, ${totalLengthM.toFixed(1)} m, `
+      + `${totalMassG.toFixed(0)} g`,
+  };
+}
+
+/**
+ * Do the rods clash with anything else in the rib?
+ *
+ * A rod occupies a band of chord, and so do the lightening holes and the line
+ * anchors. They are placed by separate rules that do not know about each
+ * other — the trap `checkRibInternals` was written for, met again with a
+ * component it does not know about.
+ *
+ * A rod cannot pass through a hole, and an anchor tab sewn over a rod puts
+ * its load into a hinge.
+ */
+function checkRodClearance({
+  rods, holes = [], anchors = [], marginChord = 0.01,
+}) {
+  const clashes = [];
+  for (const r of rods) {
+    for (const h of holes) {
+      const from = Math.min(h.fromChord, h.toChord);
+      const to = Math.max(h.fromChord, h.toChord);
+      if (r.fromChord < to + marginChord && r.toChord > from - marginChord) {
+        clashes.push({ kind: 'hole', rib: r.rib, group: r.group });
+      }
+    }
+    for (const a of anchors) {
+      const x = a.chordFraction ?? a;
+      if (x > r.fromChord - marginChord && x < r.toChord + marginChord) {
+        clashes.push({ kind: 'anchor', rib: r.rib, group: r.group, at: x });
+      }
+    }
+  }
+  return {
+    clashes,
+    ok: clashes.length === 0,
+    holeClashes: clashes.filter((c) => c.kind === 'hole').length,
+    anchorClashes: clashes.filter((c) => c.kind === 'anchor').length,
+    marginChord,
+    note: clashes.length === 0
+      ? 'no rod overlaps a hole or an anchor'
+      : `${clashes.length} clash(es): a rod cannot pass through a hole, and an `
+        + 'anchor tab sewn over a rod puts its load into a hinge',
   };
 }
 
@@ -16372,6 +16521,7 @@ const S = {
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', riserLayout: 'A/B/C+D', splitFrom: 62,
+  rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
   ovalFromPressure: false, sailTension: 300,
   // Assumptions that were constants inside the core. Each is a design
   // decision rather than a fact, so each is the user's to make.
@@ -16557,6 +16707,26 @@ function rebuild() {
     // what a pilot pulls for big ears. Applied after the cascade is built,
     // because the split is a riser change and not a different row.
     const layoutDef = RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'];
+    // Nylon rods, which hold the nose open when the wing is not pressurised.
+    // A rod works in bending, which is the one thing fabric cannot do.
+    let rods = null;
+    let rodClearance = null;
+    if (S.rods) {
+      const lastRib = Math.max(0,
+        Math.round((S.rodReach / 100) * (wing.ribs.length - 1)));
+      rods = buildRodGroups({
+        wing,
+        groups: [rodGroup({
+          name: 'LE', fromChord: S.rodFrom / 100, toChord: S.rodTo / 100,
+          fromRib: 0, toRib: lastRib, diameterMM: S.rodDia,
+        })],
+      });
+      rodClearance = checkRodClearance({
+        rods: rods.rods,
+        anchors: Object.values(airfoil.anchors ?? {}).map((x) => ({ chordFraction: x })),
+      });
+    }
+
     const riserSplit = applyRiserSplit(
       linePlan,
       layoutDef.map((r) => (r.splitTo ? { ...r, splitFrom: S.splitFrom / 100 } : r)),
@@ -16610,7 +16780,7 @@ function rebuild() {
     M = {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
-      linePlan, loads, lineSelection, lengths, riserSplit,
+      linePlan, loads, lineSelection, lengths, riserSplit, rods, rodClearance,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
@@ -16869,6 +17039,14 @@ function buildControls() {
   hint(IN, 'The opening must contain the stagnation point across the whole '
     + 'speed range, which is why intakes are cut back along the lower '
     + 'surface rather than being a hole at the nose.');
+  checkField(IN, 'rods', 'Nylon rods along the leading edge');
+  if (S.rods) {
+    numberField(IN, 'rodFrom', 'Rod from (% chord)', 0, 40, 0.5);
+    numberField(IN, 'rodTo', 'Rod to (% chord)', 0, 50, 0.5);
+    selectField(IN, 'rodDia', 'Rod diameter (mm)',
+      [['1.1', '1.1'], ['1.3', '1.3'], ['1.5', '1.5'], ['2', '2.0'], ['2.5', '2.5']]);
+    slider(IN, 'rodReach', 'Rods out to', 20, 100, 5, (v) => v.toFixed(0), '% span');
+  }
   checkField(IN, 'vribs', 'Diagonal ribs');
   if (S.vribs) {
     selectField(IN, 'vribRows', 'Diagonals on rows', [
@@ -17117,6 +17295,7 @@ function draw() {
   if (S.tab === 'rib') { drawRib(); drawBalanceTable(); return; }
   if (S.tab === 'analysis') { drawPolar(); drawAtmosphere(); drawBalanceTable(); return; }
   if (S.tab === 'lines') { drawLinePlan(); drawCascadeTable(); return; }
+  if (S.tab === 'structure') { drawDiagonals(); drawRods(); return; }
   drawPlan();
   drawFront();
   drawSection();
@@ -17828,6 +18007,103 @@ function drawCascadeTable() {
   if (rows.length > 400) {
     host.append(el('div', 'muted', `${rows.length - 400} more not shown.`));
   }
+}
+
+/**
+ * Diagonals, shaded by how much of each is actually in tension.
+ *
+ * `checkDiagonalTension` says a wide diagonal carries on a fraction of its
+ * width — the rest is sewn in, adds weight, and does no work. That is a
+ * number a designer can act on only if they can see which diagonals it
+ * applies to.
+ *
+ * Front elevation, so the diagonals sit where they sit on the span.
+ */
+function drawDiagonals() {
+  if (!M.vribs || !M.vribs.count) {
+    const c0 = canvas('vp-diag', [[0, 0], [1, 1]]);
+    c0.text('Diagonal ribs are off. Turn them on under Internal structure.',
+      [0.5, 0.5], '#8a8a8a', 11, 'middle');
+    return;
+  }
+
+  const tension = checkDiagonalTension(M.vribs.vribs);
+  const pts = [];
+  for (const v of M.vribs.vribs) {
+    pts.push([v.apex[1], v.apex[2]]);
+    for (const b of v.base) pts.push([b[1], b[2]]);
+    pts.push([-v.apex[1], v.apex[2]]);
+    for (const b of v.base) pts.push([-b[1], b[2]]);
+  }
+  const c = canvas('vp-diag', pts);
+  c.grid(1);
+
+  // Each diagonal drawn fibre by fibre: taut fibres carry the load, slack
+  // ones are the fabric doing nothing.
+  for (const side of [1, -1]) {
+    M.vribs.vribs.forEach((v, i) => {
+      const t = tension.diagonals[i].tension;
+      t.fibres.forEach((f) => {
+        c.path(
+          [[side * v.apex[1], v.apex[2]], [side * f.point[1], f.point[2]]],
+          f.taut ? '#5ec8ff' : '#ff5e5e',
+          f.taut ? 0.6 : 0.5,
+          { opacity: f.taut ? 0.35 + 0.5 * f.share : 0.5 },
+        );
+      });
+      c.dot([side * v.apex[1], v.apex[2]], '#ffffff', 1.8);
+    });
+  }
+
+  c.text(tension.note, [0, -0.03], tension.partlySlack ? '#ff9f5e' : '#5ec8ff',
+    9, 'middle');
+  document.getElementById('note-diag').textContent =
+    'Blue fibres are in tension and carry load; red are past 90 degrees to it '
+    + `and carry none. ${tension.fullyTaut} of ${tension.count} diagonals work `
+    + 'across their whole width.';
+}
+
+/**
+ * Rods on the rib section, with anything they clash with.
+ *
+ * A rod works in bending, which is the one thing fabric cannot do. It shares
+ * the rib with the lightening holes, the anchors and the diagonals, and those
+ * are placed by rules that do not know about each other.
+ */
+function drawRods() {
+  const rib = M.wing.ribs[Math.min(S.ribIndex, M.wing.ribs.length - 1)];
+  const c = canvas('vp-rods', rib.upper.concat(rib.lower));
+  c.path(rib.upper, '#5ec8ff', 1.2);
+  c.path(rib.lower, '#7bffb2', 1.2);
+
+  if (!M.rods || !M.rods.count) {
+    c.text('Rods are off. Turn them on under Internal structure.',
+      [rib.chord * 0.5, -rib.chord * 0.18], '#8a8a8a', 9, 'middle');
+    return;
+  }
+
+  const onThis = M.rods.rods.filter((r) => r.rib === rib.index);
+  const clashed = new Set((M.rodClearance?.clashes ?? [])
+    .filter((x) => x.rib === rib.index).map((x) => x.group));
+
+  for (const r of onThis) {
+    const surf = r.surface === 'lower' ? rib.lower : rib.upper;
+    const seg = [];
+    for (let f = r.fromChord; f <= r.toChord + 1e-9; f += 0.005) {
+      seg.push(pointOnSurface(surf, Math.min(1, f)));
+    }
+    if (seg.length < 2) continue;
+    c.path(seg, clashed.has(r.group) ? '#ff5e5e' : '#e8c547',
+      Math.max(1.5, r.diameterMM));
+  }
+
+  const cl = M.rodClearance;
+  c.text(`${onThis.length} rods on this rib`
+    + (cl && !cl.ok ? ` — ${cl.clashes.length} clash` : ''),
+    [rib.chord * 0.5, -rib.chord * 0.18],
+    cl && !cl.ok ? '#ff5e5e' : '#e8c547', 9, 'middle');
+  document.getElementById('note-rods').textContent =
+    M.rods.note + (cl ? `. ${cl.note}` : '');
 }
 
 function drawRib() {

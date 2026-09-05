@@ -61,7 +61,8 @@ const S = {
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
-  lineRow: 'all', compareTo: '',
+  lineRow: 'all', compareTo: '', riserLayout: 'A/B/C+D', splitFrom: 62,
+  rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
   ovalFromPressure: false, sailTension: 300,
   // Assumptions that were constants inside the core. Each is a design
   // decision rather than a fact, so each is the user's to make.
@@ -237,12 +238,42 @@ function rebuild() {
       'AB+CD': [['A', 'B'], ['C', 'D']],
     };
     const linePlan = buildLinePlan({
-      wing, airfoil, layout: RISER_LAYOUTS['A/B/C+D'],
+      wing, airfoil, layout: RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'],
       everyNthRib: 2, lineLengthM: S.lineLength,
       mergeRows: MERGES[S.mergeRows] || null,
       brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
       karabinerSeparationM: S.karabinerSep / 100,
     });
+    // A split A riser: the outboard A anchors on their own riser, which is
+    // what a pilot pulls for big ears. Applied after the cascade is built,
+    // because the split is a riser change and not a different row.
+    const layoutDef = RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'];
+    // Nylon rods, which hold the nose open when the wing is not pressurised.
+    // A rod works in bending, which is the one thing fabric cannot do.
+    let rods = null;
+    let rodClearance = null;
+    if (S.rods) {
+      const lastRib = Math.max(0,
+        Math.round((S.rodReach / 100) * (wing.ribs.length - 1)));
+      rods = buildRodGroups({
+        wing,
+        groups: [rodGroup({
+          name: 'LE', fromChord: S.rodFrom / 100, toChord: S.rodTo / 100,
+          fromRib: 0, toRib: lastRib, diameterMM: S.rodDia,
+        })],
+      });
+      rodClearance = checkRodClearance({
+        rods: rods.rods,
+        anchors: Object.values(airfoil.anchors ?? {}).map((x) => ({ chordFraction: x })),
+      });
+    }
+
+    const riserSplit = applyRiserSplit(
+      linePlan,
+      layoutDef.map((r) => (r.splitTo ? { ...r, splitFrom: S.splitFrom / 100 } : r)),
+      { halfSpanM: planform.halfSpan },
+    );
+
     if (S.stabilo) addStabilo(linePlan, wing, { anchors: 2 });
 
     // Loads, which the rib-stress report and the Lines table both read.
@@ -290,7 +321,7 @@ function rebuild() {
     M = {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
-      linePlan, loads, lineSelection, lengths,
+      linePlan, loads, lineSelection, lengths, riserSplit, rods, rodClearance,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
@@ -511,6 +542,15 @@ function buildControls() {
   checkField(LN, 'brakeLines', 'Brake lines in the plan');
   checkField(LN, 'stabilo', 'Stabilo line');
 
+  selectField(LN, 'riserLayout', 'Riser layout',
+    Object.keys(RISER_LAYOUTS).map((k) => [k, k]));
+  hint(LN, 'A split A riser carries the outboard A anchors on its own, so '
+    + 'pulling it folds the tips for big ears while the centre keeps flying. '
+    + 'Every Niviuk in the reference set is a split-A wing.');
+  if ((RISER_LAYOUTS[S.riserLayout] || []).some((r) => r.splitTo)) {
+    slider(LN, 'splitFrom', 'Split A from', 40, 90, 1,
+      (v) => v.toFixed(0), '% half-span');
+  }
   numberField(LN, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
   selectField(LN, 'compareTo', 'Compare against a real wing', [
     ['', 'none'],
@@ -540,6 +580,14 @@ function buildControls() {
   hint(IN, 'The opening must contain the stagnation point across the whole '
     + 'speed range, which is why intakes are cut back along the lower '
     + 'surface rather than being a hole at the nose.');
+  checkField(IN, 'rods', 'Nylon rods along the leading edge');
+  if (S.rods) {
+    numberField(IN, 'rodFrom', 'Rod from (% chord)', 0, 40, 0.5);
+    numberField(IN, 'rodTo', 'Rod to (% chord)', 0, 50, 0.5);
+    selectField(IN, 'rodDia', 'Rod diameter (mm)',
+      [['1.1', '1.1'], ['1.3', '1.3'], ['1.5', '1.5'], ['2', '2.0'], ['2.5', '2.5']]);
+    slider(IN, 'rodReach', 'Rods out to', 20, 100, 5, (v) => v.toFixed(0), '% span');
+  }
   checkField(IN, 'vribs', 'Diagonal ribs');
   if (S.vribs) {
     selectField(IN, 'vribRows', 'Diagonals on rows', [
@@ -622,8 +670,15 @@ function buildControls() {
       nested: M.nested,
       wing: M.wing,
       ribHoles: M.ribHoles,
-      plan: M.linePlan,
-      selection: M.lineSelection,
+      // `linePlan` and `lineSelection`, not `plan` and `selection`.
+      //
+      // Passed under the wrong names these were silently dropped and the bill
+      // of materials was built with no line data at all — it reported the
+      // cloth and the hardware and quietly omitted every metre of line.
+      // Found by `tools/check-options.mjs`, which exists because this is the
+      // fourth time a silently-ignored argument has cost something.
+      linePlan: M.linePlan,
+      lineSelection: M.lineSelection,
       rollWidth: S.rollWidth,
       gap: S.panelGap / 100,
     });
@@ -781,6 +836,7 @@ function draw() {
   if (S.tab === 'rib') { drawRib(); drawBalanceTable(); return; }
   if (S.tab === 'analysis') { drawPolar(); drawAtmosphere(); drawBalanceTable(); return; }
   if (S.tab === 'lines') { drawLinePlan(); drawCascadeTable(); return; }
+  if (S.tab === 'structure') { drawDiagonals(); drawRods(); return; }
   drawPlan();
   drawFront();
   drawSection();
@@ -1411,6 +1467,18 @@ function drawLinePlan() {
     }
   }
 
+  // Lines on a split A riser, marked. They are A lines, so they carry the A
+  // colour, but which riser they hang from is the point of the layout.
+  if (M.riserSplit && M.riserSplit.moved) {
+    for (const side of [1, -1]) {
+      for (const l of plan.lines.filter((x) => x.splitRiser && x.to)) {
+        if (!wanted(l)) continue;
+        c.dot([side * l.to[1], l.to[2]], '#ffffff', 2.4);
+      }
+    }
+    c.text(M.riserSplit.note, [0, -0.04], '#8a8a8a', 9, 'middle');
+  }
+
   const shown = plan.lines.filter(wanted).length;
   c.text(`${shown * 2} lines${S.lineRow === 'all' ? '' : ` in row ${S.lineRow}`}`,
     [0, 0.02], '#8a8a8a', 10, 'middle');
@@ -1439,7 +1507,7 @@ function drawCascadeTable() {
 
   const t = el('table', 'tbl');
   const head = el('tr');
-  for (const h of ['line', 'row', 'level', 'length mm', 'load N', 'material']) {
+  for (const h of ['line', 'row', 'riser', 'level', 'length mm', 'load N', 'material']) {
     head.append(el('th', '', h));
   }
   t.append(head);
@@ -1447,7 +1515,7 @@ function drawCascadeTable() {
     const tr = el('tr');
     const load = loads.get(l.name);
     for (const v of [
-      l.name, l.row, l.level,
+      l.name, l.row, l.riser || '—', l.level,
       l.lengthMM != null ? String(Math.round(l.lengthMM)) : '—',
       load != null ? load.toFixed(1) : '—',
       sized.get(l.name) || '—',
@@ -1480,6 +1548,103 @@ function drawCascadeTable() {
   if (rows.length > 400) {
     host.append(el('div', 'muted', `${rows.length - 400} more not shown.`));
   }
+}
+
+/**
+ * Diagonals, shaded by how much of each is actually in tension.
+ *
+ * `checkDiagonalTension` says a wide diagonal carries on a fraction of its
+ * width — the rest is sewn in, adds weight, and does no work. That is a
+ * number a designer can act on only if they can see which diagonals it
+ * applies to.
+ *
+ * Front elevation, so the diagonals sit where they sit on the span.
+ */
+function drawDiagonals() {
+  if (!M.vribs || !M.vribs.count) {
+    const c0 = canvas('vp-diag', [[0, 0], [1, 1]]);
+    c0.text('Diagonal ribs are off. Turn them on under Internal structure.',
+      [0.5, 0.5], '#8a8a8a', 11, 'middle');
+    return;
+  }
+
+  const tension = checkDiagonalTension(M.vribs.vribs);
+  const pts = [];
+  for (const v of M.vribs.vribs) {
+    pts.push([v.apex[1], v.apex[2]]);
+    for (const b of v.base) pts.push([b[1], b[2]]);
+    pts.push([-v.apex[1], v.apex[2]]);
+    for (const b of v.base) pts.push([-b[1], b[2]]);
+  }
+  const c = canvas('vp-diag', pts);
+  c.grid(1);
+
+  // Each diagonal drawn fibre by fibre: taut fibres carry the load, slack
+  // ones are the fabric doing nothing.
+  for (const side of [1, -1]) {
+    M.vribs.vribs.forEach((v, i) => {
+      const t = tension.diagonals[i].tension;
+      t.fibres.forEach((f) => {
+        c.path(
+          [[side * v.apex[1], v.apex[2]], [side * f.point[1], f.point[2]]],
+          f.taut ? '#5ec8ff' : '#ff5e5e',
+          f.taut ? 0.6 : 0.5,
+          { opacity: f.taut ? 0.35 + 0.5 * f.share : 0.5 },
+        );
+      });
+      c.dot([side * v.apex[1], v.apex[2]], '#ffffff', 1.8);
+    });
+  }
+
+  c.text(tension.note, [0, -0.03], tension.partlySlack ? '#ff9f5e' : '#5ec8ff',
+    9, 'middle');
+  document.getElementById('note-diag').textContent =
+    'Blue fibres are in tension and carry load; red are past 90 degrees to it '
+    + `and carry none. ${tension.fullyTaut} of ${tension.count} diagonals work `
+    + 'across their whole width.';
+}
+
+/**
+ * Rods on the rib section, with anything they clash with.
+ *
+ * A rod works in bending, which is the one thing fabric cannot do. It shares
+ * the rib with the lightening holes, the anchors and the diagonals, and those
+ * are placed by rules that do not know about each other.
+ */
+function drawRods() {
+  const rib = M.wing.ribs[Math.min(S.ribIndex, M.wing.ribs.length - 1)];
+  const c = canvas('vp-rods', rib.upper.concat(rib.lower));
+  c.path(rib.upper, '#5ec8ff', 1.2);
+  c.path(rib.lower, '#7bffb2', 1.2);
+
+  if (!M.rods || !M.rods.count) {
+    c.text('Rods are off. Turn them on under Internal structure.',
+      [rib.chord * 0.5, -rib.chord * 0.18], '#8a8a8a', 9, 'middle');
+    return;
+  }
+
+  const onThis = M.rods.rods.filter((r) => r.rib === rib.index);
+  const clashed = new Set((M.rodClearance?.clashes ?? [])
+    .filter((x) => x.rib === rib.index).map((x) => x.group));
+
+  for (const r of onThis) {
+    const surf = r.surface === 'lower' ? rib.lower : rib.upper;
+    const seg = [];
+    for (let f = r.fromChord; f <= r.toChord + 1e-9; f += 0.005) {
+      seg.push(pointOnSurface(surf, Math.min(1, f)));
+    }
+    if (seg.length < 2) continue;
+    c.path(seg, clashed.has(r.group) ? '#ff5e5e' : '#e8c547',
+      Math.max(1.5, r.diameterMM));
+  }
+
+  const cl = M.rodClearance;
+  c.text(`${onThis.length} rods on this rib`
+    + (cl && !cl.ok ? ` — ${cl.clashes.length} clash` : ''),
+    [rib.chord * 0.5, -rib.chord * 0.18],
+    cl && !cl.ok ? '#ff5e5e' : '#e8c547', 9, 'middle');
+  document.getElementById('note-rods').textContent =
+    M.rods.note + (cl ? `. ${cl.note}` : '');
 }
 
 function drawRib() {
