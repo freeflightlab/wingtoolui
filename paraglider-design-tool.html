@@ -5623,13 +5623,19 @@ const ANCHOR_DENSITY = {
     // Two categories the six-design table had no examples of: four-riser
     // wings, and the nine-row single-surface layout where every attachment
     // gets its own row.
+    //
+    // The Magnum 4 — a five-row tandem — joined the four-riser group and
+    // moved its mean from 1.57 to 1.65 on three designs. It had been
+    // converted and left out of the validation set because the xlsx reader
+    // could not open its file format, which is a reason one layer below where
+    // anyone was looking.
     2: { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
-    3: { mean: 1.68, min: 1.00, max: 2.50, n: 19 },
-    4: { mean: 1.57, min: 1.33, max: 1.80, n: 2 },
+    3: { mean: 1.69, min: 1.00, max: 2.50, n: 20 },
+    4: { mean: 1.65, min: 1.33, max: 1.82, n: 3 },
     8: { mean: 3.00, min: 3.00, max: 3.00, n: 1 },
   },
-  sampleDesigns: 25,
-  sampleSizes: 116,
+  sampleDesigns: 27,
+  sampleSizes: 125,
   note: 'topology is constant within a family; sizes are not independent observations',
 };
 

@@ -152,3 +152,41 @@ does.
 Files now carry `# measure: total-including-risers` or `# measure:
 single-line`, and an unknown value is refused rather than written. A key
 cannot drift out of step with its reader the way a sentence can.
+
+---
+
+## 7. Magnum 4, Vibe GT and Enzo 3 — and why they were not done
+
+These three were supplied and sat unconverted for a long time. I had reported
+them as **absent from the repository**, which was true and useless: they were
+absent because the tooling could not open them.
+
+`tools/read_xls.py` reads the old OLE2 spreadsheet format. All three files are
+the modern zip-and-XML format, and it refused them with `not an OLE2 file`.
+The reason was one layer below where I was looking, and "not present" was the
+wrong conclusion to stop at.
+
+`tools/read_xlsx.py` opens them. Fifteen sheets, and the reference set goes
+from 19 wings to **21**.
+
+### The Magnum 4 is the first five-row wing
+
+Rows **A B C D E** plus brakes, across three tandem sizes. Every other wing in
+the set stops at D, and the anchor-density table's four-riser group went from
+two designs to three, moving its measured mean from 1.57 to 1.65.
+
+### The Enzo 3 is not a cut list
+
+It is a **PMA-style inspection record**: reference length, the specimen as
+measured, and the difference. Six sizes, 59 lines each.
+
+| | measurements | inside ±12 mm |
+| --- | --- | --- |
+| six sizes | 354 | **353 (99.7%)** |
+
+The PMA standard allows ±12 mm on a reference length, and this project has
+used that band since the inspection work without ever seeing it exercised on
+real production. A manufacturer holds it on all but one line out of 354, and
+the worst is 14 mm.
+
+That is evidence for a tolerance that had been taken on the standard's word.

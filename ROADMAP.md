@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1637-test validation suite and a benchmark with regression budgets
+- [x] 1645-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -406,8 +406,13 @@ validation notes flagged.
 - [x] **A phantom in the validation set** — the corpus reader routed
       `magnum4` and `vibegt`, neither of which had ever been committed.
       Family names are now asserted to have files.
-- [ ] **Vibe GT, Magnum 4 and Enzo 3 sheets** — named in an old routing
-      branch but never present. Genuinely missing from the repository.
+- [x] **Vibe GT, Magnum 4 and Enzo 3 folded in** — they were supplied all
+      along. `tools/read_xls.py` reads the old OLE2 format and all three are
+      the modern zip format, so it refused them and they sat unconverted.
+      `tools/read_xlsx.py` opens them: 15 sheets, 21 wings in the set now. The
+      Magnum 4 is the first five-row wing and the first tandem; the Enzo 3 is
+      a PMA inspection record that puts 353 of 354 measured lines inside the
+      +/-12 mm band.
 
 - [x] **Controls grouped by subject** — 30 of 74 sat in one group. Now nine
       groups; splitting them exposed three settings bound twice, one with
