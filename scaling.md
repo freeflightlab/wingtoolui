@@ -383,95 +383,42 @@ would glide better on relatively less line drag does not get it.
 
 ---
 
+---
+
 ## 8. Niviuk, out of sample
 
-Four families and 17 sizes from a sixth manufacturer, none of it in the fit.
+Importing a sixth manufacturer, and what the data said about the scaling laws,
+is in `docs/niviuk-import.md`.
 
-| family | AR | published | law predicts | error |
-| --- | --- | --- | --- | --- |
-| Hook 6 | 5.30 | 205 m | 243 m | +18% |
-| Artik R 2 | 6.50 | 183 m | 197 m | +8% |
-| Skin 4 P | 4.90 | 287 m | 212 m | **-26%** |
-| Bi Skin 2 P | 5.50 | 522 m | 295 m | **-44%** |
+---
 
-The conventional wings hold. **The single-surface wings do not, and the reason
-is structural rather than statistical.** Same maker, same area, same year:
+## 9. Generating a family, from the interface
 
-| | Hook 6 (20) | Skin 4 P (20) |
-| --- | --- | --- |
-| flat area | 20 m² | 20 m² |
-| cells | 47 | 39 |
-| total line | 205 m | **346 m** |
-| glider weight | 3.97 kg | **1.29 kg** |
+`buildFamily`, `buildSize` and `familyTable` have been in the model since
+Phase 2 and there was never a way to ask for them. A designer draws one wing
+and needs four.
 
-**69% more line, 68% less weight.** A single-surface wing has no internal
-structure, so the lines carry all the shape — it trades cloth and ribs for
-line. The law was fitted only on double-surface wings and cannot be expected
-to cover them.
+There is a **Size family** group now — count, smallest and largest area,
+all-up mass at each end — and a button that writes the table.
 
-### A transcription hazard worth recording
+### Two things that had to be right first
 
-The ARTIK R 2 table's text layer absorbs the size header as a data row,
-shifting every label by one. Read literally it says **20 cells, aspect ratio
-68**. The corrected reading is 68 cells, AR 6.5 — checked against span² / AR
-matching the published area to within 5%, which is the kind of cross-check
-`docs/collecting-reference-data.md` asks for.
+**Line length is the line HEIGHT, not the total.** `lineLengthM` is the
+distance from karabiner to canopy; `lineLengthPerSpan` gives total metres of
+cord. Feeding one where the other belongs would have put 224 m where 6.5 m
+goes. Left null entirely, the table came out with **NaN speed and NaN glide on
+every row** and 4 of 216 lines load-sized — a table that looked like a table
+and told nobody anything.
 
-### And a parser gap the file exposed
+**A declared base area must match the base geometry.** Every size scales by
+`sqrt(area / base.flatArea)`, so a base declared at 22.5 m² whose planform
+actually measures 22.91 put every size **1.8% over what was asked for** —
+consistently, quietly, and in the direction that makes a wing bigger than its
+label.
 
-`parseSizeFamilies` had no comment handling. The collection brief requires a
-provenance header on every file, and the parser could not read a file that
-followed its own instructions — because the one file that existed carried no
-comments.
-
-### Line sheets, and two parser gaps they exposed
-
-Niviuk publish a per-line table for every size — reference, material, strength,
-colour, length — and a total-line-length table measured to the harness. They
-are the first source here to give both for the same wing.
-`tools/import-niviuk.mjs` converts a manual into the project's own sheet
-format. Five wings, 546 lines, nothing dropped.
-
-Getting to "nothing dropped" took two fixes.
-
-**A known row name must beat a combined pair.** `2BR3` is genuinely ambiguous:
-Advance's prefix convention reads it as rows B and R combined at level 2, and
-Niviuk mean the brake row at level 2. Split blindly it became rows B and R, R
-is not a row, and the name was rejected — **seven brake and stabilo lines per
-sheet silently dropped.** Known multi-letter rows are now checked first,
-because a row that exists is a better reading than a pair that does not.
-
-**Rows run to I, not to E.** Five was enough for every double-surface wing in
-the reference set. A single-surface wing is different: with no cells to gather
-loads into, every attachment point gets its own row. The Skin 4 P runs **a
-through i — nine load-bearing rows** — and F to I were being rejected as
-unrecognised, dropping a fifth of its line plan.
-
-That is the same structural fact as the line-length result above, seen from
-the other side: a single-surface wing replaces internal structure with lines,
-so it has more of them, in more rows, and they carry more of the shape.
-
-### Total line lengths, and a tool that read the wrong table in silence
-
-Niviuk's section 10.7 prints, per size, the distance from each attachment
-point to the harness — the PMA total, risers included. That is what an
-inspector measures against and what `comparePlans` needs to diff a design
-against a real wing.
-
-`tools/import-niviuk-totals.mjs` extracts them. All six Hook 6 sizes, checked
-against the printed page: A1 reads 6390, 6700, 6996, 7280, 7553, 7944 mm.
-
-Two things it got wrong first, both silent:
-
-**It anchored on the contents page.** "10.7 TOTAL LINE LENGTH" appears in the
-table of contents before it appears as a heading, so a forward search found
-the listing rather than the table. It then extracted nothing and reported
-"0 anchors" without error.
-
-**Before that it anchored on the wrong table entirely** — the size headings
-appear twice in a manual, once over the per-line table in 10.6 and once over
-the totals in 10.7. The first match is the wrong one.
-
-Both produced an empty file rather than a wrong one, which is the better
-failure, but neither said anything was amiss. The cross-check that settled it
-was reading six values off the printed page and comparing.
+`buildFamily` now measures the base and refuses a declaration that contradicts
+it. But only when it matters: a size may give its scale factor `k` directly,
+and then the base area is never read — which is exactly how the Geo 7 family
+is validated against published figures its approximated planform does not
+match. Checking regardless would have broken a valid case to fix an invalid
+one.

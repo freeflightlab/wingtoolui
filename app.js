@@ -63,6 +63,7 @@ const S = {
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', riserLayout: 'A/B/C+D', splitFrom: 62,
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
+  famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
   ovalFromPressure: false, sailTension: 300,
   // Assumptions that were constants inside the core. Each is a design
   // decision rather than a fact, so each is the user's to make.
@@ -618,6 +619,17 @@ function buildControls() {
   slider(N, 'panelGap', 'Gap between panels', 0, 10, 0.5, (v) => v.toFixed(1), ' cm');
 
   // Assumptions: values that were constants inside the model.
+  // A size family from this design.
+  const FM = clear('g-family');
+  hint(FM, 'Scaling a design across a range has been in the model since '
+    + 'Phase 2 with no way to ask for it. Set the range and press Size family '
+    + 'under Files.');
+  numberField(FM, 'famCount', 'Number of sizes', 2, 8, 1);
+  numberField(FM, 'famSmallest', 'Smallest flat area (m2)', 8, 40, 0.5);
+  numberField(FM, 'famLargest', 'Largest flat area (m2)', 8, 45, 0.5);
+  numberField(FM, 'famLoadLo', 'All-up mass, smallest (kg)', 40, 200, 1);
+  numberField(FM, 'famLoadHi', 'All-up mass, largest (kg)', 40, 250, 1);
+
   const AS = clear('g-assume');
   hint(AS, 'Each of these was a fixed constant in a core module. They are '
     + 'design decisions rather than facts, so each is yours to set — and each '
@@ -662,6 +674,55 @@ function buildControls() {
     setStatus(`${t.pages.length} pages at ${S.paper}, `
       + `${t.blankPagesSkipped} blank tiles skipped. Check the 100 mm bar before cutting.`);
   }, 'btn');
+  button(grid, 'Size family', () => {
+    // Scaling a design across a size range has been possible since Phase 2 —
+    // `buildFamily`, `buildSize` and `familyTable` — and there has never
+    // been a way to ask for it. A designer draws one wing and needs four.
+    try {
+      const n = Math.max(2, Math.round(S.famCount));
+      const sizes = [];
+      for (let i = 0; i < n; i++) {
+        const t = n === 1 ? 0 : i / (n - 1);
+        const area = S.famSmallest + t * (S.famLargest - S.famSmallest);
+        sizes.push({
+          name: `${Math.round(area)}`,
+          flatArea: area,
+          // All-up mass scales with the size, which is what makes the line
+          // sizing differ between them rather than just the geometry.
+          allUpMassKg: S.famLoadLo + t * (S.famLoadHi - S.famLoadLo),
+          wingMassKg: S.wingMass * (area / M.metrics.area),
+          // Line HEIGHT, scaled with the wing — not the total line length.
+          //
+          // `lineLengthM` is the distance from the karabiner to the canopy,
+          // and `lineLengthPerSpan` gives the *total* metres of cord. Feeding
+          // one where the other belongs would have put 224 m where 6.5 m goes.
+          //
+          // Left null the family came out with NaN line length, NaN speed and
+          // NaN glide, and 4 of 216 lines load-sized: a table that looked
+          // like a table and told a designer nothing. Line height scales with
+          // the linear dimension, so it goes as the square root of area.
+          lineLengthM: S.lineLength * Math.sqrt(area / M.metrics.area),
+        });
+      }
+      const fam = buildFamily(
+        {
+          span: S.span, rootChord: S.rootChord, tipChord: S.tipChord,
+          tipSweep: S.tipSweep,
+        },
+        sizes,
+        {
+          airfoil: M.airfoil, cells: S.cells,
+          pointsPerSurface: S.pointsPerSurface, rollWidth: S.rollWidth,
+        },
+      );
+      save(`${S.name}-family.tsv`, familyTable(fam));
+      setStatus(`${fam.sizes.length} sizes from `
+        + `${S.famSmallest} to ${S.famLargest} m2.`);
+    } catch (e) {
+      setStatus(`Family: ${e.message}`);
+    }
+  }, 'btn');
+
   button(grid, 'Bill of materials', () => {
     // The BOM has existed since Phase 3 and has never been reachable from the
     // interface — a headline feature with no button.

@@ -139,6 +139,34 @@ export function buildSize(base, k, {
  * canopy scale factor is used, which is wrong for line length and is flagged.
  */
 export function buildFamily(base, sizes, opts = {}) {
+  // The base's declared area must match its own geometry.
+  //
+  // Every size is scaled by `sqrt(flatArea / base.flatArea)`, so a base whose
+  // declared area is wrong scales the whole family by the same wrong factor.
+  // A base declared at 22.5 m2 whose planform actually measures 22.1 put
+  // every size 1.8% over what was asked for — consistently, quietly, and in
+  // the direction that makes a wing bigger than its label.
+  //
+  // The geometry is the truth here, so it is measured and the declaration
+  // checked against it rather than believed.
+  // Only when the base area is actually used for scaling.
+  //
+  // A size may give its scale factor `k` directly, in which case
+  // `base.flatArea` is never read and a declared area that differs from the
+  // geometry is not an error — it is the published area of a real wing whose
+  // planform this base only approximates, which is exactly how the Geo 7
+  // family is validated.
+  const scalesByArea = sizes.some((z) => z.k == null && z.flatArea != null);
+  const measured = planformMetrics(planformFromDesignInputs(base)).area;
+  if (scalesByArea && base.flatArea
+      && Math.abs(measured / base.flatArea - 1) > 0.005) {
+    throw new Error(
+      `buildFamily: the base declares ${base.flatArea.toFixed(2)} m2 but its `
+      + `geometry measures ${measured.toFixed(2)} m2. Every size would scale `
+      + 'by that error. Use the measured area, or correct the geometry.');
+  }
+  if (scalesByArea) base = { ...base, flatArea: measured };
+
   const built = sizes.map((s) => buildSize(base, s.k ?? Math.sqrt(s.flatArea / base.flatArea), {
     ...opts,
     name: s.name,

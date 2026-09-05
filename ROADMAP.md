@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1620-test validation suite and a benchmark with regression budgets
+- [x] 1628-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -364,6 +364,12 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Size family from the interface** — `buildFamily` had existed since
+      Phase 2 with no way to ask for it. Now a control group and a button.
+      Fixed on the way: a declared base area that contradicts the base
+      geometry scaled every size 1.8% over, and is now refused — but only
+      when the base area is used for scaling. See `docs/scaling.md`.
 
 - [x] **Rods as chord-range groups, and a Structure view** — `rodGroup`,
       `buildRodGroups` and `checkRodClearance` extend the existing rod model
