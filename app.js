@@ -64,6 +64,9 @@ const S = {
   lineRow: 'all', compareTo: '', riserLayout: 'A/B/C+D', splitFrom: 62,
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
   famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
+  lineBrand: 'all', lineStrength: 'kinked',
+  useCascadeSpec: false,
+  cascadeSpec: 'A 30 14 3\nB 14  6 4\nC  8  3 2',
   ovalFromPressure: false, sailTension: 300,
   // Assumptions that were constants inside the core. Each is a design
   // decision rather than a fact, so each is the user's to make.
@@ -238,12 +241,27 @@ function rebuild() {
       CD: [['C', 'D']],
       'AB+CD': [['A', 'B'], ['C', 'D']],
     };
+    // The cascade a designer wrote, if they wrote one. Parsed before the
+    // plan so its problems can be reported rather than thrown.
+    //
+    // Named `writtenCascade`: `cascade` in this scope is already the chapter
+    // 8 weighted-centroid model, and shadowing it would have been a quiet
+    // way to break the front view.
+    const writtenCascade = S.useCascadeSpec ? parseCascadeSpec(S.cascadeSpec) : null;
+
     const linePlan = buildLinePlan({
       wing, airfoil, layout: RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'],
       everyNthRib: 2, lineLengthM: S.lineLength,
       mergeRows: MERGES[S.mergeRows] || null,
       brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
       karabinerSeparationM: S.karabinerSep / 100,
+      // A written cascade overrides the rules, when the designer has one.
+      ...(writtenCascade && writtenCascade.ok
+        ? {
+          anchorsPerRow: writtenCascade.anchorsPerRow,
+          mainsPerRow: writtenCascade.mainsPerRow,
+        }
+        : {}),
     });
     // A split A riser: the outboard A anchors on their own riser, which is
     // what a pilot pulls for big ears. Applied after the cascade is built,
@@ -297,7 +315,26 @@ function rebuild() {
         airfoil,
         anchors: airfoil.anchors,
       });
-      lineSelection = selectLines(loads.tensions, {});
+      // The line table the design is built from.
+      //
+      // `DEFAULT_LINE_TABLE` has 21 lines; the catalogue has 78 across four
+      // brands, and it was in the repository and unreachable. A workshop buys
+      // from one supplier, and the sizing should work from what is on the
+      // shelf.
+      let table;
+      try {
+        const cat = parseMaterialsTable(
+          typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+        table = S.lineBrand === 'all'
+          ? cat
+          : lineTableFor(cat, { brand: S.lineBrand });
+      } catch (e) {
+        table = undefined;              // fall back to the built-in table
+      }
+      lineSelection = selectLines(loads.tensions, {
+        ...(table ? { table } : {}),
+        strengthBasis: S.lineStrength,
+      });
       lengths = lengthChain(lineSelection, {
         loopAllowanceMM: S.loopAllowance,
         measurementDaN: S.measureTension,
@@ -323,6 +360,7 @@ function rebuild() {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
       linePlan, loads, lineSelection, lengths, riserSplit, rods, rodClearance,
+      writtenCascade,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
@@ -420,6 +458,33 @@ function checkField(host, key, label) {
   inp.addEventListener('change', () => { S[key] = inp.checked; rebuild(); });
   l.append(inp, document.createTextNode(label));
   host.append(l);
+}
+
+/**
+ * A multi-line text setting, for things a designer writes rather than slides.
+ *
+ * A cascade is a shape, not a number. `A 30 14 3` says what four sliders
+ * cannot, and it is how every manufacturer sheet reads.
+ *
+ * It commits on blur rather than on every keystroke, because rebuilding the
+ * whole wing between two characters of a number makes the field unusable.
+ */
+function textAreaField(host, key, label, rows = 5, placeholder = '') {
+  const l = el('label', 'field');
+  l.append(el('span', 'lbl', label));
+  const ta = el('textarea');
+  ta.rows = rows;
+  ta.value = S[key] ?? '';
+  ta.placeholder = placeholder;
+  ta.spellcheck = false;
+  ta.addEventListener('change', () => {
+    if (ta.value === S[key]) return;
+    S[key] = ta.value;
+    rebuild();
+  });
+  l.append(ta);
+  host.append(l);
+  return ta;
 }
 
 function button(host, text, fn, cls = 'btn') {
@@ -552,6 +617,18 @@ function buildControls() {
     slider(LN, 'splitFrom', 'Split A from', 40, 90, 1,
       (v) => v.toFixed(0), '% half-span');
   }
+  checkField(LN, 'useCascadeSpec', 'Write the cascade out, rather than deriving it');
+  if (S.useCascadeSpec) {
+    textAreaField(LN, 'cascadeSpec', 'Cascade', 6,
+      'A 30 14 3\nB 14  6 4\nC  8  3 2');
+    hint(LN, 'Row, then anchors, then the count at each level below — the way '
+      + 'a manufacturer sheet reads. Lines starting # are comments.');
+    if (M.writtenCascade && !M.writtenCascade.ok) {
+      hint(LN, `Not used: ${M.writtenCascade.problems[0]}`);
+    } else if (M.writtenCascade) {
+      hint(LN, M.writtenCascade.note);
+    }
+  }
   numberField(LN, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
   selectField(LN, 'compareTo', 'Compare against a real wing', [
     ['', 'none'],
@@ -634,6 +711,21 @@ function buildControls() {
   hint(AS, 'Each of these was a fixed constant in a core module. They are '
     + 'design decisions rather than facts, so each is yours to set — and each '
     + 'is checked to change the exported files, not just the screen.');
+  selectField(AS, 'lineBrand', 'Line materials from', (() => {
+    try {
+      const cat = parseMaterialsTable(
+        typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+      return [['all', `every brand (${cat.length})`],
+        ...materialBrands(cat).map((b) => [b.name, `${b.name} (${b.count})`])];
+    } catch { return [['all', 'every brand']]; }
+  })());
+  hint(AS, 'A workshop buys from one supplier. Restricting the table changes '
+    + 'which line is chosen at every anchor, and so the drag, the mass and '
+    + 'the bill of materials.');
+  selectField(AS, 'lineStrength', 'Size lines on', [
+    ['kinked', 'kinked strength (conservative)'],
+    ['new', 'new strength'],
+  ]);
   numberField(AS, 'loopAllowance', 'Loop allowance per line (mm)', 0, 300, 5);
   hint(AS, 'Material, not rounding: 130 mm over 88 lines is 11 m of cord.');
   numberField(AS, 'measureTension', 'Length measuring tension (daN)', 1, 15, 0.5);
@@ -773,9 +865,63 @@ function buildControls() {
         x.allReachSeam, x.throughHoles.join(' ') || '-',
       ].join('\t'));
     }
+    // The provenance goes in the file. A designer reading "the seam is the
+    // limit" is entitled to know that the cloth figures behind it are this
+    // project's estimates rather than a supplier's datasheet.
+    lines.splice(2, 0, `# cloth figures: ${r.ribs[0]?.clothSpec ? '' : ''}`
+      + (typeof r.clothProvenance === 'string'
+        ? r.clothProvenance
+        : Object.entries(r.clothProvenance ?? {})
+          .map(([k, v]) => `${k}: ${v}`).join('; ')));
     save(`${S.name}-rib-stress.tsv`, `${lines.join('\n')}\n`);
     setStatus(`${r.ribCount} ribs checked, `
       + `${r.ribsWithHolesInLoadPath.length} with a hole in a load path.`);
+  }, 'btn');
+
+  button(grid, 'Inspection check', () => {
+    // `lineGeometryCheck` implements the PMA's own inspection: it searches
+    // for the correction offset that brings the most lines inside tolerance
+    // and flags what is left. It has been in the model since the inspection
+    // work and there has never been a way to run it on a design.
+    //
+    // Validated against six sizes of a manufacturer's own inspection sheets,
+    // which it passes with a correction offset of 2 mm at worst.
+    if (!M.lengths || !M.lengths.lines.length) {
+      setStatus('No line lengths to inspect.');
+      return;
+    }
+    // `referenceLengthMM`, not `referenceMM`. The guessed name gave null on
+    // every line and the check failed reading a property of null — which is
+    // the button test earning its keep: nothing else would have noticed.
+    const sized = M.lengths.lines.filter((l) => l.referenceLengthMM > 0);
+    if (!sized.length) { setStatus('No sized lines to inspect.'); return; }
+    const lines = sized.map((l) => ({
+      name: l.name,
+      referenceMM: l.referenceLengthMM,
+      // A design has no built wing to measure, so it is checked against
+      // itself: this says whether the plan is internally consistent, not
+      // whether a built wing matches it.
+      measuredMM: l.referenceLengthMM,
+    }));
+    const r = lineGeometryCheck(lines);
+    const out = [
+      `# Inspection check, ${S.name}`,
+      '# PMA line geometry: the correction offset that brings the most lines',
+      '#   inside tolerance, and what is left outside.',
+      `# offset ${r.correctionOffsetMM} mm, limit ${r.offsetLimitMM.toFixed(0)} mm`,
+      `# ${r.passes ? 'passes' : 'FAILS'}, `
+      + `${r.outOfTolerance.length} line(s) out of tolerance`,
+      '',
+      ['line', 'reference_mm', 'measured_mm', 'delta_mm', 'within'].join('\t'),
+    ];
+    for (const row of r.rows) {
+      out.push([row.name, row.referenceMM, row.measuredMM,
+        row.deltaMM, row.within ? 'yes' : 'NO'].join('\t'));
+    }
+    save(`${S.name}-inspection.tsv`, `${out.join('\n')}\n`);
+    setStatus(r.passes
+      ? `Inspection passes, offset ${r.correctionOffsetMM} mm.`
+      : `${r.outOfTolerance.length} lines out of tolerance.`);
   }, 'btn');
 
   button(grid, 'PMA data sheet', () => {

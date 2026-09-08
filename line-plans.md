@@ -190,8 +190,9 @@ not specified per-row densities should not be given someone else's.
 
 ### Deriving the densities: six designs, not thirty-three
 
-There are 33 size sheets in the reference set, and treating them as 33
-observations would be wrong. **The line topology is identical across every
+There are 33 size sheets **in the six Ozone families this analysis uses** —
+the database as a whole holds 63 — and treating them as 33 observations would
+be wrong. **The line topology is identical across every
 size in a family** — the Alpina 5 runs A:31 B:19 C:12 in XS through XL, the
 Ultralite 5 A:16 B:16 C:16 D:16 in all seven sizes. Only the lengths scale.
 
@@ -332,16 +333,13 @@ regression.
 
 ## 5. Not yet modelled
 
-- **Brake cascade geometry.** Brake lines (`K`, `KM`, `KMU`, `KRU`/`KRL`) are
-  parsed and named but not generated: they run to the trailing edge with a
-  deliberately uneven distribution and a pulley.
-- **Collapse / stabilo lines** (`Z` row on the Lyght) — parsed, not generated.
-- **Line materials and load.** The sheets group by material code
-  (`LIN-8001-050-BLUE`, `LIN-PPSL200`) with sheathed and unsheathed types.
-  Selecting a diameter needs the load model.
+- **Collapse lines** (`Z` row on the Lyght) — parsed, not generated. The
+  stabilo is now generated; the collapse row is not.
 - **Left/right asymmetry.** Quantities of 2 and 4 encode mirror pairs;
   asymmetric colour or line plans are not represented.
-- **Riser hardware** — maillons, pulleys, speed system travel, trimmers.
+- **Brake free travel from geometry.** The cascade is generated and the
+  coupling to the speed system is modelled, but how much slack a brake carries
+  at rest still has to be supplied rather than derived.
 
 ---
 
@@ -351,3 +349,55 @@ regression.
 
 Recovering topology, riser length and junction positions from a
 manufacturer's published numbers is covered in `docs/line-sheets.md`.
+
+---
+
+## 7. Writing a cascade down
+
+The generator derives a cascade from rules: an anchor count per row, then a
+branching factor. That is fine for exploring and wrong for **describing** — a
+designer copying a real wing, or specifying one for a builder, knows the shape
+they want and could not say it.
+
+The format is how every manufacturer sheet in this project reads: row,
+anchors, then the count at each level below.
+
+```
+# the Ozone Zeno 2, from its own plan
+A 30 14 3
+B 14  6 4
+C  8  3 2
+```
+
+`parseCascadeSpec` reads it, `buildLinePlan` builds exactly that, and
+`cascadeSpecFor` writes a built plan back out so one can be edited and reused.
+It is a checkbox and a text box in the tool, under Lines & risers.
+
+### What it refuses
+
+A spec is typed by a person, so the typos a person makes are caught rather
+than built: a row name that does not exist, a level with **more** lines than
+the one above it, a zero or negative count, a row given twice, and rows
+reaching different depths.
+
+`/^[A-Z]{1,2}$/` accepted `QQ` as a row. Two letters is legitimate — `BR`
+and `ST` are rows — so the test has to be against the known set, not against
+the shape.
+
+### Two defects it exposed
+
+**`mainsPerRow` said per row and was one integer applied to all of them.** A
+spec asking for A:3 B:4 C:2 could not be built; the A row came back with
+seven. Real plans differ by row — the Zeno 2's own is A:3 B:4 — which one
+number cannot express.
+
+**`chunkInto` returned one group fewer than asked, whenever the division was
+inexact.** Six middles into four came back as **three**, because
+`ceil(6/4) = 2` and three chunks of two exhaust the array a group early. The
+shortfall check did not fire because it compared against the same wrong
+arithmetic.
+
+Sizes are distributed now — the first `length % groups` chunks take one extra
+— and an empty input returns nothing rather than one empty group, which was a
+regression the first fix introduced and which produced NaN line lengths
+several steps away.

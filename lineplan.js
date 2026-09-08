@@ -1027,12 +1027,21 @@ function buildLinePlanInner({
       // only 2. Fewer mains means each carries a larger share, and on the
       // highest-aspect wings that pushed one main past the strongest line in
       // the table. Reported rather than silently delivered.
-      const riserGroups = mainsPerRow
-        ? chunkInto(groups, mainsPerRow)
+      // `mainsPerRow` may be one number for every row, or a count per row.
+      //
+      // Its name says per row and it was a single integer applied to all of
+      // them, so a cascade spec asking for A:3 B:4 C:2 could not be built —
+      // the A row came back with seven mains. Real plans differ by row: the
+      // Zeno 2's own is A:3 B:4, which one number cannot express.
+      const wantMains = (mainsPerRow && typeof mainsPerRow === 'object')
+        ? mainsPerRow[row] ?? null
+        : mainsPerRow;
+      const riserGroups = wantMains
+        ? chunkInto(groups, wantMains)
         : chunkBy(groups, groupSize);
-      if (mainsPerRow && riserGroups.length !== mainsPerRow) {
+      if (wantMains && riserGroups.length !== wantMains) {
         shortfalls.push({
-          row, asked: mainsPerRow, got: riserGroups.length,
+          row, asked: wantMains, got: riserGroups.length,
           anchors: cascaded.length, middles: groups.length,
         });
       }
@@ -1893,11 +1902,35 @@ export function tipFirstSlack({ centreMM = 180, tipMM = 60, power = 1.5 } = {}) 
   return (t) => centreMM + (tipMM - centreMM) * (t ** power);
 }
 
+/**
+ * Split into exactly `groups` chunks, as evenly as the count allows.
+ *
+ * A fixed chunk size of `ceil(length / groups)` does not give `groups` chunks
+ * whenever the division is inexact: six middles into four came back as
+ * **three** groups of two, because ceil(6/4) is 2 and 2+2+2 exhausts the
+ * array a group early.
+ *
+ * That silently ignored a designer asking for four mains on the B row, and
+ * the shortfall check did not fire because it compared against the same wrong
+ * arithmetic. Sizes are distributed instead: the first `length % groups`
+ * chunks take one extra, which is what "as evenly as possible" means.
+ */
 function chunkInto(arr, groups) {
+  // Nothing in, nothing out. The old loop never ran on an empty array and so
+  // returned []; distributing sizes instead pushed ONE EMPTY GROUP, which
+  // downstream counted as a cascade branch with no lines in it and produced
+  // NaN line lengths several steps away.
+  if (!arr.length) return [];
   const n = Math.max(1, Math.min(groups, arr.length));
-  const per = Math.ceil(arr.length / n);
+  const base = Math.floor(arr.length / n);
+  const extra = arr.length % n;
   const out = [];
-  for (let i = 0; i < arr.length; i += per) out.push(arr.slice(i, i + per));
+  let i = 0;
+  for (let g = 0; g < n; g++) {
+    const take = base + (g < extra ? 1 : 0);
+    out.push(arr.slice(i, i + take));
+    i += take;
+  }
   return out;
 }
 const mmDist = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000);
@@ -2147,13 +2180,19 @@ export const ANCHOR_DENSITY = {
     // Two categories the six-design table had no examples of: four-riser
     // wings, and the nine-row single-surface layout where every attachment
     // gets its own row.
+    //
+    // The Magnum 4 — a five-row tandem — joined the four-riser group and
+    // moved its mean from 1.57 to 1.65 on three designs. It had been
+    // converted and left out of the validation set because the xlsx reader
+    // could not open its file format, which is a reason one layer below where
+    // anyone was looking.
     2: { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
-    3: { mean: 1.68, min: 1.00, max: 2.50, n: 19 },
-    4: { mean: 1.57, min: 1.33, max: 1.80, n: 2 },
+    3: { mean: 1.69, min: 1.00, max: 2.50, n: 20 },
+    4: { mean: 1.65, min: 1.33, max: 1.82, n: 3 },
     8: { mean: 3.00, min: 3.00, max: 3.00, n: 1 },
   },
-  sampleDesigns: 25,
-  sampleSizes: 116,
+  sampleDesigns: 27,
+  sampleSizes: 125,
   note: 'topology is constant within a family; sizes are not independent observations',
 };
 
@@ -2667,5 +2706,128 @@ export function multiSizeSheetToTSV(split, size, {
   out.push('# Split from a multi-size sheet, one column per size');
   out.push('name\tlength_mm');
   for (const l of lines) out.push(`${l.name}\t${Math.round(l.lengthMM)}`);
+  return `${out.join('\n')}\n`;
+}
+
+/**
+ * A cascade written out, the way a designer would say it.
+ *
+ * The generator derives the cascade from rules: an anchor count per row, then
+ * a branching factor applied uniformly. That is fine for exploring and wrong
+ * for describing, because a designer copying a real wing — or specifying one
+ * for a builder — knows the shape they want and cannot say it:
+ *
+ *     A  30 14 4
+ *     B  14  6 3
+ *     C   8  3 2
+ *     K  13  6 1
+ *
+ * Anchors first, then the count at each level below, ending at the risers.
+ * That is how every manufacturer sheet in this project reads, and how the
+ * Ozone Zeno 2's own plan is written: A:30 B:14 C:8 with mains A:3 B:4.
+ *
+ * Blank lines and anything after `#` are ignored, so a spec can be commented.
+ */
+export function parseCascadeSpec(text) {
+  if (typeof text !== 'string') {
+    throw new Error('parseCascadeSpec needs the spec as text');
+  }
+
+  const rows = {};
+  const problems = [];
+  let lineNo = 0;
+
+  for (const raw of text.split(/\r?\n/)) {
+    lineNo++;
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+
+    const parts = line.split(/[\s,]+/);
+    const row = parts[0].toUpperCase();
+    // A known row, not merely a plausible-looking one.
+    //
+    // `/^[A-Z]{1,2}$/` accepted "QQ", which is not a row on any wing. A spec
+    // is a thing a person types, so a typo in a row name has to be caught
+    // here — the plan would otherwise build a cascade for a row that does not
+    // exist and quietly leave the real one out.
+    const KNOWN = [...ROWS, 'BR', 'ST'];
+    if (!KNOWN.includes(row)) {
+      problems.push(`line ${lineNo}: "${parts[0]}" is not a row; `
+        + `expected one of ${KNOWN.join(', ')}`);
+      continue;
+    }
+    if (rows[row]) {
+      problems.push(`line ${lineNo}: row ${row} appears twice`);
+      continue;
+    }
+
+    const counts = parts.slice(1).map(Number);
+    if (!counts.length || counts.some((n) => !Number.isInteger(n) || n < 1)) {
+      problems.push(`line ${lineNo}: row ${row} needs whole positive counts, `
+        + `got "${parts.slice(1).join(' ')}"`);
+      continue;
+    }
+
+    // A cascade converges. A level with more lines than the one above it is
+    // not a cascade, and is much more likely to be a typo than a design.
+    for (let i = 1; i < counts.length; i++) {
+      if (counts[i] > counts[i - 1]) {
+        problems.push(`line ${lineNo}: row ${row} goes ${counts[i - 1]} to `
+          + `${counts[i]}, which widens rather than converging`);
+      }
+    }
+
+    rows[row] = {
+      row,
+      anchors: counts[0],
+      levels: counts.slice(1),
+      depth: counts.length,
+    };
+  }
+
+  const names = Object.keys(rows);
+  if (!names.length) problems.push('the spec names no rows');
+
+  // Every row should reach the same depth, or the plan has rows terminating
+  // at different levels — possible, but far more often a missing number.
+  const depths = [...new Set(names.map((r) => rows[r].depth))];
+  if (depths.length > 1) {
+    problems.push(`rows reach different depths (${depths.sort().join(', ')}); `
+      + 'if that is deliberate the plan will build, but it is usually a '
+      + 'missing count');
+  }
+
+  return {
+    rows,
+    rowNames: names,
+    anchorsPerRow: Object.fromEntries(names.map((r) => [r, rows[r].anchors])),
+    mainsPerRow: Object.fromEntries(names.map((r) => {
+      const l = rows[r].levels;
+      return [r, l.length ? l[l.length - 1] : rows[r].anchors];
+    })),
+    problems,
+    ok: problems.length === 0,
+    depth: Math.max(...names.map((r) => rows[r].depth), 0),
+    totalAnchors: names.reduce((a, r) => a + rows[r].anchors, 0),
+    note: problems.length === 0
+      ? `${names.length} rows, ${names.reduce((a, r) => a + rows[r].anchors, 0)} `
+        + `anchors, ${Math.max(...names.map((r) => rows[r].depth))} levels`
+      : `${problems.length} problem(s) in the spec`,
+  };
+}
+
+/** Write a built plan back out as a spec, so one can be edited and reused. */
+export function cascadeSpecFor(plan) {
+  const byRow = {};
+  for (const l of plan.lines) {
+    const r = (byRow[l.row] ||= {});
+    r[l.level] = (r[l.level] || 0) + 1;
+  }
+  const order = ['upper', 'cascade-2', 'cascade-3', 'middle', 'cascade-4', 'main'];
+  const out = ['# row  anchors  then the count at each level below'];
+  for (const row of Object.keys(byRow).sort()) {
+    const counts = order.map((lv) => byRow[row][lv]).filter(Boolean);
+    if (counts.length) out.push(`${row}  ${counts.join(' ')}`);
+  }
   return `${out.join('\n')}\n`;
 }

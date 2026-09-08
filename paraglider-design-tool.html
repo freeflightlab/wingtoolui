@@ -461,6 +461,19 @@ input[type=range]::-moz-range-thumb {
 
 /* The stage holds the tab bar plus one viewport grid plus the status bar. */
 .stage { grid-template-rows: auto 1fr auto; }
+
+/* A cascade is written, not slid. Monospace so the columns line up the way
+   they do on a manufacturer sheet. */
+.field textarea {
+  width: 100%;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg-2, #14181d);
+  color: var(--fg, #dfe6ee);
+  border: 1px solid var(--line, #2a323b);
+  border-radius: 4px;
+  padding: 6px 8px;
+  resize: vertical;
+}
 </style>
 </head>
 <body>
@@ -4555,12 +4568,21 @@ function buildLinePlanInner({
       // only 2. Fewer mains means each carries a larger share, and on the
       // highest-aspect wings that pushed one main past the strongest line in
       // the table. Reported rather than silently delivered.
-      const riserGroups = mainsPerRow
-        ? chunkInto(groups, mainsPerRow)
+      // `mainsPerRow` may be one number for every row, or a count per row.
+      //
+      // Its name says per row and it was a single integer applied to all of
+      // them, so a cascade spec asking for A:3 B:4 C:2 could not be built —
+      // the A row came back with seven mains. Real plans differ by row: the
+      // Zeno 2's own is A:3 B:4, which one number cannot express.
+      const wantMains = (mainsPerRow && typeof mainsPerRow === 'object')
+        ? mainsPerRow[row] ?? null
+        : mainsPerRow;
+      const riserGroups = wantMains
+        ? chunkInto(groups, wantMains)
         : chunkBy(groups, groupSize);
-      if (mainsPerRow && riserGroups.length !== mainsPerRow) {
+      if (wantMains && riserGroups.length !== wantMains) {
         shortfalls.push({
-          row, asked: mainsPerRow, got: riserGroups.length,
+          row, asked: wantMains, got: riserGroups.length,
           anchors: cascaded.length, middles: groups.length,
         });
       }
@@ -5421,11 +5443,35 @@ function tipFirstSlack({ centreMM = 180, tipMM = 60, power = 1.5 } = {}) {
   return (t) => centreMM + (tipMM - centreMM) * (t ** power);
 }
 
+/**
+ * Split into exactly `groups` chunks, as evenly as the count allows.
+ *
+ * A fixed chunk size of `ceil(length / groups)` does not give `groups` chunks
+ * whenever the division is inexact: six middles into four came back as
+ * **three** groups of two, because ceil(6/4) is 2 and 2+2+2 exhausts the
+ * array a group early.
+ *
+ * That silently ignored a designer asking for four mains on the B row, and
+ * the shortfall check did not fire because it compared against the same wrong
+ * arithmetic. Sizes are distributed instead: the first `length % groups`
+ * chunks take one extra, which is what "as evenly as possible" means.
+ */
 function chunkInto(arr, groups) {
+  // Nothing in, nothing out. The old loop never ran on an empty array and so
+  // returned []; distributing sizes instead pushed ONE EMPTY GROUP, which
+  // downstream counted as a cascade branch with no lines in it and produced
+  // NaN line lengths several steps away.
+  if (!arr.length) return [];
   const n = Math.max(1, Math.min(groups, arr.length));
-  const per = Math.ceil(arr.length / n);
+  const base = Math.floor(arr.length / n);
+  const extra = arr.length % n;
   const out = [];
-  for (let i = 0; i < arr.length; i += per) out.push(arr.slice(i, i + per));
+  let i = 0;
+  for (let g = 0; g < n; g++) {
+    const take = base + (g < extra ? 1 : 0);
+    out.push(arr.slice(i, i + take));
+    i += take;
+  }
   return out;
 }
 const mmDist = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000);
@@ -6201,6 +6247,129 @@ function multiSizeSheetToTSV(split, size, {
   out.push('# Split from a multi-size sheet, one column per size');
   out.push('name\tlength_mm');
   for (const l of lines) out.push(`${l.name}\t${Math.round(l.lengthMM)}`);
+  return `${out.join('\n')}\n`;
+}
+
+/**
+ * A cascade written out, the way a designer would say it.
+ *
+ * The generator derives the cascade from rules: an anchor count per row, then
+ * a branching factor applied uniformly. That is fine for exploring and wrong
+ * for describing, because a designer copying a real wing — or specifying one
+ * for a builder — knows the shape they want and cannot say it:
+ *
+ *     A  30 14 4
+ *     B  14  6 3
+ *     C   8  3 2
+ *     K  13  6 1
+ *
+ * Anchors first, then the count at each level below, ending at the risers.
+ * That is how every manufacturer sheet in this project reads, and how the
+ * Ozone Zeno 2's own plan is written: A:30 B:14 C:8 with mains A:3 B:4.
+ *
+ * Blank lines and anything after `#` are ignored, so a spec can be commented.
+ */
+function parseCascadeSpec(text) {
+  if (typeof text !== 'string') {
+    throw new Error('parseCascadeSpec needs the spec as text');
+  }
+
+  const rows = {};
+  const problems = [];
+  let lineNo = 0;
+
+  for (const raw of text.split(/\r?\n/)) {
+    lineNo++;
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+
+    const parts = line.split(/[\s,]+/);
+    const row = parts[0].toUpperCase();
+    // A known row, not merely a plausible-looking one.
+    //
+    // `/^[A-Z]{1,2}$/` accepted "QQ", which is not a row on any wing. A spec
+    // is a thing a person types, so a typo in a row name has to be caught
+    // here — the plan would otherwise build a cascade for a row that does not
+    // exist and quietly leave the real one out.
+    const KNOWN = [...ROWS, 'BR', 'ST'];
+    if (!KNOWN.includes(row)) {
+      problems.push(`line ${lineNo}: "${parts[0]}" is not a row; `
+        + `expected one of ${KNOWN.join(', ')}`);
+      continue;
+    }
+    if (rows[row]) {
+      problems.push(`line ${lineNo}: row ${row} appears twice`);
+      continue;
+    }
+
+    const counts = parts.slice(1).map(Number);
+    if (!counts.length || counts.some((n) => !Number.isInteger(n) || n < 1)) {
+      problems.push(`line ${lineNo}: row ${row} needs whole positive counts, `
+        + `got "${parts.slice(1).join(' ')}"`);
+      continue;
+    }
+
+    // A cascade converges. A level with more lines than the one above it is
+    // not a cascade, and is much more likely to be a typo than a design.
+    for (let i = 1; i < counts.length; i++) {
+      if (counts[i] > counts[i - 1]) {
+        problems.push(`line ${lineNo}: row ${row} goes ${counts[i - 1]} to `
+          + `${counts[i]}, which widens rather than converging`);
+      }
+    }
+
+    rows[row] = {
+      row,
+      anchors: counts[0],
+      levels: counts.slice(1),
+      depth: counts.length,
+    };
+  }
+
+  const names = Object.keys(rows);
+  if (!names.length) problems.push('the spec names no rows');
+
+  // Every row should reach the same depth, or the plan has rows terminating
+  // at different levels — possible, but far more often a missing number.
+  const depths = [...new Set(names.map((r) => rows[r].depth))];
+  if (depths.length > 1) {
+    problems.push(`rows reach different depths (${depths.sort().join(', ')}); `
+      + 'if that is deliberate the plan will build, but it is usually a '
+      + 'missing count');
+  }
+
+  return {
+    rows,
+    rowNames: names,
+    anchorsPerRow: Object.fromEntries(names.map((r) => [r, rows[r].anchors])),
+    mainsPerRow: Object.fromEntries(names.map((r) => {
+      const l = rows[r].levels;
+      return [r, l.length ? l[l.length - 1] : rows[r].anchors];
+    })),
+    problems,
+    ok: problems.length === 0,
+    depth: Math.max(...names.map((r) => rows[r].depth), 0),
+    totalAnchors: names.reduce((a, r) => a + rows[r].anchors, 0),
+    note: problems.length === 0
+      ? `${names.length} rows, ${names.reduce((a, r) => a + rows[r].anchors, 0)} `
+        + `anchors, ${Math.max(...names.map((r) => rows[r].depth))} levels`
+      : `${problems.length} problem(s) in the spec`,
+  };
+}
+
+/** Write a built plan back out as a spec, so one can be edited and reused. */
+function cascadeSpecFor(plan) {
+  const byRow = {};
+  for (const l of plan.lines) {
+    const r = (byRow[l.row] ||= {});
+    r[l.level] = (r[l.level] || 0) + 1;
+  }
+  const order = ['upper', 'cascade-2', 'cascade-3', 'middle', 'cascade-4', 'main'];
+  const out = ['# row  anchors  then the count at each level below'];
+  for (const row of Object.keys(byRow).sort()) {
+    const counts = order.map((lv) => byRow[row][lv]).filter(Boolean);
+    if (counts.length) out.push(`${row}  ${counts.join(' ')}`);
+  }
   return `${out.join('\n')}\n`;
 }
 
@@ -17278,6 +17447,8 @@ const S = {
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
   famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
   lineBrand: 'all', lineStrength: 'kinked',
+  useCascadeSpec: false,
+  cascadeSpec: 'A 30 14 3\nB 14  6 4\nC  8  3 2',
   ovalFromPressure: false, sailTension: 300,
   // Assumptions that were constants inside the core. Each is a design
   // decision rather than a fact, so each is the user's to make.
@@ -17452,12 +17623,27 @@ function rebuild() {
       CD: [['C', 'D']],
       'AB+CD': [['A', 'B'], ['C', 'D']],
     };
+    // The cascade a designer wrote, if they wrote one. Parsed before the
+    // plan so its problems can be reported rather than thrown.
+    //
+    // Named `writtenCascade`: `cascade` in this scope is already the chapter
+    // 8 weighted-centroid model, and shadowing it would have been a quiet
+    // way to break the front view.
+    const writtenCascade = S.useCascadeSpec ? parseCascadeSpec(S.cascadeSpec) : null;
+
     const linePlan = buildLinePlan({
       wing, airfoil, layout: RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'],
       everyNthRib: 2, lineLengthM: S.lineLength,
       mergeRows: MERGES[S.mergeRows] || null,
       brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
       karabinerSeparationM: S.karabinerSep / 100,
+      // A written cascade overrides the rules, when the designer has one.
+      ...(writtenCascade && writtenCascade.ok
+        ? {
+          anchorsPerRow: writtenCascade.anchorsPerRow,
+          mainsPerRow: writtenCascade.mainsPerRow,
+        }
+        : {}),
     });
     // A split A riser: the outboard A anchors on their own riser, which is
     // what a pilot pulls for big ears. Applied after the cascade is built,
@@ -17556,6 +17742,7 @@ function rebuild() {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
       linePlan, loads, lineSelection, lengths, riserSplit, rods, rodClearance,
+      writtenCascade,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
@@ -17653,6 +17840,33 @@ function checkField(host, key, label) {
   inp.addEventListener('change', () => { S[key] = inp.checked; rebuild(); });
   l.append(inp, document.createTextNode(label));
   host.append(l);
+}
+
+/**
+ * A multi-line text setting, for things a designer writes rather than slides.
+ *
+ * A cascade is a shape, not a number. `A 30 14 3` says what four sliders
+ * cannot, and it is how every manufacturer sheet reads.
+ *
+ * It commits on blur rather than on every keystroke, because rebuilding the
+ * whole wing between two characters of a number makes the field unusable.
+ */
+function textAreaField(host, key, label, rows = 5, placeholder = '') {
+  const l = el('label', 'field');
+  l.append(el('span', 'lbl', label));
+  const ta = el('textarea');
+  ta.rows = rows;
+  ta.value = S[key] ?? '';
+  ta.placeholder = placeholder;
+  ta.spellcheck = false;
+  ta.addEventListener('change', () => {
+    if (ta.value === S[key]) return;
+    S[key] = ta.value;
+    rebuild();
+  });
+  l.append(ta);
+  host.append(l);
+  return ta;
 }
 
 function button(host, text, fn, cls = 'btn') {
@@ -17784,6 +17998,18 @@ function buildControls() {
   if ((RISER_LAYOUTS[S.riserLayout] || []).some((r) => r.splitTo)) {
     slider(LN, 'splitFrom', 'Split A from', 40, 90, 1,
       (v) => v.toFixed(0), '% half-span');
+  }
+  checkField(LN, 'useCascadeSpec', 'Write the cascade out, rather than deriving it');
+  if (S.useCascadeSpec) {
+    textAreaField(LN, 'cascadeSpec', 'Cascade', 6,
+      'A 30 14 3\nB 14  6 4\nC  8  3 2');
+    hint(LN, 'Row, then anchors, then the count at each level below — the way '
+      + 'a manufacturer sheet reads. Lines starting # are comments.');
+    if (M.writtenCascade && !M.writtenCascade.ok) {
+      hint(LN, `Not used: ${M.writtenCascade.problems[0]}`);
+    } else if (M.writtenCascade) {
+      hint(LN, M.writtenCascade.note);
+    }
   }
   numberField(LN, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
   selectField(LN, 'compareTo', 'Compare against a real wing', [

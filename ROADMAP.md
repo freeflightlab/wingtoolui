@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1692-test validation suite and a benchmark with regression budgets
+- [x] 1707-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -362,6 +362,13 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **A checkout doctor** (`npm run doctor`) — a first user's build failed
+      with seven modules missing because they had cloned the old flat layout.
+      The build could only report what it needed itself. `doctor` checks the
+      whole tree and says what to do; it is now the first check stage, and the
+      build's own message names the flat case and says it cannot be repaired
+      by adding files.
+
 - [x] **Line-set optimisation for a given load** — `optimiseLineSet`. Picking
       the best material per line needs seven types across three suppliers,
       which no workshop builds. Choosing N types is a one-dimensional
@@ -372,8 +379,11 @@ validation notes flagged.
       what rotates the wing. One fibre throughout holds its trim; mixing them
       moves it 1.7 degrees over a 200 hour life. Rates are estimated and say
       so.
-- [ ] **Custom cascade specification** — a designer can choose a riser layout
-      and anchor density, but cannot describe an arbitrary cascade topology.
+- [x] **Custom cascade specification** — `parseCascadeSpec` reads the format
+      a manufacturer sheet uses (`A 30 14 3`), builds exactly that, and writes
+      a built plan back out. Two defects fixed on the way: `mainsPerRow` said
+      per row and was one integer for all of them, and `chunkInto` returned
+      g-1 groups whenever the division was inexact. See `docs/line-plans.md`.
 - [ ] **Fabric by panel** — upper surface, lower surface, ribs and leading
       edge take different cloth; the model treats the sail as one material.
 
