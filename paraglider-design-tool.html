@@ -12020,6 +12020,256 @@ function billowDragPenalty({
   };
 }
 
+/* ===== trimdrift.js ===== */
+/* trimdrift.js — why a wing goes out of trim, and when to check it.
+ *
+ * A line set does not keep its length. Under load and over hours the fibres
+ * move, and they do not all move the same way:
+ *
+ * **Dyneema creeps.** It is a polyethylene, and under sustained load it
+ * elongates permanently. The lines get LONGER. It is worst in the most heavily
+ * loaded lines, which on a paraglider are the A's.
+ *
+ * **Aramid shrinks.** It absorbs moisture and relaxes, and over a season the
+ * lines get SHORTER. It is roughly uniform, so it moves the whole wing rather
+ * than tilting it.
+ *
+ * A cascade built entirely from one fibre drifts as a unit and mostly stays
+ * in trim. A cascade that mixes them — which most modern wings do, because
+ * unsheathed Dyneema is thin where it matters and aramid is stable where it
+ * matters — drifts *differentially*, and that is what changes the angle of
+ * attack.
+ *
+ * ---------------------------------------------------------------------------
+ * Why it matters more than it sounds
+ * ---------------------------------------------------------------------------
+ * The A and C rows are about a metre apart along the chord. If the A lines
+ * creep 15 mm and the C lines do not, the wing rotates nose-up by
+ * `atan(0.015 / 1.07)` — about 0.8 degrees. That is a large fraction of the
+ * usable angle-of-attack range, and it arrives slowly enough that a pilot
+ * does not notice it happening.
+ *
+ * Hence the schedule: a first trim check at 40 to 60 hours, when creep is
+ * fastest, and a new line set at about 200. This models what those checks
+ * are looking for.
+ *
+ * The rates below are ESTIMATES. This project has no measured creep data, and
+ * says so where it says anything.
+ */
+
+/** How a fibre changes length over its life, as a fraction. */
+const FIBRE_BEHAVIOUR = {
+  dyneema: {
+    // Creep is roughly logarithmic in time and rises with sustained load.
+    //
+    // Calibrated so a 6.5 m A line working at half its rating drifts about
+    // 18 mm over a 200 hour service life — which is the order a trim check
+    // is looking for and roughly one and a half times the PMA's 12 mm band.
+    //
+    // My first values gave 28 mm at TWENTY hours and 49 mm at 200, which is
+    // several times what a real line does. The shape of the curve was right
+    // and the scale was not, and a model that is right in shape and wrong by
+    // a factor of three is worse than one that is obviously broken.
+    creepAt100h: 0.0011,        // 1.1 mm per metre at 100 h, quarter load
+    creepLoadExponent: 1.4,     // steeper than linear in load fraction
+    shrinkPerSeason: 0,
+    note: 'creeps under load; the more heavily loaded the line, the more',
+  },
+  aramid: {
+    creepAt100h: 0.0002,
+    creepLoadExponent: 1.0,
+    // Aramid takes up moisture and relaxes; the effect is a shortening.
+    shrinkPerSeason: 0.0015,
+    note: 'barely creeps but shrinks with moisture, roughly uniformly',
+  },
+  polyester: {
+    creepAt100h: 0.0035,
+    creepLoadExponent: 1.2,
+    shrinkPerSeason: 0.0005,
+    note: 'creeps more than Dyneema and is used where that does not matter',
+  },
+};
+
+// The rates are this project's estimates, not measured data.
+Object.defineProperty(FIBRE_BEHAVIOUR, 'provenance', {
+  value: 'ESTIMATED by this project; no measured creep data. The DIRECTIONS '
+    + '(Dyneema creeps, aramid shrinks) are well established; the rates are '
+    + 'plausible magnitudes and should not be quoted as measurements.',
+  enumerable: false,
+});
+
+/** Which fibre a material is, from its name. */
+function fibreOf(material) {
+  const n = `${material.name ?? ''} ${material.code ?? ''}`.toLowerCase();
+  if (/aramid|kevlar|technora|vectran|tsl|ppsl/.test(n)) return 'aramid';
+  if (/polyester|dsl|ldc/.test(n)) return 'polyester';
+  // Edelrid 8000/9200, Liros DC/DFLC/LTC, Cousin are Dyneema cores.
+  return 'dyneema';
+}
+
+/**
+ * How much one line changes length after a given number of flying hours.
+ *
+ * `loadFraction` is how hard the line works relative to its rating. A line at
+ * a quarter of its rated strength creeps far less than one at half, which is
+ * why the answer is not simply "Dyneema creeps 0.25%".
+ */
+function lineDrift({
+  material, lengthMM, hours, loadFraction = 0.25, seasons = null,
+  behaviour = FIBRE_BEHAVIOUR,
+}) {
+  if (!(lengthMM > 0)) throw new Error('lineDrift needs a positive length');
+  if (!(hours >= 0)) throw new Error('lineDrift needs non-negative hours');
+
+  const fibre = fibreOf(material);
+  const b = behaviour[fibre];
+  if (!b) throw new Error(`lineDrift: no behaviour for fibre "${fibre}"`);
+
+  // Creep is logarithmic in time: most of it happens early, which is why the
+  // first trim check comes at 40 to 60 hours and not at 150.
+  // Normalised so the factor is 1 at 100 hours. Most of the movement is in
+  // the first fifty, which is what puts the first trim check there.
+  const timeFactor = hours <= 0 ? 0 : Math.log10(1 + hours) / Math.log10(101);
+  const loadFactor = (loadFraction / 0.25) ** b.creepLoadExponent;
+  const creep = b.creepAt100h * timeFactor * loadFactor;
+
+  // Shrinkage is seasonal rather than hourly: a wing stored over a winter
+  // shrinks whether it flies or not.
+  const yrs = seasons ?? hours / 150;
+  const shrink = b.shrinkPerSeason * yrs;
+
+  const netFraction = creep - shrink;
+  return {
+    fibre,
+    hours,
+    loadFraction,
+    creepFraction: creep,
+    shrinkFraction: shrink,
+    netFraction,
+    deltaMM: netFraction * lengthMM,
+    lengthMM,
+    newLengthMM: lengthMM * (1 + netFraction),
+    note: `${fibre}: ${b.note}`,
+  };
+}
+
+/**
+ * What the drift does to the wing's trim.
+ *
+ * The rows are what matter. If every line drifts the same amount the wing
+ * gets slightly longer lines and flies almost the same; if the A row drifts
+ * differently from the C row, the wing rotates.
+ */
+function trimDrift({
+  lines, hours, anchors, chordM, behaviour = FIBRE_BEHAVIOUR,
+}) {
+  if (!lines?.length) throw new Error('trimDrift needs lines');
+  if (!anchors) throw new Error('trimDrift needs the anchor chord fractions');
+
+  const byRow = {};
+  for (const l of lines) {
+    if (!l.line || !(l.referenceLengthMM > 0)) continue;
+    const loadFraction = l.ratedDaN > 0
+      ? Math.min(1, (l.requiredDaN ?? 0) / l.ratedDaN) : 0.25;
+    const d = lineDrift({
+      material: l.line,
+      lengthMM: l.referenceLengthMM,
+      hours,
+      loadFraction,
+      behaviour,
+    });
+    (byRow[l.row] ||= []).push(d);
+  }
+
+  const rowDrift = {};
+  for (const [row, ds] of Object.entries(byRow)) {
+    rowDrift[row] = {
+      lines: ds.length,
+      meanDeltaMM: ds.reduce((a, d) => a + d.deltaMM, 0) / ds.length,
+      fibres: [...new Set(ds.map((d) => d.fibre))],
+    };
+  }
+
+  // The rotation: the difference between the front and rear rows over the
+  // distance between them, which is the same lever `alphaChange` uses.
+  const rows = Object.keys(rowDrift).filter((r) => anchors[r] != null).sort(
+    (a, b) => anchors[a] - anchors[b]);
+  let alphaChangeDeg = 0;
+  let leverM = 0;
+  if (rows.length >= 2) {
+    const front = rows[0];
+    const rear = rows[rows.length - 1];
+    leverM = (anchors[rear] - anchors[front]) * chordM;
+    const differentialM = (rowDrift[rear].meanDeltaMM
+      - rowDrift[front].meanDeltaMM) / 1000;
+    // Rear lines growing MORE than front lines lowers the angle of attack.
+    alphaChangeDeg = leverM > 0
+      ? -Math.atan(differentialM / leverM) * (180 / Math.PI) : 0;
+  }
+
+  const mixed = new Set(Object.values(rowDrift).flatMap((r) => r.fibres)).size > 1;
+
+  return {
+    hours,
+    rowDrift,
+    leverM,
+    alphaChangeDeg,
+    mixedFibres: mixed,
+    source: 'estimated',
+    // The number a trim check is looking for.
+    worstRowDeltaMM: Math.max(...Object.values(rowDrift)
+      .map((r) => Math.abs(r.meanDeltaMM)), 0),
+    note: mixed
+      ? 'the cascade mixes fibres, so it drifts differentially and the trim '
+        + 'moves as well as the lengths'
+      : 'one fibre throughout, so the whole cascade drifts together and the '
+        + 'trim moves far less than the lengths do',
+  };
+}
+
+/**
+ * When to look, and when to replace.
+ *
+ * A trim check is worth doing when the drift has become measurable but before
+ * it has become a problem. Creep is logarithmic, so most of it arrives early:
+ * that is why the first check is at 40 to 60 hours rather than halfway
+ * through the set's life.
+ */
+function trimSchedule({
+  lines, anchors, chordM, toleranceMM = 12,
+  firstCheckHours = 50, replaceHours = 200, behaviour = FIBRE_BEHAVIOUR,
+}) {
+  const at = (h) => trimDrift({ lines, hours: h, anchors, chordM, behaviour });
+
+  const first = at(firstCheckHours);
+  const end = at(replaceHours);
+
+  // When does drift first exceed the PMA measurement band? That is when a
+  // check would actually find something.
+  let detectableAt = null;
+  for (let h = 5; h <= replaceHours; h += 5) {
+    if (at(h).worstRowDeltaMM >= toleranceMM) { detectableAt = h; break; }
+  }
+
+  return {
+    firstCheckHours,
+    replaceHours,
+    toleranceMM,
+    atFirstCheck: first,
+    atReplacement: end,
+    detectableAtHours: detectableAt,
+    // A check before anything is measurable finds nothing; one long after
+    // the wing has drifted finds it too late.
+    checkIsUseful: detectableAt != null && detectableAt <= replaceHours,
+    note: detectableAt == null
+      ? `drift stays inside ${toleranceMM} mm for the whole ${replaceHours} `
+        + 'hour life: this cascade holds its trim'
+      : `drift reaches ${toleranceMM} mm at about ${detectableAt} hours, `
+        + `${detectableAt < firstCheckHours ? 'before' : 'after'} the first `
+        + `check at ${firstCheckHours}`,
+  };
+}
+
 /* ===== bom.js ===== */
 /* bom.js — bill of materials.
  *
@@ -13812,6 +14062,235 @@ function gustResponse({
     quasiSteady: true,
     note: 'alleviation from integrating the equation of motion, with no '
       + 'empirical factor; quasi-steady, so lift lag is not represented',
+  };
+}
+
+/**
+ * Choose a small set of line types to build the whole wing from.
+ *
+ * `selectLines` picks, for each line independently, the lightest material
+ * that carries it. That is optimal per line and wrong for a workshop: it came
+ * back with **seven** distinct materials across three suppliers for one
+ * 76-line wing, and nobody builds a wing that way. Every extra type is
+ * another spool to buy, another splice setup, and another chance of sewing
+ * the wrong line into the wing.
+ *
+ * Real wings use four to six types from one supplier. So the question a
+ * designer actually has is not "what is the best line for this anchor" but
+ * **"which N types should I stock, so that every line is covered and the
+ * total cost is least"** — where cost is drag, or mass, or whatever they are
+ * trading.
+ *
+ * ---------------------------------------------------------------------------
+ * This is solvable exactly, not approximately
+ * ---------------------------------------------------------------------------
+ * Sort the materials by strength. Any line takes the weakest chosen material
+ * that still carries it, so a choice of N materials partitions the
+ * load-sorted lines into N contiguous groups. Minimising over all such
+ * partitions is a one-dimensional k-segmentation, which dynamic programming
+ * solves exactly in O(lines x materials^2).
+ *
+ * A greedy pick would be quicker and would be beaten by cases that matter:
+ * the best set of four is not usually the best set of three plus one.
+ */
+function optimiseLineSet(tensions, {
+  table = DEFAULT_LINE_TABLE,
+  maxTypes = 5,
+  loadCase = DEFAULT_LOAD_CASE,
+  strengthBasis = 'kinked',
+  minimise = 'drag',
+  brakeSafetyFactor = 2.0,
+  minimumDiameterMM = PRACTICAL_FLOOR.diameterMM,
+} = {}) {
+  if (!(maxTypes >= 1)) throw new Error('optimiseLineSet needs maxTypes >= 1');
+  if (!['drag', 'mass'].includes(minimise)) {
+    throw new Error(`optimiseLineSet: minimise is 'drag' or 'mass' (got ${minimise})`);
+  }
+
+  const rated = (m) => (strengthBasis === 'new' ? m.strengthNewDaN : m.strengthKinkedDaN);
+
+  // What each line has to carry, and how long it is.
+  const lines = tensions.lines.map((l) => ({
+    name: l.name,
+    row: l.row,
+    lengthM: (l.lengthMM ?? 0) / 1000,
+    // The same relation `selectLines` uses, read from it rather than
+    // reinvented: tension x limit g x safety factor, and brakes take the
+    // brake factor instead of the general one.
+    //
+    // My first version multiplied by `loadCase.factor`, which does not exist.
+    // Every required load came out NaN, no material could carry NaN, and the
+    // optimiser reported that no set of any size covered the wing.
+    requiredDaN: (l.tensionN * loadCase.limitG
+      * (l.row === 'K' ? brakeSafetyFactor : loadCase.safetyFactor)) / 10,
+  })).filter((l) => l.lengthM > 0);
+
+  if (!lines.length) {
+    return { chosen: [], lines: [], ok: false, note: 'no lines to size' };
+  }
+
+  // Candidates: strong enough for at least one line, thick enough to handle.
+  const candidates = table
+    .filter((m) => m.diameterMM >= minimumDiameterMM && rated(m) > 0)
+    .sort((a, b) => rated(a) - rated(b));
+
+  const heaviest = Math.max(...lines.map((l) => l.requiredDaN));
+  if (!candidates.length || rated(candidates[candidates.length - 1]) < heaviest) {
+    return {
+      chosen: [], lines: [], ok: false,
+      note: `no material in the table carries ${heaviest.toFixed(0)} daN; the `
+        + `strongest is ${candidates.length ? rated(candidates[candidates.length - 1]).toFixed(0) : 0} daN`,
+    };
+  }
+
+  // Cost of building a line from a material.
+  const cost = (l, m) => (minimise === 'drag'
+    ? l.lengthM * (m.diameterMM / 1000)      // drag goes as length x diameter
+    : l.lengthM * m.gramsPerM);
+
+  // Lines sorted by what they need, so a chosen material serves a contiguous
+  // run of them.
+  const sorted = lines.slice().sort((a, b) => a.requiredDaN - b.requiredDaN);
+
+  // The cheapest material that carries a load — not the weakest.
+  //
+  // Strength order and diameter order are not the same: a better material is
+  // stronger AND thinner, so "first in strength order that carries" can be
+  // thicker than something further along. Using it made the per-line floor
+  // more expensive than the constrained answer, and the optimiser reported a
+  // NEGATIVE penalty — which is impossible and was the clue.
+  const bestFor = (need, unitCost) => {
+    let best = null;
+    let bestC = Infinity;
+    for (const m of candidates) {
+      if (rated(m) < need) continue;
+      const c = unitCost(m);
+      if (c < bestC) { bestC = c; best = m; }
+    }
+    return best;
+  };
+  const unitCost = (m) => (minimise === 'drag'
+    ? m.diameterMM / 1000 : m.gramsPerM);
+
+  // seg[i][j] = cost of covering sorted[i..j] with the weakest material that
+  // carries sorted[j], which is the one the whole run would use.
+  const n = sorted.length;
+  const materialFor = (need) => bestFor(need, unitCost);
+  const segCost = [];
+  const segMat = [];
+  for (let i = 0; i < n; i++) {
+    segCost.push(new Float64Array(n).fill(Infinity));
+    segMat.push(new Array(n).fill(null));
+    for (let j = i; j < n; j++) {
+      const m = materialFor(sorted[j].requiredDaN);
+      if (!m) break;
+      let c = 0;
+      for (let k = i; k <= j; k++) c += cost(sorted[k], m);
+      segCost[i][j] = c;
+      segMat[i][j] = m;
+    }
+  }
+
+  // dp[t][j] = least cost of covering sorted[0..j] with t materials.
+  const K = Math.min(maxTypes, candidates.length);
+  const dp = [];
+  const back = [];
+  for (let t = 0; t <= K; t++) {
+    dp.push(new Float64Array(n).fill(Infinity));
+    back.push(new Array(n).fill(-1));
+  }
+  for (let j = 0; j < n; j++) dp[1][j] = segCost[0][j];
+  for (let t = 2; t <= K; t++) {
+    for (let j = 0; j < n; j++) {
+      for (let i = 1; i <= j; i++) {
+        const c = dp[t - 1][i - 1] + segCost[i][j];
+        if (c < dp[t][j]) { dp[t][j] = c; back[t][j] = i; }
+      }
+    }
+  }
+
+  // The best t is not always K: a type that saves nothing is a type not worth
+  // stocking, so the smallest t within a hair of the best is taken.
+  // Start from the smallest FEASIBLE depth, not from 1.
+  //
+  // One material rarely covers every load, so dp[1] is usually Infinity — and
+  // `Infinity < Infinity * 0.999` is false, so a loop seeded at t=1 never
+  // moved off it and every wing came back "no set of 1 materials covers these
+  // loads". The comparison was right; the starting point was not.
+  let bestT = -1;
+  for (let t = 1; t <= K; t++) {
+    if (Number.isFinite(dp[t][n - 1])) { bestT = t; break; }
+  }
+  if (bestT < 0) {
+    return {
+      chosen: [], lines: [], ok: false, typeCount: 0,
+      note: `no set of up to ${K} materials covers these loads; the heaviest `
+        + `line needs ${heaviest.toFixed(0)} daN`,
+    };
+  }
+  // Then take a deeper set only if it saves something worth stocking a spool
+  // for. A type that buys under a tenth of a percent is a type not worth
+  // having.
+  for (let t = bestT + 1; t <= K; t++) {
+    if (dp[t][n - 1] < dp[bestT][n - 1] * 0.999) bestT = t;
+  }
+
+  // Walk the choice back out.
+  // A back-pointer of -1 means no valid split was found at that depth, so
+  // walking it blindly indexes segMat[-1] and crashes on a null material.
+  // The walk stops and reports instead: an optimiser that cannot cover the
+  // loads should say so, not throw.
+  const groups = [];
+  let j = n - 1;
+  for (let t = bestT; t >= 1; t--) {
+    const i = t === 1 ? 0 : back[t][j];
+    if (i < 0 || i > j || !segMat[i] || !segMat[i][j]) {
+      return {
+        chosen: [], lines: [], ok: false, typeCount: 0,
+        note: `no set of ${bestT} materials covers these loads; the heaviest `
+          + `line needs ${heaviest.toFixed(0)} daN`,
+      };
+    }
+    groups.unshift({ from: i, to: j, material: segMat[i][j] });
+    j = i - 1;
+  }
+
+  const assigned = new Map();
+  for (const g of groups) {
+    for (let k = g.from; k <= g.to; k++) assigned.set(sorted[k].name, g.material);
+  }
+
+  const totalCost = dp[bestT][n - 1];
+  // What the per-line optimum would cost, as the floor this is measured
+  // against: it is unbuildable, but it says what the constraint costs.
+  const perLineFloor = sorted.reduce((a, l) => {
+    const m = materialFor(l.requiredDaN);
+    return a + (m ? cost(l, m) : 0);
+  }, 0);
+
+  return {
+    chosen: groups.map((g) => ({
+      code: g.material.code,
+      name: g.material.name,
+      diameterMM: g.material.diameterMM,
+      ratedDaN: rated(g.material),
+      lines: g.to - g.from + 1,
+      heaviestLoadDaN: sorted[g.to].requiredDaN,
+    })),
+    typeCount: bestT,
+    maxTypes: K,
+    lines: sorted.map((l) => ({ ...l, line: assigned.get(l.name) })),
+    ok: true,
+    minimise,
+    totalCost,
+    perLineFloor,
+    // What restricting the wing to this many types costs against the
+    // unbuildable per-line optimum.
+    penalty: perLineFloor > 0 ? totalCost / perLineFloor - 1 : 0,
+    exact: true,
+    note: `${bestT} type${bestT > 1 ? 's' : ''} covers ${n} lines, `
+      + `${(100 * (perLineFloor > 0 ? totalCost / perLineFloor - 1 : 0)).toFixed(1)}% `
+      + `more ${minimise} than a different line at every anchor`,
   };
 }
 

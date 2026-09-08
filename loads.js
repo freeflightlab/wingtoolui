@@ -1418,3 +1418,232 @@ export function gustResponse({
       + 'empirical factor; quasi-steady, so lift lag is not represented',
   };
 }
+
+/**
+ * Choose a small set of line types to build the whole wing from.
+ *
+ * `selectLines` picks, for each line independently, the lightest material
+ * that carries it. That is optimal per line and wrong for a workshop: it came
+ * back with **seven** distinct materials across three suppliers for one
+ * 76-line wing, and nobody builds a wing that way. Every extra type is
+ * another spool to buy, another splice setup, and another chance of sewing
+ * the wrong line into the wing.
+ *
+ * Real wings use four to six types from one supplier. So the question a
+ * designer actually has is not "what is the best line for this anchor" but
+ * **"which N types should I stock, so that every line is covered and the
+ * total cost is least"** — where cost is drag, or mass, or whatever they are
+ * trading.
+ *
+ * ---------------------------------------------------------------------------
+ * This is solvable exactly, not approximately
+ * ---------------------------------------------------------------------------
+ * Sort the materials by strength. Any line takes the weakest chosen material
+ * that still carries it, so a choice of N materials partitions the
+ * load-sorted lines into N contiguous groups. Minimising over all such
+ * partitions is a one-dimensional k-segmentation, which dynamic programming
+ * solves exactly in O(lines x materials^2).
+ *
+ * A greedy pick would be quicker and would be beaten by cases that matter:
+ * the best set of four is not usually the best set of three plus one.
+ */
+export function optimiseLineSet(tensions, {
+  table = DEFAULT_LINE_TABLE,
+  maxTypes = 5,
+  loadCase = DEFAULT_LOAD_CASE,
+  strengthBasis = 'kinked',
+  minimise = 'drag',
+  brakeSafetyFactor = 2.0,
+  minimumDiameterMM = PRACTICAL_FLOOR.diameterMM,
+} = {}) {
+  if (!(maxTypes >= 1)) throw new Error('optimiseLineSet needs maxTypes >= 1');
+  if (!['drag', 'mass'].includes(minimise)) {
+    throw new Error(`optimiseLineSet: minimise is 'drag' or 'mass' (got ${minimise})`);
+  }
+
+  const rated = (m) => (strengthBasis === 'new' ? m.strengthNewDaN : m.strengthKinkedDaN);
+
+  // What each line has to carry, and how long it is.
+  const lines = tensions.lines.map((l) => ({
+    name: l.name,
+    row: l.row,
+    lengthM: (l.lengthMM ?? 0) / 1000,
+    // The same relation `selectLines` uses, read from it rather than
+    // reinvented: tension x limit g x safety factor, and brakes take the
+    // brake factor instead of the general one.
+    //
+    // My first version multiplied by `loadCase.factor`, which does not exist.
+    // Every required load came out NaN, no material could carry NaN, and the
+    // optimiser reported that no set of any size covered the wing.
+    requiredDaN: (l.tensionN * loadCase.limitG
+      * (l.row === 'K' ? brakeSafetyFactor : loadCase.safetyFactor)) / 10,
+  })).filter((l) => l.lengthM > 0);
+
+  if (!lines.length) {
+    return { chosen: [], lines: [], ok: false, note: 'no lines to size' };
+  }
+
+  // Candidates: strong enough for at least one line, thick enough to handle.
+  const candidates = table
+    .filter((m) => m.diameterMM >= minimumDiameterMM && rated(m) > 0)
+    .sort((a, b) => rated(a) - rated(b));
+
+  const heaviest = Math.max(...lines.map((l) => l.requiredDaN));
+  if (!candidates.length || rated(candidates[candidates.length - 1]) < heaviest) {
+    return {
+      chosen: [], lines: [], ok: false,
+      note: `no material in the table carries ${heaviest.toFixed(0)} daN; the `
+        + `strongest is ${candidates.length ? rated(candidates[candidates.length - 1]).toFixed(0) : 0} daN`,
+    };
+  }
+
+  // Cost of building a line from a material.
+  const cost = (l, m) => (minimise === 'drag'
+    ? l.lengthM * (m.diameterMM / 1000)      // drag goes as length x diameter
+    : l.lengthM * m.gramsPerM);
+
+  // Lines sorted by what they need, so a chosen material serves a contiguous
+  // run of them.
+  const sorted = lines.slice().sort((a, b) => a.requiredDaN - b.requiredDaN);
+
+  // The cheapest material that carries a load — not the weakest.
+  //
+  // Strength order and diameter order are not the same: a better material is
+  // stronger AND thinner, so "first in strength order that carries" can be
+  // thicker than something further along. Using it made the per-line floor
+  // more expensive than the constrained answer, and the optimiser reported a
+  // NEGATIVE penalty — which is impossible and was the clue.
+  const bestFor = (need, unitCost) => {
+    let best = null;
+    let bestC = Infinity;
+    for (const m of candidates) {
+      if (rated(m) < need) continue;
+      const c = unitCost(m);
+      if (c < bestC) { bestC = c; best = m; }
+    }
+    return best;
+  };
+  const unitCost = (m) => (minimise === 'drag'
+    ? m.diameterMM / 1000 : m.gramsPerM);
+
+  // seg[i][j] = cost of covering sorted[i..j] with the weakest material that
+  // carries sorted[j], which is the one the whole run would use.
+  const n = sorted.length;
+  const materialFor = (need) => bestFor(need, unitCost);
+  const segCost = [];
+  const segMat = [];
+  for (let i = 0; i < n; i++) {
+    segCost.push(new Float64Array(n).fill(Infinity));
+    segMat.push(new Array(n).fill(null));
+    for (let j = i; j < n; j++) {
+      const m = materialFor(sorted[j].requiredDaN);
+      if (!m) break;
+      let c = 0;
+      for (let k = i; k <= j; k++) c += cost(sorted[k], m);
+      segCost[i][j] = c;
+      segMat[i][j] = m;
+    }
+  }
+
+  // dp[t][j] = least cost of covering sorted[0..j] with t materials.
+  const K = Math.min(maxTypes, candidates.length);
+  const dp = [];
+  const back = [];
+  for (let t = 0; t <= K; t++) {
+    dp.push(new Float64Array(n).fill(Infinity));
+    back.push(new Array(n).fill(-1));
+  }
+  for (let j = 0; j < n; j++) dp[1][j] = segCost[0][j];
+  for (let t = 2; t <= K; t++) {
+    for (let j = 0; j < n; j++) {
+      for (let i = 1; i <= j; i++) {
+        const c = dp[t - 1][i - 1] + segCost[i][j];
+        if (c < dp[t][j]) { dp[t][j] = c; back[t][j] = i; }
+      }
+    }
+  }
+
+  // The best t is not always K: a type that saves nothing is a type not worth
+  // stocking, so the smallest t within a hair of the best is taken.
+  // Start from the smallest FEASIBLE depth, not from 1.
+  //
+  // One material rarely covers every load, so dp[1] is usually Infinity — and
+  // `Infinity < Infinity * 0.999` is false, so a loop seeded at t=1 never
+  // moved off it and every wing came back "no set of 1 materials covers these
+  // loads". The comparison was right; the starting point was not.
+  let bestT = -1;
+  for (let t = 1; t <= K; t++) {
+    if (Number.isFinite(dp[t][n - 1])) { bestT = t; break; }
+  }
+  if (bestT < 0) {
+    return {
+      chosen: [], lines: [], ok: false, typeCount: 0,
+      note: `no set of up to ${K} materials covers these loads; the heaviest `
+        + `line needs ${heaviest.toFixed(0)} daN`,
+    };
+  }
+  // Then take a deeper set only if it saves something worth stocking a spool
+  // for. A type that buys under a tenth of a percent is a type not worth
+  // having.
+  for (let t = bestT + 1; t <= K; t++) {
+    if (dp[t][n - 1] < dp[bestT][n - 1] * 0.999) bestT = t;
+  }
+
+  // Walk the choice back out.
+  // A back-pointer of -1 means no valid split was found at that depth, so
+  // walking it blindly indexes segMat[-1] and crashes on a null material.
+  // The walk stops and reports instead: an optimiser that cannot cover the
+  // loads should say so, not throw.
+  const groups = [];
+  let j = n - 1;
+  for (let t = bestT; t >= 1; t--) {
+    const i = t === 1 ? 0 : back[t][j];
+    if (i < 0 || i > j || !segMat[i] || !segMat[i][j]) {
+      return {
+        chosen: [], lines: [], ok: false, typeCount: 0,
+        note: `no set of ${bestT} materials covers these loads; the heaviest `
+          + `line needs ${heaviest.toFixed(0)} daN`,
+      };
+    }
+    groups.unshift({ from: i, to: j, material: segMat[i][j] });
+    j = i - 1;
+  }
+
+  const assigned = new Map();
+  for (const g of groups) {
+    for (let k = g.from; k <= g.to; k++) assigned.set(sorted[k].name, g.material);
+  }
+
+  const totalCost = dp[bestT][n - 1];
+  // What the per-line optimum would cost, as the floor this is measured
+  // against: it is unbuildable, but it says what the constraint costs.
+  const perLineFloor = sorted.reduce((a, l) => {
+    const m = materialFor(l.requiredDaN);
+    return a + (m ? cost(l, m) : 0);
+  }, 0);
+
+  return {
+    chosen: groups.map((g) => ({
+      code: g.material.code,
+      name: g.material.name,
+      diameterMM: g.material.diameterMM,
+      ratedDaN: rated(g.material),
+      lines: g.to - g.from + 1,
+      heaviestLoadDaN: sorted[g.to].requiredDaN,
+    })),
+    typeCount: bestT,
+    maxTypes: K,
+    lines: sorted.map((l) => ({ ...l, line: assigned.get(l.name) })),
+    ok: true,
+    minimise,
+    totalCost,
+    perLineFloor,
+    // What restricting the wing to this many types costs against the
+    // unbuildable per-line optimum.
+    penalty: perLineFloor > 0 ? totalCost / perLineFloor - 1 : 0,
+    exact: true,
+    note: `${bestT} type${bestT > 1 ? 's' : ''} covers ${n} lines, `
+      + `${(100 * (perLineFloor > 0 ? totalCost / perLineFloor - 1 : 0)).toFixed(1)}% `
+      + `more ${minimise} than a different line at every anchor`,
+  };
+}

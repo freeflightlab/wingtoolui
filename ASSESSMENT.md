@@ -11,10 +11,10 @@ patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
 One offline HTML file, 733 KB, no build step and no network. That constraint
-drove the architecture: 33 core modules bundled into a single scope, with the
+drove the architecture: 34 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**36,000 lines**: 16,000 core, 2,100 interface, 10,000 tests, 2,000 tools,
+**37,000 lines**: 17,000 core, 2,100 interface, 10,300 tests, 2,000 tools,
 5,800 documentation.
 
 ## 2. What is genuinely validated
@@ -76,10 +76,13 @@ by it.
 
 ## 5. What is missing
 
-**39 open items.** The substantial ones:
+**41 open items.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
+- Fabric selection by panel: real wings use different cloth on the upper
+  surface, the lower, the ribs and the leading edge, and the model treats the
+  sail as one material.
 - Collapse (Z) lines: three reference wings carry them; the model does not.
 - Asymmetric and left/right-independent line plans.
 - Nesting: 51.6% efficiency against a 73% shape ceiling.

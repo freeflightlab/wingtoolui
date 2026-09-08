@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1672-test validation suite and a benchmark with regression budgets
+- [x] 1692-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,21 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Line-set optimisation for a given load** — `optimiseLineSet`. Picking
+      the best material per line needs seven types across three suppliers,
+      which no workshop builds. Choosing N types is a one-dimensional
+      k-segmentation and dynamic programming solves it exactly: four types
+      cost 0.4% of drag against a different line at every anchor.
+- [x] **Trim drift and the check schedule** — `trimdrift.js`. Dyneema creeps
+      longer under load, aramid shrinks with moisture, and the difference is
+      what rotates the wing. One fibre throughout holds its trim; mixing them
+      moves it 1.7 degrees over a 200 hour life. Rates are estimated and say
+      so.
+- [ ] **Custom cascade specification** — a designer can choose a riser layout
+      and anchor density, but cannot describe an arbitrary cascade topology.
+- [ ] **Fabric by panel** — upper surface, lower surface, ribs and leading
+      edge take different cloth; the model treats the sail as one material.
 
 - [x] **Inspection check on a design** — `lineGeometryCheck` had been tested
       against the standard's worked example and never against a real wing.
