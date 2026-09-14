@@ -1,0 +1,18 @@
+# Fabric by location, as manufacturers actually specify it
+# Source: Niviuk technical specifications, MATERIALS section
+# Retrieved: 2026-08-31 from the published PDFs
+# measure: as-published
+#
+# A wing is not one cloth. The leading edge takes a harder finish than the
+# rest of the upper surface, the ribs take a different weave again, and the
+# trailing edge and rib reinforcements are not sail cloth at all.
+family	location	material	supplier	note
+Niviuk Bi Skin 2 P	upper surface leading edge	9017 E25	Porcher	harder finish at the nose
+Niviuk Bi Skin 2 P	upper surface	70032 E3W	Porcher	
+Niviuk Bi Skin 2 P	lower surface	70032 E3W	Porcher	same as upper on this wing
+Niviuk Bi Skin 2 P	ribs	70032 E4D	Porcher	different finish code from the sail
+Niviuk Bi Skin 2 P	loops	LKI-10	Kolon	
+Niviuk Bi Skin 2 P	reinforcement loops	9017	Porcher	the LE cloth reused
+Niviuk Bi Skin 2 P	trailing edge reinforcement	Mylar 20	D-P	not fabric
+Niviuk Bi Skin 2 P	rib reinforcement	LTN-0.8 stick	Sportware	a stiffener, not cloth
+Niviuk Bi Skin 2 P	thread	Serafil 60	Amann	

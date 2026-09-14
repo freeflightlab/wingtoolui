@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1707-test validation suite and a benchmark with regression budgets
+- [x] 1719-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -384,8 +384,11 @@ validation notes flagged.
       a built plan back out. Two defects fixed on the way: `mainsPerRow` said
       per row and was one integer for all of them, and `chunkInto` returned
       g-1 groups whenever the division was inexact. See `docs/line-plans.md`.
-- [ ] **Fabric by panel** — upper surface, lower surface, ribs and leading
-      edge take different cloth; the model treats the sail as one material.
+- [x] **Fabric by location** — `fabric.js`. The bill carried four cloth
+      weights; a real specification names nine materials. The nose takes a
+      hard finish because it must hold its shape unpressurised, and the tool
+      refuses a soft one — or a sail heavier than its ribs. Niviuk's own
+      schedule is in the reference set.
 
 - [x] **Inspection check on a design** — `lineGeometryCheck` had been tested
       against the standard's worked example and never against a real wing.
