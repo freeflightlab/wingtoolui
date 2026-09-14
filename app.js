@@ -63,8 +63,13 @@ const S = {
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', riserLayout: 'A/B/C+D', splitFrom: 62,
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
+  useRodSpec: false,
+  rodSpec: 'leading edge  12.0 18.5   7.0 15.0   1.5  0 25\n'
+    + 'mid           23.5 29.5   63.0 70.0  1.1  0 25',
   famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
   lineBrand: 'all', lineStrength: 'kinked',
+  clothLE: 'Porcher Skytex 27 hard', clothUpper: 'Porcher Skytex 32',
+  clothLower: 'Porcher Skytex 32', clothRib: 'Porcher Skytex 40 hard',
   useCascadeSpec: false,
   cascadeSpec: 'A 30 14 3\nB 14  6 4\nC  8  3 2',
   ovalFromPressure: false, sailTension: 300,
@@ -271,20 +276,30 @@ function rebuild() {
     // A rod works in bending, which is the one thing fabric cannot do.
     let rods = null;
     let rodClearance = null;
+    let rodSpecResult = null;
     if (S.rods) {
-      const lastRib = Math.max(0,
-        Math.round((S.rodReach / 100) * (wing.ribs.length - 1)));
-      rods = buildRodGroups({
-        wing,
-        groups: [rodGroup({
+      let groups;
+      if (S.useRodSpec) {
+        // A written spec, which is the only way to say that a
+        // leading-edge rod wraps the nose: it needs an extent on each
+        // surface, and four sliders cannot express two of anything.
+        rodSpecResult = parseRodSpec(S.rodSpec, { ribCount: wing.ribs.length });
+        groups = rodSpecResult.ok
+          ? rodSpecResult.groups.flatMap((g) => noseRodGroup(g).parts)
+          : [];
+      } else {
+        const lastRib = Math.max(0,
+          Math.round((S.rodReach / 100) * (wing.ribs.length - 1)));
+        groups = [rodGroup({
           name: 'LE', fromChord: S.rodFrom / 100, toChord: S.rodTo / 100,
           fromRib: 0, toRib: lastRib, diameterMM: S.rodDia,
-        })],
-      });
-      rodClearance = checkRodClearance({
+        })];
+      }
+      rods = groups.length ? buildRodGroups({ wing, groups }) : null;
+      rodClearance = rods ? checkRodClearance({
         rods: rods.rods,
         anchors: Object.values(airfoil.anchors ?? {}).map((x) => ({ chordFraction: x })),
-      });
+      }) : null;
     }
 
     const riserSplit = applyRiserSplit(
@@ -360,6 +375,7 @@ function rebuild() {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
       linePlan, loads, lineSelection, lengths, riserSplit, rods, rodClearance,
+      rodSpecResult,
       writtenCascade,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
@@ -658,8 +674,25 @@ function buildControls() {
   hint(IN, 'The opening must contain the stagnation point across the whole '
     + 'speed range, which is why intakes are cut back along the lower '
     + 'surface rather than being a hole at the nose.');
-  checkField(IN, 'rods', 'Nylon rods along the leading edge');
+  checkField(IN, 'rods', 'Nylon rods');
   if (S.rods) {
+    checkField(IN, 'useRodSpec', 'Write the rods out, rather than one group');
+  }
+  if (S.rods && S.useRodSpec) {
+    textAreaField(IN, 'rodSpec', 'Rods', 4,
+      'name  upperFrom upperTo  lowerFrom lowerTo  dia  fromRib toRib');
+    hint(IN, 'Name, then the upper extent, the lower extent, the diameter and '
+      + 'the rib range — percentages of chord, the way LEP section 21 states '
+      + 'them. A rod at the nose needs an extent on BOTH surfaces, or it '
+      + 'hinges there rather than holding the radius. A dash means no rod on '
+      + 'that surface.');
+    if (M.rodSpecResult && !M.rodSpecResult.ok) {
+      hint(IN, `Not used: ${M.rodSpecResult.problems[0]}`);
+    } else if (M.rodSpecResult) {
+      hint(IN, M.rodSpecResult.note);
+    }
+  }
+  if (S.rods && !S.useRodSpec) {
     numberField(IN, 'rodFrom', 'Rod from (% chord)', 0, 40, 0.5);
     numberField(IN, 'rodTo', 'Rod to (% chord)', 0, 50, 0.5);
     selectField(IN, 'rodDia', 'Rod diameter (mm)',
@@ -711,6 +744,18 @@ function buildControls() {
   hint(AS, 'Each of these was a fixed constant in a core module. They are '
     + 'design decisions rather than facts, so each is yours to set — and each '
     + 'is checked to change the exported files, not just the screen.');
+  // A wing is not made of one cloth. The nose takes a harder finish than the
+  // rest of the upper surface, and the ribs a different weave again.
+  const clothNames = Object.keys(CLOTH).map((k) => [k, k]);
+  selectField(AS, 'clothLE', 'Leading edge cloth', clothNames);
+  selectField(AS, 'clothUpper', 'Upper surface cloth', clothNames);
+  selectField(AS, 'clothLower', 'Lower surface cloth', clothNames);
+  selectField(AS, 'clothRib', 'Rib and diagonal cloth', clothNames);
+  hint(AS, 'The nose must hold its shape unpressurised, so it takes a hard '
+    + 'finish; the ribs work in tension across their depth rather than as a '
+    + 'bulging membrane. A sail heavier than its ribs is the wrong way round '
+    + 'and the tool will say so.');
+
   selectField(AS, 'lineBrand', 'Line materials from', (() => {
     try {
       const cat = parseMaterialsTable(
@@ -818,7 +863,16 @@ function buildControls() {
   button(grid, 'Bill of materials', () => {
     // The BOM has existed since Phase 3 and has never been reachable from the
     // interface — a headline feature with no button.
+    // The fabric schedule, so the bill uses the cloths actually chosen
+    // rather than four hardcoded weights.
+    const fab = fabricSchedule({
+      leadingEdge: S.clothLE, upperSail: S.clothUpper,
+      lowerSail: S.clothLower, rib: S.clothRib, diagonal: S.clothRib,
+    });
+    if (!fab.ok) { setStatus(`Fabric: ${fab.problems[0]}`); return; }
+
     const bom = buildBOM({
+      cloth: clothWeightsFor(fab),
       panels: seamed(),
       nested: M.nested,
       wing: M.wing,
@@ -1043,7 +1097,7 @@ function draw() {
   if (S.tab === 'rib') { drawRib(); drawBalanceTable(); return; }
   if (S.tab === 'analysis') { drawPolar(); drawAtmosphere(); drawBalanceTable(); return; }
   if (S.tab === 'lines') { drawLinePlan(); drawCascadeTable(); return; }
-  if (S.tab === 'structure') { drawDiagonals(); drawRods(); return; }
+  if (S.tab === 'structure') { drawDiagonals(); return; }
   drawPlan();
   drawFront();
   drawSection();
@@ -1818,42 +1872,6 @@ function drawDiagonals() {
  * the rib with the lightening holes, the anchors and the diagonals, and those
  * are placed by rules that do not know about each other.
  */
-function drawRods() {
-  const rib = M.wing.ribs[Math.min(S.ribIndex, M.wing.ribs.length - 1)];
-  const c = canvas('vp-rods', rib.upper.concat(rib.lower));
-  c.path(rib.upper, '#5ec8ff', 1.2);
-  c.path(rib.lower, '#7bffb2', 1.2);
-
-  if (!M.rods || !M.rods.count) {
-    c.text('Rods are off. Turn them on under Internal structure.',
-      [rib.chord * 0.5, -rib.chord * 0.18], '#8a8a8a', 9, 'middle');
-    return;
-  }
-
-  const onThis = M.rods.rods.filter((r) => r.rib === rib.index);
-  const clashed = new Set((M.rodClearance?.clashes ?? [])
-    .filter((x) => x.rib === rib.index).map((x) => x.group));
-
-  for (const r of onThis) {
-    const surf = r.surface === 'lower' ? rib.lower : rib.upper;
-    const seg = [];
-    for (let f = r.fromChord; f <= r.toChord + 1e-9; f += 0.005) {
-      seg.push(pointOnSurface(surf, Math.min(1, f)));
-    }
-    if (seg.length < 2) continue;
-    c.path(seg, clashed.has(r.group) ? '#ff5e5e' : '#e8c547',
-      Math.max(1.5, r.diameterMM));
-  }
-
-  const cl = M.rodClearance;
-  c.text(`${onThis.length} rods on this rib`
-    + (cl && !cl.ok ? ` — ${cl.clashes.length} clash` : ''),
-    [rib.chord * 0.5, -rib.chord * 0.18],
-    cl && !cl.ok ? '#ff5e5e' : '#e8c547', 9, 'middle');
-  document.getElementById('note-rods').textContent =
-    M.rods.note + (cl ? `. ${cl.note}` : '');
-}
-
 function drawRib() {
   const note = document.getElementById('note-rib');
   const rib = M.wing.ribs[Math.min(S.ribIndex, M.wing.ribs.length - 1)];
@@ -1875,6 +1893,38 @@ function drawRib() {
   // Chord line and the section.
   c.path([[0, 0], [rib.chord, 0]], '#4e6270', 0.8, { dash: '5 4' });
   c.path(loop, '#35d6e8', 1.6, { close: true });
+
+  // Rods, on the rib rather than on a section of their own.
+  //
+  // They were drawn in a separate viewport that redrew a bare aerofoil with
+  // no holes, no anchors and no diagonals — a second, poorer rib view. A rod
+  // on its own says nothing: what a designer needs to see is whether it
+  // clears the lightening holes, whether an anchor tab lands on it, and
+  // whether a leading-edge pair actually meets round the nose.
+  if (S.rods && M.rods && M.rods.count) {
+    const onThis = M.rods.rods.filter((r) => r.rib === rib.index);
+    const clashed = new Set((M.rodClearance?.clashes ?? [])
+      .filter((x) => x.rib === rib.index).map((x) => x.group));
+
+    for (const r of onThis) {
+      const surf = r.surface === 'lower' ? rib.lower : rib.upper;
+      const seg = [];
+      for (let f = r.fromChord; f <= r.toChord + 1e-9; f += 0.004) {
+        seg.push(flat(pointOnSurface(surf, Math.min(1, f))));
+      }
+      if (seg.length < 2) continue;
+      c.path(seg, clashed.has(r.group) ? '#ff5e5e' : '#e8c547',
+        Math.max(2, r.diameterMM * 1.6));
+    }
+
+    if (onThis.length) {
+      const cl = M.rodClearance;
+      c.text(`${onThis.length} rod${onThis.length > 1 ? 's' : ''}`
+        + (cl && !cl.ok ? ' — clash' : ''),
+      [rib.chord * 0.5, -rib.chord * 0.16],
+      cl && !cl.ok ? '#ff5e5e' : '#e8c547', 9, 'middle');
+    }
+  }
 
   // Seam allowance, which is what actually gets cut.
   const allowance = S.seamAllowance / 1000;

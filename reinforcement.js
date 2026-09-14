@@ -198,10 +198,22 @@ export function massBudget({ bom, reinforcement, rods = null, publishedKg = null
 
 /** Rod materials: density in kg/m^3, and what they are for. */
 export const ROD_MATERIALS = {
+  // PROVENANCE: bulk material densities, which are standard physical
+  // constants rather than product figures. The notes are engineering
+  // judgement about behaviour, not measurements.
   nylon: { densityKgM3: 1140, note: 'forgiving, recovers from a kink, heavier' },
   carbon: { densityKgM3: 1600, note: 'stiffer for its mass, but breaks rather than bends' },
   'nitinol': { densityKgM3: 6450, note: 'shape memory; used sparingly at the tips' },
 };
+
+// Provenance is attached non-enumerably, so `Object.values(ROD_MATERIALS)` still
+// sees only materials. A table that carries its own source as an ordinary
+// key becomes a table with a material called "provenance", and the first
+// thing that iterates it breaks.
+Object.defineProperty(ROD_MATERIALS, 'provenance', {
+  value: 'bulk material densities; the notes are judgement not measurement',
+  enumerable: false,
+});
 
 export const DEFAULT_ROD_SPEC = {
   material: 'nylon',
@@ -550,3 +562,173 @@ export function checkRodClearance({
         + 'anchor tab sewn over a rod puts its load into a hinge',
   };
 }
+
+/**
+ * A rod that wraps the nose, which is what most leading-edge rods do.
+ *
+ * `rodGroup` puts a rod on one surface. Laboratori d'envol's own Swoop2 does
+ * not work that way. Its section 21 defines two groups, and each carries
+ * **both** an upper and a lower extent:
+ *
+ *     group 1   upper 12.0 to 18.5%    lower 7.0 to 15.0%
+ *     group 2   upper 23.5 to 29.5%    lower 63.0 to 70.0%
+ *
+ * The first is a leading-edge rod: it runs back from the nose along the upper
+ * surface and forward along the lower, so the two extents together wrap round
+ * the nose and hold its radius. That is the whole point of a leading-edge rod
+ * — the nose is where an unpressurised wing loses its shape first, and a rod
+ * on one surface only would hinge at the nose rather than hold it.
+ *
+ * The second group is something else: a rod at 23.5 to 29.5% of the upper
+ * surface and another at 63 to 70% of the lower, which are two separate
+ * stiffeners rather than one wrapping piece.
+ *
+ * So a group carries a list of extents, and whether they wrap is a property
+ * of where they sit rather than a flag anyone sets.
+ */
+export function noseRodGroup({
+  upperFrom, upperTo, lowerFrom, lowerTo,
+  fromRib, toRib, diameterMM = 1.3, material = 'nylon', name = 'nose',
+}) {
+  const parts = [];
+  if (upperTo != null) {
+    parts.push(rodGroup({
+      fromChord: upperFrom, toChord: upperTo, fromRib, toRib,
+      diameterMM, material, surface: 'upper', name: `${name} upper`,
+    }));
+  }
+  if (lowerTo != null) {
+    parts.push(rodGroup({
+      fromChord: lowerFrom, toChord: lowerTo, fromRib, toRib,
+      diameterMM, material, surface: 'lower', name: `${name} lower`,
+    }));
+  }
+  if (!parts.length) {
+    throw new Error('noseRodGroup needs at least one surface extent');
+  }
+
+  // A pair wraps the nose when both extents reach forward of it. If either
+  // starts well aft, they are two separate stiffeners that happen to share a
+  // group, and calling that a nose rod would be wrong.
+  const NOSE = 0.20;
+  const wrapsNose = parts.length === 2
+    && parts.every((p) => p.fromChord <= NOSE);
+
+  return {
+    name,
+    parts,
+    wrapsNose,
+    fromRib,
+    toRib,
+    diameterMM,
+    note: wrapsNose
+      ? 'both extents reach the nose, so the pair wraps it and holds its '
+        + 'radius; a rod on one surface alone would hinge there instead'
+      : 'the extents do not both reach the nose, so these are separate '
+        + 'stiffeners rather than one wrapping piece',
+  };
+}
+
+
+
+/**
+ * Rod groups written out, the way section 21 of a LEP file states them.
+ *
+ * A single from/to pair describes one rod on one surface. A real wing has
+ * several, and a leading-edge rod needs an extent on each surface to wrap the
+ * nose. Four sliders cannot say that; a written spec can:
+ *
+ *     # name          upper        lower        dia  ribs
+ *     leading edge    12.0 18.5    7.0 15.0     1.5  0 25
+ *     mid             23.5 29.5    63.0 70.0    1.1  0 25
+ *
+ * Which is the Swoop2's own definition, transcribed.
+ *
+ * Percentages of chord, because that is how the file states them and how a
+ * rod scales with the wing. A dash in place of a pair means no rod on that
+ * surface.
+ */
+export function parseRodSpec(text, { ribCount = null } = {}) {
+  if (typeof text !== 'string') throw new Error('parseRodSpec needs text');
+
+  const groups = [];
+  const problems = [];
+  let lineNo = 0;
+
+  for (const raw of text.split(/\r?\n/)) {
+    lineNo++;
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+
+    // name may contain spaces, so the numbers are found from the right.
+    const tok = line.split(/\s+/);
+    const nums = [];
+    while (tok.length && (/^-?[\d.]+$/.test(tok[tok.length - 1]) || tok[tok.length - 1] === '-')) {
+      nums.unshift(tok.pop());
+    }
+    const name = tok.join(' ') || `rod ${groups.length + 1}`;
+
+    // upper pair, lower pair, diameter, rib range.
+    if (nums.length < 7) {
+      problems.push(`line ${lineNo}: expected "name upperFrom upperTo `
+        + `lowerFrom lowerTo diameter fromRib toRib", got ${nums.length} numbers`);
+      continue;
+    }
+    const [uf, ut, lf, lt, dia, fr, tr] = nums;
+    const pct = (v) => (v === '-' ? null : Number(v) / 100);
+
+    const g = {
+      name,
+      upperFrom: pct(uf), upperTo: pct(ut),
+      lowerFrom: pct(lf), lowerTo: pct(lt),
+      diameterMM: Number(dia),
+      fromRib: Math.round(Number(fr)),
+      toRib: Math.round(Number(tr)),
+    };
+
+    if (g.upperTo == null && g.lowerTo == null) {
+      problems.push(`line ${lineNo}: "${name}" has no extent on either surface`);
+      continue;
+    }
+    for (const [lab, from, to] of [['upper', g.upperFrom, g.upperTo],
+      ['lower', g.lowerFrom, g.lowerTo]]) {
+      if (to != null && !(to > from)) {
+        problems.push(`line ${lineNo}: "${name}" ${lab} runs ${from} to ${to}, `
+          + 'which is backwards');
+      }
+      if (to != null && (from < 0 || to > 1)) {
+        problems.push(`line ${lineNo}: "${name}" ${lab} is outside the chord`);
+      }
+    }
+    if (!ROD_MATERIALS.nylon || !(g.diameterMM > 0)) {
+      problems.push(`line ${lineNo}: "${name}" needs a positive diameter`);
+    }
+    if (!(g.toRib >= g.fromRib)) {
+      problems.push(`line ${lineNo}: "${name}" rib range ${g.fromRib} to `
+        + `${g.toRib} is backwards`);
+    }
+    if (ribCount != null && g.toRib > ribCount - 1) {
+      problems.push(`line ${lineNo}: "${name}" reaches rib ${g.toRib} but the `
+        + `wing has ${ribCount}`);
+    }
+
+    groups.push(g);
+  }
+
+  if (!groups.length) problems.push('the spec defines no rods');
+
+  return {
+    groups,
+    problems,
+    ok: problems.length === 0,
+    count: groups.length,
+    note: problems.length === 0
+      ? `${groups.length} rod group${groups.length > 1 ? 's' : ''}`
+      : `${problems.length} problem(s): ${problems[0]}`,
+  };
+}
+
+/** The spec text for the Swoop2's own rods, as a starting point. */
+export const SWOOP2_ROD_SPEC = `# name        upper        lower       dia  ribs
+leading edge  12.0 18.5    7.0 15.0    1.5  0 25
+mid           23.5 29.5    63.0 70.0   1.1  0 25`;

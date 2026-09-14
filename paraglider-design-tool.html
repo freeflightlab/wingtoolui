@@ -581,14 +581,10 @@ input[type=range]::-moz-range-thumb {
         </div>
       </div>
 
-      <div class="viewports two" data-tab="structure" hidden>
+      <div class="viewports one" data-tab="structure" hidden>
         <div class="vp">
           <div class="vp-label">Diagonals — tension <span class="zoomtag" id="zoom-vp-diag">zoomed · dbl-click to reset</span></div>
           <svg id="vp-diag"></svg><div class="vp-note" id="note-diag"></div>
-        </div>
-        <div class="vp">
-          <div class="vp-label">Rods on the rib</div>
-          <svg id="vp-rods"></svg><div class="vp-note" id="note-rods"></div>
         </div>
       </div>
 
@@ -10875,6 +10871,176 @@ function checkRodClearance({
   };
 }
 
+/**
+ * A rod that wraps the nose, which is what most leading-edge rods do.
+ *
+ * `rodGroup` puts a rod on one surface. Laboratori d'envol's own Swoop2 does
+ * not work that way. Its section 21 defines two groups, and each carries
+ * **both** an upper and a lower extent:
+ *
+ *     group 1   upper 12.0 to 18.5%    lower 7.0 to 15.0%
+ *     group 2   upper 23.5 to 29.5%    lower 63.0 to 70.0%
+ *
+ * The first is a leading-edge rod: it runs back from the nose along the upper
+ * surface and forward along the lower, so the two extents together wrap round
+ * the nose and hold its radius. That is the whole point of a leading-edge rod
+ * — the nose is where an unpressurised wing loses its shape first, and a rod
+ * on one surface only would hinge at the nose rather than hold it.
+ *
+ * The second group is something else: a rod at 23.5 to 29.5% of the upper
+ * surface and another at 63 to 70% of the lower, which are two separate
+ * stiffeners rather than one wrapping piece.
+ *
+ * So a group carries a list of extents, and whether they wrap is a property
+ * of where they sit rather than a flag anyone sets.
+ */
+function noseRodGroup({
+  upperFrom, upperTo, lowerFrom, lowerTo,
+  fromRib, toRib, diameterMM = 1.3, material = 'nylon', name = 'nose',
+}) {
+  const parts = [];
+  if (upperTo != null) {
+    parts.push(rodGroup({
+      fromChord: upperFrom, toChord: upperTo, fromRib, toRib,
+      diameterMM, material, surface: 'upper', name: `${name} upper`,
+    }));
+  }
+  if (lowerTo != null) {
+    parts.push(rodGroup({
+      fromChord: lowerFrom, toChord: lowerTo, fromRib, toRib,
+      diameterMM, material, surface: 'lower', name: `${name} lower`,
+    }));
+  }
+  if (!parts.length) {
+    throw new Error('noseRodGroup needs at least one surface extent');
+  }
+
+  // A pair wraps the nose when both extents reach forward of it. If either
+  // starts well aft, they are two separate stiffeners that happen to share a
+  // group, and calling that a nose rod would be wrong.
+  const NOSE = 0.20;
+  const wrapsNose = parts.length === 2
+    && parts.every((p) => p.fromChord <= NOSE);
+
+  return {
+    name,
+    parts,
+    wrapsNose,
+    fromRib,
+    toRib,
+    diameterMM,
+    note: wrapsNose
+      ? 'both extents reach the nose, so the pair wraps it and holds its '
+        + 'radius; a rod on one surface alone would hinge there instead'
+      : 'the extents do not both reach the nose, so these are separate '
+        + 'stiffeners rather than one wrapping piece',
+  };
+}
+
+
+
+/**
+ * Rod groups written out, the way section 21 of a LEP file states them.
+ *
+ * A single from/to pair describes one rod on one surface. A real wing has
+ * several, and a leading-edge rod needs an extent on each surface to wrap the
+ * nose. Four sliders cannot say that; a written spec can:
+ *
+ *     # name          upper        lower        dia  ribs
+ *     leading edge    12.0 18.5    7.0 15.0     1.5  0 25
+ *     mid             23.5 29.5    63.0 70.0    1.1  0 25
+ *
+ * Which is the Swoop2's own definition, transcribed.
+ *
+ * Percentages of chord, because that is how the file states them and how a
+ * rod scales with the wing. A dash in place of a pair means no rod on that
+ * surface.
+ */
+function parseRodSpec(text, { ribCount = null } = {}) {
+  if (typeof text !== 'string') throw new Error('parseRodSpec needs text');
+
+  const groups = [];
+  const problems = [];
+  let lineNo = 0;
+
+  for (const raw of text.split(/\r?\n/)) {
+    lineNo++;
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+
+    // name may contain spaces, so the numbers are found from the right.
+    const tok = line.split(/\s+/);
+    const nums = [];
+    while (tok.length && (/^-?[\d.]+$/.test(tok[tok.length - 1]) || tok[tok.length - 1] === '-')) {
+      nums.unshift(tok.pop());
+    }
+    const name = tok.join(' ') || `rod ${groups.length + 1}`;
+
+    // upper pair, lower pair, diameter, rib range.
+    if (nums.length < 7) {
+      problems.push(`line ${lineNo}: expected "name upperFrom upperTo `
+        + `lowerFrom lowerTo diameter fromRib toRib", got ${nums.length} numbers`);
+      continue;
+    }
+    const [uf, ut, lf, lt, dia, fr, tr] = nums;
+    const pct = (v) => (v === '-' ? null : Number(v) / 100);
+
+    const g = {
+      name,
+      upperFrom: pct(uf), upperTo: pct(ut),
+      lowerFrom: pct(lf), lowerTo: pct(lt),
+      diameterMM: Number(dia),
+      fromRib: Math.round(Number(fr)),
+      toRib: Math.round(Number(tr)),
+    };
+
+    if (g.upperTo == null && g.lowerTo == null) {
+      problems.push(`line ${lineNo}: "${name}" has no extent on either surface`);
+      continue;
+    }
+    for (const [lab, from, to] of [['upper', g.upperFrom, g.upperTo],
+      ['lower', g.lowerFrom, g.lowerTo]]) {
+      if (to != null && !(to > from)) {
+        problems.push(`line ${lineNo}: "${name}" ${lab} runs ${from} to ${to}, `
+          + 'which is backwards');
+      }
+      if (to != null && (from < 0 || to > 1)) {
+        problems.push(`line ${lineNo}: "${name}" ${lab} is outside the chord`);
+      }
+    }
+    if (!ROD_MATERIALS.nylon || !(g.diameterMM > 0)) {
+      problems.push(`line ${lineNo}: "${name}" needs a positive diameter`);
+    }
+    if (!(g.toRib >= g.fromRib)) {
+      problems.push(`line ${lineNo}: "${name}" rib range ${g.fromRib} to `
+        + `${g.toRib} is backwards`);
+    }
+    if (ribCount != null && g.toRib > ribCount - 1) {
+      problems.push(`line ${lineNo}: "${name}" reaches rib ${g.toRib} but the `
+        + `wing has ${ribCount}`);
+    }
+
+    groups.push(g);
+  }
+
+  if (!groups.length) problems.push('the spec defines no rods');
+
+  return {
+    groups,
+    problems,
+    ok: problems.length === 0,
+    count: groups.length,
+    note: problems.length === 0
+      ? `${groups.length} rod group${groups.length > 1 ? 's' : ''}`
+      : `${problems.length} problem(s): ${problems[0]}`,
+  };
+}
+
+/** The spec text for the Swoop2's own rods, as a starting point. */
+const SWOOP2_ROD_SPEC = `# name        upper        lower       dia  ribs
+leading edge  12.0 18.5    7.0 15.0    1.5  0 25
+mid           23.5 29.5    63.0 70.0   1.1  0 25`;
+
 /* ===== compare.js ===== */
 /* compare.js — put two designs side by side.
  *
@@ -17605,6 +17771,9 @@ const S = {
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', riserLayout: 'A/B/C+D', splitFrom: 62,
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
+  useRodSpec: false,
+  rodSpec: 'leading edge  12.0 18.5   7.0 15.0   1.5  0 25\n'
+    + 'mid           23.5 29.5   63.0 70.0  1.1  0 25',
   famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
   lineBrand: 'all', lineStrength: 'kinked',
   clothLE: 'Porcher Skytex 27 hard', clothUpper: 'Porcher Skytex 32',
@@ -17815,20 +17984,30 @@ function rebuild() {
     // A rod works in bending, which is the one thing fabric cannot do.
     let rods = null;
     let rodClearance = null;
+    let rodSpecResult = null;
     if (S.rods) {
-      const lastRib = Math.max(0,
-        Math.round((S.rodReach / 100) * (wing.ribs.length - 1)));
-      rods = buildRodGroups({
-        wing,
-        groups: [rodGroup({
+      let groups;
+      if (S.useRodSpec) {
+        // A written spec, which is the only way to say that a
+        // leading-edge rod wraps the nose: it needs an extent on each
+        // surface, and four sliders cannot express two of anything.
+        rodSpecResult = parseRodSpec(S.rodSpec, { ribCount: wing.ribs.length });
+        groups = rodSpecResult.ok
+          ? rodSpecResult.groups.flatMap((g) => noseRodGroup(g).parts)
+          : [];
+      } else {
+        const lastRib = Math.max(0,
+          Math.round((S.rodReach / 100) * (wing.ribs.length - 1)));
+        groups = [rodGroup({
           name: 'LE', fromChord: S.rodFrom / 100, toChord: S.rodTo / 100,
           fromRib: 0, toRib: lastRib, diameterMM: S.rodDia,
-        })],
-      });
-      rodClearance = checkRodClearance({
+        })];
+      }
+      rods = groups.length ? buildRodGroups({ wing, groups }) : null;
+      rodClearance = rods ? checkRodClearance({
         rods: rods.rods,
         anchors: Object.values(airfoil.anchors ?? {}).map((x) => ({ chordFraction: x })),
-      });
+      }) : null;
     }
 
     const riserSplit = applyRiserSplit(
@@ -17904,6 +18083,7 @@ function rebuild() {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, cascade, anchors, worstDev, worstPhi, imported, vribs,
       linePlan, loads, lineSelection, lengths, riserSplit, rods, rodClearance,
+      rodSpecResult,
       writtenCascade,
       atm, polar, trim, nd, thin, polarIssues,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
@@ -18202,8 +18382,25 @@ function buildControls() {
   hint(IN, 'The opening must contain the stagnation point across the whole '
     + 'speed range, which is why intakes are cut back along the lower '
     + 'surface rather than being a hole at the nose.');
-  checkField(IN, 'rods', 'Nylon rods along the leading edge');
+  checkField(IN, 'rods', 'Nylon rods');
   if (S.rods) {
+    checkField(IN, 'useRodSpec', 'Write the rods out, rather than one group');
+  }
+  if (S.rods && S.useRodSpec) {
+    textAreaField(IN, 'rodSpec', 'Rods', 4,
+      'name  upperFrom upperTo  lowerFrom lowerTo  dia  fromRib toRib');
+    hint(IN, 'Name, then the upper extent, the lower extent, the diameter and '
+      + 'the rib range — percentages of chord, the way LEP section 21 states '
+      + 'them. A rod at the nose needs an extent on BOTH surfaces, or it '
+      + 'hinges there rather than holding the radius. A dash means no rod on '
+      + 'that surface.');
+    if (M.rodSpecResult && !M.rodSpecResult.ok) {
+      hint(IN, `Not used: ${M.rodSpecResult.problems[0]}`);
+    } else if (M.rodSpecResult) {
+      hint(IN, M.rodSpecResult.note);
+    }
+  }
+  if (S.rods && !S.useRodSpec) {
     numberField(IN, 'rodFrom', 'Rod from (% chord)', 0, 40, 0.5);
     numberField(IN, 'rodTo', 'Rod to (% chord)', 0, 50, 0.5);
     selectField(IN, 'rodDia', 'Rod diameter (mm)',
@@ -18608,7 +18805,7 @@ function draw() {
   if (S.tab === 'rib') { drawRib(); drawBalanceTable(); return; }
   if (S.tab === 'analysis') { drawPolar(); drawAtmosphere(); drawBalanceTable(); return; }
   if (S.tab === 'lines') { drawLinePlan(); drawCascadeTable(); return; }
-  if (S.tab === 'structure') { drawDiagonals(); drawRods(); return; }
+  if (S.tab === 'structure') { drawDiagonals(); return; }
   drawPlan();
   drawFront();
   drawSection();
@@ -19383,42 +19580,6 @@ function drawDiagonals() {
  * the rib with the lightening holes, the anchors and the diagonals, and those
  * are placed by rules that do not know about each other.
  */
-function drawRods() {
-  const rib = M.wing.ribs[Math.min(S.ribIndex, M.wing.ribs.length - 1)];
-  const c = canvas('vp-rods', rib.upper.concat(rib.lower));
-  c.path(rib.upper, '#5ec8ff', 1.2);
-  c.path(rib.lower, '#7bffb2', 1.2);
-
-  if (!M.rods || !M.rods.count) {
-    c.text('Rods are off. Turn them on under Internal structure.',
-      [rib.chord * 0.5, -rib.chord * 0.18], '#8a8a8a', 9, 'middle');
-    return;
-  }
-
-  const onThis = M.rods.rods.filter((r) => r.rib === rib.index);
-  const clashed = new Set((M.rodClearance?.clashes ?? [])
-    .filter((x) => x.rib === rib.index).map((x) => x.group));
-
-  for (const r of onThis) {
-    const surf = r.surface === 'lower' ? rib.lower : rib.upper;
-    const seg = [];
-    for (let f = r.fromChord; f <= r.toChord + 1e-9; f += 0.005) {
-      seg.push(pointOnSurface(surf, Math.min(1, f)));
-    }
-    if (seg.length < 2) continue;
-    c.path(seg, clashed.has(r.group) ? '#ff5e5e' : '#e8c547',
-      Math.max(1.5, r.diameterMM));
-  }
-
-  const cl = M.rodClearance;
-  c.text(`${onThis.length} rods on this rib`
-    + (cl && !cl.ok ? ` — ${cl.clashes.length} clash` : ''),
-    [rib.chord * 0.5, -rib.chord * 0.18],
-    cl && !cl.ok ? '#ff5e5e' : '#e8c547', 9, 'middle');
-  document.getElementById('note-rods').textContent =
-    M.rods.note + (cl ? `. ${cl.note}` : '');
-}
-
 function drawRib() {
   const note = document.getElementById('note-rib');
   const rib = M.wing.ribs[Math.min(S.ribIndex, M.wing.ribs.length - 1)];
@@ -19440,6 +19601,38 @@ function drawRib() {
   // Chord line and the section.
   c.path([[0, 0], [rib.chord, 0]], '#4e6270', 0.8, { dash: '5 4' });
   c.path(loop, '#35d6e8', 1.6, { close: true });
+
+  // Rods, on the rib rather than on a section of their own.
+  //
+  // They were drawn in a separate viewport that redrew a bare aerofoil with
+  // no holes, no anchors and no diagonals — a second, poorer rib view. A rod
+  // on its own says nothing: what a designer needs to see is whether it
+  // clears the lightening holes, whether an anchor tab lands on it, and
+  // whether a leading-edge pair actually meets round the nose.
+  if (S.rods && M.rods && M.rods.count) {
+    const onThis = M.rods.rods.filter((r) => r.rib === rib.index);
+    const clashed = new Set((M.rodClearance?.clashes ?? [])
+      .filter((x) => x.rib === rib.index).map((x) => x.group));
+
+    for (const r of onThis) {
+      const surf = r.surface === 'lower' ? rib.lower : rib.upper;
+      const seg = [];
+      for (let f = r.fromChord; f <= r.toChord + 1e-9; f += 0.004) {
+        seg.push(flat(pointOnSurface(surf, Math.min(1, f))));
+      }
+      if (seg.length < 2) continue;
+      c.path(seg, clashed.has(r.group) ? '#ff5e5e' : '#e8c547',
+        Math.max(2, r.diameterMM * 1.6));
+    }
+
+    if (onThis.length) {
+      const cl = M.rodClearance;
+      c.text(`${onThis.length} rod${onThis.length > 1 ? 's' : ''}`
+        + (cl && !cl.ok ? ' — clash' : ''),
+      [rib.chord * 0.5, -rib.chord * 0.16],
+      cl && !cl.ok ? '#ff5e5e' : '#e8c547', 9, 'middle');
+    }
+  }
 
   // Seam allowance, which is what actually gets cut.
   const allowance = S.seamAllowance / 1000;

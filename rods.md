@@ -28,7 +28,7 @@ does not know about.
 band running 23.5 to 29.5%. **A rod cannot pass through a hole, and an anchor
 tab sewn over a rod puts its load into a hinge.**
 
-## 3. The Structure view
+## 3. The Structure view (rods since moved to the rib)
 
 Diagonals and rods were computed, exported, and never drawn. A number a
 designer can act on is only useful if they can see what it applies to.
@@ -47,3 +47,56 @@ sleeves, closed-rib handling, materials.
 
 `tools/find.mjs` exists precisely for this and I did not run it. The guard
 caught what the habit should have.
+
+---
+
+## 5. On the rib, where they make sense
+
+Rods had their own viewport, which redrew a bare aerofoil with no holes, no
+anchors and no diagonals — a second, poorer rib view. **A rod alone says
+nothing.** What a designer needs to see is whether it clears the lightening
+holes, whether an anchor tab lands on it, and whether a leading-edge pair
+actually meets round the nose.
+
+They are drawn on the real rib now, in the rib's own projection, with the
+clash colouring beside the holes and anchors they might clash with. The
+separate viewport is gone and the toggle is under Internal structure.
+
+## 6. A rod at the nose needs both surfaces
+
+`rodGroup` puts a rod on one surface. **The Swoop2 does not work that way.**
+Its section 21 gives each group an upper *and* a lower extent:
+
+```
+group 1   upper 12.0 to 18.5%    lower  7.0 to 15.0%
+group 2   upper 23.5 to 29.5%    lower 63.0 to 70.0%
+```
+
+The first is a leading-edge rod: back from the nose along the upper surface
+and forward along the lower, so **the pair wraps the nose and holds its
+radius**. A rod on one surface alone would hinge at the nose rather than hold
+it, which is the opposite of what it is for.
+
+The second is not a nose rod at all — 23.5% upper and 63% lower are two
+separate stiffeners that happen to share a group. `noseRodGroup` tells them
+apart by where the extents sit rather than by a flag anyone sets: a pair wraps
+the nose when **both** extents reach forward of 20% chord.
+
+## 7. Writing the rods out
+
+Four sliders cannot say "two groups, each with two extents". A written spec
+can, in the form section 21 states:
+
+```
+# name        upper        lower       dia  ribs
+leading edge  12.0 18.5    7.0 15.0    1.5  0 25
+mid           23.5 29.5    63.0 70.0   1.1  0 25
+```
+
+That is the Swoop2's own definition, transcribed, and it is the default in the
+tool. A dash in place of a pair means no rod on that surface.
+
+It refuses what a person mistypes: a backwards extent, an extent off the
+chord, a group with no extent at all, too few numbers, and a rib beyond the
+end of the wing. The name may contain spaces — "leading edge" is what someone
+writes — so the numbers are read from the right.

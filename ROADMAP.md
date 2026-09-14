@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1719-test validation suite and a benchmark with regression budgets
+- [x] 1734-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,13 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Rods on the rib, and nose rods that wrap** — rods had their own
+      viewport showing a bare aerofoil, which is a second poorer rib view; a
+      rod alone says nothing. They draw on the real rib now. A leading-edge
+      rod needs an extent on BOTH surfaces or it hinges at the nose, which
+      `rodGroup` could not express — `noseRodGroup` and `parseRodSpec` do,
+      in the form LEP section 21 states. See `docs/rods.md`.
 
 - [x] **A checkout doctor** (`npm run doctor`) — a first user's build failed
       with seven modules missing because they had cloned the old flat layout.
