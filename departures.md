@@ -406,3 +406,31 @@ No pressure gives flat, not an infinite radius. A tension too low to span the
 ribs against the pressure is reported as `overLimit` rather than returning a
 bulge past a half-circle. An excess no arc can reach is refused with the
 maximum that is reachable.
+
+---
+
+## The arc, against 38 published wings
+
+The projected-to-flat span ratio is an input to `buildLobe`, and this project
+had never checked it came back out. 38 sizes across the reference set publish
+**both** spans, so the check was available the whole time.
+
+**It is exact on all 38** — worst error below 1e-6. The arc model reproduces
+every published projected span.
+
+### Two ways I measured it wrong first
+
+Before getting that answer I twice concluded the model had a **6 to 8%
+systematic error**, consistently within each family, which is exactly what a
+real modelling fault looks like.
+
+**The samples run past the half-span.** `buildLobe` deliberately draws the arc
+to 1.2x what the wing needs, so the wing can take what it wants from it.
+Measuring the last sample overstates the projection.
+
+**`at(s)` returns `{y, z, beta}`, not a pair.** Reading `at(s)[0]` gives
+`undefined`, and the arithmetic one step later gives NaN.
+
+Both are pinned as tests now, because the next person to check this will reach
+for the same two measurements. A model that looks wrong is worth a second
+measurement before it is worth a fix — the error was in the ruler both times.

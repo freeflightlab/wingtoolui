@@ -17769,7 +17769,7 @@ const S = {
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
-  lineRow: 'all', compareTo: '', riserLayout: 'A/B/C+D', splitFrom: 62,
+  lineRow: 'all', compareTo: '', dimensions: true, riserLayout: 'A/B/C+D', splitFrom: 62,
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
   useRodSpec: false,
   rodSpec: 'leading edge  12.0 18.5   7.0 15.0   1.5  0 25\n'
@@ -18228,6 +18228,7 @@ function buildControls() {
     hint(P, 'Seven families of published sizes. Loads the size only: a specification '
       + 'does not say how elliptical the leading edge is, or what section the wing uses.');
   }
+  checkField(P, 'dimensions', 'Dimensions on the drawings');
   slider(P, 'span', 'Flat span', 4, 16, 0.05, (v) => v.toFixed(2), ' m');
   slider(P, 'rootChord', 'Root chord', 0.8, 4, 0.01, (v) => v.toFixed(2), ' m');
   slider(P, 'tipChord', 'Tip chord', 0.1, 2.5, 0.01, (v) => v.toFixed(2), ' m');
@@ -19139,6 +19140,59 @@ function canvas(id, pts, pad = 0.10, opts = {}) {
       });
       t.textContent = str;
     },
+    /**
+     * A dimension: a line with ticks at each end and the measurement on it.
+     *
+     * A plan view without dimensions is a picture, not a drawing. A designer
+     * reading one wants the span and the chords off the page rather than out
+     * of a settings panel, and a reviewer wants to check the drawing agrees
+     * with the numbers beside it.
+     *
+     * Drawn in model coordinates so it scales and rotates with the geometry,
+     * with the tick length in pixels so it stays legible at any zoom.
+     */
+    dim(a, b, label, {
+      color = '#8a9aa6', size = 9, tickPx = 4, offsetPx = 0,
+    } = {}) {
+      const [ax, ay] = [X(a[0]), Y(a[1])];
+      const [bx, by] = [X(b[0]), Y(b[1])];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len = Math.hypot(dx, dy);
+      if (!(len > 1e-9)) return;
+      // Unit vector along the dimension, and its normal for ticks and offset.
+      const ux = dx / len;
+      const uy = dy / len;
+      const nx = -uy;
+      const ny = ux;
+      const ox = nx * offsetPx;
+      const oy = ny * offsetPx;
+
+      add('line', {
+        x1: ax + ox, y1: ay + oy, x2: bx + ox, y2: by + oy,
+        stroke: color, 'stroke-width': 0.8, opacity: 0.85,
+      });
+      for (const [px, py] of [[ax + ox, ay + oy], [bx + ox, by + oy]]) {
+        add('line', {
+          x1: px - nx * tickPx, y1: py - ny * tickPx,
+          x2: px + nx * tickPx, y2: py + ny * tickPx,
+          stroke: color, 'stroke-width': 0.8, opacity: 0.85,
+        });
+      }
+
+      // The label sits clear of the line, on whichever side the offset went,
+      // and reads the right way up rather than upside down on a return leg.
+      const mx = (ax + bx) / 2 + ox;
+      const my = (ay + by) / 2 + oy;
+      let deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+      if (deg > 90 || deg < -90) deg += 180;
+      const t = add('text', {
+        x: mx, y: my - 3, fill: color, 'font-size': size,
+        'font-family': 'ui-monospace, monospace', 'text-anchor': 'middle',
+        transform: `rotate(${deg.toFixed(2)} ${mx.toFixed(2)} ${my.toFixed(2)})`,
+      });
+      t.textContent = label;
+    },
     grid(step) {
       const gx0 = Math.floor(minX / step) * step, gx1 = Math.ceil(maxX / step) * step;
       const gy0 = Math.floor(minY / step) * step, gy1 = Math.ceil(maxY / step) * step;
@@ -19174,6 +19228,34 @@ function drawPlan() {
     ref.push([y, -(M.planform.xLE(y) + S.RL * M.planform.chord(y))]);
   }
   c.path(ref, '#e85bc4', 1.1, { dash: '4 3' });
+
+  // Dimensions, so the drawing can be read rather than only looked at.
+  //
+  // In this view y is spanwise and x is -chordwise, so a span dimension runs
+  // horizontally and a chord one vertically. They are placed clear of the
+  // outline, which is why the fit() below happens after them.
+  if (S.dimensions) {
+    const hs = M.planform.halfSpan;
+    const root = M.planform.chord(0);
+    const tip = M.planform.chord(hs);
+    const aft = -(M.planform.xLE(hs) + tip);
+
+    // Span, below the trailing edge.
+    c.dim([-hs, aft], [hs, aft], `${(hs * 2).toFixed(2)} m span`,
+      { offsetPx: 22 });
+    // Root chord, on the centreline.
+    c.dim([0, -M.planform.xLE(0)], [0, -root], `${root.toFixed(2)} m root`,
+      { offsetPx: -18 });
+    // Tip chord.
+    c.dim([hs, -M.planform.xLE(hs)], [hs, aft], `${tip.toFixed(2)} m tip`,
+      { offsetPx: -14 });
+    // Tip sweep: how far the tip's leading edge sits behind the centre's.
+    const sweep = M.planform.xLE(hs) - M.planform.xLE(0);
+    if (sweep > 0.01) {
+      c.dim([hs, -M.planform.xLE(0)], [hs, -M.planform.xLE(hs)],
+        `${sweep.toFixed(2)} m sweep`, { offsetPx: 14, color: '#e85bc4' });
+    }
+  }
 
   c.fit();
   document.getElementById('note-plan').textContent =
@@ -19663,6 +19745,43 @@ function drawRib() {
   // Chord line and the section.
   c.path([[0, 0], [rib.chord, 0]], '#4e6270', 0.8, { dash: '5 4' });
   c.path(loop, '#35d6e8', 1.6, { close: true });
+
+  // Dimensions on the rib, which is the drawing a builder works from.
+  //
+  // Chord along the datum, maximum thickness where it actually occurs, and
+  // each anchor's position — the three things someone marking out a rib has
+  // to measure.
+  if (S.dimensions) {
+    c.dim([0, 0], [rib.chord, 0], `${rib.chord.toFixed(3)} m chord`,
+      { offsetPx: 26 });
+
+    // Thickness at the station where it is greatest, not at a nominal 30%:
+    // a reflexed or heavily cambered section does not peak where a textbook
+    // one does.
+    let best = 0;
+    let bestI = 0;
+    for (let i = 0; i < upper.length; i++) {
+      const lo = lower[Math.min(i, lower.length - 1)];
+      const t = Math.abs(upper[i][1] - lo[1]);
+      if (t > best && Math.abs(upper[i][0] - lo[0]) < rib.chord * 0.02) {
+        best = t; bestI = i;
+      }
+    }
+    if (best > 0) {
+      const x = upper[bestI][0];
+      c.dim([x, lower[Math.min(bestI, lower.length - 1)][1]], [x, upper[bestI][1]],
+        `${(best * 1000).toFixed(0)} mm`, { offsetPx: -12, color: '#7bffb2' });
+    }
+
+    // Where each line attaches, measured from the leading edge.
+    for (const [row, frac] of Object.entries(M.airfoil.anchors ?? {})) {
+      if (!(frac > 0)) continue;
+      const x = frac * rib.chord;
+      c.dim([0, -rib.chord * 0.06], [x, -rib.chord * 0.06],
+        `${row} ${(x * 1000).toFixed(0)}`,
+        { offsetPx: 0, color: '#ff9f5e', size: 8, tickPx: 3 });
+    }
+  }
 
   // Rods, on the rib rather than on a section of their own.
   //

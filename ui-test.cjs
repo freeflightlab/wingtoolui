@@ -242,6 +242,36 @@ try {
   console.log('  ok   diffed against ' + keys[0] + ', ' + keys.length + ' wings selectable');
   S3.compareTo = '';
   globalThis.__rebuild();
+  globalThis.__tab('structure');
+  {
+    const S4=globalThis.__S;
+    for (const [lab,fn] of [['diagonals on',()=>{S4.vribs=true;S4.rods=true;}],['rods off',()=>{S4.rods=false;}],['diagonals off',()=>{S4.vribs=false;S4.rods=true;}]]) {
+      fn(); globalThis.__rebuild();
+      const d=document.getElementById('vp-diag');
+      console.log('  ok   structure ['+lab+'] diag '+((d&&d.children)?d.children.length:0)+' els');
+    }
+    S4.vribs=true; S4.rods=true; globalThis.__rebuild();
+  }
+  // Rods are drawn on the rib now, not in a view of their own. A rod alone
+  // says nothing: what matters is whether it clears the holes and whether an
+  // anchor tab lands on it, and that is only visible on the real rib.
+  {
+    const S5=globalThis.__S;
+    const before=(()=>{S5.rods=false;globalThis.__rebuild();globalThis.__rib(0);
+      const v=document.getElementById('vp-rib');return v.children.length;})();
+    const after=(()=>{S5.rods=true;globalThis.__rebuild();globalThis.__rib(0);
+      const v=document.getElementById('vp-rib');return v.children.length;})();
+    if (after <= before) { console.log('  FAIL rods add nothing to the rib view'); process.exit(1); }
+    console.log('  ok   rods draw on the rib: '+before+' elements without, '+after+' with');
+    // A written spec with a nose rod puts an extent on BOTH surfaces, so it
+    // must draw more than a single-surface group does.
+    S5.useRodSpec=true; globalThis.__rebuild(); globalThis.__rib(0);
+    const spec=document.getElementById('vp-rib').children.length;
+    if (spec <= after) { console.log('  FAIL the rod spec draws no more than one group'); process.exit(1); }
+    console.log('  ok   a written spec draws both nose surfaces: '+spec+' elements');
+    S5.useRodSpec=false; globalThis.__rebuild();
+  }
+
   globalThis.__tab('wing');
 } catch(e){ console.log('  FAIL tab/rib: '+e.message); console.log(e.stack.split('\n').slice(1,4).join('\n')); process.exit(1); }
 
@@ -289,10 +319,90 @@ try {
     return Object.fromEntries(Object.entries(globalThis.__saved));
   };
   const S2 = globalThis.__S;
+  // Dimensions must carry the model's own numbers.
+  //
+  // A drawing whose labels disagree with the design is worse than one with no
+  // labels: a reviewer checks the drawing against the panel beside it, and a
+  // stale number there is a number they will trust.
+  {
+    const S6 = globalThis.__S;
+    const wasDim = S6.dimensions;
+    S6.dimensions = false; globalThis.__rebuild();
+    const without = document.getElementById('vp-plan').children.length;
+    S6.dimensions = true; globalThis.__rebuild();
+    const withDim = document.getElementById('vp-plan').children.length;
+    if (withDim <= without) {
+      console.log('  FAIL dimensions draw nothing'); process.exit(1);
+    }
+
+    const m = globalThis.__getM();
+    const gather = (n, out = []) => {
+      if (!n) return out;
+      if (n._text) out.push(n._text);
+      for (const c of n.children || []) gather(c, out);
+      return out;
+    };
+    const labels = gather(document.getElementById('vp-plan'));
+    const claimed = (re) => {
+      const hit = labels.find((t) => re.test(t));
+      return hit ? Number(/[\d.]+/.exec(hit)[0]) : null;
+    };
+    const checks = [
+      ['span', claimed(/m span/), m.metrics.span],
+      ['root chord', claimed(/m root/), m.planform.chord(0)],
+      ['tip chord', claimed(/m tip/), m.planform.chord(m.planform.halfSpan)],
+    ];
+    for (const [what, shown, actual] of checks) {
+      if (shown == null || Math.abs(shown - actual) > 0.02) {
+        console.log(`  FAIL the ${what} dimension reads ${shown}, model says `
+          + `${actual.toFixed(2)}`);
+        process.exit(1);
+      }
+    }
+    // The rib is the drawing a builder marks out from, so its dimensions
+    // matter more than the plan's. Anchor positions especially: a wrong one
+    // puts a line in the wrong place on a real wing.
+    globalThis.__rib(0);
+    const ribLabels = gather(document.getElementById('vp-rib'));
+    const rib0 = m.wing.ribs[0];
+    const ribChord = ribLabels.find((t) => /m chord/.test(t));
+    if (!ribChord || Math.abs(Number(/[\d.]+/.exec(ribChord)[0]) - rib0.chord) > 0.002) {
+      console.log(`  FAIL the rib chord dimension reads ${ribChord}, model `
+        + `says ${rib0.chord.toFixed(3)}`);
+      process.exit(1);
+    }
+    let anchorsChecked = 0;
+    for (const [row, frac] of Object.entries(m.airfoil.anchors ?? {})) {
+      const want = Math.round(frac * rib0.chord * 1000);
+      const hit = ribLabels.find((t) => t.startsWith(`${row} `));
+      if (!hit) continue;
+      const shown = Number(hit.slice(row.length + 1));
+      if (Math.abs(shown - want) > 1) {
+        console.log(`  FAIL anchor ${row} is drawn at ${shown} mm, model says `
+          + `${want} mm`);
+        process.exit(1);
+      }
+      anchorsChecked++;
+    }
+    if (anchorsChecked < 3) {
+      console.log(`  FAIL only ${anchorsChecked} anchor dimensions found`);
+      process.exit(1);
+    }
+
+    console.log(`  ok   ${checks.length} plan and ${anchorsChecked + 1} rib `
+      + 'dimensions carry the model\'s own numbers');
+    S6.dimensions = wasDim; globalThis.__rebuild();
+  }
+
   const baseline = pressAll();
   const probes = [
     // The assumptions made adjustable. A control that changes nothing is
     // worse than no control: it says the user has a choice when they do not.
+    ['clothRib', () => { S2.clothRib = S2.clothRib === 'Porcher Skytex 40 hard' ? 'Porcher Skytex 38' : 'Porcher Skytex 40 hard'; }],
+    ['useCascadeSpec', () => { S2.useCascadeSpec = !S2.useCascadeSpec; }],
+    ['riserLayout', () => { S2.riserLayout = S2.riserLayout === 'A/B/C+D' ? "A-A'/B" : 'A/B/C+D'; }],
+    ['lineBrand', () => { S2.lineBrand = S2.lineBrand === 'all' ? 'Liros' : 'all'; }],
+    ['lineStrength', () => { S2.lineStrength = S2.lineStrength === 'kinked' ? 'new' : 'kinked'; }],
     ['karabinerSep', () => { S2.karabinerSep = S2.karabinerSep === 42 ? 60 : 42; }],
     ['loopAllowance', () => { S2.loopAllowance = S2.loopAllowance === 130 ? 200 : 130; }],
     ['rowShareMode', () => {
@@ -391,7 +501,7 @@ try {
   // once and nothing checked.
   const src = require('fs').readFileSync('src/ui/app.js', 'utf8');
   const boundKeys = [...src.matchAll(
-    /(?:slider|numberField|checkField|selectField)\([^,]+, '(\w+)'/g)].map((m) => m[1]);
+    /(?:slider|numberField|checkField|selectField|textAreaField)\([^,]+, '(\w+)'/g)].map((m) => m[1]);
   const counts = {};
   for (const k of boundKeys) counts[k] = (counts[k] || 0) + 1;
   const twice = Object.entries(counts).filter(([, n]) => n > 1);
@@ -409,6 +519,34 @@ try {
     console.log(`  FAIL settings with no control: ${unreachable.join(', ')}`);
     process.exit(1);
   }
+  // A control must not be able to send a value the model refuses.
+  //
+  // The model now rejects a zero span, a negative chord and a projected ratio
+  // of 1 — good, but only if no slider can produce one. A guard the interface
+  // can trip is a crash rather than a refusal, and the user did nothing
+  // wrong: they moved a slider the tool gave them.
+  const limits = {
+    span: [0.01, Infinity], rootChord: [0.01, Infinity],
+    tipChord: [0, Infinity], ellipticityLE: [0, 1], ellipticityTE: [0, 1],
+    projectedRatio: [0.64, 0.99],
+  };
+  const outOfRange = [];
+  for (const m of src.matchAll(
+    /(?:slider|numberField)\([^,]+, '(\w+)', '[^']*', ([\-\d.]+), ([\-\d.]+)/g)) {
+    const [, key, lo, hi] = m;
+    const lim = limits[key];
+    if (!lim) continue;
+    if (Number(lo) < lim[0] || Number(hi) > lim[1]) {
+      outOfRange.push(`${key} slides ${lo}..${hi}, model allows ${lim[0]}..${lim[1]}`);
+    }
+  }
+  if (outOfRange.length) {
+    for (const o of outOfRange) console.log(`  FAIL ${o}`);
+    process.exit(1);
+  }
+  console.log(`  ok   ${Object.keys(limits).length} guarded inputs cannot be `
+    + 'driven out of range by their controls');
+
   console.log(`  ok   ${boundKeys.length} controls, each bound once, `
     + `every setting reachable`);
 } catch(e){ console.log('  FAIL buttons: '+e.message); process.exit(1); }

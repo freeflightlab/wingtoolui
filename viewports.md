@@ -23,6 +23,12 @@ make it **53× wider** and fill the frame.
 rather than the interface so it can be tested: the suite asserts both the
 sliver and the fix, using the real polar's coordinate ranges.
 
+![The nested cutting layout drawn as one strip and wrapped into bands](cutting-layout.svg)
+
+*The same nest twice. Drawn as one strip it is a hairline using about 4% of
+the frame; wrapped into bands the way a long roll is laid out on a floor, it
+uses 91%. A display transform only — the DXF is byte-identical either way.*
+
 ## 2. Pan and zoom
 
 The section-balance and rib views take wheel zoom about the cursor, drag to
@@ -71,3 +77,40 @@ station, chord, thickness as a percentage, washin, dihedral, yaw, and the
 flow-alignment angle φ. Stepping the selector across the span shows the chord
 shrinking, the washin building and φ growing outboard — which is the wing's
 twist distribution made visible one rib at a time.
+
+---
+
+## 5. Dimensions
+
+A plan view without dimensions is a picture, not a drawing. A designer reading
+one wants the span and the chords off the page rather than out of a settings
+panel, and a reviewer wants to check the drawing agrees with the numbers
+beside it.
+
+**On the plan:** span, root chord, tip chord, and tip sweep.
+
+**On the rib** — the drawing a builder actually marks out from:
+
+- the chord along the datum
+- maximum thickness, **at the station where it actually occurs**. A reflexed
+  or heavily cambered section does not peak where a textbook one does, so the
+  dimension finds the maximum rather than reading a nominal 30%.
+- every anchor position, measured from the leading edge
+
+They are drawn in model coordinates so they scale and rotate with the
+geometry, with tick length in pixels so they stay legible at any zoom, and the
+label turned the right way up rather than upside down on a return leg.
+
+### Checked against the model, not just for existing
+
+A drawing whose labels disagree with the design is **worse** than one with no
+labels: a reviewer checks the drawing against the panel beside it, and a stale
+number there is a number they will trust.
+
+The interface test reads the rendered labels back and compares all eight
+against the model — span, root, tip, rib chord and four anchor positions.
+Verified in both directions by scaling a label by 10% and watching it fail:
+
+```
+FAIL anchor A is drawn at 218 mm, model says 198 mm
+```
