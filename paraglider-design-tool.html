@@ -17775,7 +17775,7 @@ const S = {
   rodSpec: 'leading edge  12.0 18.5   7.0 15.0   1.5  0 25\n'
     + 'mid           23.5 29.5   63.0 70.0  1.1  0 25',
   famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
-  lineBrand: 'all', lineStrength: 'kinked',
+  lineBrand: 'all', lineStrength: 'kinked', maxLineTypes: 5, serviceHours: 200,
   clothLE: 'Porcher Skytex 27 hard', clothUpper: 'Porcher Skytex 32',
   clothLower: 'Porcher Skytex 32', clothRib: 'Porcher Skytex 40 hard',
   useCascadeSpec: false,
@@ -18475,6 +18475,11 @@ function buildControls() {
   hint(AS, 'A workshop buys from one supplier. Restricting the table changes '
     + 'which line is chosen at every anchor, and so the drag, the mass and '
     + 'the bill of materials.');
+  numberField(AS, 'maxLineTypes', 'Line types to stock at most', 1, 10, 1);
+  hint(AS, 'A workshop cannot stock twenty diameters. Four types typically '
+    + 'cost under half a per cent of drag against a different line at every '
+    + 'anchor — press Line set & trim under Files to see the trade.');
+  numberField(AS, 'serviceHours', 'Line set service life (hours)', 50, 400, 10);
   selectField(AS, 'lineStrength', 'Size lines on', [
     ['kinked', 'kinked strength (conservative)'],
     ['new', 'new strength'],
@@ -18638,6 +18643,63 @@ function buildControls() {
     save(`${S.name}-rib-stress.tsv`, `${lines.join('\n')}\n`);
     setStatus(`${r.ribCount} ribs checked, `
       + `${r.ribsWithHolesInLoadPath.length} with a hole in a load path.`);
+  }, 'btn');
+
+  button(grid, 'Line set & trim', () => {
+    // `optimiseLineSet` and the trim-drift model were both built, tested and
+    // unreachable. A designer asking "how many line types should I stock"
+    // and "will this cascade hold its trim" had no way to ask.
+    if (!M.loads || !M.lengths) { setStatus('No loads to optimise.'); return; }
+    try {
+      const cat = parseMaterialsTable(
+        typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+      const table = S.lineBrand === 'all' ? cat : lineTableFor(cat, { brand: S.lineBrand });
+      const opt = optimiseLineSet(M.loads.tensions, {
+        table, maxTypes: S.maxLineTypes, strengthBasis: S.lineStrength,
+      });
+
+      const out = [`# Line set, ${S.name}`];
+      if (!opt.ok) {
+        out.push(`# ${opt.note}`);
+      } else {
+        out.push(`# ${opt.note}`);
+        out.push('');
+        out.push(['material', 'rated_daN', 'diameter_mm', 'lines'].join('\t'));
+        for (const c of opt.chosen) {
+          out.push([c.name, c.ratedDaN.toFixed(1), c.diameterMM, c.lines].join('\t'));
+        }
+      }
+
+      // Trim drift: the fibres do not move the same way, and the difference
+      // is what rotates the wing.
+      const sched = trimSchedule({
+        lines: M.lengths.lines, anchors: M.airfoil.anchors,
+        chordM: S.rootChord, replaceHours: S.serviceHours,
+      });
+      out.push('');
+      out.push('# trim drift');
+      out.push(`# ${sched.note}`);
+      const end = sched.atReplacement;
+      out.push(`# trim moves ${end.alphaChangeDeg.toFixed(2)} degrees by `
+        + `${S.serviceHours} hours; ${end.mixedFibres ? 'the cascade mixes '
+          + 'fibres, so it drifts differentially' : 'one fibre throughout, so '
+          + 'it drifts together'}`);
+      out.push(`# rates are ${end.source}, not measured`);
+      out.push('');
+      out.push(['row', 'lines', 'mean_drift_mm', 'fibres'].join('\t'));
+      for (const [row, r] of Object.entries(end.rowDrift)) {
+        out.push([row, r.lines, r.meanDeltaMM.toFixed(1), r.fibres.join('+')].join('\t'));
+      }
+
+      save(`${S.name}-line-set.tsv`, `${out.join('\n')}\n`);
+      setStatus(opt.ok
+        ? `${opt.typeCount} line types, ${(opt.penalty * 100).toFixed(1)}% drag `
+          + `penalty; trim moves ${end.alphaChangeDeg.toFixed(2)} deg by `
+          + `${S.serviceHours} h.`
+        : opt.note);
+    } catch (e) {
+      setStatus(`Line set: ${e.message}`);
+    }
   }, 'btn');
 
   button(grid, 'Inspection check', () => {

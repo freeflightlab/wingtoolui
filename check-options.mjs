@@ -97,8 +97,37 @@ for (const [file, body] of sources) {
   }
 }
 
+/* ---- capabilities with no path to a user -------------------------------- */
+//
+// A model built, tested, validated and unreachable is a model nobody can use.
+// It has happened repeatedly here: a bill of materials with no button, family
+// generation with no control, a material catalogue the model never read.
+//
+// Not every export should be reachable — helpers are called by other core
+// code, and importers are run from the command line. So this checks a named
+// list of things that ARE meant to be user-facing, which has to be extended
+// deliberately when a new capability is added.
+const USER_FACING = [
+  'optimiseLineSet', 'trimSchedule', 'fabricSchedule', 'parseCascadeSpec',
+  'parseRodSpec', 'noseRodGroup', 'checkWingRibStress', 'checkDiagonalTension',
+  'buildFamily', 'buildBOM', 'lineGeometryCheck', 'applyRiserSplit',
+  'lineTableFor', 'buildIntake', 'tiledPages', 'comparePlans',
+];
+const uiSrc = readFileSync('src/ui/app.js', 'utf8');
+const unreachable = USER_FACING
+  .filter((fn) => !new RegExp(`\\b${fn}\\b`).test(uiSrc));
+
 const unique = [...new Set(bad)];
 console.log(`${Object.keys(accepted).length} exported functions with option objects`);
 console.log(`${unique.length} call sites pass an option the function never reads`);
 for (const b of unique.slice(0, 20)) console.log(`  ${b}`);
-process.exit(unique.length ? 1 : 0);
+
+console.log(`\n${USER_FACING.length} capabilities meant to be user-facing`);
+if (unreachable.length) {
+  console.log(`${unreachable.length} with no path to a user:`);
+  for (const u of unreachable) console.log(`  ${u}`);
+} else {
+  console.log('all of them are reachable from the interface');
+}
+
+process.exit(unique.length + unreachable.length ? 1 : 0);
