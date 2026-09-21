@@ -19301,6 +19301,35 @@ function drawFront() {
   }
   c.dot([0, -S.lineLength], '#ff5e5e', 3);
 
+  // Dimensions, taken from the geometry actually drawn.
+  //
+  // Measured off `half` — the arc as plotted — rather than copied from
+  // `M.lobeM`, so the drawing and the model's reported figures are two
+  // independent computations. The interface test holds them to each other;
+  // if they ever disagree, one of them is wrong and the note says so.
+  if (S.dimensions && half.length > 1) {
+    const centre = half[0];
+    const tip = half[half.length - 1];
+    const projSpan = 2 * Math.abs(tip[0]);
+    const arrow = Math.abs(centre[1] - tip[1]);
+
+    // Projected span, across the tips.
+    c.dim([-tip[0], tip[1]], [tip[0], tip[1]],
+      `${projSpan.toFixed(2)} m projected`, { offsetPx: -16 });
+    // Arrow: how far the tips sit below the centre of the arc.
+    if (arrow > 0.01) {
+      c.dim([tip[0], centre[1]], [tip[0], tip[1]],
+        `${arrow.toFixed(2)} m arrow`, { offsetPx: 16, color: '#e85bc4' });
+    }
+    // Line length, centre of the arc down to the maillon.
+    c.dim([0, centre[1]], [0, -S.lineLength],
+      `${(Math.abs(centre[1] + S.lineLength)).toFixed(2)} m to maillon`,
+      { offsetPx: 14, color: '#6e8bff' });
+
+    // Stashed for the check that the drawing and the model agree.
+    drawFront.measured = { projSpan, arrow };
+  }
+
   c.fit();
   const tipRib = M.wing.ribs[M.wing.ribs.length - 1];
   document.getElementById('note-front').textContent =

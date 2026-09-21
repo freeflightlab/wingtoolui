@@ -389,7 +389,29 @@ try {
       process.exit(1);
     }
 
-    console.log(`  ok   ${checks.length} plan and ${anchorsChecked + 1} rib `
+    // The front view measures the arc off the geometry it plotted, and the
+    // model reports the same two figures by a different route. Holding them
+    // to each other checks both: a disagreement means one is wrong.
+    globalThis.__tab('wing'); globalThis.__rebuild();
+    const frontLabels = gather(document.getElementById('vp-front'));
+    const frontNum = (re) => {
+      const hit = frontLabels.find((t) => re.test(t));
+      return hit ? Number(/[\d.]+/.exec(hit)[0]) : null;
+    };
+    const fChecks = [
+      ['projected span', frontNum(/m projected/), m.lobeM.projectedSpan],
+      ['arrow', frontNum(/m arrow/), m.lobeM.arrow],
+    ];
+    for (const [what, drawn, model] of fChecks) {
+      if (drawn == null || Math.abs(drawn - model) > 0.02) {
+        console.log(`  FAIL the front view draws the ${what} as ${drawn}; the `
+          + `model reports ${model.toFixed(2)}`);
+        process.exit(1);
+      }
+    }
+
+    console.log(`  ok   ${checks.length} plan, ${fChecks.length} front and `
+      + `${anchorsChecked + 1} rib `
       + 'dimensions carry the model\'s own numbers');
     S6.dimensions = wasDim; globalThis.__rebuild();
   }

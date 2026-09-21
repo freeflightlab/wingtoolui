@@ -107,8 +107,13 @@ A drawing whose labels disagree with the design is **worse** than one with no
 labels: a reviewer checks the drawing against the panel beside it, and a stale
 number there is a number they will trust.
 
-The interface test reads the rendered labels back and compares all eight
-against the model — span, root, tip, rib chord and four anchor positions.
+The interface test reads the rendered labels back and compares all ten
+against the model — span, root and tip on the plan; projected span and
+arrow on the front view; and chord plus four anchor positions on the rib.
+
+The front view's two are measured off the arc **as plotted**, and the model
+reports the same figures by a different route, so holding them to each
+other checks both.
 Verified in both directions by scaling a label by 10% and watching it fail:
 
 ```
