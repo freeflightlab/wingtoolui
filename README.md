@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**1601 tests across nine check stages**, all passing. Phases 1 and 5 are
+**1744 tests across nine check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -44,20 +44,34 @@ are no packages to install.
 git clone https://github.com/freeflightlab/wingtoolui
 cd wingtoolui
 
+npm run doctor      # is this checkout complete? run this first
 npm run build       # bundle src/ into dist/paraglider-design-tool.html
-npm run check       # everything, six stages, one command
+npm run check       # everything, Thirteen stages, one command
 ```
+
+**Publishing to GitHub? Read [`PUBLISHING.md`](PUBLISHING.md) first.** Uploading
+individual files through the web interface flattens the tree and has broken
+the repository twice.
+
+**If anything looks wrong, run `npm run doctor` before anything else.** It
+checks the whole tree — layout, every file the manifest promises, every module
+the build needs, the reference data, and the Node version — and says what to
+do about what it finds. A first user hit a build failure that turned out to be
+a stale checkout in an older layout, and the build could only report what it
+personally needed.
 
 `npm run check` is the one that matters. Individual stages, if a single one is
 being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1672 unit checks against known geometry and the sources |
+| `npm test` | 1744 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
 | `npm run test:refs` | every wing in the database against the physics |
+| `npm run check:assertions` | checks that cannot fail |
+| `npm run check:references` | names in prose that point at nothing |
 | `npm run check:options` | options passed that a function never reads |
 | `npm run check:corpus` | every dataset measured, against the model's own constants |
 | `npm run check:provenance` | every material figure says where it came from |
@@ -74,7 +88,7 @@ And two tools that are not tests:
 The scripts are thin wrappers — `node tools/check.mjs` and the rest work
 directly if you prefer.
 
-`check.mjs` runs all ten in one command, because six commands meant five got
+`check.mjs` runs all thirteen in one command, because six commands meant five got
 skipped. The full-pipeline stage carries a **pinned baseline of 3 known
 problems**: treating them as failures would make the command red every run and
 train everyone to ignore it, while letting the number drift up silently would
@@ -239,15 +253,18 @@ speed is stated as an assumption and inverted from published data.
 
 ## Validation
 
-Ten stages, one command:
+Thirteen stages, one command:
 
 | stage | catches |
 | --- | --- |
-| unit suite | the maths, 1672 checks |
+| checkout | a tree that is incomplete or in an older layout |
+| unit suite | the maths, 1744 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
 | reference sweep | wings that parse but describe impossible geometry |
+| assertions | checks that cannot fail, which report success |
+| references | names in comments and documents that point at nothing |
 | options | calls that look right, run clean, and do nothing |
 | corpus | model constants that have drifted from their data |
 | provenance | estimates presented as if they were measurements |
@@ -285,6 +302,9 @@ across six manufacturers.
 | `docs/shaping.md` | 3D shaping of the nose, and two wrong derivations |
 | `docs/risers.md` | riser-aware line plans and split A risers |
 | `docs/line-plans.md` | risers, naming, topology inference |
+| `docs/panels.md` | panel development, and whether the wing sews |
+| `docs/fabric.md` | cloth by location, and what the tool refuses |
+| `docs/line-sets.md` | choosing N line types, and whether a cascade holds trim |
 | `docs/loads-and-materials.md` | lift to line tension, kinked strength, drag |
 | `docs/niviuk-import.md` | importing a sixth manufacturer, and what its data said |
 | `docs/swoop2.md` | validating against the source method's own design |

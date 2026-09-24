@@ -1,0 +1,149 @@
+# Ozone vibegt XL
+# Source: manufacturer line sheet, supplied as xlsx
+# Converted by tools/read_xlsx.py
+Suspension line details
+VibeGT_XL
+rev2. 23/3/2026
+Sewn lengths are based on a pin diameter of 5mm.
+LIN-10-200-41
+Name	No.	Sewn	Adjusted	Prod adj.	Comment		Linked line check sheet
+KRL1	2	1530					VibeGT_XL
+matk at 1280							rev1. 12/2/2026
+LIN-8001-050-BLUE							Corrected check lengths
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			A	B	C	D	K
+A12	2	556					1	7687	7597	7712	7776	8100
+							2	7644	7555	7653	7717	7827
+LIN-8001-050-ORANGE							3	7594	7511	7614	7681	7669
+Name	No.	Sewn	Adjusted	Prod adj.	Comment		4	7609	7528	7643	7697	7552
+B7	2	358					5	7525	7455	7571	7635	7470
+B6	2	365					6	7478	7411	7487	7541	7316
+B3	2	409					7	7400	7341	7422	7478	7201
+B2	2	411					8	7405	7346	7416	7451	7141
+K12	2	433					9	7259	7227	7322		7081
+K13	2	445					10	7150	7122	7191		7138
+K9	2	452					11	7064	7038	7095		7006
+K8	2	464					12	7021	7001	7042		6965
+K11	2	474					13	6787	6791			7015
+K4	2	481					14	6762	6824			7074
+K2	2	485			
+K14	2	504					includ. Risers
+K10	2	509			
+K7	2	524			
+K6	2	533			
+B12	2	572			
+C12	2	577			
+A14	2	597			
+K3	2	598			
+B11	2	609			
+A13	2	622			
+B13	2	626			
+C10, C11	4	630			
+B10	2	651			
+B14	2	659			
+C8	2	682			
+K5	2	687			
+C7	2	688			
+C6	2	695			
+D8	2	717			
+C2, D7	4	744			
+D6	2	749			
+KMU6	2	751			
+C3	2	755			
+K1	2	758			
+C9	2	761			
+C5	2	779			
+C4	2	784			
+KMU7	2	789			
+C1	2	803			
+D2	2	808			
+D3	2	822			
+D4	2	838			
+D5	2	843			
+D1	2	867			
+KMU2	2	1066			
+KMU1	2	1337			
+CM6	2	1449			
+KMU5	2	1551			
+KMU4	2	1599			
+KMU3	2	1705			
+LIN-8001-070-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A11	2	599			
+LIN-8001-070-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A10	2	649			
+LIN-8001-070-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+B8	2	363			
+B5	2	409			
+B4	2	426			
+B1	2	453			
+B9	2	756			
+BM6	2	1386			
+CM5	2	1545			
+LIN-8001-070-ORANGE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+KML2	2	1748			
+KML3	2	2451			
+KML1	2	2675			
+BRU4	2	4476			
+LIN-8001-090-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A7	2	372			
+A8	2	377			
+A6	2	378			
+A2	2	424			
+A3, A5	4	425			
+A4	2	440			
+A1	2	467			
+A9	2	758			
+AM6	2	1418			
+LIN-8001-090-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BM5	2	1428			
+LIN-8001-090-ORANGE + red cover maillon side
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CR3	2	4403	4392	11	one loop around the maillon
+LIN-8001-090-ORANGE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CM4	2	1843			
+CM3	2	1901			
+BM4	2	2004			
+BM3	2	2068			
+CM2	2	2139			
+CM1	2	2189			
+BM2	2	2196			
+BM1	2	2238			
+LIN-8001-135-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AM5	2	1460			
+AM4	2	2048			
+AM3	2	2121			
+LIN-8001-135-ORANGE + red cover maillon side
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CR1	2	4118	4107	11	one loop around the maillon
+CR2	2	4289	4278	11	one loop around the maillon
+BR2	2	4358			
+BR3	2	4422			
+LIN-8001-190-BLUE + blue cover on maillon side
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR3	2	4434			
+LIN-8001-190-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AM2	2	2259			
+AM1	2	2310			
+LIN-8001-190-ORANGE + red cover maillon side
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BR1	2	4286			
+LIN-8001-230-BLUE + blue cover on maillon side
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR2	2	4363			
+LIN-8001-280-BLUE + blue cover on maillon side
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR1	2	4291			
+LIN-DSL-140-YELLOW
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+KRU1	2	2039			
+LIN-DSL-70-RED
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BRL4	2	1077	1066	11	one loop around the maillon

@@ -11,7 +11,7 @@ patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
 One offline HTML file, 733 KB, no build step and no network. That constraint
-drove the architecture: 34 core modules bundled into a single scope, with the
+drove the architecture: 35 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
 **37,000 lines**: 17,000 core, 2,100 interface, 10,300 tests, 2,000 tools,
@@ -26,7 +26,7 @@ demonstrating the method. Flat area, span, root chord, cell and rib counts
 reproduce **exactly**. 37 LEP sections parse. Its published per-line loads
 close at every cascade level.
 
-**Against 21 wings from six manufacturers**, 133 reference files. Every line
+**Against 21 wings from six manufacturers**, 134 reference files. Every line
 sheet is held to five physical invariants, not merely parsed. The
 anchor-density table the generator calibrates against is **measured from the
 corpus**, not hand-entered — 27 designs, and a check stage fails if the
@@ -76,13 +76,10 @@ by it.
 
 ## 5. What is missing
 
-**41 open items.** The substantial ones:
+**39 open items.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
-- Fabric selection by panel: real wings use different cloth on the upper
-  surface, the lower, the ribs and the leading edge, and the model treats the
-  sail as one material.
 - Collapse (Z) lines: three reference wings carry them; the model does not.
 - Asymmetric and left/right-independent line plans.
 - Nesting: 51.6% efficiency against a 73% shape ceiling.

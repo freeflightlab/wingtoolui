@@ -1,5 +1,15 @@
 # Working on this
 
+## If something looks broken
+
+```bash
+npm run doctor
+```
+
+Checks the tree is complete before you spend time on it: layout, manifest,
+core modules, reference data, Node version. A build failure is usually a
+checkout problem, and the build can only see what it needs itself.
+
 ## Before writing anything
 
 ```bash
@@ -19,21 +29,28 @@ find them; this does.
 node tools/check.mjs
 ```
 
-Six stages, one command. All six must pass.
+Thirteen stages, one command. All thirteen must pass.
 
 ## What the checks are for
 
 | stage | catches |
 | --- | --- |
+| checkout | a tree that is incomplete or in an older layout |
 | unit suite | the maths |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | modules that are right alone and wrong together |
 | interface | features with no button, buttons with no effect |
+| reference sweep | wings that parse but describe impossible geometry |
+| assertions | checks that cannot fail, which report success |
+| references | names in comments and documents that point at nothing |
+| options | calls that look right, run clean, and do nothing |
+| corpus | model constants that have drifted from their data |
+| provenance | estimates presented as if they were measurements |
 | benchmark | performance regressions |
 | self-audit | unused exports, stale numbers in prose, duplicate names |
 
-The **full pipeline** stage carries a pinned baseline of 3 known problems.
-Exceeding it fails; it is not a licence to add a fourth.
+The **full pipeline** stage is pinned at **zero**. Any regression is visible on
+the first run rather than absorbed into an allowance.
 
 ## House rules
 

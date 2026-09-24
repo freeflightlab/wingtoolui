@@ -1,0 +1,176 @@
+Suspension line details
+Geo7_L - 7/6/2023
+
+
+
+
+								A	B	C	D	K
+LIN-10-200-41
+Name	No.	Sewn	Adjusted	Prod adj.	Comment		1	7379	7291	7368	7473	7988
+KRL1	2	1470					2	7335	7247	7327	7433	7593
+mark at 1220							3	7314	7228	7308	7410	7445
+							4	7327	7241	7330	7428	7317
+LIN-8001-050-BLUE							5	7299	7222	7298	7397	7272
+Name	No.	Sewn	Adjusted	Prod adj.	Comment		6	7270	7195	7270	7363	7064
+A12	2	363					7	7252	7183	7252	7336	7027
+A11	2	391					8	7269	7199	7271	7349	7101
+							9	7157	7098	7265	7345	6938
+LIN-8001-050-BLUE R							10	7112	7056	7171	7251	6848
+Name	No.	Sewn	Adjusted	Prod adj.	Comment		11	7018	6975	7181	7246	6843
+AM6	2	1288					12	6990	6946	7098	7163
+							13	6690	6678	7057	7116
+LIN-8001-050-ORANGE							14	6448	6500	7078	7126
+Name	No.	Sewn	Adjusted	Prod adj.	Comment		15			6611
+B10	2	305
+B12	2	326
+B7	2	329
+B9	2	347
+B11	2	355
+B6	2	392
+C7	2	395
+C8	2	414
+C10	2	422
+C11	2	432
+C13	2	442
+K7	2	447
+C14	2	463
+C6	2	464
+D7	2	474
+B3	2	477
+C12	2	483
+K6	2	484
+D11, D8	4	487
+D13	2	490
+C5, D10	4	492
+B2	2	496
+D14	2	500
+C9	2	516
+K8	2	521
+D12	2	537
+C3	2	544
+D6	2	552
+C2	2	563
+C4	2	566
+K4	2	571
+D5, D9	4	586
+C1	2	604
+D3	2	651
+D4	2	669
+D2	2	674
+K5	2	692
+K3	2	699
+D1	2	714
+K11	2	726
+K10	2	731
+K2	2	733
+K9	2	821
+A14	2	1074
+B14	2	1126
+K1	2	1128
+C15	2	1237
+CM6	2	1277
+DM6	2	1288
+CM5	2	1411
+DM5	2	1421
+
+LIN-8001-050-ORANGE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+KMU3, KMU4	4	1071
+KMU2	2	1277
+BM6	2	1288
+KMU1	2	1390
+
+LIN-8001-070-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A10	2	354
+A9	2	399
+
+LIN-8001-070-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A7	2	394
+A6	2	463
+A3	2	557
+A2	2	578
+
+LIN-8001-070-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+B8	2	345
+B5	2	419
+B4	2	490
+B1	2	540
+B13	2	1304
+A13	2	1316
+
+LIN-8001-070-ORANGE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+DM1, DM2	4	2034
+CM1, CM2	4	2039
+CM3	2	2081
+DM3	2	2086
+CM4	2	2132
+DM4	2	2137
+KM2	2	2369
+KM1	2	2379
+KM3	2	2977
+
+LIN-8001-090-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A8	2	411
+A5	2	492
+A4	2	570
+A1	2	622
+AM5	2	1421
+AM4	2	1730
+
+LIN-8001-090-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CRU4	2	3811
+
+LIN-8001-090-ORANGE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BM5	2	1421
+BM3	2	1679
+BM4	2	1730
+BM1, BM2	4	2039
+
+LIN-8001-130-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AM3	2	1679
+AM1, AM2	4	2039
+
+LIN-DSL-140-RED
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CRL4	2	1030
+
+LIN-DSL-70-YELLOW
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+KRU1	2	1864
+
+LIN-PPSL120-PURPLE + sock on maillon
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BR3	2	4798
+
+LIN-PPSL120-ORANGE + sock on maillon + Loop on maillon
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CR3	2	4818	4807	11
+
+LIN-PPSL120-BLUE + sock on maillon
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR3	2	4808
+
+LIN-PPSL160-ORANGE + sock on maillon + Loop on maillon
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CR1, CR2	4	4210	4199	11
+
+LIN-PPSL191-PURPLE + sock on maillon
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BR1	2	4180
+BR2	2	4592
+
+LIN-PPSL191-BLUE + sock on maillon
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR2	2	4602
+
+LIN-PPSL200-BLUE + sock on maillon
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR1	2	4192

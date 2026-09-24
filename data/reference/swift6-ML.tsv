@@ -1,0 +1,170 @@
+Suspension line details
+Rush6 / Swift6 ML prod					corr: 17/05/2021 offset upper K name starting from K1 instead of K2. 
+					corr: 27/05/2021 KRU1 at 2011 instead of 1991
+
+
+
+
+LIN-10-200-41
+Name		No.	Sewn	Marked	Prod adj.	Comment		  Manual Rush6 ML
+KRL1		2	1450	1200	250				Lines + risers
+									A	B	C	D	E	K
+LIN-6843-200-05	Blue							1	7371	7289	7477	7569		7676
+Name		No.	Sewn	Adjusted	Prod adj.	Comment		2	7341	7261	7375	7469		7409
+	ARL3	2	300					3	7295	7215	7341	7434		7247
+								4	7310	7232	7398	7481		7196
+LIN-8001-050 Orange	Blue							5	7204	7143	7344	7431		7124
+Name		No.	Sewn	Adjusted	Prod adj.	Comment		6	7166	7107	7214	7298		6963
+	A17	2	145					7	7090	7032	7158	7237		6903
+B10		2	154					8	7094	7033	7187	7243		6883
+B13		2	157					9	7001	6989				6900
+B12		2	158					10	6942	6927				6988
+B14, B6	A13	6	162					11	6851	6846				6744
+	A12	2	166					12	6839	6832				6723
+	A14	2	168					13	6738	6736				6876
+	A10	2	169					14	6744	6741
+B11		2	172					15	6519	6542
+	A11	2	178					16	6443	6506
+CM7		2	183					17	6413	6469
+B5, K6		4	198					18
+K9		2	199
+B17		2	201
+B7		2	207
+B8		2	208
+B9		2	216
+B2		2	241
+B3		2	245
+K2		2	255
+	A16	2	259
+K8		2	260
+CM8		2	267
+K7		2	280
+K10		2	287
+K4		2	299
+B16		2	322
+C6		2	332
+C8	A15	4	335
+C7		2	341
+K3		2	350
+K12		2	354
+B15		2	358
+K5		2	359
+K11		2	375
+C2		2	390
+D8		2	391
+C5		2	412
+D6		2	416
+D7		2	420
+C3		2	422
+C1		2	432
+C4		2	459
+D2		2	484
+D5		2	499
+K13		2	507
+CMU7, D3		4	515
+K1		2	522
+D1		2	524
+D4		2	542
+CMU6, CMU8		4	550
+CMU2		2	590
+CMU5		2	600
+CMU3		2	605
+CMU4		2	625
+CMU1		2	650
+CMU10		2	890
+KMU2		2	1068
+KMU1		2	1325
+KMU4		2	1440
+KMU5		2	1518
+KMU3		2	1582
+CM6		2	2095
+KML3		2	3095
+CRU4		2	4420
+
+LIN-8001-050 Orange R	Blue
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+AM6	AM6	2	2088
+KML1		2	2555
+
+LIN-8001-070 Orange	Blue
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+	A9	2	228
+B4		2	262
+B1		2	269
+CMU9		2	989
+
+LIN-8001-070 Orange R	Blue
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+	A6	2	197
+	A7	2	223
+	A8	2	227
+	A2	2	285
+	A3	2	289
+CM4		2	613
+CM3		2	643
+	AMU2	2	885
+
+LIN-8001-090 Orange
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+CM5		2	1300
+
+LIN-8001-090 Orange R	Blue
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+	A5	2	235
+	A4	2	304
+	A1	2	315
+CM2		2	695
+CM1		2	776
+	AMU1	2	985
+KML2		2	1909
+BM4		2	2000
+	AM4	2	2030
+BM3		2	2120
+
+LIN-8001-130 Orange R	Blue
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+	AM5	2	1300
+BM2	AM2	4	1960
+BM1	AM1	4	2010
+	AM3	2	2132
+
+LIN-8001-130 Orange R + sock on maillon + Loop on maillon
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+BR2		2	4303	4292	11	(loop)
+
+LIN-8001-130 Orange + sock on maillon + Loop on maillon
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+CR1		2	5093	5082	11	(loop)
+
+LIN-8001-130 Orange + sock on maillon + Loop on maillon
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+CR3		2	3956	3945	11	(loop)
+CR2		2	5163	5152	11	(loop)
+
+LIN-8001-190 R	Blue
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+	ARU3	2	3650
+
+LIN-8001-190 R + sock on maillon	Blue
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+	AR2	2	4297
+
+LIN-8001-190-Orange R + sock on maillon + Loop on maillon
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+BR1		2	4486	4475	11	(loop)
+
+LIN-8001-230 R + sock on maillon	Blue
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+	AR1	2	4502
+
+LIN-DSL-140-BLUE
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+KRU1		2	2011
+
+LIN-DSL-70-RED
+Name		No.	Sewn	Adjusted	Prod adj.	Comment
+CRL4		2	1048
+
+
+
+

@@ -8,11 +8,18 @@
     "node": ">=18"
   },
   "scripts": {
+    "doctor": "node tools/doctor.mjs",
     "check": "node tools/check.mjs",
     "test": "node tests/run-tests.js",
     "test:phase1": "node tests/phase1-audit.mjs",
     "test:pipeline": "node tests/full-pipeline.mjs",
     "test:ui": "node tools/ui-test.cjs",
+    "test:refs": "node tests/reference-sweep.mjs",
+    "check:assertions": "node tools/check-assertions.mjs",
+    "check:references": "node tools/check-references.mjs",
+    "check:options": "node tools/check-options.mjs",
+    "check:corpus": "node tools/corpus-learnings.mjs",
+    "check:provenance": "node tools/check-provenance.mjs",
     "bench": "node tests/benchmark.js",
     "audit": "node tools/audit.mjs",
     "build": "python3 build.py",

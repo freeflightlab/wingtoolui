@@ -1,0 +1,188 @@
+# Ozone magnum4 44
+# Source: manufacturer line sheet, supplied as xlsx
+# Converted by tools/read_xlsx.py
+Suspension line details	rev4. 3/4/2024
+Magnum4_44
+LIN-10-200-41								EN line check sheet
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			A	B	C	D	E	K
+KR1	2	5100						9384	9277	9320	9438	9534	10542
+mark at 4850								9312	9200	9243	9367	9463	10148
+9311									9203	9246	9363	9439	9896
+LIN-7343-190-RED								9286	9182	9225	9341	9460	9653
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			9261	9154	9198	9320	9413	9501
+CR4	2	5739						9312	9211	9255	9369	9318	9210
+								9263	9169	9213	9323	9274	9100
+LIN-7343-190-ORANGE								9175	9078	9124	9240	9259	9112
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			9169	9078	9123	9231	9194	9076
+DR2	2	5359						9114	9032	9078	9178	9026	8953
+								9062	8978	9027	9134	8807	8952
+LIN-7343-230-PURPLE								9110	9032	9081	9178	8975
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			8981	8927	8951	9090	9128
+BR3	2	5772						8859	8804	8833	8971
+								8825	8771	8798	8928
+LIN-7343-230-ORANGE								8695	8659	8662	8804
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			8629	8578	8587	8727
+CR2	4	5356						8672	8604	8605	8734
+CR3	2	5772						8180	8161	8200	8248
+DR1	2	5359						8054	8084	8096	8141
+								computer + risers
+LIN-7343-280-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CR1	2	5356			
+LIN-7343-280-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR3_U	2	4932			
+AR3_L	2	863
+LIN-6843-160 BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+Ear Kit Line	2	1190			Length without the knot for the plastic ball
+mark at 1040
+LIN-7343-420-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR1, AR2	4	5359			
+LIN-7343-420-PURPLE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BR1, BR2	4	5346			
+LIN-8001-070-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A17	2	633			
+LIN-8001-070-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A20	2	580			
+B17	2	589			
+B20	2	610			
+C20	2	622			
+C17	2	632			
+C18	2	650			
+D20	2	667			
+B19	2	687			
+C11	2	689			
+D17	2	696			
+D18	2	703			
+A19	2	706			
+C16	2	707			
+B14	2	709			
+C15	2	720			
+C19	2	726			
+C10	2	740			
+C12	2	743			
+C14	2	755			
+D16	2	773			
+D19	2	774			
+E11	2	775			
+C9	2	785			
+C8	2	786			
+D15	2	791			
+D11	2	827			
+D14	2	834			
+C5	2	860			
+D10, D12	4	871			
+C13	2	873			
+C7	2	875			
+C4	2	887			
+E10	2	888			
+C2	2	905			
+C3	2	908			
+C6	2	917			
+D9	2	924			
+D8	2	933			
+E8	2	952			
+D13	2	953			
+E7	2	967			
+C1	2	982			
+E6	2	1011			
+D5	2	1013			
+D7	2	1016			
+D4	2	1034			
+D3, E9	4	1056			
+D2	2	1060			
+D6	2	1062			
+E5	2	1106			
+D1	2	1131			
+E3	2	1132			
+E4	2	1153			
+E2	2	1156			
+E1	2	1227			
+LIN-8001-090-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A18	2	676			
+A16	2	699			
+A15	2	723			
+A11	2	732			
+A14	2	757			
+A12	2	780			
+A10	2	784			
+A9	2	839			
+A8	2	845			
+A13	2	879			
+A5	2	931			
+A7	2	933			
+A4	2	956			
+A3	2	981			
+A2, A6	4	982			
+A1	2	1054			
+LIN-8001-090-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+B18	2	615			
+B11	2	658			
+B16	2	670			
+B15	2	676			
+B10, B12	4	712			
+B8, B9	4	758			
+B13	2	832			
+B5	2	834			
+B7	2	849			
+B4	2	862			
+B2	2	880			
+B3	2	883			
+B6	2	891			
+B1	2	957			
+LIN-8001-130-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+MSA, MSB	4	1311			
+LIN-DSL-70-YELLOW
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+K10	2	557			
+K6	2	589			
+K7	2	606			
+K8	2	618			
+K4	2	666			
+K9	2	680			
+K11	2	768			
+K12	2	791			
+K5	2	880			
+K3	2	909			
+K2	2	928			
+K13	2	944			
+KMU6	2	1004			
+KMU5	2	1216			
+K1	2	1322			
+KMU4	2	1353			
+KMU3	2	1480			
+KMU2	2	1564			
+KMU1	2	1797			
+KML2	2	2255			
+KML3	2	2294			
+KML1	2	2537			
+LIN-PPSL120-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CM6	2	1762			
+DM6	2	1838			
+CM5	2	1885			
+DM5	2	1944			
+DM1, DM2, DM3, DM4	8	2526			
+CM1, CM2, CM3, CM4	8	2558			
+LIN-PPSL120-PURPLE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BM6	2	1797			
+BM5	2	1903			
+LIN-PPSL160-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AM6	2	1797			
+AM5	2	1903			
+LIN-PPSL200-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AM1, AM2, AM3, AM4	8	2558			
+LIN-PPSL200-PURPLE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BM1, BM2, BM3, BM4	8	2558			

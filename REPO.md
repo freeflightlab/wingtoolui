@@ -56,6 +56,22 @@ not edit it by hand.
 The self-audit checks `MANIFEST.txt` against what is actually present, so a
 file added without regenerating it fails the check.
 
+## If a checkout will not build
+
+Run `npm run doctor` first. It checks the whole tree — layout, every file the
+manifest promises, every module the build needs, the reference data, and the
+Node version — and says what to do about what it finds.
+
+A first user hit `7 of 33 core modules are missing ... layout 'flat'`. Nothing
+was wrong with their machine: they had cloned a repository still holding the
+**old flat layout**, in which those seven files had never been committed. The
+build could only report what it personally needed, which reads like a bug in
+the tool rather than a stale tree.
+
+**A flat checkout cannot be repaired by adding the missing files.** Replace
+the whole tree with a current release. The build says so now, and `doctor`
+says it before the build is even reached.
+
 ## A note on history
 
 This file used to describe a **flat** repository — every source file at the

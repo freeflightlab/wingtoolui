@@ -74,6 +74,8 @@ MODULES = [
     "ribstress.js",
     "shaping3d.js",
     "inflated.js",
+    "trimdrift.js",
+    "fabric.js",
     "bom.js",
     "loads.js",
     "scaling.js",
@@ -121,12 +123,44 @@ def _missing_report(names):
         "",
     ]
     lines += [f"  {n}" for n in absent]
-    lines += [
-        "",
-        "A checkout needs every file listed in MANIFEST.txt: the core modules,",
-        "src/ui, build.py, tests, tools and data/reference. Committing only the",
-        "files that changed leaves a tree that cannot build or be tested.",
-    ]
+    lines += ["", "What to do:", ""]
+    if LAYOUT == "flat":
+        # This is the specific case a first user hit: they cloned a repository
+        # still holding the OLD flat layout, where every file sat at the top
+        # level and several were never committed at all. The build found
+        # enough files to guess "flat" and then failed on the rest, which
+        # reads like a bug in the tool rather than a stale checkout.
+        lines += [
+            "  This tree is the OLD FLAT LAYOUT: source files at the top",
+            "  level rather than under src/core. That layout was replaced,",
+            "  and several modules were never committed to it — which is why",
+            "  they are missing here.",
+            "",
+            "  It cannot be repaired by adding the missing files. Replace the",
+            "  whole tree with a current release, which is laid out as:",
+            "",
+            "      src/core/    the modules listed above",
+            "      src/ui/      index.html, app.js, style.css",
+            "      tests/  tools/  data/reference/  docs/",
+            "      build.py  package.json  MANIFEST.txt",
+            "",
+            "  Then: npm run build && npm run check",
+            "",
+            "  A flat tree is what GitHub's web uploader makes when files are",
+            "  dragged in one at a time. PUBLISHING.md says how to avoid it.",
+        ]
+    else:
+        lines += [
+            "  A checkout needs every file in MANIFEST.txt: the core modules,",
+            "  src/ui, build.py, tests, tools and data/reference.",
+            "",
+            "  Committing only the files that changed leaves a tree that",
+            "  cannot build or be tested. Take a complete release rather than",
+            "  adding the files above one at a time — anything missing from",
+            "  MANIFEST.txt is missing for a reason you cannot see from here.",
+            "",
+            "  Then: npm run build && npm run check",
+        ]
     return "\n".join(lines)
 
 

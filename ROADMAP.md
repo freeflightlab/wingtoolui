@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1734-test validation suite and a benchmark with regression budgets
+- [x] 1744-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,27 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Does it sew?** — every panel checked against the ribs it is sewn to,
+      and against its neighbour: 0.006 mm worst. The front view is
+      dimensioned and its figures held to the model's. See `docs/panels.md`.
+
+- [x] **Dimensioned drawings** — span, chords and sweep on the plan; chord,
+      maximum thickness and every anchor position on the rib. The labels are
+      read back and checked against the model, because a drawing that
+      disagrees with the design is worse than one with no labels. See
+      `docs/viewports.md`.
+
+- [x] **The arc validated against 38 published wings** — the projected-span
+      ratio was an input nobody checked came back out. Exact on all 38. Two
+      wrong measurements on the way, both pinned: the samples run past the
+      half-span, and `at(s)` returns an object rather than a pair.
+- [x] **Line optimiser and trim drift reachable** — both were built, tested
+      and had no path to a user. Now a "Line set & trim" export, and
+      `check-options` asserts a named list of user-facing capabilities stays
+      reachable.
+- [x] **A check that cannot fail is now itself checked** —
+      `tools/check-assertions.mjs`, a stage.
 
 - [x] **Rods on the rib, and nose rods that wrap** — rods had their own
       viewport showing a bare aerofoil, which is a second poorer rib view; a
