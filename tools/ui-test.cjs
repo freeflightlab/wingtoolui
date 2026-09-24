@@ -416,6 +416,33 @@ try {
     S6.dimensions = wasDim; globalThis.__rebuild();
   }
 
+  // The front view must draw the SAME lines as everything else.
+  //
+  // It drew chapter 8's simplified cascade while the Lines view, the loads,
+  // the bill and the PMA sheet used the real plan — so the riser layout, the
+  // merges, the brakes and the split A were all missing from it. Two line
+  // models in one tool, and the drawing showed the wrong one.
+  {
+    const m = globalThis.__getM();
+    const src = require('fs').readFileSync('src/ui/app.js', 'utf8');
+    // Comments stripped: the fix's own explanation names `M.cascade`, and a
+    // scan that reads it flags the very change it is checking for. Third
+    // time this project has caught a checker matching its own description.
+    const front = src.slice(src.indexOf('function drawFront'),
+      src.indexOf('function drawRib'))
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    if (/M\.cascade/.test(front)) {
+      console.log('  FAIL the front view still draws the chapter 8 cascade');
+      process.exit(1);
+    }
+    if (!/M\.linePlan/.test(front)) {
+      console.log('  FAIL the front view draws no line plan at all');
+      process.exit(1);
+    }
+    console.log(`  ok   the front view draws the real plan, `
+      + `${m.linePlan.lines.length} lines`);
+  }
+
   const baseline = pressAll();
   const probes = [
     // The assumptions made adjustable. A control that changes nothing is

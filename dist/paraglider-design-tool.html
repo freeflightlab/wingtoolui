@@ -3331,6 +3331,93 @@ function solveEquilibriumFromWing({
   };
 }
 
+/**
+ * Trim from the calage, rather than calage from an assumed trim.
+ *
+ * `solveEquilibriumFromWing` takes an angle of attack and reports the calage
+ * that would make it an equilibrium. That is chapter 4's method and it is
+ * useful, but it has the causation backwards for a designer: **you do not
+ * choose an angle of attack. You choose where the risers hang, and the wing
+ * flies at whatever angle that produces.**
+ *
+ * The difference is not academic. The default angle was 6 degrees, which
+ * demands a calage at 48% of chord — well aft of the 40 to 45% real wings
+ * use — and produces CL 0.81 and a trim speed of 24.9 km/h on a Geo 7 XS.
+ * EN 926-2 requires more than 30 km/h, and the certificate for that wing
+ * records it passing at 55 kg.
+ *
+ * Run the other way round, a calage of 40 to 43.5% gives 2 to 4 degrees,
+ * CL 0.49 to 0.65 and 27.8 to 31.9 km/h. The lift coefficient and the speed
+ * both land where a real wing sits, from a geometry a builder can measure.
+ *
+ * The calage rises monotonically with angle of attack, so this is a plain
+ * root find on that relation.
+ */
+function trimFromCalage({
+  planform, airfoil, atm = null, calageFraction,
+  alphaRange = [-2, 12], tolerance = 1e-5, ...rest
+}) {
+  if (!(calageFraction > 0 && calageFraction < 1)) {
+    throw new Error('trimFromCalage: calageFraction is a fraction of chord '
+      + `between 0 and 1 (got ${calageFraction})`);
+  }
+
+  const at = (alphaDeg) => solveEquilibriumFromWing({
+    planform, airfoil, atm, alphaDeg, ...rest,
+  });
+
+  // The calage is NOT monotonic in angle of attack. It falls to a minimum —
+  // around 1 to 2 degrees on the wings here — and rises on both sides. A
+  // bisection that assumes it rises throughout picks the wrong branch or
+  // finds nothing.
+  //
+  // My first version assumed monotonic and its bracket check threw rather
+  // than returning a wrong answer, which is the only reason this was caught.
+  //
+  // Two angles therefore give any reachable calage. The lower one is at a
+  // very small or negative angle of attack and is not a flight state: a
+  // paraglider there has no lift to speak of and would not stay open. The
+  // upper branch is the one a wing actually flies on, so the search starts
+  // at the minimum and goes up.
+  const [rangeLo, rangeHi] = alphaRange;
+  const samples = 48;
+  let minAlpha = rangeLo;
+  let minCalage = Infinity;
+  for (let i = 0; i <= samples; i++) {
+    const a = rangeLo + ((rangeHi - rangeLo) * i) / samples;
+    const c = at(a).calageFraction;
+    if (c < minCalage) { minCalage = c; minAlpha = a; }
+  }
+
+  const topCalage = at(rangeHi).calageFraction;
+  if (calageFraction < minCalage || calageFraction > topCalage) {
+    throw new Error(`trimFromCalage: a calage of ${(calageFraction * 100).toFixed(1)}% `
+      + 'is outside what this wing can trim at in flight '
+      + `(${(minCalage * 100).toFixed(1)}% at ${minAlpha.toFixed(1)} degrees, `
+      + `rising to ${(topCalage * 100).toFixed(1)}% at ${rangeHi} degrees)`);
+  }
+
+  let lo = minAlpha;
+  let hi = rangeHi;
+  for (let i = 0; i < 60 && hi - lo > tolerance; i++) {
+    const mid = (lo + hi) / 2;
+    if (at(mid).calageFraction - calageFraction < 0) lo = mid; else hi = mid;
+  }
+
+  const alphaDeg = (lo + hi) / 2;
+  const state = at(alphaDeg);
+  return {
+    ...state,
+    alphaDeg,
+    calageAsked: calageFraction,
+    calageError: state.calageFraction - calageFraction,
+    derivedFrom: 'calage',
+    note: `a calage of ${(calageFraction * 100).toFixed(1)}% of chord trims at `
+      + `${alphaDeg.toFixed(2)} degrees, CL ${state.cz3D.toFixed(3)}, `
+      + `${state.speedKMH.toFixed(1)} km/h`,
+  };
+}
+
 /* ===== lines.js ===== */
 /* lines.js — Chapter 8: line geometry.
  *
@@ -9201,6 +9288,24 @@ function buildVRibs({
           if (blocked) continue;
 
         const apex = pointAt(ribs[i].lower, frac);
+
+        // The base stays at the apex's own chord fraction.
+        //
+        // A diagonal runs from the LOWER surface of one rib to the UPPER
+        // surface of its neighbour, and a rib on an arc is tilted, so its
+        // thickness has a spanwise component: on the test wing rib 4's upper
+        // surface sits at y = 1.691 at 30% chord and its lower at y = 1.789.
+        // That offset adds to the rib gap going inboard and subtracts going
+        // outboard, so one-cell diagonals from the same rib come out at
+        // 0.505 m and 0.291 m.
+        //
+        // I tried to even that up by sliding the base along the neighbouring
+        // rib until it sat across from the apex. It cannot work: `y` varies
+        // by only about 0.07 m across the whole chord of that rib, less than
+        // the 0.098 m offset, so the search ran to the end of the chord and
+        // produced 1.7 m diagonals lying almost flat. The asymmetry is the
+        // arc, not a placement error, and it is reported rather than forced
+        // away — see `diagonalGeometry`.
         const base = [];
         for (let p = 0; p < points; p++) {
           const t = frac - baseSpread / 2 + (baseSpread * p) / (points - 1);
@@ -9714,6 +9819,120 @@ function checkDiagonalTension(vribs, opts = {}) {
       ? `all ${results.length} diagonals are in tension across their width`
       : `${slack.length} of ${results.length} diagonals are partly slack, `
         + `${(wastedArea * 1e4).toFixed(0)} cm2 of fabric carrying nothing`,
+  };
+}
+
+/**
+ * Does each diagonal make sense as a piece of a wing?
+ *
+ * `buildVRibs` places a diagonal wherever the rules say one goes. It does not
+ * ask whether the result is buildable, and on a real planform many are not:
+ *
+ *   - **Too short.** Near the tip the cells narrow and the section thins, and
+ *     the rule still produces a diagonal. On the test wing the smallest is
+ *     74 mm. Nobody cuts, marks and sews a 74 mm triangle; it adds seams and
+ *     weight and carries almost nothing.
+ *
+ *   - **Too long.** The longest on the same wing is 685 mm, nine times the
+ *     shortest. A long diagonal is a long unsupported edge.
+ *
+ *   - **Asymmetric between directions.** A rib on an arc is tilted, so its
+ *     thickness has a spanwise component — 98 mm at mid-span on the test
+ *     wing. A diagonal runs from the LOWER surface of one rib to the UPPER
+ *     surface of its neighbour, so that offset adds going inboard and
+ *     subtracts going outboard: 505 mm one way and 291 mm the other from the
+ *     same rib.
+ *
+ *     That is the arc, not a placement error. Sliding the base along the
+ *     neighbouring rib to even it up does not work, because `y` varies by
+ *     less across that rib's whole chord than the offset it would have to
+ *     absorb; the search runs to the end of the chord and produces diagonals
+ *     lying almost flat.
+ *
+ *   - **Too shallow.** A diagonal near horizontal is a poor load path: it
+ *     pulls the rib sideways rather than carrying the anchor load up into
+ *     the upper surface, which is what it is for.
+ *
+ * None of these is fixable by the diagonal code alone — they follow from the
+ * planform, the arc and the anchor spacing. What the tool can do is say which
+ * ones are wrong and by how much, so the designer changes the thing that
+ * actually causes it.
+ */
+function diagonalGeometry(vribs, {
+  minLengthM = 0.12, maxLengthM = 0.60, minAngleFromHorizontalDeg = 25,
+  maxDirectionRatio = 1.4,
+} = {}) {
+  const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+  const items = vribs.map((g) => {
+    const mid = g.base[Math.floor(g.base.length / 2)];
+    const dz = mid[2] - g.apex[2];
+    const lengthM = d3(g.apex, mid);
+    // Angle up from the horizontal plane. A diagonal doing its job rises
+    // steeply from the anchor to the upper surface.
+    const angleDeg = lengthM > 0
+      ? Math.asin(Math.min(1, Math.abs(dz) / lengthM)) * (180 / Math.PI) : 0;
+    return {
+      row: g.row,
+      fromRib: g.fromRib,
+      toRib: g.toRib,
+      outboard: g.toRib > g.fromRib,
+      lengthM,
+      angleDeg,
+      baseWidthM: d3(g.base[0], g.base[g.base.length - 1]),
+      areaM2: g.areaM2,
+    };
+  });
+
+  const tooShort = items.filter((d) => d.lengthM < minLengthM);
+  const tooLong = items.filter((d) => d.lengthM > maxLengthM);
+  const tooShallow = items.filter((d) => d.angleDeg < minAngleFromHorizontalDeg);
+
+  // Inboard against outboard, from the same rib, which should be alike.
+  const pairs = [];
+  for (const a of items.filter((d) => d.outboard)) {
+    const b = items.find((x) => !x.outboard && x.fromRib === a.fromRib
+      && x.row === a.row);
+    if (!b) continue;
+    const ratio = Math.max(a.lengthM, b.lengthM) / Math.min(a.lengthM, b.lengthM);
+    pairs.push({ fromRib: a.fromRib, outboardM: a.lengthM, inboardM: b.lengthM, ratio });
+  }
+  const lopsided = pairs.filter((p) => p.ratio > maxDirectionRatio);
+
+  const lengths = items.map((d) => d.lengthM);
+
+  // Distinct diagonals, not a sum of categories. One piece can be short AND
+  // shallow, and adding the lists gave "24 of 20 diagonals", which is the
+  // kind of number that makes a reader stop trusting the rest.
+  const failing = new Set();
+  for (const d of [...tooShort, ...tooLong, ...tooShallow]) {
+    failing.add(`${d.row}:${d.fromRib}->${d.toRib}`);
+  }
+  for (const p of lopsided) failing.add(`pair:${p.fromRib}`);
+  const problems = failing.size;
+
+  return {
+    diagonals: items,
+    pairs,
+    tooShort,
+    tooLong,
+    tooShallow,
+    lopsided,
+    shortestM: Math.min(...lengths),
+    longestM: Math.max(...lengths),
+    spread: Math.max(...lengths) / Math.min(...lengths),
+    ok: problems === 0,
+    problems,
+    limits: { minLengthM, maxLengthM, minAngleFromHorizontalDeg, maxDirectionRatio },
+    note: problems === 0
+      ? `all ${items.length} diagonals are a sensible size and angle`
+      : `${problems} of ${items.length} diagonals are not buildable as placed: `
+        + [
+          tooShort.length && `${tooShort.length} under ${minLengthM * 1000} mm`,
+          tooLong.length && `${tooLong.length} over ${maxLengthM * 1000} mm`,
+          tooShallow.length && `${tooShallow.length} shallower than ${minAngleFromHorizontalDeg} degrees`,
+          lopsided.length && `${lopsided.length} lopsided between directions`,
+        ].filter(Boolean).join(', '),
   };
 }
 
@@ -19292,12 +19511,29 @@ function drawFront() {
 
   c.path(full, '#e85bc4', 1.6);
 
-  // Line cascade, projected onto the front view.
-  for (const seg of M.cascade.segments) {
-    const a = [seg.from[1], seg.from[2]];
-    const b = [seg.to[1], seg.to[2]];
-    c.path([a, b], '#6e8bff', 0.5, { opacity: 0.5 });
-    c.path([[-a[0], a[1]], [-b[0], b[1]]], '#6e8bff', 0.5, { opacity: 0.5 });
+  // The real line plan, projected onto the front view.
+  //
+  // This drew `M.cascade` — chapter 8's weighted-centroid cascade — while the
+  // Lines view, the loads, the bill of materials and the PMA sheet all use
+  // `M.linePlan`. The front view was therefore showing a different set of
+  // lines from every other part of the tool: the riser layout, the merges,
+  // the brakes, the stabilo and the split A were all absent from it.
+  //
+  // It is the same defect that was fixed in the exported line lengths, left
+  // behind in the one place that draws rather than writes.
+  const ROW_COLOUR = {
+    A: '#ff5e5e', B: '#ffa23e', C: '#e8c547', D: '#5ec8ff',
+    E: '#9d7bff', K: '#8a8a8a', S: '#00e0a0', Z: '#ff00d0',
+  };
+  const LEVEL_WIDTH = { upper: 0.45, middle: 0.7, main: 1.1 };
+  for (const l of M.linePlan.lines) {
+    if (!l.from || !l.to) continue;
+    const a = [l.from[1], l.from[2]];
+    const b = [l.to[1], l.to[2]];
+    const colour = ROW_COLOUR[l.row] || '#6e8bff';
+    const w = LEVEL_WIDTH[l.level] ?? 0.5;
+    c.path([a, b], colour, w, { opacity: 0.55 });
+    c.path([[-a[0], a[1]], [-b[0], b[1]]], colour, w, { opacity: 0.55 });
   }
   c.dot([0, -S.lineLength], '#ff5e5e', 3);
 
@@ -19711,6 +19947,12 @@ function drawDiagonals() {
   }
 
   const tension = checkDiagonalTension(M.vribs.vribs);
+  // Which diagonals are not a buildable size or angle, so the designer sees
+  // them on the drawing rather than only in a report.
+  const geom = diagonalGeometry(M.vribs.vribs);
+  const badKey = new Set([
+    ...geom.tooShort, ...geom.tooLong, ...geom.tooShallow,
+  ].map((d) => `${d.row}:${d.fromRib}->${d.toRib}`));
   const pts = [];
   for (const v of M.vribs.vribs) {
     pts.push([v.apex[1], v.apex[2]]);
@@ -19734,12 +19976,20 @@ function drawDiagonals() {
           { opacity: f.taut ? 0.35 + 0.5 * f.share : 0.5 },
         );
       });
-      c.dot([side * v.apex[1], v.apex[2]], '#ffffff', 1.8);
+      // An apex marked red is a diagonal that is not buildable as placed:
+      // too short to sew, too long to support, or too shallow to carry the
+      // anchor load up into the upper surface.
+      const unbuildable = badKey.has(`${v.row}:${v.fromRib}->${v.toRib}`);
+      c.dot([side * v.apex[1], v.apex[2]],
+        unbuildable ? '#ff5e5e' : '#ffffff', unbuildable ? 2.4 : 1.8);
     });
   }
 
   c.text(tension.note, [0, -0.03], tension.partlySlack ? '#ff9f5e' : '#5ec8ff',
     9, 'middle');
+  c.text(geom.note.slice(0, 96), [0, -0.055],
+    geom.ok ? '#5ec8ff' : '#ff9f5e', 9, 'middle');
+
   document.getElementById('note-diag').textContent =
     'Blue fibres are in tension and carry load; red are past 90 degrees to it '
     + `and carry none. ${tension.fullyTaut} of ${tension.count} diagonals work `

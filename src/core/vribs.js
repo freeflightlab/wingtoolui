@@ -96,6 +96,24 @@ export function buildVRibs({
           if (blocked) continue;
 
         const apex = pointAt(ribs[i].lower, frac);
+
+        // The base stays at the apex's own chord fraction.
+        //
+        // A diagonal runs from the LOWER surface of one rib to the UPPER
+        // surface of its neighbour, and a rib on an arc is tilted, so its
+        // thickness has a spanwise component: on the test wing rib 4's upper
+        // surface sits at y = 1.691 at 30% chord and its lower at y = 1.789.
+        // That offset adds to the rib gap going inboard and subtracts going
+        // outboard, so one-cell diagonals from the same rib come out at
+        // 0.505 m and 0.291 m.
+        //
+        // I tried to even that up by sliding the base along the neighbouring
+        // rib until it sat across from the apex. It cannot work: `y` varies
+        // by only about 0.07 m across the whole chord of that rib, less than
+        // the 0.098 m offset, so the search ran to the end of the chord and
+        // produced 1.7 m diagonals lying almost flat. The asymmetry is the
+        // arc, not a placement error, and it is reported rather than forced
+        // away — see `diagonalGeometry`.
         const base = [];
         for (let p = 0; p < points; p++) {
           const t = frac - baseSpread / 2 + (baseSpread * p) / (points - 1);
@@ -609,5 +627,119 @@ export function checkDiagonalTension(vribs, opts = {}) {
       ? `all ${results.length} diagonals are in tension across their width`
       : `${slack.length} of ${results.length} diagonals are partly slack, `
         + `${(wastedArea * 1e4).toFixed(0)} cm2 of fabric carrying nothing`,
+  };
+}
+
+/**
+ * Does each diagonal make sense as a piece of a wing?
+ *
+ * `buildVRibs` places a diagonal wherever the rules say one goes. It does not
+ * ask whether the result is buildable, and on a real planform many are not:
+ *
+ *   - **Too short.** Near the tip the cells narrow and the section thins, and
+ *     the rule still produces a diagonal. On the test wing the smallest is
+ *     74 mm. Nobody cuts, marks and sews a 74 mm triangle; it adds seams and
+ *     weight and carries almost nothing.
+ *
+ *   - **Too long.** The longest on the same wing is 685 mm, nine times the
+ *     shortest. A long diagonal is a long unsupported edge.
+ *
+ *   - **Asymmetric between directions.** A rib on an arc is tilted, so its
+ *     thickness has a spanwise component — 98 mm at mid-span on the test
+ *     wing. A diagonal runs from the LOWER surface of one rib to the UPPER
+ *     surface of its neighbour, so that offset adds going inboard and
+ *     subtracts going outboard: 505 mm one way and 291 mm the other from the
+ *     same rib.
+ *
+ *     That is the arc, not a placement error. Sliding the base along the
+ *     neighbouring rib to even it up does not work, because `y` varies by
+ *     less across that rib's whole chord than the offset it would have to
+ *     absorb; the search runs to the end of the chord and produces diagonals
+ *     lying almost flat.
+ *
+ *   - **Too shallow.** A diagonal near horizontal is a poor load path: it
+ *     pulls the rib sideways rather than carrying the anchor load up into
+ *     the upper surface, which is what it is for.
+ *
+ * None of these is fixable by the diagonal code alone — they follow from the
+ * planform, the arc and the anchor spacing. What the tool can do is say which
+ * ones are wrong and by how much, so the designer changes the thing that
+ * actually causes it.
+ */
+export function diagonalGeometry(vribs, {
+  minLengthM = 0.12, maxLengthM = 0.60, minAngleFromHorizontalDeg = 25,
+  maxDirectionRatio = 1.4,
+} = {}) {
+  const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+  const items = vribs.map((g) => {
+    const mid = g.base[Math.floor(g.base.length / 2)];
+    const dz = mid[2] - g.apex[2];
+    const lengthM = d3(g.apex, mid);
+    // Angle up from the horizontal plane. A diagonal doing its job rises
+    // steeply from the anchor to the upper surface.
+    const angleDeg = lengthM > 0
+      ? Math.asin(Math.min(1, Math.abs(dz) / lengthM)) * (180 / Math.PI) : 0;
+    return {
+      row: g.row,
+      fromRib: g.fromRib,
+      toRib: g.toRib,
+      outboard: g.toRib > g.fromRib,
+      lengthM,
+      angleDeg,
+      baseWidthM: d3(g.base[0], g.base[g.base.length - 1]),
+      areaM2: g.areaM2,
+    };
+  });
+
+  const tooShort = items.filter((d) => d.lengthM < minLengthM);
+  const tooLong = items.filter((d) => d.lengthM > maxLengthM);
+  const tooShallow = items.filter((d) => d.angleDeg < minAngleFromHorizontalDeg);
+
+  // Inboard against outboard, from the same rib, which should be alike.
+  const pairs = [];
+  for (const a of items.filter((d) => d.outboard)) {
+    const b = items.find((x) => !x.outboard && x.fromRib === a.fromRib
+      && x.row === a.row);
+    if (!b) continue;
+    const ratio = Math.max(a.lengthM, b.lengthM) / Math.min(a.lengthM, b.lengthM);
+    pairs.push({ fromRib: a.fromRib, outboardM: a.lengthM, inboardM: b.lengthM, ratio });
+  }
+  const lopsided = pairs.filter((p) => p.ratio > maxDirectionRatio);
+
+  const lengths = items.map((d) => d.lengthM);
+
+  // Distinct diagonals, not a sum of categories. One piece can be short AND
+  // shallow, and adding the lists gave "24 of 20 diagonals", which is the
+  // kind of number that makes a reader stop trusting the rest.
+  const failing = new Set();
+  for (const d of [...tooShort, ...tooLong, ...tooShallow]) {
+    failing.add(`${d.row}:${d.fromRib}->${d.toRib}`);
+  }
+  for (const p of lopsided) failing.add(`pair:${p.fromRib}`);
+  const problems = failing.size;
+
+  return {
+    diagonals: items,
+    pairs,
+    tooShort,
+    tooLong,
+    tooShallow,
+    lopsided,
+    shortestM: Math.min(...lengths),
+    longestM: Math.max(...lengths),
+    spread: Math.max(...lengths) / Math.min(...lengths),
+    ok: problems === 0,
+    problems,
+    limits: { minLengthM, maxLengthM, minAngleFromHorizontalDeg, maxDirectionRatio },
+    note: problems === 0
+      ? `all ${items.length} diagonals are a sensible size and angle`
+      : `${problems} of ${items.length} diagonals are not buildable as placed: `
+        + [
+          tooShort.length && `${tooShort.length} under ${minLengthM * 1000} mm`,
+          tooLong.length && `${tooLong.length} over ${maxLengthM * 1000} mm`,
+          tooShallow.length && `${tooShallow.length} shallower than ${minAngleFromHorizontalDeg} degrees`,
+          lopsided.length && `${lopsided.length} lopsided between directions`,
+        ].filter(Boolean).join(', '),
   };
 }

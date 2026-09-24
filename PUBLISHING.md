@@ -24,39 +24,89 @@ GitHub's web **Add file → Upload files** with **individual files** dragged in.
 It drops the folder structure, uploads only what was dragged, and does not
 show hidden files. A first user who cloned it could not build it.
 
-## How to publish correctly
+## Why replace rather than merge
 
-**Use git.** This is the only method that preserves the tree exactly.
+The broken copy and the release do not overlap tidily. The old copy has
+`equilibrium.js` at the top level; the release has `src/core/equilibrium.js`.
+Git sees those as two different files. If you only add the release, the old
+flat copies **stay**, and the build picks the wrong ones — that is precisely
+how the repository ended up mixing 66 current files with 33 older ones.
+
+So the old files have to be removed in the same commit that adds the new tree.
+
+## The commands
+
+Each of these was run against a copy of the current repository before being
+written down, and the result was cloned fresh and tested.
 
 ```bash
-# Replace the whole working copy with the release, then commit everything.
 cd wingtoolui
-git rm -r -q .                       # stage removal of the old flat files
-unzip -o ../wingtoolui-release.zip   # the complete tree, folders and all
-git add -A                           # includes .gitignore and every folder
-git status                           # check: expect src/, data/, docs/ …
+git rm -r -q .
+```
+
+`git rm -r .` removes every **tracked** file from the folder and stages the
+removal. Your working folder will look empty apart from `.git`. That is
+expected, and nothing is lost: the old files are still in the repository's
+history, and the commit has not happened yet. If you want to stop at this
+point, `git checkout .` puts everything back.
+
+```bash
+unzip -o /path/to/wingtoolui-release.zip
+```
+
+Unpacks the complete tree — folders, `.gitignore` and all — into the now-empty
+folder.
+
+```bash
+git add -A
+git status
+```
+
+`-A` stages everything, including the deletions and the dotfiles. `git status`
+should report roughly **99 deletions and 245 additions**, and the additions
+should have paths with slashes in them — `src/core/...`, `data/reference/...`.
+
+> **If the additions have no slashes, stop.** The tree is flat and committing
+> it will break the repository again.
+
+```bash
 git commit -m "Replace flat tree with the complete release"
 git push
 ```
 
-**GitHub Desktop** works the same way: replace the folder contents, and it will
-show the new directories as added and the flat files as deleted.
+## Check it worked
 
-**If you must use the web interface**, drag the **folders** — `src`, `data`,
-`docs`, `tests`, `tools`, `dist` — not the files inside them. GitHub's uploader
-keeps a folder's structure only when the folder itself is dropped. Then delete
-the old flat files at the top level, and add `.gitignore` separately, because
-the uploader will not show it.
-
-## Check before and after
+Clone the pushed repository into a **new** folder and run the doctor there.
+Checking the folder you just worked in proves nothing, because that folder is
+correct whether or not the push was.
 
 ```bash
-npm run doctor     # is this tree complete? says what is wrong and what to do
+cd ..
+git clone https://github.com/freeflightlab/wingtoolui wingtoolui-check
+cd wingtoolui-check
+npm run doctor
 ```
 
-After pushing, clone it fresh into a new directory and run `npm run doctor`
-there. If it passes on a fresh clone, the repository is right. If it reports
-the flat layout, the upload flattened it again.
+Expected:
+
+```
+This checkout is complete. Next: npm run build && npm run check
+```
+
+If instead it says the tree is the old flat layout, the upload flattened it
+again — see the note on the web interface below.
+
+## If you use the web interface
+
+GitHub's **Add file → Upload files** keeps a folder's structure only when you
+drop the **folder**. Dropping the files from inside it flattens them, which is
+what happened here.
+
+So drag `src`, `data`, `docs`, `tests`, `tools` and `dist` as folders, then
+delete the old flat files at the top level, and add `.gitignore` by hand —
+the uploader does not show hidden files.
+
+Using git is simpler and is the only way that is hard to get wrong.
 
 ## What a complete tree looks like
 

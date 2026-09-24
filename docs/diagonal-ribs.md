@@ -226,3 +226,55 @@ insensitive to the thing it was measuring.
 Same shape as the `demoWing({ cells: 40 })` error two rounds ago and the
 `thinAirfoil` one before that: a call that looks right, runs clean, and does
 nothing.
+
+---
+
+## 10. Are they buildable?
+
+`buildVRibs` places a diagonal wherever the rule says one goes. It never asked
+whether the result is a piece anyone could cut and sew, and on every planform
+tried, most are not.
+
+On the test wing, one row of diagonals across 20 cells:
+
+| | |
+| --- | --- |
+| shortest | **74 mm** |
+| longest | **685 mm** |
+| spread | 9.2 to 1 |
+| flagged | 19 of 20 |
+
+Nobody cuts, marks and sews a 74 mm triangle. It adds two seams and some
+weight and carries almost nothing.
+
+### Why the two directions differ
+
+A rib on an arc is tilted, so its thickness has a spanwise component — 98 mm
+at mid-span here. A diagonal runs from the **lower** surface of one rib to the
+**upper** surface of its neighbour, so that offset adds going inboard and
+subtracts going outboard. From rib 4: **675 mm inboard, 346 mm outboard.**
+
+I tried to even that up by sliding the base along the neighbouring rib until
+it sat across from the apex. **It cannot work.** `y` varies by about 70 mm
+across that rib's whole chord, less than the 98 mm offset it would have to
+absorb, so the search runs to the end of the chord and produces 1.7 m
+diagonals lying almost flat at 87 degrees from vertical.
+
+The asymmetry is the arc. It is not a placement error and forcing it away
+makes things worse.
+
+### So the tool reports rather than pretends
+
+`diagonalGeometry` flags each diagonal that is too short to sew, too long to
+support, too shallow to carry its load up into the upper surface, or lopsided
+against its opposite number. The Structure view marks the apex of each one in
+red.
+
+None of it is fixable inside the diagonal code — the sizes follow from the
+planform, the arc and the anchor spacing. What the tool can do is say which
+ones are wrong and by how much, so the designer changes the thing that causes
+it.
+
+**This is recorded as a known state, not as a passing check.** The placement
+rule produces mostly unbuildable diagonals, and writing the test the other way
+round would enshrine that.

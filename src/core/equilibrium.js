@@ -358,3 +358,90 @@ export function solveEquilibriumFromWing({
       + 'section, Oswald factor from lifting line over the real planform',
   };
 }
+
+/**
+ * Trim from the calage, rather than calage from an assumed trim.
+ *
+ * `solveEquilibriumFromWing` takes an angle of attack and reports the calage
+ * that would make it an equilibrium. That is chapter 4's method and it is
+ * useful, but it has the causation backwards for a designer: **you do not
+ * choose an angle of attack. You choose where the risers hang, and the wing
+ * flies at whatever angle that produces.**
+ *
+ * The difference is not academic. The default angle was 6 degrees, which
+ * demands a calage at 48% of chord — well aft of the 40 to 45% real wings
+ * use — and produces CL 0.81 and a trim speed of 24.9 km/h on a Geo 7 XS.
+ * EN 926-2 requires more than 30 km/h, and the certificate for that wing
+ * records it passing at 55 kg.
+ *
+ * Run the other way round, a calage of 40 to 43.5% gives 2 to 4 degrees,
+ * CL 0.49 to 0.65 and 27.8 to 31.9 km/h. The lift coefficient and the speed
+ * both land where a real wing sits, from a geometry a builder can measure.
+ *
+ * The calage rises monotonically with angle of attack, so this is a plain
+ * root find on that relation.
+ */
+export function trimFromCalage({
+  planform, airfoil, atm = null, calageFraction,
+  alphaRange = [-2, 12], tolerance = 1e-5, ...rest
+}) {
+  if (!(calageFraction > 0 && calageFraction < 1)) {
+    throw new Error('trimFromCalage: calageFraction is a fraction of chord '
+      + `between 0 and 1 (got ${calageFraction})`);
+  }
+
+  const at = (alphaDeg) => solveEquilibriumFromWing({
+    planform, airfoil, atm, alphaDeg, ...rest,
+  });
+
+  // The calage is NOT monotonic in angle of attack. It falls to a minimum —
+  // around 1 to 2 degrees on the wings here — and rises on both sides. A
+  // bisection that assumes it rises throughout picks the wrong branch or
+  // finds nothing.
+  //
+  // My first version assumed monotonic and its bracket check threw rather
+  // than returning a wrong answer, which is the only reason this was caught.
+  //
+  // Two angles therefore give any reachable calage. The lower one is at a
+  // very small or negative angle of attack and is not a flight state: a
+  // paraglider there has no lift to speak of and would not stay open. The
+  // upper branch is the one a wing actually flies on, so the search starts
+  // at the minimum and goes up.
+  const [rangeLo, rangeHi] = alphaRange;
+  const samples = 48;
+  let minAlpha = rangeLo;
+  let minCalage = Infinity;
+  for (let i = 0; i <= samples; i++) {
+    const a = rangeLo + ((rangeHi - rangeLo) * i) / samples;
+    const c = at(a).calageFraction;
+    if (c < minCalage) { minCalage = c; minAlpha = a; }
+  }
+
+  const topCalage = at(rangeHi).calageFraction;
+  if (calageFraction < minCalage || calageFraction > topCalage) {
+    throw new Error(`trimFromCalage: a calage of ${(calageFraction * 100).toFixed(1)}% `
+      + 'is outside what this wing can trim at in flight '
+      + `(${(minCalage * 100).toFixed(1)}% at ${minAlpha.toFixed(1)} degrees, `
+      + `rising to ${(topCalage * 100).toFixed(1)}% at ${rangeHi} degrees)`);
+  }
+
+  let lo = minAlpha;
+  let hi = rangeHi;
+  for (let i = 0; i < 60 && hi - lo > tolerance; i++) {
+    const mid = (lo + hi) / 2;
+    if (at(mid).calageFraction - calageFraction < 0) lo = mid; else hi = mid;
+  }
+
+  const alphaDeg = (lo + hi) / 2;
+  const state = at(alphaDeg);
+  return {
+    ...state,
+    alphaDeg,
+    calageAsked: calageFraction,
+    calageError: state.calageFraction - calageFraction,
+    derivedFrom: 'calage',
+    note: `a calage of ${(calageFraction * 100).toFixed(1)}% of chord trims at `
+      + `${alphaDeg.toFixed(2)} degrees, CL ${state.cz3D.toFixed(3)}, `
+      + `${state.speedKMH.toFixed(1)} km/h`,
+  };
+}

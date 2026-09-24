@@ -20,7 +20,7 @@ import { buildWing, projectedArea , ribLoops, mirrorRib } from '../src/core/wing
 import { analyticPlanform as _ap } from '../src/core/planform.js';
 import { developPanel, developmentError, developWing } from '../src/core/flatdev.js';
 import { solveArc, applyOvalization, wideningProfile , DEFAULT_TRANSITIONS , arcFromWidening, seamEasing, billowFromPressure, tensionForBillow, panelBillowProfile } from '../src/core/ovalization.js';
-import { solveEquilibrium, lift3DFactor, simplifiedCalage , polarSweep, glideAngleTable, solveEquilibriumFromWing } from '../src/core/equilibrium.js';
+import { solveEquilibrium, lift3DFactor, simplifiedCalage , polarSweep, glideAngleTable, solveEquilibriumFromWing, trimFromCalage } from '../src/core/equilibrium.js';
 import { canopyAnchors, centroid, buildCascade , brakeAnchors, applyBrakeDistribution } from '../src/core/lines.js';
 import {
   panelsToDXF, ribsToDXF, panelsToSVG, nestPanels, fabricEstimate, layoutBands,
@@ -77,7 +77,7 @@ import {
   buildTabs, checkTabClearance, DEFAULT_TAB,
 } from '../src/core/reinforcement.js';
 import {
-  buildVRibs, diagonalTension, checkDiagonalTension, developFan, fanDevelopmentError, vribLoads,
+  buildVRibs, diagonalGeometry, diagonalTension, checkDiagonalTension, developFan, fanDevelopmentError, vribLoads,
   buildHRibs, internalStructure,
 } from '../src/core/vribs.js';
 import {
@@ -7224,6 +7224,72 @@ section('The built shape and the flying shape');
 }
 
 // ---------------------------------------------------------------------------
+section('Are the diagonals buildable?');
+
+{
+  // `buildVRibs` places a diagonal wherever the rule says one goes. It never
+  // asked whether the result is a piece anyone could cut and sew, and on a
+  // real planform most are not.
+  const wingG = demoWing();
+  const afG = naca4('4415');
+  afG.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const built = buildVRibs({
+    wing: wingG, airfoil: afG, rows: ['B'], baseSpread: 0.18, maxReach: 1,
+  });
+  const geom = diagonalGeometry(built.vribs);
+
+  check('every diagonal is measured', geom.diagonals.length === built.vribs.length);
+
+  // The spread is the headline. On the test wing the smallest is under a
+  // tenth of the largest: nobody cuts, marks and sews a 74 mm triangle.
+  check('the lengths vary far more than a set of like pieces should',
+    geom.spread > 3,
+    `${(geom.shortestM * 1000).toFixed(0)} to ${(geom.longestM * 1000).toFixed(0)} mm, `
+    + `${geom.spread.toFixed(1)} to 1`);
+
+  // Inboard against outboard from the same rib. A rib on an arc is tilted,
+  // so its thickness has a spanwise component; a diagonal runs lower-surface
+  // to upper-surface, so that offset adds going one way and subtracts going
+  // the other.
+  check('diagonals from the same rib differ by direction',
+    geom.lopsided.length > 0,
+    geom.lopsided.length
+      ? `worst: rib ${geom.lopsided[0].fromRib}, `
+        + `${(geom.lopsided[0].outboardM * 1000).toFixed(0)} mm outboard against `
+        + `${(geom.lopsided[0].inboardM * 1000).toFixed(0)} mm inboard`
+      : 'none');
+
+  // This is recorded as a KNOWN STATE, not as a pass. The placement rule
+  // produces mostly unbuildable diagonals on every planform tried, and
+  // writing the check the other way round would enshrine that.
+  //
+  // It is not fixable inside the diagonal code: the sizes follow from the
+  // planform, the arc and the anchor spacing. Sliding the base along the
+  // neighbouring rib to even the two directions up was tried and cannot
+  // work — `y` varies by less across that rib's whole chord than the offset
+  // it would have to absorb, so the search runs to the end of the chord and
+  // makes 1.7 m diagonals lying almost flat.
+  check('most diagonals are flagged as not buildable as placed',
+    geom.problems > geom.diagonals.length / 2, geom.note);
+
+  // The categories have to be distinct pieces, not a sum of lists: one
+  // diagonal can be both short and shallow, and adding them gave "24 of 20".
+  check('the count is of diagonals, not of categories',
+    geom.problems <= geom.diagonals.length + geom.pairs.length,
+    `${geom.problems} problems across ${geom.diagonals.length} diagonals`);
+
+  // Loosening the limits must reduce the count, or the check is not
+  // measuring what it says.
+  const loose = diagonalGeometry(built.vribs, {
+    minLengthM: 0.05, maxLengthM: 1.0, minAngleFromHorizontalDeg: 5,
+    maxDirectionRatio: 3,
+  });
+  check('and relaxing the limits reduces it',
+    loose.problems < geom.problems,
+    `${geom.problems} at the default limits, ${loose.problems} relaxed`);
+}
+
+// ---------------------------------------------------------------------------
 section('Are the diagonals in tension?');
 
 {
@@ -8337,6 +8403,155 @@ section('Does it sew?');
     check(`and adjacent ${surf} panels agree along their shared seam`,
       toNext < 0.0001, `worst ${(toNext * 1000).toFixed(4)} mm`);
   }
+}
+
+// ---------------------------------------------------------------------------
+section('Trim from the calage, not from an assumed angle');
+
+{
+  // `solveEquilibriumFromWing` takes an angle of attack and reports the
+  // calage that would make it an equilibrium. The causation is backwards for
+  // a designer: you do not choose an angle of attack, you choose where the
+  // risers hang and the wing flies at whatever angle that produces.
+  const geoT = parseSizeFamilies(
+    readFileSync('data/reference/size-families.tsv', 'utf8'))['Ozone Geo 7'];
+  const zT = geoT.find((x) => x.name === 'XS');
+  const pfT = planformFromDesignInputs({
+    span: zT.flatSpan, rootChord: zT.maxChord, tipChord: 0.55, tipSweep: 1.25,
+  });
+  const args = {
+    planform: pfT, airfoil: naca4('4415'), atm: atmosphere(0),
+    pilotMass: 52, wingMass: 3, lineLengthM: 6.6,
+  };
+
+  // The calage is NOT monotonic in angle of attack: it falls to a minimum
+  // near 1 to 2 degrees and rises on both sides. A bisection assuming it
+  // rises throughout finds the wrong branch or nothing at all.
+  const calageAt = (a) => solveEquilibriumFromWing({ ...args, alphaDeg: a })
+    .calageFraction;
+  check('the calage falls before it rises',
+    calageAt(-2) > calageAt(2) && calageAt(12) > calageAt(2),
+    `${(calageAt(-2) * 100).toFixed(1)}% at -2, `
+    + `${(calageAt(2) * 100).toFixed(1)}% at 2, `
+    + `${(calageAt(12) * 100).toFixed(1)}% at 12`);
+
+  // So there are two angles for any reachable calage, and only the upper one
+  // is a flight state — at the lower the wing has no lift to speak of and
+  // would not stay open.
+  const trimmed = trimFromCalage({ ...args, calageFraction: 0.42 });
+  check('the solve returns the flight branch, not the low-angle one',
+    trimmed.alphaDeg > 2, `${trimmed.alphaDeg.toFixed(2)} degrees`);
+  near('and it hits the calage it was asked for',
+    trimmed.calageFraction, 0.42, 1e-4);
+
+  // The point of the change: a realistic calage gives a realistic wing.
+  check('a 42% calage trims at a lift coefficient a real wing uses',
+    trimmed.cz3D > 0.5 && trimmed.cz3D < 0.7,
+    `CL ${trimmed.cz3D.toFixed(3)} against a real 0.55 to 0.65`);
+
+  const assumed = solveEquilibriumFromWing({ ...args, alphaDeg: 6 });
+  check('where the old assumed angle of 6 degrees does not',
+    assumed.cz3D > 0.75, `CL ${assumed.cz3D.toFixed(3)}`);
+  check('and the speed rises towards what certification requires',
+    trimmed.speedKMH > assumed.speedKMH * 1.15,
+    `${assumed.speedKMH.toFixed(1)} to ${trimmed.speedKMH.toFixed(1)} km/h, `
+    + 'certificate wants more than 30');
+  check('carrying the sink rate with it',
+    (trimmed.speedMS / trimmed.glideRatio) > (assumed.speedMS / assumed.glideRatio) * 1.15,
+    `${(assumed.speedMS / assumed.glideRatio).toFixed(3)} to `
+    + `${(trimmed.speedMS / trimmed.glideRatio).toFixed(3)} m/s against a real 1.0`);
+
+  // A calage the wing cannot trim at is refused rather than approximated.
+  check('an unreachable calage is refused, and says what is reachable', (() => {
+    try { trimFromCalage({ ...args, calageFraction: 0.20 }); return false; }
+    catch (e) { return /outside what this wing can trim at/.test(e.message); }
+  })());
+  check('and a calage outside 0 to 1 is refused as not a fraction', (() => {
+    try { trimFromCalage({ ...args, calageFraction: 42 }); return false; }
+    catch (e) { return /fraction of chord/.test(e.message); }
+  })());
+}
+
+// ---------------------------------------------------------------------------
+section('Against the certification flight tests');
+
+{
+  // EN 926-2 flight test reports are mostly qualitative — A/B ratings and
+  // phrases like "dive forward 0 to 30 degrees". They contain no polar: no
+  // sink rate, no glide ratio, no speed at a given brake position.
+  //
+  // But they do fix three things a model must satisfy, at weights the wing
+  // was actually flown at: trim speed above 30 km/h, minimum speed below 25,
+  // and more than 10 km/h of range on the controls.
+  const rows = readFileSync('data/reference/certification-flight-tests.tsv', 'utf8')
+    .split('\n').filter((l) => l && !l.startsWith('#')).slice(1)
+    .map((l) => l.split('\t'));
+  check('the certification data is loaded', rows.length >= 4, `${rows.length} tests`);
+
+  // Every wing is flown twice, at the low and high end of its range.
+  const geoXS = rows.filter((r) => r[1] === 'XS').map((r) => Number(r[3]));
+  check('each size is tested at both ends of its weight range',
+    geoXS.length === 2 && geoXS[1] > geoXS[0], geoXS.join(' and '));
+
+  // The riser separation the tool assumes, against what was measured.
+  const seps = [...new Set(rows.map((r) => Number(r[5])))];
+  check('the karabiner separation default sits inside the measured range',
+    Math.min(...seps) <= 42 && 42 <= Math.max(...seps),
+    `measured ${seps.join(', ')} cm; default 42 cm`);
+
+  // ---------------------------------------------------------------------
+  // The model trims too slowly, and this is what says so.
+  //
+  // Sink was 10% below what a real wing does, and two candidate causes had
+  // already been ruled out by measurement: raising profile drag and modelling
+  // the inflated shape both move sink toward reality and glide away from it,
+  // and the glide was already right.
+  //
+  // `sink = V / (L/D)`. Glide right and sink low means the SPEED is low, and
+  // the certificates fix the speed independently of anything in this project.
+  const geo = parseSizeFamilies(
+    readFileSync('data/reference/size-families.tsv', 'utf8'))['Ozone Geo 7'];
+  const trimAt = (size, allUpKg) => {
+    const z = geo.find((x) => x.name === size);
+    const pf = planformFromDesignInputs({
+      span: z.flatSpan, rootChord: z.maxChord, tipChord: 0.55, tipSweep: 1.25,
+    });
+    return solveEquilibriumFromWing({
+      planform: pf, airfoil: naca4('4415'), atm: atmosphere(0),
+      pilotMass: allUpKg - z.mass, wingMass: z.mass, lineLengthM: 6.6,
+    });
+  };
+
+  const cases = [['XS', 55], ['XS', 70], ['L', 95], ['L', 115]];
+  const speeds = cases.map(([sz, m]) => trimAt(sz, m).speedKMH);
+  const below = speeds.filter((v) => v < 30).length;
+
+  // This is recorded as a KNOWN SHORTFALL, not as a passing check. Writing it
+  // as "trim speed exceeds 30" would fail, and writing it the other way round
+  // would enshrine the error. It is pinned at its current size so that any
+  // work on it shows up as movement.
+  check('trim speed falls short of certification on most cases',
+    below === 3, `${below} of ${cases.length} below 30 km/h: `
+    + speeds.map((v) => v.toFixed(1)).join(', '));
+
+  // The mechanism: the model trims at too high a lift coefficient.
+  const xs = trimAt('XS', 55);
+  check('and it does so by trimming at too high a lift coefficient',
+    xs.cz3D > 0.75, `CL ${xs.cz3D.toFixed(3)} where a real wing trims 0.55 to 0.65`);
+
+  // The glide is not the problem, which is why drag was the wrong suspect.
+  check('while the glide ratio is plausible',
+    xs.glideRatio > 8.5 && xs.glideRatio < 11,
+    xs.glideRatio.toFixed(2));
+
+  // And the arithmetic that ties it to the sink residual: bringing the speed
+  // up to the certified minimum, at the same glide, moves sink from 0.73 to
+  // 0.88 m/s — most of the gap to the 1.0 a wing of this size does.
+  const asIs = xs.speedMS / xs.glideRatio;
+  const corrected = (xs.speedMS * (30 / xs.speedKMH)) / xs.glideRatio;
+  check('correcting the speed alone recovers most of the sink gap',
+    corrected > asIs * 1.15,
+    `${asIs.toFixed(3)} to ${corrected.toFixed(3)} m/s against a real 1.0`);
 }
 
 // ---------------------------------------------------------------------------

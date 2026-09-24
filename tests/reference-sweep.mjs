@@ -31,6 +31,8 @@ const read = (f, body) => {
   if (/-inspection/.test(f)) return null;
   // A fabric schedule lists materials by location; it has no lines at all.
   if (/fabric-schedule/.test(f)) return null;
+  // A flight test report has no lines in it at all.
+  if (/certification-flight-tests/.test(f)) return null;
   if (/^niviuk-/.test(f) || /^up-split-/.test(f)) return parseSimpleLineSheet(body).lines;
   if (/materials|families|risers|min-strength/.test(f)) return null;
   const t = parseLineTable(body);

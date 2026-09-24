@@ -1584,12 +1584,29 @@ function drawFront() {
 
   c.path(full, '#e85bc4', 1.6);
 
-  // Line cascade, projected onto the front view.
-  for (const seg of M.cascade.segments) {
-    const a = [seg.from[1], seg.from[2]];
-    const b = [seg.to[1], seg.to[2]];
-    c.path([a, b], '#6e8bff', 0.5, { opacity: 0.5 });
-    c.path([[-a[0], a[1]], [-b[0], b[1]]], '#6e8bff', 0.5, { opacity: 0.5 });
+  // The real line plan, projected onto the front view.
+  //
+  // This drew `M.cascade` — chapter 8's weighted-centroid cascade — while the
+  // Lines view, the loads, the bill of materials and the PMA sheet all use
+  // `M.linePlan`. The front view was therefore showing a different set of
+  // lines from every other part of the tool: the riser layout, the merges,
+  // the brakes, the stabilo and the split A were all absent from it.
+  //
+  // It is the same defect that was fixed in the exported line lengths, left
+  // behind in the one place that draws rather than writes.
+  const ROW_COLOUR = {
+    A: '#ff5e5e', B: '#ffa23e', C: '#e8c547', D: '#5ec8ff',
+    E: '#9d7bff', K: '#8a8a8a', S: '#00e0a0', Z: '#ff00d0',
+  };
+  const LEVEL_WIDTH = { upper: 0.45, middle: 0.7, main: 1.1 };
+  for (const l of M.linePlan.lines) {
+    if (!l.from || !l.to) continue;
+    const a = [l.from[1], l.from[2]];
+    const b = [l.to[1], l.to[2]];
+    const colour = ROW_COLOUR[l.row] || '#6e8bff';
+    const w = LEVEL_WIDTH[l.level] ?? 0.5;
+    c.path([a, b], colour, w, { opacity: 0.55 });
+    c.path([[-a[0], a[1]], [-b[0], b[1]]], colour, w, { opacity: 0.55 });
   }
   c.dot([0, -S.lineLength], '#ff5e5e', 3);
 
@@ -2003,6 +2020,12 @@ function drawDiagonals() {
   }
 
   const tension = checkDiagonalTension(M.vribs.vribs);
+  // Which diagonals are not a buildable size or angle, so the designer sees
+  // them on the drawing rather than only in a report.
+  const geom = diagonalGeometry(M.vribs.vribs);
+  const badKey = new Set([
+    ...geom.tooShort, ...geom.tooLong, ...geom.tooShallow,
+  ].map((d) => `${d.row}:${d.fromRib}->${d.toRib}`));
   const pts = [];
   for (const v of M.vribs.vribs) {
     pts.push([v.apex[1], v.apex[2]]);
@@ -2026,12 +2049,20 @@ function drawDiagonals() {
           { opacity: f.taut ? 0.35 + 0.5 * f.share : 0.5 },
         );
       });
-      c.dot([side * v.apex[1], v.apex[2]], '#ffffff', 1.8);
+      // An apex marked red is a diagonal that is not buildable as placed:
+      // too short to sew, too long to support, or too shallow to carry the
+      // anchor load up into the upper surface.
+      const unbuildable = badKey.has(`${v.row}:${v.fromRib}->${v.toRib}`);
+      c.dot([side * v.apex[1], v.apex[2]],
+        unbuildable ? '#ff5e5e' : '#ffffff', unbuildable ? 2.4 : 1.8);
     });
   }
 
   c.text(tension.note, [0, -0.03], tension.partlySlack ? '#ff9f5e' : '#5ec8ff',
     9, 'middle');
+  c.text(geom.note.slice(0, 96), [0, -0.055],
+    geom.ok ? '#5ec8ff' : '#ff9f5e', 9, 'middle');
+
   document.getElementById('note-diag').textContent =
     'Blue fibres are in tension and carry load; red are past 90 degrees to it '
     + `and carry none. ${tension.fullyTaut} of ${tension.count} diagonals work `

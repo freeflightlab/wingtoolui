@@ -26,7 +26,7 @@ demonstrating the method. Flat area, span, root chord, cell and rib counts
 reproduce **exactly**. 37 LEP sections parse. Its published per-line loads
 close at every cascade level.
 
-**Against 21 wings from six manufacturers**, 134 reference files. Every line
+**Against 21 wings from six manufacturers**, 135 reference files. Every line
 sheet is held to five physical invariants, not merely parsed. The
 anchor-density table the generator calibrates against is **measured from the
 corpus**, not hand-entered — 27 designs, and a check stage fails if the
@@ -57,11 +57,21 @@ the standard's word for many rounds.
 
 ## 4. What is wrong, or unexplained
 
-**A 10% residual in minimum sink.** The model gives 0.83 m/s at 28 km/h where
-a real wing of that size does about 1.0 at 33–35. Two independent routes have
-ruled out surface drag: raising profile drag and modelling the inflated shape
-both move sink toward reality and glide away from it, and the glide was
-already right. Unexplained, and stated as such rather than fitted away.
+**The 10% residual in minimum sink is explained.** The model trims at CL
+0.806 where a real wing trims near 0.55 to 0.65, so it flies about 20% too
+slowly at trim. `sink = V / (L/D)`, and the glide was already right, so a
+speed 20% low gives a sink rate about 17% low — which is the discrepancy.
+
+EN 926-2 flight test reports settled it. They contain no polar, but they fix
+the trim speed at above 30 km/h at weights the wing was actually flown at, and
+the model gives 24.9 to 31.6 km/h across four certified cases — short on
+three. Two earlier suspects had already been ruled out by measurement: raising
+profile drag and modelling the inflated shape both move sink toward reality
+and glide away from it.
+
+**It is not yet fixed.** Knowing the model trims at too high a lift
+coefficient is not the same as knowing why, and the fix touches the
+equilibrium solve, which everything downstream depends on.
 
 **Total line length runs +14% against published.** Concentrated in two-liner
 middle lines. The mechanism is identified — lateral run to gather anchors —
