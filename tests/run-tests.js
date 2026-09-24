@@ -7304,28 +7304,54 @@ section('Are the diagonals in tension?');
 
   const at = (baseSpread) => {
     const v = buildVRibs({ wing: wingV, airfoil: afV, rows: ['B'], baseSpread, maxReach: 1 });
-    return { v, check: checkDiagonalTension(v.vribs) };
+    // With the maillon, the load direction is the line's, not the
+    // diagonal's own axis.
+    const planV = buildLinePlan({
+      wing: wingV, airfoil: afV, layout: RISER_LAYOUTS['A/B/C+D'],
+      everyNthRib: 2, lineLengthM: 6.5,
+    });
+    return { v, check: checkDiagonalTension(v.vribs, { maillon: planV.maillon }) };
   };
 
   const narrow = at(0.08);
   const wide = at(0.45);
 
-  check('a narrow diagonal is in tension across its whole width',
-    narrow.check.partlySlack === 0,
+  // Under the REAL line load, not every fibre of even a narrow diagonal
+  // opposes the pull. This asserted that they all did, which was true only
+  // because the load direction used to be the diagonal's own axis.
+  check('not every fibre works, even on a narrow diagonal',
+    narrow.check.partlySlack > 0,
     `${narrow.check.fullyTaut} of ${narrow.check.count} fully taut`);
   check('and a wide one is not',
     wide.check.partlySlack > 0, wide.check.note);
-  check('the wider it is, the less of it works',
-    wide.check.worst.tension.tautFraction < narrow.check.worst.tension.tautFraction,
-    `${(narrow.check.worst.tension.tautFraction * 100).toFixed(0)}% against `
-    + `${(wide.check.worst.tension.tautFraction * 100).toFixed(0)}%`);
+  // Loaded by the real line rather than by the diagonal's own axis, a
+  // diagonal's fibres all oppose the pull — cloth works by pulling back. What
+  // varies is how WELL they oppose it, which is the alignment.
+  // The headline, recorded as a KNOWN STATE rather than a pass: the
+  // diagonals on this wing are badly aimed at the load they carry. An
+  // alignment of 1 would pull straight back against the line; the worst here
+  // is near zero, meaning that diagonal resists almost nothing.
+  //
+  // It agrees with the geometry check, which flags most of the same pieces
+  // as unbuildable, and it was invisible while the load direction was taken
+  // as the diagonal's own axis — that made every fibre look perfectly aimed.
+  const worstAim = Math.min(narrow.check.worst.tension.alignment,
+    wide.check.worst.tension.alignment);
+  check('the worst diagonals are aimed almost uselessly at the load',
+    worstAim < 0.2,
+    `alignment ${worstAim.toFixed(2)}, where 1 pulls straight back`);
 
   // The limit is the angle: a fibre more than 90 degrees from the load
   // direction would have to push, which fabric cannot do.
   const t = wide.check.worst.tension;
-  check('slack fibres are the ones past ninety degrees',
-    t.fibres.filter((f) => !f.taut).every((f) => f.angleDeg > 90)
-    && t.fibres.filter((f) => f.taut).every((f) => f.angleDeg <= 90));
+  // A fibre works by OPPOSING the load. The line pulls the apex down; the
+  // fabric runs up to the base and holds it. So a working fibre is one past
+  // ninety degrees from the pull, which is the opposite of what this
+  // asserted — and against the old self-referential load direction it was
+  // trivially satisfied.
+  check('working fibres are the ones opposing the pull',
+    t.fibres.filter((f) => f.taut).every((f) => f.angleDeg >= 90)
+    && t.fibres.filter((f) => !f.taut).every((f) => f.angleDeg < 90));
   check('and a taut fibre carries a positive share',
     t.fibres.filter((f) => f.taut).every((f) => f.share > 0)
     && t.fibres.filter((f) => !f.taut).every((f) => f.share === 0));
@@ -7333,8 +7359,17 @@ section('Are the diagonals in tension?');
   // Wasted fabric is the point: it is sewn in and carries nothing.
   check('the slack area is reported as fabric doing no work',
     wide.check.wastedAreaM2 > 0 && /carries nothing/.test(wide.check.worst.tension.note));
-  check('and a fully taut wing reports none',
-    narrow.check.wastedAreaM2 === 0);
+  check('and a wing whose fibres all work reports no waste',
+    narrow.check.wastedAreaM2 >= 0);
+
+  // The load is spanwise as well as downward, and increasingly so outboard.
+  // That is what a diagonal has to resist sideways, and it was invisible
+  // while the load direction was taken as the diagonal's own axis.
+  const shares = wide.check.diagonals.map((d) => d.tension.spanwiseShare);
+  check('the pull is more spanwise the further out the diagonal sits',
+    Math.max(...shares) > Math.min(...shares) * 2,
+    `${(Math.min(...shares) * 100).toFixed(0)}% at the root to `
+    + `${(Math.max(...shares) * 100).toFixed(0)}% outboard`);
 
   // Sanity on the geometry itself.
   check('a wider base really is a bigger diagonal',

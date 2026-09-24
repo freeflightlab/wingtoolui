@@ -223,6 +223,52 @@ def build():
     mats = (ROOT / "data" / "reference" / "line-materials.tsv").read_text()
     reference_js += "\nconst LINE_MATERIALS_TSV = " + json.dumps(mats) + ";"
 
+    # Every published wing, as a starting point.
+    #
+    # `REFERENCE_LIB` in app.js was twenty designs typed in by hand, covering
+    # seven families. The data files hold 55 sizes across eleven, including
+    # every Niviuk — so two thirds of the wings this project validates against
+    # could not be loaded as a starting point in the tool that validates them.
+    #
+    # Generated here so adding a reference file adds a wing, with no second
+    # list to keep in step.
+    import re as _re
+    lib = []
+    for f in sorted((ROOT / "data" / "reference").glob("*.tsv")):
+        if not _re.search(r"(-spec|families)\.tsv$", f.name):
+            continue
+        rows = [l for l in f.read_text().splitlines()
+                if l.strip() and not l.startswith("#")]
+        if not rows:
+            continue
+        head = rows[0].split("\t")
+        idx = {name: head.index(name) for name in head}
+        # The real column names, read from the file's own header rather than
+        # assumed: `size` not `name`, `flat_span_m` not `flat_span`. Guessing
+        # them produced a library of zero wings, silently.
+        need = ["family", "size", "flat_area_m2", "flat_span_m", "flat_AR",
+                "cells", "root_chord_m", "proj_area_m2"]
+        if not all(n in idx for n in need):
+            continue
+        for line in rows[1:]:
+            c = line.split("\t")
+            try:
+                lib.append([c[idx["family"]], c[idx["size"]],
+                            float(c[idx["flat_area_m2"]]),
+                            float(c[idx["flat_span_m"]]),
+                            float(c[idx["flat_AR"]]), int(float(c[idx["cells"]])),
+                            float(c[idx["root_chord_m"]]),
+                            float(c[idx["proj_area_m2"]])])
+            except (ValueError, IndexError, KeyError):
+                continue
+    reference_js += ("\nconst REFERENCE_WINGS = "
+                     + json.dumps(lib, separators=(",", ":")) + ";")
+
+    # The Swoop2: a complete design, not just a specification.
+    swoop = (ROOT / "data" / "reference" / "lep" / "swoop2-20260829.lep")
+    reference_js += ("\nconst SWOOP2_LEP = "
+                     + json.dumps(swoop.read_text() if swoop.exists() else "") + ";")
+
     shell = (UI / "index.html").read_text()
     app = (UI / "app.js").read_text()
     css = (UI / "style.css").read_text()

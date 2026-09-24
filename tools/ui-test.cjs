@@ -272,6 +272,51 @@ try {
     S5.useRodSpec=false; globalThis.__rebuild();
   }
 
+  // The Swoop2, loaded the way a user would. Last, because it replaces the
+  // design and everything after it would be testing a different wing.
+  {
+    // Controls first:  is only populated when they are built.
+    globalThis.__buttons.length = 0;
+    globalThis.__controls();
+    const load = globalThis.__buttons.find((b) => b.text === 'Load the Swoop2');
+    if (!load) { console.log('  FAIL no button loads the Swoop2'); process.exit(1); }
+    load.fn();
+    const m2 = globalThis.__getM();
+    // Published: 18.00 m2 flat, 50 cells, 51 ribs.
+    //
+    // The model holds the HALF wing, so it carries 26 ribs — 25 cells plus
+    // the centre — not 51. Asserting 51 failed against a correct load, which
+    // is the assertion being wrong rather than the tool.
+    const areaOk = Math.abs(m2.metrics.area - 18.0) < 0.05;
+    const halfRibs = m2.wing.ribs.length;
+    const ribsOk = halfRibs === 26;
+    if (!areaOk || !ribsOk) {
+      console.log(`  FAIL the Swoop2 loads as ${m2.metrics.area.toFixed(2)} m2 `
+        + `and ${halfRibs} half-wing ribs; published is 18.00 m2 and 51 ribs `
+        + 'across the wing, so 26 here');
+      process.exit(1);
+    }
+    console.log(`  ok   the Swoop2 loads: ${m2.metrics.area.toFixed(2)} m2 `
+      + `against a published 18.00, ${halfRibs} half-wing ribs`);
+
+    // Back to the parametric wing before anything else runs.
+    //
+    // Everything after this point — the settings probes especially — rebuilds
+    // many times, and on the imported 50-cell wing that is slow enough to
+    // stop the test finishing at all. Leaving an imported design in place
+    // would also mean those probes were testing a different wing from the one
+    // they were written for.
+    globalThis.__setLEP(null);
+    globalThis.__rebuild();
+    const back = globalThis.__getM();
+    if (back.wing.ribs.length === halfRibs) {
+      console.log('  FAIL returning to the parametric wing left the import in place');
+      process.exit(1);
+    }
+    console.log(`  ok   and returns to the parametric wing, `
+      + `${back.wing.ribs.length} ribs`);
+  }
+
   globalThis.__tab('wing');
 } catch(e){ console.log('  FAIL tab/rib: '+e.message); console.log(e.stack.split('\n').slice(1,4).join('\n')); process.exit(1); }
 
@@ -288,7 +333,17 @@ try {
   // they are created instead.
   globalThis.__buttons.length = 0;
   globalThis.__controls();
-  const btns = globalThis.__buttons;
+  // A snapshot, and without the buttons that replace the design.
+  //
+  // `globalThis.__buttons` is the live array, and a handler that calls
+  // `buildControls()` appends to it while this loop runs — so the loop never
+  // reaches the end and the test hangs with no output.
+  //
+  // This is the SECOND loop with that defect. I fixed the one inside
+  // `pressAll` and did not look for another, so the test went on hanging and
+  // the instrumentation I added to the fixed loop reported nothing at all.
+  const REPLACES = /^(Load the Swoop2|Import LEP|Return to parametric)/;
+  const btns = globalThis.__buttons.slice().filter((b) => !REPLACES.test(b.text));
   const seen = new Map();
   let pressed = 0, failed = [];
   for (const b of btns) {
@@ -308,7 +363,24 @@ try {
     globalThis.__saved = {};
     globalThis.__buttons.length = 0;
     globalThis.__controls();
-    for (const b of globalThis.__buttons) { try { b.fn(); } catch (e) { /* reported above */ } }
+    // A SNAPSHOT, not the live array.
+    //
+    // `globalThis.__buttons` is appended to whenever controls are built, and
+    // a handler that calls `buildControls()` — the Swoop2 loader does, to
+    // refresh the panel — adds more buttons while this loop is running. A
+    // `for...of` over the live array then never reaches the end, and the
+    // whole test hangs with no output at all.
+    // Buttons that deliberately REPLACE the design are left out of the
+    // export sweep. "Load the Swoop2" swaps in a 50-cell imported wing, and
+    // every rebuild after it in this sweep then runs on that wing instead of
+    // the one being tested — dozens of them, and the test stops finishing.
+    //
+    // Pressing it here would not be testing the exports anyway; it changes
+    // the subject. It is exercised on its own below.
+    const REPLACES_DESIGN = /^(Load the Swoop2|Import LEP|Return to parametric)/;
+    const snapshot = globalThis.__buttons.slice()
+      .filter((b) => !REPLACES_DESIGN.test(b.text));
+    for (const b of snapshot) { try { b.fn(); } catch (e) { /* reported above */ } }
     // The content, not its length.
     //
     // Comparing byte lengths missed a setting that changed 378 to 382 in

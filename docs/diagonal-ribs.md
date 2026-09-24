@@ -278,3 +278,43 @@ it.
 **This is recorded as a known state, not as a passing check.** The placement
 rule produces mostly unbuildable diagonals, and writing the test the other way
 round would enshrine that.
+
+---
+
+## 11. What actually pulls on a diagonal
+
+`diagonalTension` took the load direction as **apex to base centre** — the
+diagonal's own axis. A tension check whose load direction is defined by the
+thing it is checking cannot find anything, and it did not: every fibre came
+out perfectly aimed, on every wing.
+
+What pulls on a diagonal's apex is the **line** attached there, running down
+and inboard to the maillon. Pass `maillon` and that is what is used.
+
+### The sign was backwards too
+
+With the real direction, every fibre came out slack. Cloth can only pull, and
+a fibre works by **opposing** the load: the line pulls the apex down, the
+fabric runs up to the base and holds it. The check asked whether fibres
+aligned *with* the pull. Both answers were wrong and the first one looked
+fine.
+
+### What it shows
+
+| | |
+| --- | --- |
+| spanwise share of the pull | **3% at the root, up to 75% outboard** |
+| alignment, worst | **0.00** |
+| alignment, best | 0.67 |
+
+An alignment of 1 would be a diagonal pulling straight back against the line.
+Below about 0.5 it is carrying the load sideways; at 0.34 it needs three times
+the tension of a well-aimed one to hold the same anchor. **The worst on the
+test wing resists almost nothing.**
+
+The spanwise figure is the point: a diagonal outboard is resisting a pull that
+is three quarters sideways. That load was invisible while the direction was
+taken as the diagonal's own axis.
+
+This is recorded as a **known state**, not a pass. It agrees with the geometry
+check, which flags most of the same pieces as unbuildable.

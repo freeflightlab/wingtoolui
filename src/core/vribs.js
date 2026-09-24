@@ -532,19 +532,30 @@ export function internalStructure({
  * carrying on a fraction of its width. A narrow, deep one works throughout.
  * This says which, and by how much.
  */
-export function diagonalTension(vrib, { loadDirection = null } = {}) {
+export function diagonalTension(vrib, { loadDirection = null, maillon = null } = {}) {
   const apex = vrib.apex;
   const base = vrib.base;
   if (!apex || !base || base.length < 2) {
     throw new Error('diagonalTension needs a diagonal with an apex and a base');
   }
 
-  // The load pulls along the line the anchor takes, which is towards the
-  // riser: downward and inboard. Taken as apex-to-base-centre unless given.
+  // The load pulls along the LINE, not along the diagonal.
+  //
+  // This defaulted to apex-to-base-centre — the diagonal's own axis — so by
+  // construction the load always lay along the piece and every fibre came out
+  // near enough aligned. A tension check whose load direction is defined by
+  // the thing it is checking cannot find anything.
+  //
+  // What actually pulls on a diagonal's apex is the line attached there,
+  // running down and inboard to the maillon. On an arced wing that direction
+  // has a large spanwise component — the further outboard the anchor, the
+  // more the line pulls sideways rather than down — and it is that component
+  // the diagonal has to resist. `maillon` supplies it; without one the old
+  // behaviour is kept so existing callers do not silently change meaning.
   const mid = base[Math.floor(base.length / 2)];
-  const dir = loadDirection ?? [
-    mid[0] - apex[0], mid[1] - apex[1], mid[2] - apex[2],
-  ];
+  const dir = loadDirection ?? (maillon
+    ? [maillon[0] - apex[0], maillon[1] - apex[1], maillon[2] - apex[2]]
+    : [mid[0] - apex[0], mid[1] - apex[1], mid[2] - apex[2]]);
   const dl = Math.hypot(dir[0], dir[1], dir[2]) || 1;
   const u = [dir[0] / dl, dir[1] / dl, dir[2] / dl];
 
@@ -554,16 +565,29 @@ export function diagonalTension(vrib, { loadDirection = null } = {}) {
     const len = Math.hypot(v[0], v[1], v[2]);
     if (len < 1e-12) continue;
     const cos = (v[0] * u[0] + v[1] * u[1] + v[2] * u[2]) / len;
+    // A fibre carries load when it OPPOSES the pull, not when it aligns
+    // with it.
+    //
+    // The line pulls the apex down towards the maillon. The fabric runs from
+    // the apex up to the base on the neighbouring rib's upper surface, and
+    // its tension acts along base-to-apex: it holds the apex up against the
+    // pull. Cloth can only pull, so a fibre works when its own direction has
+    // a component against the load.
+    //
+    // Written the other way round — carrying load when aligned WITH the pull
+    // — every fibre came out slack against a real line direction, and 100%
+    // taut against the old self-referential default. Both answers were
+    // wrong and the second looked fine.
+    const opposing = -cos;
     fibres.push({
       point: b,
       lengthM: len,
       cosine: cos,
       angleDeg: Math.acos(Math.max(-1, Math.min(1, cos))) * (180 / Math.PI),
-      // A fibre at more than 90 degrees to the load would have to push.
-      taut: cos > 0,
-      // How much of the load this fibre can carry, relative to one aligned
-      // with it.
-      share: Math.max(0, cos),
+      taut: opposing > 0,
+      // How much of the load this fibre can carry, relative to one directly
+      // opposing it.
+      share: Math.max(0, opposing),
     });
   }
 
@@ -578,10 +602,22 @@ export function diagonalTension(vrib, { loadDirection = null } = {}) {
     tautCount: taut.length,
     totalCount: fibres.length,
     tautFraction: fibres.length ? taut.length / fibres.length : 0,
-    // Mean cosine over the taut part: how efficiently the working fabric is
-    // aligned with the load.
+    // How well the working fabric opposes the load, 0 to 1.
+    //
+    // Reported as a magnitude. The underlying cosine is negative — a fibre
+    // works by pulling against the load — and handing a reader a negative
+    // "alignment" invites them to read a well-oriented diagonal as a badly
+    // oriented one.
+    //
+    // 1 would be a diagonal pulling directly against the line. Below about
+    // 0.5 it is carrying the load sideways: at 0.34 it needs three times the
+    // tension of a well-aimed one to hold the same anchor.
     alignment: taut.length
-      ? taut.reduce((a, f) => a + f.cosine, 0) / taut.length : 0,
+      ? Math.abs(taut.reduce((a, f) => a + f.cosine, 0) / taut.length) : 0,
+    // How much of the pull is spanwise rather than down. On an arced wing
+    // this grows outboard — 3% at the root and 37% by mid-span on the test
+    // wing — and it is the part a diagonal has to resist sideways.
+    spanwiseShare: Math.abs(u[1]),
     totalShare,
     worstAngleDeg: fibres.length
       ? Math.max(...fibres.map((f) => f.angleDeg)) : 0,
@@ -602,6 +638,9 @@ export function diagonalTension(vrib, { loadDirection = null } = {}) {
  * are things a designer can change.
  */
 export function checkDiagonalTension(vribs, opts = {}) {
+  // `opts.maillon` reaches `diagonalTension` through here, so a caller with a
+  // line plan gets the real load direction rather than the diagonal's own
+  // axis.
   const results = vribs.map((v) => ({
     row: v.row,
     fromRib: v.fromRib,

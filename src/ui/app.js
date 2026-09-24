@@ -9,28 +9,22 @@
  * single file with no filesystem. Only the fields a design needs are carried;
  * the full tables stay in the repository for validation.
  */
-const REFERENCE_LIB = [
-  ['PHI Allegro light', 'XS', 20.40, 11.09, 6.03, 72, 2.29, 17.49],
-  ['PHI Allegro light', 'ML', 25.02, 12.29, 6.03, 72, 2.54, 21.40],
-  ['PHI Allegro light', 'XL', 28.62, 13.14, 6.03, 72, 2.72, 24.48],
-  ['Ozone Geo 7', 'XS', 22.20, 10.69, 5.16, 48, 2.63, 18.70],
-  ['Ozone Geo 7', 'MS', 25.80, 11.52, 5.16, 48, 2.84, 21.80],
-  ['Ozone Geo 7', 'L', 29.00, 12.22, 5.16, 48, 3.01, 24.50],
-  ['Ozone Ultralite 5', '13', 12.90, 7.70, 4.56, 34, 2.10, 11.40],
-  ['Ozone Ultralite 5', '19', 18.90, 9.30, 4.56, 34, 2.54, 16.50],
-  ['Ozone Ultralite 5', '25', 25.10, 10.70, 4.56, 34, 2.92, 21.90],
-  ['Ozone Alpina 5', 'XS', 19.30, 10.82, 6.07, 65, 2.25, 16.40],
-  ['Ozone Alpina 5', 'ML', 24.40, 12.16, 6.07, 65, 2.53, 20.70],
-  ['Ozone Alpina 5', 'XL', 27.80, 13.00, 6.07, 65, 2.71, 23.70],
-  ['Ozone Zeno 2', 'S', 21.00, 12.00, 6.90, 78, 2.19, 17.70],
-  ['Ozone Zeno 2', 'L', 26.50, 13.50, 6.90, 78, 2.46, 22.20],
-  ['BGD Lynx 2', 'XS', 19.50, 10.90, 6.20, 65, 2.20, 16.50],
-  ['BGD Lynx 2', 'M', 23.00, 11.80, 6.20, 65, 2.40, 19.50],
-  ['BGD Lynx 2', 'L', 27.00, 12.80, 6.20, 65, 2.60, 22.90],
-  ['Skywalk SAGE', '75', 20.26, 11.34, 6.40, 68, 2.20, 17.29],
-  ['Skywalk SAGE', '95', 22.70, 12.01, 6.40, 68, 2.33, 19.37],
-  ['Skywalk SAGE', '115', 25.67, 12.77, 6.40, 68, 2.48, 21.90],
-].map(([family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea]) => ({
+// Every published wing the repository holds, generated at build time.
+//
+// This was twenty designs typed in by hand across seven families. The data
+// files carry 55 sizes across eleven, including every Niviuk — so two thirds
+// of the wings this project validates against could not be loaded as a
+// starting point in the tool that validates them.
+//
+// `REFERENCE_WINGS` comes from build.py, so adding a reference file adds a
+// wing and there is no second list to keep in step. The rows below are the
+// fallback for running app.js outside the bundle, where that constant does
+// not exist.
+const REFERENCE_LIB = ((typeof REFERENCE_WINGS !== 'undefined'
+  && Array.isArray(REFERENCE_WINGS) && REFERENCE_WINGS.length)
+  ? REFERENCE_WINGS
+  : [
+]).map(([family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea]) => ({
   id: `${family} ${size}`,
   family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea,
   source: { flatArea, flatSpan, flatAR, cells, maxChord, projectedArea, name: size },
@@ -1067,6 +1061,43 @@ function buildControls() {
       }, LEP ? LEP.doc : null));
     } catch (e) { setStatus(`Could not write LEP file: ${e.message}`); }
   }, 'btn primary');
+  // Laboratori d'envol's Swoop2, built in.
+  //
+  // It is a COMPLETE design — 50 cells, 51 ribs, its own aerofoils, its own
+  // line plan — and it is the design whose author wrote the handbook this
+  // project implements. Its published area, span, root chord and cell and rib
+  // counts all reproduce exactly.
+  //
+  // It was in the repository as a data file and there was no way to open it,
+  // so the one wing the tool reproduces exactly could not be looked at in the
+  // tool. It loads through the same path as an imported file.
+  button(F, 'Load the Swoop2', () => {
+    if (typeof SWOOP2_LEP !== 'string' || !SWOOP2_LEP.length) {
+      setStatus('The Swoop2 is not in this build.');
+      return;
+    }
+    try {
+      const doc = parseLep(SWOOP2_LEP);
+      const design = lepToDesign(doc);
+      LEP = { doc, design, info: describeLep(doc) };
+      S.name = design.name || 'Swoop2';
+      const nameField = document.getElementById('wingName');
+      if (nameField) nameField.value = S.name;
+      if (design.anchorFractions) {
+        S.anchorA = design.anchorFractions.A * 100;
+        S.anchorB = design.anchorFractions.B * 100;
+        S.anchorC = design.anchorFractions.C * 100;
+        S.anchorD = design.anchorFractions.D * 100;
+      }
+      buildControls();
+      rebuild();
+      setStatus(`${S.name}: ${design.cells} cells, `
+        + `${design.geometry.ribCount} ribs, ${LEP.info.sections.length} LEP sections.`);
+    } catch (e) {
+      setStatus(`Swoop2: ${e.message}`);
+    }
+  }, 'btn');
+
   const lepIn = el('button', 'btn', 'Import LEP');
   const lepFile = el('input');
   lepFile.type = 'file'; lepFile.accept = '.txt'; lepFile.style.display = 'none';
