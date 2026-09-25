@@ -8804,7 +8804,16 @@ section('The reference set against the manufacturers');
     .map((l) => l.split('\t'));
 
   check('the published specifications are loaded',
-    pubRows.length >= 12, `${pubRows.length} sizes`);
+    pubRows.length >= 18, `${pubRows.length} sizes`);
+
+  // An odd total cell count is a real thing — 65 on the Alpina 5 and the
+  // Lynx 2 — and it means a cell straddles the centreline rather than a rib
+  // sitting on it. The parametric model cannot build one, and the reference
+  // note says so rather than rounding quietly.
+  const odd = pubRows.filter((r) => Number(r[2]) % 2 === 1);
+  check('some published wings have an odd number of cells',
+    odd.length > 0,
+    odd.length ? `${odd[0][0]} at ${odd[0][2]}` : 'none');
 
   const disagree = [];
   let figures = 0;

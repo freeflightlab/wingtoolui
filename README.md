@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**1792 tests across nine check stages**, all passing. Phases 1 and 5 are
+**1793 tests across nine check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -65,7 +65,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1792 unit checks against known geometry and the sources |
+| `npm test` | 1793 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -258,7 +258,7 @@ Thirteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 1792 checks |
+| unit suite | the maths, 1793 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -302,6 +302,7 @@ across six manufacturers.
 | `docs/shaping.md` | 3D shaping of the nose, and two wrong derivations |
 | `docs/risers.md` | riser-aware line plans and split A risers |
 | `docs/line-plans.md` | risers, naming, topology inference |
+| `docs/reference-wings.md` | the reference wings against their published figures |
 | `docs/certification.md` | what a flight test report does and does not contain |
 | `docs/panels.md` | panel development, and whether the wing sews |
 | `docs/fabric.md` | cloth by location, and what the tool refuses |

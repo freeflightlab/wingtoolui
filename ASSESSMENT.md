@@ -86,7 +86,7 @@ by it.
 
 ## 5. What is missing
 
-**40 open items.** The substantial ones:
+**41 open items.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.

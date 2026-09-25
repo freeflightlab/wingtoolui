@@ -617,6 +617,9 @@ try {
       ['Ozone Ultralite 5 17', 34, 8.8],
       ['Ozone Geo 7 XS', 48, 10.69],
       ['Ozone Zeno 2 S', 78, null],
+      // An odd published count: must be reported, not silently rounded.
+      ['Ozone Alpina 5 S', 65, 11.31],
+      ['BGD Lynx 2 S', 65, null],
     ];
     for (const [ref, publishedCells, publishedSpan] of cases) {
       S1.reference = ref;
@@ -624,9 +627,18 @@ try {
       const m = globalThis.__getM();
       const builtTotal = S1.cells * 2;
       if (builtTotal !== publishedCells) {
-        console.log(`  FAIL ${ref} builds ${builtTotal} cells; published is `
-          + `${publishedCells}`);
-        process.exit(1);
+        // An ODD published count cannot be built: a cell straddles the
+        // centreline and this model always puts a rib there. That is a real
+        // limitation, and what matters is that the tool SAYS SO rather than
+        // quietly building 66 and calling it an Alpina 5.
+        const odd = publishedCells % 2 === 1;
+        const saysSo = odd && /straddles the centreline/
+          .test(S1._referenceNote || '');
+        if (!odd || !saysSo || Math.abs(builtTotal - publishedCells) > 1) {
+          console.log(`  FAIL ${ref} builds ${builtTotal} cells; published is `
+            + `${publishedCells}${odd && !saysSo ? ' and nothing says so' : ''}`);
+          process.exit(1);
+        }
       }
       // Ribs are cells+1 on the half wing, centre rib included.
       if (m.wing.ribs.length !== S1.cells + 1) {

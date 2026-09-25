@@ -18150,11 +18150,33 @@ function applyReference() {
   // Rib spacing follows the cell count, and everything built on the ribs
   // follows the spacing: panel widths, diagonal sizes, anchor positions, the
   // lot. The clamp also meant four different wings came out identical.
-  S.cells = Math.max(4, Math.min(60, Math.round(r.cells / 2)));
+  // `S.cells` is the count for ONE HALF of the wing — the slider says so and
+  // the LEP export doubles it. A manufacturer publishes the TOTAL.
+  //
+  // This read `Math.round(r.cells / 2) * 2`, which rounds to the nearest even
+  // number and does not halve anything: the `* 2` undoes the `/ 2`. Every
+  // reference wing was built with twice its published cell count.
+  //
+  // An ODD published count cannot be built at all. 65 cells — the Alpina 5
+  // and the Lynx 2 — means a cell straddles the centreline, a centre CELL
+  // rather than a centre rib. This model always puts a rib at station 0, so
+  // it can only make even totals, and it was quietly building 66 and calling
+  // it an Alpina 5. The LEP format carries the distinction as `centreRib`;
+  // the parametric path does not.
+  const halfCells = Math.round(r.cells / 2);
+  S.cells = Math.max(4, Math.min(60, halfCells));
+  const builtTotal = S.cells * 2;
+  const cellNote = builtTotal === r.cells
+    ? null
+    : (r.cells % 2
+      ? `${r.cells} cells is odd, so a cell straddles the centreline. This `
+        + `model puts a rib there, so it builds ${builtTotal}.`
+      : `built with ${builtTotal} cells against ${r.cells} published.`);
   S.projectedRatio = r.projectedRatio;
   S.name = S.reference.replace(/\s+/g, '-');
   S._referenceNote = `${S.reference}: ${entry.flatArea} m² published. Size only — `
-    + `${r.derived.join(', ')} are defaults, not this wing's.`;
+    + `${r.derived.join(', ')} are defaults, not this wing's.`
+    + (cellNote ? ` ${cellNote}` : '');
 }
 
 function rebuild() {

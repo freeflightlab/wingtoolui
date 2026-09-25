@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1792-test validation suite and a benchmark with regression budgets
+- [x] 1793-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,14 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Odd cell counts are reported, not rounded away** — the Alpina 5 and
+      Lynx 2 have 65 cells, which this model cannot build. Found by building
+      every reference wing and comparing it with its published figures rather
+      than checking components against each other.
+- [ ] **A true centre cell** — the parametric path always puts a rib on the
+      centreline, so it cannot build an odd cell count. LEP carries this as
+      `centreRib`.
 
 - [x] **The reference set checked against the manufacturers** —
       `published-specs.tsv`, transcribed separately so the two can disagree.
