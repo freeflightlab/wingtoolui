@@ -1,0 +1,183 @@
+# Ozone magnum4 41
+# Source: manufacturer line sheet, supplied as xlsx
+# Converted by tools/read_xlsx.py
+Suspension line details	rev2. 25/3/2024
+Magnum4_41
+LIN-10-200-41								EN line check sheet
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			A	B	C	D	E	K
+KR1	2	4910						9053	8950	8991	9106	9198	10137
+mark at 4660								8982	8874	8916	9036	9129	9755
+8981									8877	8919	9033	9106	9512
+LIN-7343-190-RED								8957	8856	8898	9011	9126	9276
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			8932	8828	8872	8990	9080	9137
+CR4	2	5536						8981	8884	8927	9038	8988	8854
+								8933	8843	8886	8993	8946	8749
+LIN-7343-190-ORANGE								8848	8754	8799	8911	8932	8762
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			8842	8754	8799	8903	8867	8718
+DR1, DR2	4	5169						8789	8710	8755	8853	8706	8598
+								8738	8656	8705	8809	8494	8600
+LIN-7343-230-PURPLE								8786	8711	8758	8853	8623
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			8660	8609	8642	8766	8775
+BR3	2	5567						8542	8489	8526	8651
+								8511	8459	8494	8610
+LIN-7343-230-ORANGE								8385	8351	8372	8491
+Name	No.	Sewn	Adjusted	Prod adj.	Comment			8321	8271	8299	8415
+CR1, CR2	4	5166						8365	8299	8319	8424
+CR3	2	5567						7889	7870	7908	7954
+								7766	7797	7808	7852
+LIN-7343-280-BLUE								computer + risers
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR3_U	2	4727			
+AR3_L	2	863
+LIN-6843-160 BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+Ear Kit Line	2	1190			Length without the knot for the plastic ball
+mark at 1040
+LIN-7343-420-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AR1, AR2	4	5169			
+LIN-7343-420-PURPLE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BR1, BR2	4	5156			
+LIN-8001-070-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A17	2	589			
+LIN-8001-070-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A20	2	537			
+B17	2	546			
+B20	2	568			
+C20	2	579			
+C17	2	588			
+C18	2	608			
+D20	2	623			
+B19	2	641			
+C11	2	643			
+D17	2	649			
+D18	2	658			
+A19	2	660			
+C16	2	661			
+B14	2	662			
+C15	2	674			
+C19	2	679			
+C10	2	693			
+C12	2	696			
+C14	2	706			
+D16, D19	4	725			
+E11	2	727			
+C8, C9	4	737			
+D15	2	742			
+D11	2	776			
+D14	2	783			
+C5	2	810			
+D10, D12	4	820			
+C13	2	822			
+C7	2	824			
+C4	2	836			
+E10	2	837			
+C2	2	854			
+C3	2	857			
+C6	2	865			
+D9	2	870			
+D8	2	878			
+D13	2	898			
+E8	2	899			
+E7	2	913			
+C1	2	929			
+E6	2	955			
+D5	2	957			
+D7	2	960			
+D4	2	978			
+E9	2	998			
+D3	2	1000			
+D2	2	1003			
+D6	2	1005			
+E5	2	1047			
+D1, E3	4	1073			
+E4	2	1093			
+E2	2	1096			
+E1	2	1165			
+LIN-8001-090-BLUE R
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+A18	2	633			
+A16	2	653			
+A15	2	677			
+A11	2	684			
+A14	2	708			
+A12	2	732			
+A10	2	735			
+A9	2	788			
+A8	2	794			
+A13	2	826			
+A5	2	878			
+A7	2	879			
+A4	2	903			
+A3, A6	4	927			
+A2	2	928			
+A1	2	999			
+LIN-8001-090-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+B18	2	574			
+B11	2	612			
+B16	2	626			
+B15	2	632			
+B10	2	666			
+B12	2	667			
+B8, B9	4	710			
+B13	2	782			
+B5	2	784			
+B7	2	799			
+B4	2	812			
+B2	2	830			
+B3	2	833			
+B6	2	840			
+B1	2	906			
+LIN-8001-130-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+MSA, MSB	4	1264			
+LIN-DSL-70-YELLOW
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+K10	2	518			
+K6	2	548			
+K7	2	565			
+K8	2	578			
+K4	2	624			
+K9	2	638			
+K11	2	723			
+K12	2	746			
+K5	2	831			
+K3	2	860			
+K2	2	879			
+K13	2	898			
+KMU6	2	969			
+KMU5	2	1172			
+K1	2	1261			
+KMU4	2	1305			
+KMU3	2	1427			
+KMU2	2	1509			
+KMU1	2	1733			
+KML2	2	2183			
+KML3	2	2212			
+KML1	2	2447			
+LIN-PPSL120-ORANGE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+CM6	2	1718			
+DM6	2	1773			
+CM5	2	1827			
+DM5	2	1875			
+DM1, DM2, DM3, DM4	8	2437			
+CM1, CM2, CM3, CM4	8	2467			
+LIN-PPSL120-PURPLE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BM6	2	1733			
+BM5	2	1835			
+LIN-PPSL160-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AM6	2	1733			
+AM5	2	1835			
+LIN-PPSL200-BLUE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+AM1, AM2, AM3, AM4	8	2467			
+LIN-PPSL200-PURPLE
+Name	No.	Sewn	Adjusted	Prod adj.	Comment
+BM1, BM2, BM3, BM4	8	2467			

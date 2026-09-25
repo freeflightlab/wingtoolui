@@ -1,0 +1,50 @@
+# Total line lengths, size 26
+# Source: Niviuk user manual, section 10.7 "Total line length"
+# "LINES HEIGHT + RISER mm" — the PMA total, sail to harness,
+#   so these INCLUDE the risers.
+# Retrieved: 2026-08-31
+anchor	row	total_length_mm
+1	A	7280
+1	B	7162
+1	C	7210
+1	D	7332
+1	K	7468
+2	A	7234
+2	B	7114
+2	C	7168
+2	D	7286
+2	K	7228
+3	A	7194
+3	B	7134
+3	C	7234
+3	D	7348
+3	K	7155
+4	A	7154
+4	B	7050
+4	C	7110
+4	D	7214
+4	K	7154
+5	A	7108
+5	B	6997
+5	C	7072
+5	D	6988
+6	A	6948
+6	B	6891
+6	C	6972
+6	D	6931
+7	A	6837
+7	B	6840
+7	C	6937
+7	D	6990
+8	A	6765
+8	B	6834
+8	C	6955
+8	D	6977
+9	A	6559
+9	B	6532
+9	C	6516
+9	D	6834
+10	A	6443
+10	B	6443
+10	C	6714
+11	A	6613

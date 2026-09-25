@@ -1,0 +1,470 @@
+/* Palette note: the geometry colours are the AutoCAD Color Index values the
+   handbook's own panel subroutine writes into its DXF (2 yellow, 3 green,
+   4 cyan, 5 blue, 6 magenta), tempered for a dark screen. Anyone who has
+   opened a .dxf from that program will recognise the wing immediately. */
+
+:root {
+  --ink:        #0d1317;
+  --panel:      #141d23;
+  --panel-2:    #1b262e;
+  --rule:       #26343d;
+  --rule-soft:  #1e2a32;
+  --text:       #ccd8de;
+  --text-dim:   #7b8f9b;
+  --text-faint: #4e6270;
+
+  --aci-cyan:    #35d6e8;
+  --aci-green:   #5fd97a;
+  --aci-magenta: #e85bc4;
+  --aci-yellow:  #e8c547;
+  --aci-blue:    #6e8bff;
+  --aci-red:     #ff5e5e;
+
+  --grid:       #1a252c;
+  --grid-major: #223039;
+
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.wordmark {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text);
+  white-space: nowrap;
+}
+.wordmark b { color: var(--aci-cyan); font-weight: 600; }
+
+.wingname {
+  font-family: var(--mono);
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  color: var(--aci-yellow);
+  padding: 4px 8px;
+  border-radius: 3px;
+  width: 150px;
+  font-size: 12px;
+}
+
+.readout {
+  display: flex;
+  gap: 16px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.stat { display: flex; flex-direction: column; gap: 1px; min-width: 62px; }
+.stat .k {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.stat .v { font-family: var(--mono); font-size: 13px; color: var(--text); }
+.stat .v.hot { color: var(--aci-cyan); }
+.stat .v.warn { color: var(--aci-red); }
+
+/* ---------- body ---------- */
+
+.body {
+  display: grid;
+  grid-template-columns: 288px 1fr;
+  overflow: hidden;
+}
+
+.controls {
+  border-right: 1px solid var(--rule);
+  background: var(--panel);
+  overflow-y: auto;
+  padding-bottom: 40px;
+}
+
+.stage {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+  background: var(--ink);
+}
+
+.viewports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--rule-soft);
+  overflow: hidden;
+}
+
+.vp {
+  position: relative;
+  background: var(--ink);
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;          /* grid children default to min-content and refuse
+                            to shrink, which pushed the viewports wider than
+                            their frames on narrow screens */
+}
+
+.vp > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The viewBox is re-fitted to the drawn content after every redraw, so the
+     drawing scales itself. These keep the element from claiming more room
+     than the frame gives it while that happens. */
+  max-width: 100%;
+  max-height: 100%;
+  overflow: visible;
+}
+
+/* Labels sit above the drawing and must not be scaled by the viewBox fit. */
+.vp-label, .vp-note {
+  max-width: calc(100% - 20px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vp-label {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.vp-note {
+  position: absolute;
+  bottom: 8px;
+  left: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+/* ---------- control groups ---------- */
+
+.group { border-bottom: 1px solid var(--rule-soft); }
+
+.group > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 11px 14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary:hover { color: var(--text); background: var(--panel-2); }
+.group > summary::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .15s ease;
+  flex: none;
+}
+.group[open] > summary::before { transform: rotate(45deg); }
+.group[open] > summary { color: var(--text); }
+
+.group-body { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+.field { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; }
+.field label {
+  font-size: 11px;
+  color: var(--text-dim);
+  grid-column: 1;
+}
+.field output {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--aci-yellow);
+  text-align: right;
+  grid-column: 2;
+}
+.field input[type=range] { grid-column: 1 / -1; }
+
+.field.row { grid-template-columns: 1fr 84px; }
+.field.row input[type=number], .field.row select {
+  grid-column: 2;
+  width: 100%;
+}
+
+input[type=number], select, input[type=text] {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--ink);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 4px 6px;
+}
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--aci-cyan);
+  outline-offset: 1px;
+}
+
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+  width: 100%;
+  margin: 0;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 2px; background: var(--rule); border-radius: 2px;
+}
+input[type=range]::-moz-range-track {
+  height: 2px; background: var(--rule); border-radius: 2px;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--aci-cyan);
+  margin-top: -4.5px;
+  border: none;
+}
+input[type=range]::-moz-range-thumb {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--aci-cyan); border: none;
+}
+
+.btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 7px 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.btn:hover { border-color: var(--aci-cyan); color: var(--aci-cyan); }
+.btn.primary { border-color: var(--aci-cyan); color: var(--aci-cyan); }
+
+.btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.btn-grid .btn { text-align: center; }
+
+.hint {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.check { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-dim); cursor: pointer; }
+.check input { accent-color: var(--aci-cyan); }
+
+/* ---------- balance table ---------- */
+
+.tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+.tbl td { padding: 3px 0; }
+.tbl td:last-child { text-align: right; color: var(--aci-yellow); }
+.tbl td:first-child { color: var(--text-dim); }
+.tbl tr.em td:last-child { color: var(--aci-cyan); }
+
+/* ---------- status bar ---------- */
+
+.statusbar {
+  border-top: 1px solid var(--rule);
+  background: var(--panel);
+  padding: 7px 14px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+  min-height: 32px;
+}
+.statusbar .sep { color: var(--rule); }
+.statusbar .ok { color: var(--aci-green); }
+.statusbar .bad { color: var(--aci-red); }
+
+.legend { display: flex; gap: 12px; margin-left: auto; flex-wrap: wrap; }
+.legend i {
+  font-style: normal;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.legend i::before {
+  content: "";
+  width: 10px; height: 2px; border-radius: 2px;
+  background: currentColor;
+}
+.legend i.c { color: var(--aci-cyan); }
+.legend i.g { color: var(--aci-green); }
+.legend i.m { color: var(--aci-magenta); }
+.legend i.y { color: var(--aci-yellow); }
+.legend i.b { color: var(--aci-blue); }
+
+/* ---------- safety notice ---------- */
+
+.notice {
+  margin: 12px 14px;
+  padding: 10px 11px;
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--aci-red);
+  border-radius: 3px;
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  background: var(--panel-2);
+}
+.notice b { color: var(--aci-red); font-weight: 600; display: block; margin-bottom: 3px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .controls { border-right: none; border-bottom: 1px solid var(--rule); max-height: 42vh; }
+  .viewports { grid-template-columns: 1fr; grid-template-rows: repeat(6, minmax(220px, 1fr)); overflow-y: auto; }
+  .readout { width: 100%; margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+
+/* ---------- environment flags ---------- */
+
+.flag {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: 3px;
+  border-left: 2px solid;
+  background: var(--panel-2);
+}
+.flag.warn  { border-color: var(--aci-yellow); color: var(--aci-yellow); }
+.flag.error { border-color: var(--aci-red);    color: var(--aci-red); }
+.flag.ok    { border-color: var(--aci-green);  color: var(--aci-green); }
+
+
+/* ---------- viewport tabs ---------- */
+
+.vptabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  flex: none;
+}
+
+.vptab {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--text-faint);
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+.vptab:hover { color: var(--text); }
+.vptab.is-on { color: var(--aci-cyan); border-bottom-color: var(--aci-cyan); }
+
+.vptab-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 4px;
+}
+.vptab-tools label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.vptab-tools select, .vptab-tools input[type=range] { width: auto; }
+.vptab-tools input[type=range] { width: 130px; }
+
+.viewports[hidden] { display: none; }
+.viewports.one { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.viewports.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+
+.zoomtag {
+  display: none;
+  color: var(--aci-yellow);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  margin-left: 6px;
+}
+
+/* The stage holds the tab bar plus one viewport grid plus the status bar. */
+.stage { grid-template-rows: auto 1fr auto; }
+
+/* A cascade is written, not slid. Monospace so the columns line up the way
+   they do on a manufacturer sheet. */
+.field textarea {
+  width: 100%;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg-2, #14181d);
+  color: var(--fg, #dfe6ee);
+  border: 1px solid var(--line, #2a323b);
+  border-radius: 4px;
+  padding: 6px 8px;
+  resize: vertical;
+}
