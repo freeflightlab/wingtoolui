@@ -36,6 +36,7 @@ const S = {
   span: 10.25, rootChord: 2.60, tipChord: 0.90, tipSweep: 1.10,
   ellipticityLE: 0.85, ellipticityTE: 0.95,
   cells: 24, distribution: 'cosine', centreRib: true,
+  theme: 'dark',
   // operating environment
   altitudeM: 1000, deltaISA: 0, nCrit: 7,
   // section
@@ -144,7 +145,15 @@ function applyReference() {
     + (cellNote ? ` ${cellNote}` : '');
 }
 
+/** Put the chosen theme on the document, so the stylesheet can see it. */
+function applyTheme() {
+  const root = document.documentElement;
+  if (root && root.setAttribute) root.setAttribute('data-theme', S.theme);
+}
+
 function rebuild() {
+  applyTheme();
+  addViewportSavers();
   applyReference();
   const t0 = performance.now();
   try {
@@ -561,6 +570,7 @@ function buildControls() {
   slider(P, 'tipSweep', 'Tip sweep back', 0, 3, 0.01, (v) => v.toFixed(2), ' m');
   slider(P, 'ellipticityLE', 'Leading edge — elliptical', 0, 1, 0.01, (v) => (v * 100).toFixed(0), '%');
   slider(P, 'ellipticityTE', 'Trailing edge — elliptical', 0, 1, 0.01, (v) => (v * 100).toFixed(0), '%');
+  selectField(P, 'theme', 'Appearance', [['dark', 'Dark'], ['light', 'Light']]);
   checkField(P, 'centreRib', 'Rib on the centreline (off = centre cell)');
   slider(P, 'cells', 'Full cells each side', 4, 40, 1, (v) => v.toFixed(0));
   hint(P, `${S.centreRib ? S.cells * 2 : S.cells * 2 + 1} cells across the `
@@ -980,6 +990,86 @@ function buildControls() {
     save(`${S.name}-rib-stress.tsv`, `${lines.join('\n')}\n`);
     setStatus(`${r.ribCount} ribs checked, `
       + `${r.ribsWithHolesInLoadPath.length} with a hole in a load path.`);
+  }, 'btn');
+
+  button(grid, 'Design parameters', () => {
+    // Every setting and every derived figure, in one table.
+    //
+    // The JSON export is the design; this is the design as a person reads
+    // it — what was set, what came out, and which is which. A reviewer
+    // checking a drawing against the numbers beside it needs the numbers in
+    // one place, not spread across five panels.
+    const rows = [['group', 'parameter', 'value', 'unit', 'source']];
+
+    const GROUPS = {
+      span: 'Planform', rootChord: 'Planform', tipChord: 'Planform',
+      tipSweep: 'Planform', ellipticityLE: 'Planform', ellipticityTE: 'Planform',
+      cells: 'Planform', centreRib: 'Planform', distribution: 'Planform',
+      projectedRatio: 'Arc', arcType: 'Arc', washinDeg: 'Arc',
+      naca: 'Aerofoil', reflex: 'Aerofoil',
+      anchorA: 'Lines', anchorB: 'Lines', anchorC: 'Lines', anchorD: 'Lines',
+      lineLength: 'Lines', riserLayout: 'Lines', karabinerSep: 'Lines',
+      pilotMass: 'Loading', wingMass: 'Loading',
+    };
+    // View preferences are not design parameters. The colour scheme, which
+    // tab is open and which rib is on screen say nothing about the wing, and
+    // listing them invites a reader to think they might.
+    const VIEW_ONLY = new Set(['theme', 'tab', 'ribIndex', 'dimensions',
+      'lineRow', 'compareTo', 'reference', 'name']);
+    for (const [k, v] of Object.entries(S)) {
+      if (k.startsWith('_') || typeof v === 'object') continue;
+      if (VIEW_ONLY.has(k)) continue;
+      rows.push([GROUPS[k] || 'Settings', k, String(v), '', 'set']);
+    }
+
+    // Derived: what the geometry actually came out as.
+    const d = [
+      ['Geometry', 'flat area', M.metrics.area.toFixed(3), 'm2'],
+      ['Geometry', 'flat span', M.metrics.span.toFixed(3), 'm'],
+      ['Geometry', 'aspect ratio', M.metrics.aspectRatio.toFixed(3), ''],
+      ['Geometry', 'mean aerodynamic chord', M.metrics.mac.toFixed(3), 'm'],
+      ['Geometry', 'cells across the wing',
+        String(S.centreRib ? S.cells * 2 : S.cells * 2 + 1), ''],
+      ['Geometry', 'ribs on the half wing', String(M.wing.ribs.length), ''],
+    ];
+    if (M.lobeM) {
+      d.push(['Arc', 'projected span', M.lobeM.projectedSpan.toFixed(3), 'm']);
+      d.push(['Arc', 'arrow', M.lobeM.arrow.toFixed(3), 'm']);
+      d.push(['Arc', 'tip dihedral', M.lobeM.tipDihedralDeg.toFixed(2), 'deg']);
+    }
+    // `M.balance` is the flight state; `M.equilibrium` does not exist, and an
+    // imported design has no balance at all until one is solved. Reading a
+    // field that is not there threw on the Swoop2 and the export produced
+    // nothing — caught because the Swoop2 is exercised through every button.
+    const bal = M.balance;
+    if (bal) {
+      const num = (v, dp) => (Number.isFinite(v) ? v.toFixed(dp) : null);
+      for (const [name, value, unit] of [
+        ['trim speed', num(bal.speedKMH, 1), 'km/h'],
+        ['glide ratio', num(bal.glideRatio, 2), ''],
+        ['lift coefficient', num(bal.cz3D, 3), ''],
+        ['calage', num(bal.calageFraction * 100, 2), '% chord'],
+      ]) if (value !== null) d.push(['Flight', name, value, unit]);
+    }
+    if (M.lengths) {
+      // The three lengths a builder cares about, and they are different
+      // numbers: what flies, what is sewn, what is cut.
+      for (const [name, key] of [
+        ['flying line length', 'flyingMetres'],
+        ['sewn line length', 'sewnMetres'],
+        ['cut line length', 'cutMetres'],
+      ]) {
+        const v = M.lengths[key];
+        if (Number.isFinite(v)) d.push(['Lines', name, v.toFixed(1), 'm']);
+      }
+      if (M.linePlan) {
+        d.push(['Lines', 'line count', String(M.linePlan.lines.length), '']);
+      }
+    }
+    for (const [g, n, v, u] of d) rows.push([g, n, v, u, 'derived']);
+
+    save(`${S.name}-parameters.tsv`,
+      `${rows.map((r) => r.join('\t')).join('\n')}\n`);
   }, 'btn');
 
   button(grid, 'Line set & trim', () => {
@@ -1456,9 +1546,18 @@ function canvas(id, pts, pad = 0.10, opts = {}) {
   const X = (x) => ox + x * sx;
   const Y = (y) => oy - y * sy;
 
+  // Colours are written for a dark screen. On white they have to change, and
+  // doing that at every call site would mean editing a hundred literals and
+  // getting one wrong. They are mapped here instead: one place, every
+  // drawing, nothing to keep in step.
   const add = (tag, attrs) => {
     const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
-    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    const light = S.theme === 'light';
+    for (const k in attrs) {
+      const v = (k === 'stroke' || k === 'fill')
+        ? themeColour(attrs[k], light) : attrs[k];
+      n.setAttribute(k, v);
+    }
     svg.append(n);
     return n;
   };
@@ -2427,7 +2526,155 @@ function save(filename, text) {
   setStatus(null, `Saved ${filename}`);
 }
 
+/**
+ * Save a viewport as SVG, exactly as drawn.
+ *
+ * The drawings are already SVG, so this is the honest export: vector, the
+ * size the geometry actually is, openable in any editor. The background is
+ * painted in because an SVG with no background renders on whatever the
+ * viewer uses, and a light-mode drawing on a dark page is unreadable.
+ */
+function saveViewportSVG(id, filename) {
+  const svg = document.getElementById(id);
+  if (!svg || !svg.outerHTML) {
+    setStatus('Nothing to save from that view.');
+    return;
+  }
+  const bg = S.theme === 'light' ? '#ffffff' : '#0d1317';
+  let markup = svg.outerHTML;
+  // A standalone file needs the namespace; the one in the page inherits it.
+  if (!/xmlns=/.test(markup)) {
+    markup = markup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  markup = markup.replace(/(<svg[^>]*>)/,
+    `$1<rect x="-100000" y="-100000" width="200000" height="200000" fill="${bg}"/>`);
+  save(filename, markup);
+}
+
+/**
+ * Save a viewport as PNG.
+ *
+ * Rasterised through a canvas at a chosen scale, because a PNG is what goes
+ * into a document or a message and an SVG often is not. The scale matters:
+ * a drawing captured at screen size is unreadable when printed, so it is
+ * rendered at three times the on-screen size by default.
+ */
+function saveViewportPNG(id, filename, scale = 3) {
+  const svg = document.getElementById(id);
+  if (!svg || !svg.outerHTML) {
+    setStatus('Nothing to save from that view.');
+    return;
+  }
+  if (typeof Image === 'undefined' || !document.createElement('canvas').getContext) {
+    setStatus('This browser cannot rasterise; use SVG instead.');
+    return;
+  }
+  const box = svg.viewBox && svg.viewBox.baseVal;
+  const w = Math.max(1, Math.round((box && box.width ? box.width : 800)));
+  const h = Math.max(1, Math.round((box && box.height ? box.height : 500)));
+  const bg = S.theme === 'light' ? '#ffffff' : '#0d1317';
+  let markup = svg.outerHTML;
+  if (!/xmlns=/.test(markup)) {
+    markup = markup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  const blob = new Blob([markup], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = w * scale;
+    canvas.height = h * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob((png) => {
+      if (!png) { setStatus('Could not make a PNG.'); return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(png);
+      a.download = filename;
+      document.body.append(a); a.click(); a.remove();
+      setStatus(null, `Saved ${filename}`);
+    }, 'image/png');
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    setStatus('Could not rasterise that view; use SVG instead.');
+  };
+  img.src = url;
+}
+
+/**
+ * A save control on every viewport.
+ *
+ * Added from script rather than written into the page, so a new viewport gets
+ * one without anybody remembering to. Every drawing the tool makes can leave
+ * it as vector or as a picture.
+ */
+function addViewportSavers() {
+  const views = [
+    ['vp-plan', 'plan'], ['vp-front', 'front'], ['vp-section', 'section'],
+    ['vp-cut', 'cut'], ['vp-rib', 'rib'], ['vp-diag', 'structure'],
+    ['vp-lineplan', 'lines'], ['vp-polar', 'polar'], ['vp-atmos', 'atmosphere'],
+  ];
+  for (const [id, what] of views) {
+    const svg = document.getElementById(id);
+    if (!svg || !svg.parentNode) continue;
+    const label = svg.parentNode.querySelector
+      ? svg.parentNode.querySelector('.vp-label') : null;
+    if (!label || label.querySelector?.('.vp-save')) continue;
+    const box = el('span', 'vp-save');
+    for (const [kind, fn] of [
+      ['SVG', () => saveViewportSVG(id, `${S.name}-${what}.svg`)],
+      ['PNG', () => saveViewportPNG(id, `${S.name}-${what}.png`)],
+    ]) {
+      const b = el('button', 'vp-save-btn', kind);
+      b.addEventListener('click', fn);
+      box.append(b);
+    }
+    label.append(box);
+  }
+}
+
 /* ---------------------------------------------------------------- misc  -- */
+
+/**
+ * A drawing colour, adjusted for the theme.
+ *
+ * The palette is the AutoCAD Color Index the handbook's own DXF uses, warmed
+ * for a dark screen. Those values are chosen to glow on near-black and they
+ * wash out on white, so light mode darkens them rather than using a second
+ * hand-written palette that would drift from the first.
+ *
+ * A few are not geometry at all — the grid, the faint text, the white used
+ * for anchor dots — and those invert rather than darken.
+ */
+const LIGHT_SWAP = {
+  '#ffffff': '#11181d',   // anchor dots: white on dark, near-black on light
+  '#cccccc': '#33414a',
+  '#8a9aa6': '#4a5a66',   // dimension labels
+  '#4e6270': '#6b7d8a',   // faint rules
+  '#1a252c': '#dfe6ea',   // minor grid
+  '#2c3d47': '#c3d0d7',   // major grid
+  '#26343d': '#cfd9df',
+  '#8a8a8a': '#6a6a6a',
+};
+
+function themeColour(hex, light) {
+  if (!light || typeof hex !== 'string' || hex[0] !== '#') return hex;
+  const swap = LIGHT_SWAP[hex.toLowerCase()];
+  if (swap) return swap;
+  // Darken a saturated colour towards its own hue rather than towards grey,
+  // so a yellow stays recognisably yellow at a readable contrast on white.
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const k = 0.62;
+  const to2 = (v) => Math.round(v * k).toString(16).padStart(2, '0');
+  return `#${to2(r)}${to2(g)}${to2(b)}`;
+}
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);

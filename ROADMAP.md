@@ -362,6 +362,11 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **Light mode, viewport export and a parameter table** — colours mapped
+      at one point rather than at every call site; SVG and PNG on every
+      viewport; every setting and derived figure as one table, with view
+      preferences left out. See `docs/viewports.md`.
+
 - [x] **Odd cell counts are reported, not rounded away** — the Alpina 5 and
       Lynx 2 have 65 cells, which this model cannot build. Found by building
       every reference wing and comparing it with its published figures rather

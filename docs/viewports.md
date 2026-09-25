@@ -149,3 +149,58 @@ FAIL every diagonal fibre drew red (2880 of 2880);
 That is the fourth defect this project has had where the output looked
 plausible and the check could not see it. The pattern each time is the same:
 the test measured something adjacent to what mattered.
+
+---
+
+## 7. Light mode, and getting a drawing out
+
+### Two themes
+
+The drawings are SVG with explicit `stroke` attributes, which a stylesheet
+cannot reach — so a `[data-theme="light"]` block handles the page chrome and
+the drawing colours are mapped in script.
+
+Mapping happens at the single point where an attribute is set, not at the
+hundred call sites that pass a colour. Editing those would mean getting one
+wrong and not noticing.
+
+The palette is the AutoCAD Color Index the handbook's DXF uses, warmed for a
+dark screen. Those values glow on near-black and wash out on white, so light
+mode darkens each towards **its own hue** rather than towards grey: a yellow
+stays recognisably yellow at a readable contrast.
+
+| dark | light |
+| --- | --- |
+| `#e8c547` | `#907a2c` |
+| `#35d6e8` | `#218590` |
+| `#ffffff` | `#11181d` |
+| `#1a252c` (grid) | `#dfe6ea` |
+
+A test asserts the two themes share **no** stroke colour, so a mapping that
+stops being applied fails rather than leaving a dark wing on a white page.
+
+### Saving a drawing
+
+Every viewport carries **SVG** and **PNG** controls, added from script so a
+new viewport gets them without anyone remembering.
+
+SVG is the honest export: vector, the size the geometry is. PNG is what goes
+into a document, rendered at three times screen size because a drawing
+captured at screen size is unreadable when printed. Both paint the background
+in, since a drawing with none renders on whatever the viewer uses.
+
+### A table of every parameter
+
+`Design parameters` writes every setting and every derived figure as one
+table, each row marked `set` or `derived`. The JSON export is the design; this
+is the design as a person reads it.
+
+**View preferences are excluded.** The colour scheme, the open tab and the
+rib on screen say nothing about the wing, and listing them invites a reader to
+think they might.
+
+It failed on the Swoop2 first time: it read `M.equilibrium`, which does not
+exist, and `M.lengths.totalM`, which is not the field name — the real ones are
+`flyingMetres`, `sewnMetres` and `cutMetres`, three different numbers a
+builder needs separately. Caught because the Swoop2 is pushed through every
+button.

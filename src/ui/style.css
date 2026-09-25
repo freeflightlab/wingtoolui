@@ -468,3 +468,43 @@ input[type=range]::-moz-range-thumb {
   padding: 6px 8px;
   resize: vertical;
 }
+
+/* Light mode.
+ *
+ * The drawing colours are mapped in app.js rather than here, because the SVG
+ * is built with explicit stroke attributes and a stylesheet cannot reach
+ * them. This block is the chrome: backgrounds, panels, rules and text. */
+[data-theme="light"] {
+  --ink:        #f5f7f8;
+  --panel:      #ffffff;
+  --panel-2:    #eef2f4;
+  --rule:       #ccd6db;
+  --rule-soft:  #e2e9ec;
+  --text:       #1d2a31;
+  --text-dim:   #5a6c77;
+  --text-faint: #8496a1;
+
+  --grid:       #e4ebee;
+  --grid-major: #ccd8de;
+}
+
+[data-theme="light"] svg { background: #ffffff; }
+[data-theme="light"] .field textarea {
+  background: #ffffff;
+  color: #1d2a31;
+  border-color: #ccd6db;
+}
+
+/* Save controls on each viewport label. Small and quiet: they are there when
+   wanted and should not compete with the drawing. */
+.vp-save { float: right; display: inline-flex; gap: 4px; }
+.vp-save-btn {
+  font: 10px/1 var(--mono);
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid var(--rule-soft);
+  border-radius: 3px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+.vp-save-btn:hover { color: var(--text); border-color: var(--rule); }

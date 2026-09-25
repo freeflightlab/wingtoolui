@@ -663,10 +663,62 @@ try {
     globalThis.__rebuild();
   }
 
+  // Light mode has to change what is DRAWN, not only the page chrome.
+  //
+  // The drawings are SVG with explicit stroke attributes, which a stylesheet
+  // cannot reach, so the colours are mapped in script. If that mapping ever
+  // stops being applied the page turns white and the wing stays dark on it.
+  {
+    const S9 = globalThis.__S;
+    const strokesIn = (id) => {
+      const out = new Set();
+      const walk = (n) => {
+        if (!n) return;
+        if (n.attrs && n.attrs.stroke) out.add(n.attrs.stroke);
+        for (const c of n.children || []) walk(c);
+      };
+      walk(document.getElementById(id));
+      return out;
+    };
+    S9.theme = 'dark'; globalThis.__rebuild();
+    const dark = strokesIn('vp-plan');
+    S9.theme = 'light'; globalThis.__rebuild();
+    const light = strokesIn('vp-plan');
+    const shared = [...dark].filter((c) => light.has(c));
+    if (!dark.size || shared.length) {
+      console.log(`  FAIL light mode shares ${shared.length} stroke colours `
+        + `with dark (${shared.slice(0, 3).join(' ')})`);
+      process.exit(1);
+    }
+    console.log(`  ok   light mode redraws all ${dark.size} stroke colours`);
+    S9.theme = 'dark'; globalThis.__rebuild();
+  }
+
+  // Every viewport can be saved, and a new one gets the control without
+  // anyone remembering to add it.
+  {
+    const ids = ['vp-plan', 'vp-front', 'vp-section', 'vp-cut', 'vp-rib',
+      'vp-diag', 'vp-lineplan', 'vp-polar', 'vp-atmos'];
+    const missing = ids.filter((id) => {
+      const svg = document.getElementById(id);
+      if (!svg || !svg.parentNode) return false;
+      const lbl = svg.parentNode.querySelector
+        ? svg.parentNode.querySelector('.vp-label') : null;
+      return !lbl || !(lbl.children || []).some((c) => c.className === 'vp-save');
+    });
+    if (missing.length) {
+      console.log(`  FAIL ${missing.length} viewports have no save control: `
+        + missing.join(', '));
+      process.exit(1);
+    }
+    console.log(`  ok   all ${ids.length} viewports can be saved as SVG or PNG`);
+  }
+
   const baseline = pressAll();
   const probes = [
     // The assumptions made adjustable. A control that changes nothing is
     // worse than no control: it says the user has a choice when they do not.
+    ['theme', () => { S2.theme = S2.theme === 'light' ? 'dark' : 'light'; }],
     ['vribMinLength', () => { S2.vribMinLength = S2.vribMinLength ? 0 : 150; }],
     ['clothRib', () => { S2.clothRib = S2.clothRib === 'Porcher Skytex 40 hard' ? 'Porcher Skytex 38' : 'Porcher Skytex 40 hard'; }],
     ['useCascadeSpec', () => { S2.useCascadeSpec = !S2.useCascadeSpec; }],
