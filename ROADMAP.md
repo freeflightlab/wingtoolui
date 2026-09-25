@@ -362,6 +362,11 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **The diagonals view drew every fibre red** — it measured the load
+      against the diagonal's own axis rather than the line. No test could see
+      it: the drawing was checked by element count and the stub DOM threw
+      attributes away. The stub records them now and the colours are checked.
+
 - [x] **Does it sew?** — every panel checked against the ribs it is sewn to,
       and against its neighbour: 0.006 mm worst. The front view is
       dimensioned and its figures held to the model's. See `docs/panels.md`.

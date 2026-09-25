@@ -2050,7 +2050,17 @@ function drawDiagonals() {
     return;
   }
 
-  const tension = checkDiagonalTension(M.vribs.vribs);
+  // The load is the LINE's, so the maillon has to be passed in.
+  //
+  // Without it `checkDiagonalTension` falls back to the diagonal's own axis.
+  // That used to read as every fibre perfectly aligned; once the sign was
+  // corrected — a fibre works by opposing the pull, not following it — the
+  // same fallback read as every fibre slack, and the whole view went red.
+  //
+  // 8 of 240 fibres drawn blue against 160 with the maillon. The drawing was
+  // reporting the fallback, not the wing.
+  const tension = checkDiagonalTension(M.vribs.vribs,
+    M.linePlan && M.linePlan.maillon ? { maillon: M.linePlan.maillon } : {});
   // Which diagonals are not a buildable size or angle, so the designer sees
   // them on the drawing rather than only in a report.
   const geom = diagonalGeometry(M.vribs.vribs);

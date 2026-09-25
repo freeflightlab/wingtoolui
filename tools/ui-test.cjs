@@ -37,7 +37,14 @@ const created = [];
 function mk(tag='div'){
   const n = {
     tagName:tag, children:[], _text:'', className:'', style:{}, files:[],
-    setAttribute(){}, getAttribute(){throw new Error('stub DOM: getAttribute is not implemented; it can only ever return null.');},
+    // Attributes are RECORDED, not discarded.
+    //
+    // `setAttribute(){}` threw everything away, so nothing could check what
+    // colour or width a thing was drawn at. The diagonals view rendered every
+    // fibre red for a whole release and no test could have seen it: the
+    // drawing was testable only by element count, and the count was right.
+    attrs: {},
+    setAttribute(k, v){ n.attrs[k] = v; }, getAttribute(){throw new Error('stub DOM: getAttribute is not implemented; it can only ever return null.');},
     addEventListener(){}, removeEventListener(){},
     append(...c){ c.forEach(x=>{ if(x&&typeof x==='object') n.children.push(x); }); },
     appendChild(c){ n.children.push(c); return c; },
@@ -513,6 +520,47 @@ try {
     }
     console.log(`  ok   the front view draws the real plan, `
       + `${m.linePlan.lines.length} lines`);
+  }
+
+  // What colour things are actually drawn.
+  //
+  // The diagonals view shades each fibre blue where the fabric carries load
+  // and red where it does not. It rendered EVERY fibre red for a release,
+  // because the view called `checkDiagonalTension` without a maillon and so
+  // measured against the diagonal's own axis rather than the line.
+  //
+  // No test could have caught it: the drawing was only ever checked by
+  // element count, and the count was right. The stub threw attributes away.
+  {
+    const S0 = globalThis.__S;
+    const wasV = S0.vribs;
+    S0.vribs = true;
+    globalThis.__rebuild();
+    globalThis.__tab('structure');
+    let red = 0;
+    let blue = 0;
+    const walk = (n) => {
+      if (!n) return;
+      const stroke = n.attrs && n.attrs.stroke;
+      if (stroke === '#ff5e5e') red++;
+      if (stroke === '#5ec8ff') blue++;
+      for (const c of n.children || []) walk(c);
+    };
+    walk(document.getElementById('vp-diag'));
+    if (blue + red === 0) {
+      console.log('  FAIL the diagonals view drew no fibres at all');
+      process.exit(1);
+    }
+    if (blue === 0) {
+      console.log(`  FAIL every diagonal fibre drew red (${red} of ${red}); `
+        + 'the load direction is not the line\'s');
+      process.exit(1);
+    }
+    console.log(`  ok   diagonal fibres shaded by load: ${blue} carrying, `
+      + `${red} not`);
+    S0.vribs = wasV;
+    globalThis.__tab('wing');
+    globalThis.__rebuild();
   }
 
   const baseline = pressAll();

@@ -119,3 +119,33 @@ Verified in both directions by scaling a label by 10% and watching it fail:
 ```
 FAIL anchor A is drawn at 218 mm, model says 198 mm
 ```
+
+---
+
+## 6. Colour was never checked
+
+The diagonals view shades each fibre blue where the fabric carries load and
+red where it does not. **It drew every fibre red for a whole release.**
+
+Two things had to be wrong at once. The view called `checkDiagonalTension`
+without a maillon, so the load direction fell back to the diagonal's own axis
+— and once the sign was corrected, so that a fibre works by *opposing* the
+pull rather than following it, that fallback meant nothing opposed anything.
+8 of 240 fibres blue, against 160 with the real line direction.
+
+No test could have caught it. The drawing was only ever checked by **element
+count**, and the count was right: 3140 elements either way. The stub DOM's
+`setAttribute` was an empty function, so every colour, width and dash the tool
+drew was discarded before anything could look at it.
+
+The stub records attributes now, and the interface test counts the two colours
+and fails if nothing is drawn as carrying load. Verified by reverting the fix:
+
+```
+FAIL every diagonal fibre drew red (2880 of 2880);
+     the load direction is not the line's
+```
+
+That is the fourth defect this project has had where the output looked
+plausible and the check could not see it. The pattern each time is the same:
+the test measured something adjacent to what mattered.
