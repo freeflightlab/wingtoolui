@@ -599,6 +599,56 @@ try {
     globalThis.__rebuild();
   }
 
+  // A published cell count is the TOTAL across the wing. `S.cells` is the
+  // count for one half — the slider says so and the LEP export doubles it.
+  //
+  // The picker read `Math.round(r.cells / 2) * 2`, which rounds to the
+  // nearest even number and halves nothing: the `* 2` undoes the `/ 2`. Every
+  // reference wing was built with twice its published count, and the big ones
+  // hit the clamp at 60 per half, so a 78-cell Zeno 2 and a 72-cell Allegro
+  // came out identical at 120.
+  //
+  // Nothing caught it because every check was internally consistent — the
+  // tool agreed with itself all the way down.
+  {
+    const S1 = globalThis.__S;
+    const wasRef = S1.reference;
+    const cases = [
+      ['Ozone Ultralite 5 17', 34, 8.8],
+      ['Ozone Geo 7 XS', 48, 10.69],
+      ['Ozone Zeno 2 S', 78, null],
+    ];
+    for (const [ref, publishedCells, publishedSpan] of cases) {
+      S1.reference = ref;
+      globalThis.__rebuild();
+      const m = globalThis.__getM();
+      const builtTotal = S1.cells * 2;
+      if (builtTotal !== publishedCells) {
+        console.log(`  FAIL ${ref} builds ${builtTotal} cells; published is `
+          + `${publishedCells}`);
+        process.exit(1);
+      }
+      // Ribs are cells+1 on the half wing, centre rib included.
+      if (m.wing.ribs.length !== S1.cells + 1) {
+        console.log(`  FAIL ${ref} has ${m.wing.ribs.length} ribs for `
+          + `${S1.cells} half-wing cells`);
+        process.exit(1);
+      }
+      // Span is a total too, and was always handled correctly — checked here
+      // so the two conventions are pinned side by side.
+      if (publishedSpan !== null
+        && Math.abs(m.metrics.span - publishedSpan) > 0.02) {
+        console.log(`  FAIL ${ref} spans ${m.metrics.span.toFixed(2)} m; `
+          + `published is ${publishedSpan}`);
+        process.exit(1);
+      }
+    }
+    console.log(`  ok   ${cases.length} reference wings build their published `
+      + 'cell count and span');
+    S1.reference = wasRef;
+    globalThis.__rebuild();
+  }
+
   const baseline = pressAll();
   const probes = [
     // The assumptions made adjustable. A control that changes nothing is

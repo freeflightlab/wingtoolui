@@ -8720,6 +8720,73 @@ section('Against the certification flight tests');
 }
 
 // ---------------------------------------------------------------------------
+section('Half the wing, or all of it');
+
+{
+  // The tool models ONE HALF and reports some things for the whole. Getting
+  // which is which wrong is invisible, because every part agrees with every
+  // other part all the way down.
+  //
+  // It was wrong in one place. The reference picker fed a manufacturer's
+  // TOTAL cell count into `S.cells`, which is the count for one half, so
+  // every reference wing was built with twice its published cells — a
+  // 34-cell Ultralite 5 as 68, a 48-cell Geo 7 as 96. The expression read
+  // `Math.round(r.cells / 2) * 2`, which rounds to the nearest even number
+  // and halves nothing.
+  const pfH = planformFromDesignInputs({
+    span: 10, rootChord: 2, tipChord: 0.5, tipSweep: 1,
+  });
+  const mH = planformMetrics(pfH);
+  const afH = naca4('4415');
+  afH.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const wH = buildWing({
+    planform: pfH, lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, 5),
+    airfoil: afH, cells: 20, pointsPerSurface: 24,
+  });
+
+  // Whole wing.
+  near('span is the whole wing', mH.span, 10, 1e-6, ' m');
+  check('and area is too', mH.area > 10, `${mH.area.toFixed(2)} m2`);
+
+  // Half wing.
+  check('ribs are one half plus the centre rib',
+    wH.ribs.length === 21, `${wH.ribs.length} for 20 half-wing cells`);
+  check('and the last rib sits at the half-span, not the span',
+    Math.abs(wH.ribs[wH.ribs.length - 1].station - 5) < 0.01,
+    `${wH.ribs[wH.ribs.length - 1].station.toFixed(2)} m`);
+
+  const panelsH = developWing(wH);
+  check('panels are one half, both surfaces',
+    panelsH.length === 40, `${panelsH.length}`);
+
+  // The bill has to put the two halves back together, or a builder orders
+  // half the cloth. It does.
+  //  takes the wing and its panels; it reads the planform through
+  // the wing. Passing planform and airfoil as well was silently ignored, and
+  // the options check caught it in this very test.
+  const bomH = buildBOM({ wing: wH, panels: panelsH });
+  const wholeSail = mH.area * (DEFAULT_CLOTH.upperSail + DEFAULT_CLOTH.lowerSail);
+  check('the bill covers the whole wing, not the half it modelled',
+    bomH.totals.fabricMassKg > wholeSail * 0.95,
+    `${bomH.totals.fabricMassKg.toFixed(2)} kg against `
+    + `${wholeSail.toFixed(2)} kg of sail for the whole wing`);
+  check('and is not double it either',
+    bomH.totals.fabricMassKg < wholeSail * 1.5,
+    `${bomH.totals.fabricMassKg.toFixed(2)} kg`);
+
+  // An imported design states the total and stores the half, which is the
+  // convention the parametric path should have followed.
+  const lepH = lepToDesign(parseLep(
+    readFileSync('data/reference/lep/swoop2-20260829.lep', 'utf8')));
+  check('an imported design states the total cell count',
+    lepH.geometry.cells === 50 && lepH.geometry.halfCells === 25,
+    `${lepH.geometry.cells} total, ${lepH.geometry.halfCells} per half`);
+  check('and stores one half of the ribs',
+    lepH.geometry.ribs.length === lepH.geometry.halfCells + 1,
+    `${lepH.geometry.ribs.length} ribs for ${lepH.geometry.halfCells} half-cells`);
+}
+
+// ---------------------------------------------------------------------------
 section('The reference set against the manufacturers');
 
 {

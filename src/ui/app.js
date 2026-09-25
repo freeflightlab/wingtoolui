@@ -102,7 +102,19 @@ function applyReference() {
   S.rootChord = r.inputs.rootChord;
   S.tipChord = r.inputs.tipChord;
   S.tipSweep = r.inputs.tipSweep;
-  S.cells = Math.max(8, Math.min(60, Math.round(r.cells / 2) * 2));
+  // `S.cells` is the count for ONE HALF of the wing — the slider says so and
+  // the LEP export doubles it. A manufacturer publishes the TOTAL.
+  //
+  // This read `Math.round(r.cells / 2) * 2`, which rounds to the nearest even
+  // number and does not halve anything: the `* 2` undoes the `/ 2`. Every
+  // reference wing was built with twice its published cell count — a 34-cell
+  // Ultralite 5 as 68, a 48-cell Geo 7 as 96 — and the bigger ones hit the
+  // clamp, so a 78-cell Zeno 2 and a 72-cell Allegro were both built as 120.
+  //
+  // Rib spacing follows the cell count, and everything built on the ribs
+  // follows the spacing: panel widths, diagonal sizes, anchor positions, the
+  // lot. The clamp also meant four different wings came out identical.
+  S.cells = Math.max(4, Math.min(60, Math.round(r.cells / 2)));
   S.projectedRatio = r.projectedRatio;
   S.name = S.reference.replace(/\s+/g, '-');
   S._referenceNote = `${S.reference}: ${entry.flatArea} m² published. Size only — `
