@@ -119,5 +119,25 @@ The area and aspect-ratio differences are the parametric planform
 approximating a real shape, which the tool already states as "size only —
 these are defaults, not this wing's".
 
-`published-specs.tsv` now covers 18 sizes across three families — 108 figures,
-zero disagreements with the reference data.
+### What a maker does not publish
+
+`published-specs.tsv` covers 23 sizes across four families: **133 published
+figures, zero disagreements.**
+
+A dash means the maker does not publish that figure. BGD give area, span,
+aspect ratio, cells and projected area but not root chord.
+
+I filled those five chords in from area and span, and the check reported five
+disagreements — my arithmetic against an estimate already in the reference
+data. **Neither side was a published number.** A cross-check that compares two
+guesses is worse than no cross-check, because it reads like evidence.
+
+Five figures are now blank rather than invented, and a test asserts that at
+least some are, so the discipline cannot quietly lapse.
+
+### The centre cell through the pipeline
+
+A feature that works in isolation is not one that works downstream. The centre
+cell is nested with everything else, paid for in the bill, reaches the cutting
+file, leaves the rib count untouched and carries a line plan — asserted, not
+assumed, because the missing centre panel was exactly that kind of gap.

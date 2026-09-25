@@ -8730,6 +8730,8 @@ section('A cell on the centreline');
   const pfC = planformFromDesignInputs({
     span: 11.31, rootChord: 2.35, tipChord: 0.5, tipSweep: 1.3,
   });
+  const afC2 = naca4('4415');
+  afC2.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
   const build = (centreRib) => buildWing({
     planform: pfC,
     lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfC.halfSpan),
@@ -8804,6 +8806,41 @@ section('A cell on the centreline');
   // The wing carries the fact, so anything walking the ribs knows.
   check('the wing says which kind it is',
     withCell.centreRib === false && withRib.centreRib === true);
+
+  // A feature that works in isolation is not the same as one that works
+  // downstream. The centre cell has to survive everything built on the
+  // panels, or a builder gets a cutting file that is missing a piece.
+  const nestRib = nestByProfile(panelsRib, { rollWidth: 1.4, gap: 0.03 });
+  const nestCell = nestByProfile(panelsCell, { rollWidth: 1.4, gap: 0.03 });
+  check('the centre cell is nested with everything else',
+    nestCell.lengthM > nestRib.lengthM,
+    `${nestRib.lengthM.toFixed(2)} m becomes ${nestCell.lengthM.toFixed(2)} m `
+    + 'of roll');
+
+  const bomRib = buildBOM({ wing: withRib, panels: panelsRib });
+  const bomCell = buildBOM({ wing: withCell, panels: panelsCell });
+  check('and it is paid for in the bill',
+    bomCell.totals.fabricMassKg > bomRib.totals.fabricMassKg,
+    `${bomRib.totals.fabricMassKg.toFixed(3)} kg becomes `
+    + `${bomCell.totals.fabricMassKg.toFixed(3)} kg`);
+
+  check('and it reaches the cutting file',
+    panelsToDXF(panelsCell).length > panelsToDXF(panelsRib).length);
+
+  // The ribs are unchanged in number, so anything indexed by rib is not
+  // disturbed by the extra cell.
+  const holesRib = buildAllRibHoles(withRib, naca4('4415'));
+  const holesCell = buildAllRibHoles(withCell, naca4('4415'));
+  check('the rib count is untouched by the centre cell',
+    holesCell.sets.length === holesRib.sets.length,
+    `${holesCell.sets.length} rib hole sets either way`);
+
+  const planCell = buildLinePlan({
+    wing: withCell, airfoil: afC2, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  check('and the line plan builds on it',
+    planCell.lines.length > 0, `${planCell.lines.length} lines`);
 }
 
 // ---------------------------------------------------------------------------
@@ -8891,7 +8928,7 @@ section('The reference set against the manufacturers');
     .map((l) => l.split('\t'));
 
   check('the published specifications are loaded',
-    pubRows.length >= 18, `${pubRows.length} sizes`);
+    pubRows.length >= 23, `${pubRows.length} sizes`);
 
   // An odd total cell count is a real thing — 65 on the Alpina 5 and the
   // Lynx 2 — and it means a cell straddles the centreline rather than a rib
@@ -8904,6 +8941,7 @@ section('The reference set against the manufacturers');
 
   const disagree = [];
   let figures = 0;
+  let notPublished = 0;
   for (const r of pubRows) {
     const z = (mineF[r[0]] || []).find((x) => String(x.name) === r[1]);
     if (!z) { disagree.push(`${r[0]} ${r[1]} is missing from size-families`); continue; }
@@ -8916,6 +8954,14 @@ section('The reference set against the manufacturers');
       ['projected area', z.projectedArea, Number(r[7]), 0.06],
     ];
     for (const [what, mineV, pubV, tol] of pairs) {
+      // A dash means the maker does not publish that figure.
+      //
+      // I filled BGD's root chords in from area and span, and the check
+      // reported five disagreements — my arithmetic against an estimate
+      // already in the reference data. Neither side was a published number.
+      // A cross-check comparing two guesses is worse than none, because it
+      // reads like evidence.
+      if (!Number.isFinite(pubV)) { notPublished++; continue; }
       figures++;
       if (Math.abs(mineV - pubV) > tol) {
         disagree.push(`${r[0]} ${r[1]} ${what}: ${mineV} against ${pubV}`);
@@ -8923,10 +8969,13 @@ section('The reference set against the manufacturers');
     }
   }
 
-  check('every figure matches the manufacturer',
+  check('every published figure matches the manufacturer',
     disagree.length === 0,
     disagree.length ? disagree.slice(0, 3).join('; ')
-      : `${figures} figures across ${pubRows.length} sizes`);
+      : `${figures} figures across ${pubRows.length} sizes, `
+        + `${notPublished} not published`);
+  check('and the ones makers do not publish are left out, not guessed',
+    notPublished > 0, `${notPublished} blank`);
 
   // Cell count especially: it sets the rib spacing, and everything built on
   // the ribs follows it.

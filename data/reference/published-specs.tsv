@@ -3,6 +3,16 @@
 # Retrieved: 2026-09-25
 # measure: as-published
 #
+# A dash means the maker does not publish that figure. BGD give area, span,
+# aspect ratio, cells and projected area but not root chord, so the chord
+# column is blank for the Lynx 2 rather than holding a number I worked out.
+#
+# I filled those five in first, from area and span, and the check then
+# reported five disagreements — my arithmetic against an estimate already in
+# the reference data. Neither side was a published figure. A cross-check that
+# compares two guesses is worse than no cross-check, because it reads like
+# evidence.
+#
 # `size-families.tsv` is what this project measures against. Nothing checked
 # that IT was right. These are the manufacturers' own figures, kept separate
 # so the two can disagree: a single file cannot check itself.
@@ -30,3 +40,8 @@ Ozone Alpina 5	MS	65	22.8	11.76	6.07	2.45	19.4
 Ozone Alpina 5	ML	65	24.4	12.16	6.07	2.53	20.7
 Ozone Alpina 5	L	65	25.9	12.53	6.07	2.61	22.04
 Ozone Alpina 5	XL	65	27.8	13.0	6.07	2.71	23.7
+BGD Lynx 2	XS	65	19.5	10.9	6.2	-	16.5
+BGD Lynx 2	S	65	21.0	11.3	6.2	-	17.8
+BGD Lynx 2	M	65	23.0	11.8	6.2	-	19.5
+BGD Lynx 2	ML	65	25.0	12.3	6.2	-	21.2
+BGD Lynx 2	L	65	27.0	12.8	6.2	-	22.9
