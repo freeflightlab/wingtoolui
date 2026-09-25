@@ -41,7 +41,7 @@ src/core/   35 files — the maths — every module the build inlines
      10103  src/core/shaping3d.js
       9694  src/core/trimdrift.js
       2605  src/core/viewfit.js
-     30478  src/core/vribs.js
+     31861  src/core/vribs.js
       8140  src/core/wing3d.js
       9106  src/core/xfoil.js
 
@@ -55,7 +55,7 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
      12786  tests/full-pipeline.mjs
      18515  tests/phase1-audit.mjs
       8205  tests/reference-sweep.mjs
-    486421  tests/run-tests.js
+    489017  tests/run-tests.js
 
 tools/   16 files — build helpers, figures, audit, legacy .xls reader
      23443  tools/audit.mjs
@@ -83,7 +83,7 @@ docs/   33 files — notes on what was validated and what was not
       2545  docs/comparing.md
      19207  docs/construction.md
      20319  docs/departures.md
-     13731  docs/diagonal-ribs.md
+     15679  docs/diagonal-ribs.md
      10686  docs/environment-and-aero.md
       2158  docs/fabric.md
       9515  docs/full-pipeline.md
@@ -156,7 +156,7 @@ data/reference/   133 files — production data used for validation
   vibegt-ML.tsv vibegt-MS.tsv vibegt-S.tsv vibegt-XL.tsv vibegt-XS.tsv zeno2-L.tsv
   zeno2-ML.tsv zeno2-MS.tsv zeno2-S.tsv
 
-234 files, 2197 KB
-sha256 of the tree: b47b0d5bcb670303fd4fa0cf73d2b611
+234 files, 2203 KB
+sha256 of the tree: 6a47b3c3ce8038f2488a5a1e1ba2033e
 
 Verify with:  node tools/audit.mjs

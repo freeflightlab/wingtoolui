@@ -9801,15 +9801,38 @@ function diagonalTension(vrib, { loadDirection = null, maillon = null } = {}) {
     // "alignment" invites them to read a well-oriented diagonal as a badly
     // oriented one.
     //
-    // 1 would be a diagonal pulling directly against the line. Below about
-    // 0.5 it is carrying the load sideways: at 0.34 it needs three times the
-    // tension of a well-aimed one to hold the same anchor.
+    // 1 would be a diagonal pulling straight back against the line, and no
+    // real diagonal reaches it.
+    //
+    // A diagonal spans a cell sideways while rising from the lower surface to
+    // the upper, so its direction is fixed by the cell width against the
+    // section depth. On the test wing that is 0.45 m across and 0.35 m up:
+    // 52 degrees from the pull, and a ceiling of about 0.61. Sweeping the
+    // base along the whole chord of the neighbouring rib moves it from 0.57
+    // to 0.59 — the placement is already near the best that cell allows.
+    //
+    // So this figure means little on its own. `achievable` below is the
+    // bound for that particular cell, and the ratio between them is what
+    // says whether a diagonal is badly placed or merely in a shallow cell.
     alignment: taut.length
       ? Math.abs(taut.reduce((a, f) => a + f.cosine, 0) / taut.length) : 0,
     // How much of the pull is spanwise rather than down. On an arced wing
     // this grows outboard — 3% at the root and 37% by mid-span on the test
     // wing — and it is the part a diagonal has to resist sideways.
     spanwiseShare: Math.abs(u[1]),
+    // The best any one fibre of this diagonal manages against the SAME load.
+    //
+    // My first version measured the rise against the span — the alignment a
+    // diagonal would have if the load were straight down. The load is up to
+    // three quarters spanwise, so that bound belonged to a different problem
+    // and the ratio to it came out near 50% on every wing, which says
+    // nothing about anything.
+    //
+    // Measured against the real load direction it is a bound the diagonal
+    // could actually reach: if the mean is well below it the base is spread
+    // into fabric that is not pulling its weight, and if the best fibre is
+    // itself poor then no placement in this cell will help.
+    achievable: fibres.length ? Math.max(...fibres.map((f) => f.share)) : 0,
     totalShare,
     worstAngleDeg: fibres.length
       ? Math.max(...fibres.map((f) => f.angleDeg)) : 0,

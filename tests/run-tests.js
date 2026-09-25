@@ -7341,6 +7341,61 @@ section('Are the diagonals in tension?');
     worstAim < 0.2,
     `alignment ${worstAim.toFixed(2)}, where 1 pulls straight back`);
 
+  // But the alignment on its own says little, because 1 is unreachable.
+  //
+  // A diagonal spans a cell sideways while rising from the lower surface to
+  // the upper, so its direction is fixed by the cell width against the
+  // section depth. `achievable` is the best any one of its own fibres manages
+  // against the same load, and the ratio is what says whether the base is
+  // placed well.
+  const usedFraction = (c) => {
+    const ds = c.diagonals.map((d) => d.tension).filter((t) => t.achievable > 0);
+    const mean = ds.reduce((a, t) => a + t.alignment, 0) / ds.length;
+    const best = ds.reduce((a, t) => a + t.achievable, 0) / ds.length;
+    return { mean, best, ratio: mean / best };
+  };
+  const uNarrow = usedFraction(narrow.check);
+  const uWide = usedFraction(wide.check);
+  check('a narrow base uses most of what its best fibre achieves',
+    uNarrow.ratio > 0.8,
+    `${(uNarrow.ratio * 100).toFixed(0)}% of ${uNarrow.best.toFixed(2)}`);
+  // A wider base necessarily spreads into fabric further from the best
+  // direction, so it uses less of it. That is the cost of spreading the load
+  // over more of the rib, and it is a trade rather than a fault.
+  check('and a wider one uses less, which is what spreading costs',
+    uWide.ratio < uNarrow.ratio,
+    `${(uNarrow.ratio * 100).toFixed(0)}% narrow against `
+    + `${(uWide.ratio * 100).toFixed(0)}% wide`);
+
+  // So the fix is not the base. It is the cell width: narrower cells rise
+  // more steeply for the same reach, and the alignment goes up with them.
+  const atCells = (cells) => {
+    const pfC = planformFromDesignInputs({
+      span: 11.6, rootChord: 2.45, tipChord: 0.55, tipSweep: 1.4,
+    });
+    const wC = buildWing({
+      planform: pfC,
+      lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfC.halfSpan),
+      airfoil: afV, cells, pointsPerSurface: 24,
+    });
+    const planC = buildLinePlan({
+      wing: wC, airfoil: afV, layout: RISER_LAYOUTS['A/B/C+D'],
+      everyNthRib: 2, lineLengthM: 6.5,
+    });
+    const vC = buildVRibs({
+      wing: wC, airfoil: afV, rows: ['B'], baseSpread: 0.18, maxReach: 1,
+    });
+    return usedFraction(checkDiagonalTension(vC.vribs, { maillon: planC.maillon }));
+  };
+  const few = atCells(20);
+  const many = atCells(40);
+  check('more cells aim the diagonals better at the load',
+    many.mean > few.mean * 1.2,
+    `${few.mean.toFixed(2)} at 20 cells, ${many.mean.toFixed(2)} at 40`);
+  check('and the bound moves with them, so it is the cell doing it',
+    many.best > few.best * 1.2,
+    `${few.best.toFixed(2)} to ${many.best.toFixed(2)}`);
+
   // The limit is the angle: a fibre more than 90 degrees from the load
   // direction would have to push, which fabric cannot do.
   const t = wide.check.worst.tension;

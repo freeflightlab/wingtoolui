@@ -307,10 +307,15 @@ fine.
 | alignment, worst | **0.00** |
 | alignment, best | 0.67 |
 
-An alignment of 1 would be a diagonal pulling straight back against the line.
-Below about 0.5 it is carrying the load sideways; at 0.34 it needs three times
-the tension of a well-aimed one to hold the same anchor. **The worst on the
-test wing resists almost nothing.**
+An alignment of 1 would be a diagonal pulling straight back against the line,
+and **no real diagonal reaches it.** A diagonal spans a cell sideways while
+rising from the lower surface to the upper, so its direction is fixed by the
+cell width against the section depth — about 0.45 m across and 0.35 m up on
+this wing, which is 52 degrees from the pull.
+
+So the figure means little on its own, and my first reading of it — that
+below 0.5 a diagonal is carrying load sideways — set a standard nothing could
+meet.
 
 The spanwise figure is the point: a diagonal outboard is resisting a pull that
 is three quarters sideways. That load was invisible while the direction was
@@ -318,3 +323,50 @@ taken as the diagonal's own axis.
 
 This is recorded as a **known state**, not a pass. It agrees with the geometry
 check, which flags most of the same pieces as unbuildable.
+
+---
+
+## 12. It is the cell, not the placement
+
+Having measured that the diagonals are badly aimed, the obvious next move was
+to place them better. **It gains almost nothing.**
+
+Sweeping the base along the entire chord of the neighbouring rib moves the
+alignment from 0.57 to 0.59. The base is already within a couple of per cent
+of the best that cell allows.
+
+`achievable` reports that bound — the best any one of the diagonal's own
+fibres manages against the same load — and the ratio to the mean is what says
+whether the base is well placed:
+
+| base width | mean alignment | best fibre | ratio |
+| --- | --- | --- | --- |
+| 18% of chord | 0.34 | 0.40 | **87%** |
+| 45% of chord | — | — | **73%** |
+
+A wider base necessarily spreads into fabric further from the best direction.
+That is the cost of spreading load over more of the rib, and it is a trade
+rather than a fault.
+
+### What does work
+
+Narrower cells. They rise as steeply for a shorter reach, so the diagonal
+points more against the load:
+
+| cells | mean alignment | best fibre |
+| --- | --- | --- |
+| 20 | 0.34 | 0.40 |
+| 40 | **0.46** | 0.53 |
+| 60 | 0.46 | 0.52 |
+
+Both move together, which is what says the cell is doing it rather than the
+placement. **A designer whose diagonals are poorly aimed should add cells, not
+adjust the base.**
+
+### A bound measured against the wrong thing
+
+My first `achievable` compared the diagonal's rise against its span — the
+alignment it would have if the load were straight down. The load is up to
+three quarters spanwise, so that bound belonged to a different problem, and
+the ratio to it came out near 50% on every wing regardless. A number that does
+not move is not measuring anything.
