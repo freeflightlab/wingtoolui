@@ -231,3 +231,27 @@ recognise that an unfamiliar scheme is worth capturing verbatim.
 | stabilo | `sa1` `st3` | UP names it; most makers do not |
 
 Brake lines appear as `K`, `Br`, `br` or `BR` depending on maker.
+
+---
+
+## 9. Checking the reference set itself
+
+`size-families.tsv` is what this project measures everything against — cell
+counts, areas, spans, chords. **Nothing checked that it was right.** A wrong
+cell count there would quietly bend every result that depends on rib spacing,
+and it would look like a modelling error rather than a typo.
+
+`published-specs.tsv` holds the manufacturers' own tables, transcribed
+separately. A single file cannot check itself.
+
+**72 figures across 12 sizes, zero disagreements.** The Ultralite 5 is 34
+cells and the Geo 7 is 48, both as published, and every area, span, aspect
+ratio, root chord and projected area matches too.
+
+Where a maker's manual and website differ slightly — the Geo 7 manual says
+22.1 m² and AR 5.15 where the website says 22.2 and 5.16 — the website table
+is used, because that is what it says. Inventing a reconciliation would hide
+the difference.
+
+Only two families are covered so far. The other nine in the reference set are
+still unchecked against their makers, and that is the next piece of this work.

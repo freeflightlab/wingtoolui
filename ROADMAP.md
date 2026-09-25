@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1779-test validation suite and a benchmark with regression budgets
+- [x] 1783-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,14 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **The reference set checked against the manufacturers** —
+      `published-specs.tsv`, transcribed separately so the two can disagree.
+      72 figures across the Ultralite 5 and Geo 7, zero disagreements.
+- [x] **The Swoop2 works as a complete design** — every view and all 30
+      exports run on it, 17 files, asserted in the interface test.
+- [ ] **The other nine families checked against their makers** — only the
+      Ultralite 5 and Geo 7 are covered so far.
 
 - [x] **The outboard diagonal collapses towards the tip** — 75 mm by rib 12,
       because the rib tilt cancels the cell gap. `minLengthM` skips them,

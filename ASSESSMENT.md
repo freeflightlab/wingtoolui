@@ -26,7 +26,7 @@ demonstrating the method. Flat area, span, root chord, cell and rib counts
 reproduce **exactly**. 37 LEP sections parse. Its published per-line loads
 close at every cascade level.
 
-**Against 21 wings from six manufacturers**, 135 reference files. Every line
+**Against 21 wings from six manufacturers**, 136 reference files. Every line
 sheet is held to five physical invariants, not merely parsed. The
 anchor-density table the generator calibrates against is **measured from the
 corpus**, not hand-entered — 27 designs, and a check stage fails if the
@@ -86,7 +86,7 @@ by it.
 
 ## 5. What is missing
 
-**39 open items.** The substantial ones:
+**40 open items.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.

@@ -107,6 +107,12 @@ global.requestAnimationFrame = (f)=>setTimeout(f,0);
 
 let errors = [];
 const origErr = console.error;
+// Buttons that REPLACE the design rather than export from it. They are kept
+// out of the export sweeps — loading a 50-cell wing part way through means
+// every rebuild after it runs on a different wing — and exercised on their
+// own.
+const REPLACES_DESIGN = /^(Load the Swoop2|Import LEP|Return to parametric)/;
+
 try {
   new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__REFERENCE_TOTALS=typeof REFERENCE_TOTALS==="object"?REFERENCE_TOTALS:{}; globalThis.__parseDXF=parseDXF; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
 } catch(e){ errors.push('boot: '+e.message+'\n'+e.stack.split('\n').slice(0,4).join('\n')); }
@@ -313,6 +319,37 @@ try {
     // stop the test finishing at all. Leaving an imported design in place
     // would also mean those probes were testing a different wing from the one
     // they were written for.
+    // A complete design has to survive every view and every export, not just
+    // load. It is the one wing this project reproduces exactly, so if
+    // anything only works on parametric geometry it shows up here.
+    for (const tb of ['wing', 'lines', 'structure', 'rib', 'analysis']) {
+      try { globalThis.__tab(tb); }
+      catch (e) {
+        console.log(`  FAIL the Swoop2 breaks the ${tb} view: ${e.message}`);
+        process.exit(1);
+      }
+    }
+    globalThis.__saved = {};
+    const failedOnSwoop = [];
+    let ranOnSwoop = 0;
+    for (const b of globalThis.__buttons.slice()
+      .filter((x) => !REPLACES_DESIGN.test(x.text))) {
+      try { b.fn(); ranOnSwoop++; }
+      catch (e) { failedOnSwoop.push(`${b.text}: ${e.message.slice(0, 50)}`); }
+    }
+    if (failedOnSwoop.length) {
+      console.log(`  FAIL ${failedOnSwoop.length} exports fail on the Swoop2: `
+        + failedOnSwoop.slice(0, 3).join(' | '));
+      process.exit(1);
+    }
+    const swoopFiles = Object.keys(globalThis.__saved).length;
+    if (swoopFiles < 10) {
+      console.log(`  FAIL the Swoop2 only produced ${swoopFiles} files`);
+      process.exit(1);
+    }
+    console.log(`  ok   and every view and export works on it: `
+      + `${ranOnSwoop} exports, ${swoopFiles} files`);
+
     globalThis.__setLEP(null);
     globalThis.__rebuild();
     const back = globalThis.__getM();
@@ -384,7 +421,6 @@ try {
     //
     // Pressing it here would not be testing the exports anyway; it changes
     // the subject. It is exercised on its own below.
-    const REPLACES_DESIGN = /^(Load the Swoop2|Import LEP|Return to parametric)/;
     const snapshot = globalThis.__buttons.slice()
       .filter((b) => !REPLACES_DESIGN.test(b.text));
     for (const b of snapshot) { try { b.fn(); } catch (e) { /* reported above */ } }

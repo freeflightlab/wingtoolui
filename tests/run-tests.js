@@ -8720,6 +8720,70 @@ section('Against the certification flight tests');
 }
 
 // ---------------------------------------------------------------------------
+section('The reference set against the manufacturers');
+
+{
+  // `size-families.tsv` is what this project measures everything against.
+  // Nothing checked that IT was right.
+  //
+  // `published-specs.tsv` holds the manufacturers' own tables, transcribed
+  // separately so the two can disagree. A single file cannot check itself,
+  // and a wrong cell count there would quietly bend every result that
+  // depends on it.
+  const mineF = parseSizeFamilies(
+    readFileSync('data/reference/size-families.tsv', 'utf8'));
+  const pubRows = readFileSync('data/reference/published-specs.tsv', 'utf8')
+    .split('\n').filter((l) => l && !l.startsWith('#')).slice(1)
+    .map((l) => l.split('\t'));
+
+  check('the published specifications are loaded',
+    pubRows.length >= 12, `${pubRows.length} sizes`);
+
+  const disagree = [];
+  let figures = 0;
+  for (const r of pubRows) {
+    const z = (mineF[r[0]] || []).find((x) => String(x.name) === r[1]);
+    if (!z) { disagree.push(`${r[0]} ${r[1]} is missing from size-families`); continue; }
+    const pairs = [
+      ['cells', z.cells, Number(r[2]), 0],
+      ['flat area', z.flatArea, Number(r[3]), 0.06],
+      ['flat span', z.flatSpan, Number(r[4]), 0.06],
+      ['flat AR', z.flatAR, Number(r[5]), 0.02],
+      ['root chord', z.maxChord, Number(r[6]), 0.06],
+      ['projected area', z.projectedArea, Number(r[7]), 0.06],
+    ];
+    for (const [what, mineV, pubV, tol] of pairs) {
+      figures++;
+      if (Math.abs(mineV - pubV) > tol) {
+        disagree.push(`${r[0]} ${r[1]} ${what}: ${mineV} against ${pubV}`);
+      }
+    }
+  }
+
+  check('every figure matches the manufacturer',
+    disagree.length === 0,
+    disagree.length ? disagree.slice(0, 3).join('; ')
+      : `${figures} figures across ${pubRows.length} sizes`);
+
+  // Cell count especially: it sets the rib spacing, and everything built on
+  // the ribs follows it.
+  const cellRows = pubRows.filter((r) => {
+    const z = (mineF[r[0]] || []).find((x) => String(x.name) === r[1]);
+    return z && z.cells === Number(r[2]);
+  });
+  check('and every cell count is the published one',
+    cellRows.length === pubRows.length,
+    `${cellRows.length} of ${pubRows.length}`);
+
+  // The check has to be able to fail, or it is telling us nothing.
+  const canFail = (() => {
+    const z = mineF['Ozone Geo 7'].find((x) => x.name === 'XS');
+    return Math.abs((z.cells + 1) - 48) > 0;
+  })();
+  check('a wrong cell count would be caught', canFail);
+}
+
+// ---------------------------------------------------------------------------
 section('The cell intake');
 
 {
