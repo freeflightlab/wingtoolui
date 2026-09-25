@@ -78,6 +78,7 @@ const S = {
   showIntake: false, intakeLower: 9, intakeUpper: 1,
   packer: 'profile',
   vribs: true, vribRows: 'BC', vribSpread: 18, vribReach: 1,
+  vribMinLength: 0,
   mergeRows: 'none',
   ovalAmount: 6.0, seamAllowance: 10, pointsPerSurface: 50,
   rollWidth: 1.40, panelGap: 3.0, applyOval: true,
@@ -168,6 +169,9 @@ function rebuild() {
         anchorRibs: wing.ribs.map((_, i) => i).filter((i) => i % 2 === 0),
         rows: S.vribRows.split(''),
         baseSpread: S.vribSpread / 100,
+        // Below this a diagonal is not worth making. Off by default: it can
+        // leave a rib unsupported, and `unsupportedRibs` says so when it does.
+        minLengthM: S.vribMinLength / 1000,
         maxReach: S.vribReach,
       })
       : { vribs: [], count: 0, totalAreaM2: 0, unsupportedRibs: [] };
@@ -700,6 +704,12 @@ function buildControls() {
       ['B', 'B'], ['C', 'C'], ['BC', 'B and C'],
     ]);
     slider(IN, 'vribSpread', 'Diagonal base width', 6, 40, 1, (v) => v.toFixed(0), '% c');
+    numberField(IN, 'vribMinLength', 'Skip diagonals shorter than (mm)', 0, 400, 10);
+    hint(IN, 'The outboard leg collapses towards the tip — 75 mm by rib 12 on '
+      + 'a typical wing — because the rib tilt cancels the cell gap. Nobody '
+      + 'sews a 75 mm triangle. Skipping them evens up the sizes, but can '
+      + 'leave a rib with nothing holding it, and the note below says when it '
+      + 'does. 0 places them all.');
     slider(IN, 'vribReach', 'Diagonal reach', 1, 3, 1, (v) => `${v} cell${v > 1 ? 's' : ''}`);
   }
 

@@ -7224,6 +7224,81 @@ section('The built shape and the flying shape');
 }
 
 // ---------------------------------------------------------------------------
+section('Not placing a diagonal that has collapsed');
+
+{
+  // The outboard leg degenerates towards the tip. A rib on an arc is tilted,
+  // so its thickness has a spanwise component, and going outboard that offset
+  // SUBTRACTS from the rib gap. Towards the tip the dihedral grows while the
+  // cells narrow, and the two cancel:
+  //
+  //     rib  4   inboard 675 mm   outboard 346 mm
+  //     rib  8   inboard 661 mm   outboard 155 mm
+  //     rib 12   inboard 531 mm   outboard  75 mm
+  const wingN = demoWing();
+  const afN = naca4('4415');
+  afN.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const at = (minLengthM) => {
+    const v = buildVRibs({
+      wing: wingN, airfoil: afN, rows: ['B'], baseSpread: 0.18,
+      maxReach: 1, minLengthM,
+    });
+    return { v, geom: diagonalGeometry(v.vribs) };
+  };
+
+  const none = at(0);
+  const dflt = at(0.12);
+
+  check('placing every diagonal the rule asks for gives a huge size spread',
+    none.geom.spread > 6,
+    `${(none.geom.shortestM * 1000).toFixed(0)} to `
+    + `${(none.geom.longestM * 1000).toFixed(0)} mm`);
+
+  // Nobody cuts, marks and sews a 75 mm triangle. It adds two seams and some
+  // weight and carries almost nothing, and the inboard leg at the same rib
+  // already holds that anchor.
+  check('the collapsed ones are not placed',
+    dflt.v.skipped.length > 0,
+    `${dflt.v.skipped.length} skipped of ${none.v.vribs.length}`);
+  check('and every one skipped really was below the limit',
+    dflt.v.skipped.every((sk) => sk.lengthM < 0.12));
+  check('so the sizes that remain are far more alike',
+    dflt.geom.spread < none.geom.spread * 0.7,
+    `${none.geom.spread.toFixed(1)} to 1 becomes `
+    + `${dflt.geom.spread.toFixed(1)} to 1`);
+  check('and fewer are flagged as unbuildable',
+    dflt.geom.problems < none.geom.problems,
+    `${none.geom.problems} becomes ${dflt.geom.problems}`);
+
+  // The safety question: skipping must not leave a rib with nothing holding
+  // it. At the default it does not.
+  check('no rib is left unsupported at the default limit',
+    dflt.v.unsupportedRibs.length === 0,
+    `unsupported: ${JSON.stringify(dflt.v.unsupportedRibs)}`);
+
+  // Pushed too far it does, and the existing check catches it — which is what
+  // makes the limit safe to expose as a control.
+  const greedy = at(0.40);
+  check('and pushing the limit too far is caught, not silently accepted',
+    greedy.v.unsupportedRibs.length > 0,
+    `at 400 mm, ribs ${JSON.stringify(greedy.v.unsupportedRibs)} have nothing`);
+
+  // Zero keeps the old behaviour, so an existing design is not silently
+  // changed by the new default.
+  // Opt-in: the default places them all, so an existing design is not
+  // silently changed. Turning it on by default left a rib unsupported on a
+  // row and reach combination I had not checked, which is exactly the kind
+  // of change that should not arrive uninvited.
+  const asShipped = buildVRibs({
+    wing: wingN, airfoil: afN, rows: ['B'], baseSpread: 0.18, maxReach: 1,
+  });
+  check('the default still places every diagonal the rule asks for',
+    asShipped.skipped.length === 0
+    && asShipped.vribs.length === none.v.vribs.length,
+    `${asShipped.vribs.length} placed, ${asShipped.skipped.length} skipped`);
+}
+
+// ---------------------------------------------------------------------------
 section('Are the diagonals buildable?');
 
 {

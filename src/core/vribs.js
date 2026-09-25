@@ -58,6 +58,17 @@ export function buildVRibs({
   anchorRibs = null,
   rows = ['B', 'C'],
   baseSpread = 0.18,
+  // Below this a diagonal is not worth making, so it is not placed.
+  //
+  // Defaults to 0 — place one wherever the rule says — because turning it on
+  // by default changes an existing design without being asked. Setting it to
+  // 0.12 on the test wing skips 5 of 20 and cuts the size spread from 9.2:1
+  // to 5.4:1, but on other row and reach combinations it can leave a rib with
+  // nothing holding it, which `unsupportedRibs` reports.
+  //
+  // So it is a choice a designer makes and checks, not a new default they
+  // inherit.
+  minLengthM = 0,
   points = 12,
   surface = 'upper',
   maxReach = 1,
@@ -69,6 +80,8 @@ export function buildVRibs({
   const fractions = airfoil.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
 
   const out = [];
+  // Diagonals the rule asked for that came out too small to be worth making.
+  const skipped = [];
 
   for (const i of anchors) {
     for (const row of rows) {
@@ -120,6 +133,34 @@ export function buildVRibs({
           base.push(pointAt(ribs[j][surface], Math.min(0.98, Math.max(0.02, t))));
         }
 
+          // A diagonal that has collapsed is not placed at all.
+          //
+          // The outboard leg degenerates towards the tip. A rib on an arc is
+          // tilted, so its thickness has a spanwise component, and going
+          // outboard that offset SUBTRACTS from the rib gap. Towards the tip
+          // the dihedral grows while the cells narrow, and the two cancel:
+          //
+          //     rib  4   inboard 675 mm   outboard 346 mm
+          //     rib  8   inboard 661 mm   outboard 155 mm
+          //     rib 12   inboard 531 mm   outboard  75 mm
+          //
+          // Nobody cuts, marks and sews a 75 mm triangle. It adds two seams
+          // and some weight and carries almost nothing, and the inboard leg
+          // at the same rib already holds that anchor.
+          //
+          // Real wings stop placing diagonals before the tip for this reason.
+          // The rule placed them all the way out because it never looked at
+          // what it had made.
+          if (minLengthM > 0) {
+            const bm = base[Math.floor(base.length / 2)];
+            const len = Math.hypot(bm[0] - apex[0], bm[1] - apex[1],
+              bm[2] - apex[2]);
+            if (len < minLengthM) {
+              skipped.push({ row, fromRib: i, toRib: j, lengthM: len });
+              continue;
+            }
+          }
+
           const flat = developFan(apex, base);
           out.push({
             row,
@@ -143,6 +184,10 @@ export function buildVRibs({
   return {
     vribs: out,
     count: out.length,
+    // Diagonals the rule asked for but which came out too small to be worth
+    // making — the outboard leg degenerates towards the tip.
+    skipped,
+    minLengthM,
     totalAreaM2: out.reduce((a, v) => a + v.areaM2, 0),
     anchorRibs: anchors,
     // Ribs with no line and no diagonal reaching them are unsupported, which

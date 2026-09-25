@@ -370,3 +370,46 @@ alignment it would have if the load were straight down. The load is up to
 three quarters spanwise, so that bound belonged to a different problem, and
 the ratio to it came out near 50% on every wing regardless. A number that does
 not move is not measuring anything.
+
+---
+
+## 13. The outboard leg collapses
+
+The size spread was 9.2 to 1 — 74 mm to 685 mm — and it is not random:
+
+| rib | inboard | outboard |
+| --- | --- | --- |
+| 4 | 675 mm | 346 mm |
+| 8 | 661 mm | 155 mm |
+| 12 | 531 mm | **75 mm** |
+
+The inboard legs stay large. **The outboard leg shrinks to nothing.**
+
+A rib on an arc is tilted, so its thickness has a spanwise component, and
+going outboard that offset *subtracts* from the rib gap. Towards the tip the
+dihedral grows while the cells narrow, and the two cancel.
+
+Nobody cuts, marks and sews a 75 mm triangle. It adds two seams and some
+weight and carries almost nothing — and the inboard leg at the same rib is
+already holding that anchor. Real wings stop placing diagonals before the tip
+for exactly this reason. The rule placed them all the way out because it never
+looked at what it had made.
+
+### `minLengthM`, and why it is off by default
+
+| limit | placed | skipped | spread | flagged |
+| --- | --- | --- | --- | --- |
+| 0 | 20 | 0 | 9.2 : 1 | 19 |
+| 120 mm | 15 | 5 | **5.4 : 1** | **9** |
+| 200 mm | 13 | 7 | 3.0 : 1 | 7 |
+
+At 120 mm the spread nearly halves and the flagged count halves.
+
+**It defaults to 0.** Turning it on changes an existing design without being
+asked, and on a row and reach combination I had not checked it left a rib with
+nothing holding it. At 200 mm rib 19 loses its support; at 400 mm three ribs
+do. `unsupportedRibs` reports it, which is what makes the limit safe to
+expose — but it is a choice a designer makes and checks, not a default they
+inherit.
+
+The tests caught that when I tried to ship it on by default.

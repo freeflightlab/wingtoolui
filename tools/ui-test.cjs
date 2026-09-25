@@ -567,6 +567,7 @@ try {
   const probes = [
     // The assumptions made adjustable. A control that changes nothing is
     // worse than no control: it says the user has a choice when they do not.
+    ['vribMinLength', () => { S2.vribMinLength = S2.vribMinLength ? 0 : 150; }],
     ['clothRib', () => { S2.clothRib = S2.clothRib === 'Porcher Skytex 40 hard' ? 'Porcher Skytex 38' : 'Porcher Skytex 40 hard'; }],
     ['useCascadeSpec', () => { S2.useCascadeSpec = !S2.useCascadeSpec; }],
     ['riserLayout', () => { S2.riserLayout = S2.riserLayout === 'A/B/C+D' ? "A-A'/B" : 'A/B/C+D'; }],

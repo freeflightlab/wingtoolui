@@ -15,7 +15,21 @@
  * This reads the option names each exported function destructures — across
  * however many lines it spans — and flags any caller passing something else.
  */
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync as rawRead, readdirSync } from 'fs';
+
+/**
+ * Source with comments removed.
+ *
+ * A call site's options are found by reading the text between its braces, and
+ * a comment there is read as arguments. An explanatory note mentioning "rib 4"
+ * and "0.12" came back as `buildVRibs({ 2: ... })` and `{ 4: ... }` passing
+ * options nothing accepts — three failures, all of them prose.
+ *
+ * Fourth checker in this project to have read its own commentary as data.
+ */
+const readFileSync = (path, enc) => rawRead(path, enc)
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 /** Option names a function destructures, from a possibly multi-line signature. */
 function acceptedKeys(body) {

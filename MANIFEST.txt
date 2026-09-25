@@ -6,7 +6,7 @@ but it cannot be rebuilt, tested or audited.
 
      11029  build.py
      17296  README.md
-     52401  ROADMAP.md
+     52676  ROADMAP.md
 
 src/core/   35 files — the maths — every module the build inlines
      17588  src/core/aero.js
@@ -41,12 +41,12 @@ src/core/   35 files — the maths — every module the build inlines
      10103  src/core/shaping3d.js
       9694  src/core/trimdrift.js
       2605  src/core/viewfit.js
-     31861  src/core/vribs.js
+     34039  src/core/vribs.js
       8140  src/core/wing3d.js
       9106  src/core/xfoil.js
 
 src/ui/   3 files — the interface: markup, style and the one script
-    106530  src/ui/app.js
+    107192  src/ui/app.js
       5430  src/ui/index.html
      11916  src/ui/style.css
 
@@ -55,13 +55,13 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
      12786  tests/full-pipeline.mjs
      18515  tests/phase1-audit.mjs
       8205  tests/reference-sweep.mjs
-    489017  tests/run-tests.js
+    492338  tests/run-tests.js
 
 tools/   16 files — build helpers, figures, audit, legacy .xls reader
      23443  tools/audit.mjs
       5571  tools/catalogue.mjs
       2999  tools/check-assertions.mjs
-      5812  tools/check-options.mjs
+      6378  tools/check-options.mjs
       2667  tools/check-provenance.mjs
       4438  tools/check-references.mjs
       5516  tools/check.mjs
@@ -83,7 +83,7 @@ docs/   33 files — notes on what was validated and what was not
       2545  docs/comparing.md
      19207  docs/construction.md
      20319  docs/departures.md
-     15679  docs/diagonal-ribs.md
+     17295  docs/diagonal-ribs.md
      10686  docs/environment-and-aero.md
       2158  docs/fabric.md
       9515  docs/full-pipeline.md
@@ -156,7 +156,7 @@ data/reference/   133 files — production data used for validation
   vibegt-ML.tsv vibegt-MS.tsv vibegt-S.tsv vibegt-XL.tsv vibegt-XS.tsv zeno2-L.tsv
   zeno2-ML.tsv zeno2-MS.tsv zeno2-S.tsv
 
-234 files, 2203 KB
-sha256 of the tree: 6a47b3c3ce8038f2488a5a1e1ba2033e
+234 files, 2212 KB
+sha256 of the tree: 5b4d84ece2698c130f2edc4fc4dcb82d
 
 Verify with:  node tools/audit.mjs
