@@ -1320,8 +1320,15 @@ function buildControls() {
       }
       buildControls();
       rebuild();
+      // Say what the file carries that this tool does not build, rather
+      // than loading it and quietly leaving 124 ribs out.
+      let unbuilt = '';
+      try {
+        const hv = parseHVRibs(doc);
+        if (hv.count > 0) unbuilt = ` ${hv.count} H/V/VH ribs in the file are not built.`;
+      } catch (e) { unbuilt = ''; }
       setStatus(`${S.name}: ${design.cells} cells, `
-        + `${design.geometry.ribCount} ribs, ${LEP.info.sections.length} LEP sections.`);
+        + `${design.geometry.ribCount} ribs, ${LEP.info.sections.length} LEP sections.${unbuilt}`);
     } catch (e) {
       setStatus(`Swoop2: ${e.message}`);
     }

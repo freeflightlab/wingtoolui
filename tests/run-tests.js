@@ -31,7 +31,7 @@ import {
   markPanels, markPanel, notchFractions, markPlacedSeams, DEFAULT_MARKING,
 } from '../src/core/marking.js';
 import {
-  parseLep, writeLep, blankLepDocument, lepToDesign, writeDesignIntoLep,
+  parseLep, parseHVRibs, writeLep, blankLepDocument, lepToDesign, writeDesignIntoLep,
   designToLep, describeLep, readGeometry, readAoA, section as lepSection,
 } from '../src/core/lep.js';
 import { discretePlanform } from '../src/core/planform.js';
@@ -8864,6 +8864,39 @@ section('A cell on the centreline');
   check('the wing says which kind it is',
     withCell.centreRib === false && withRib.centreRib === true);
 
+  // A centre rib must lie FLAT on the centreline.
+  //
+  // `lobe.at(s)` takes a centred difference to find the arc's angle, except
+  // at s = 0 where it clamped to one side and returned the angle half a step
+  // outboard — 0.0161 degrees where the arc is level and it must be zero.
+  //
+  // That tilted the centre rib 0.1 mm off the plane, and mirroring a rib that
+  // is not quite flat leaves a sliver of overlapping faces in the 3D model:
+  // 122 of them, which a CAD package renders as shading artefacts and a
+  // boolean operation trips over.
+  const centreYs = withRib.ribs[0].upper.concat(withRib.ribs[0].lower)
+    .map((p) => p[1]);
+  check('a centre rib lies flat on the centreline',
+    Math.max(...centreYs) - Math.min(...centreYs) < 1e-9,
+    `${((Math.max(...centreYs) - Math.min(...centreYs)) * 1000).toFixed(4)} mm wide`);
+
+  const crossing = (objText) => {
+    const rows = objText.split('\n');
+    const vs = rows.filter((l) => l.startsWith('v '))
+      .map((l) => l.slice(2).split(' ').map(Number));
+    let n = 0;
+    for (const l of rows) {
+      if (!l.startsWith('f ')) continue;
+      const ys = l.slice(2).split(' ').map((t) => vs[Number(t) - 1][1]);
+      if (Math.min(...ys) < -1e-9 && Math.max(...ys) > 1e-9) n++;
+    }
+    return n;
+  };
+  check('so the two halves meet at it rather than overlapping',
+    crossing(wingToOBJ({ wing: withRib, name: 'R' })) === 0);
+  check('while a centre cell genuinely spans the line',
+    crossing(wingToOBJ({ wing: withCell, name: 'C' })) > 0);
+
   // A feature that works in isolation is not the same as one that works
   // downstream. The centre cell has to survive everything built on the
   // panels, or a builder gets a cutting file that is missing a piece.
@@ -9185,6 +9218,42 @@ section('The wing as a 3D model');
   const bare = wingToOBJ({ wing: wingO, name: 'Bare' });
   check('a wing with no line plan still exports',
     bare.includes('g upper_surface') && !bare.includes('g lines_'));
+}
+
+// ---------------------------------------------------------------------------
+section('What the Swoop2 carries that this tool does not');
+
+{
+  // Reviewing OpenGlider — the other open-source paraglider design library —
+  // turned up one concrete thing it models and this does not: **mini-ribs**.
+  // Its own screenshots show "testcell with miniribs" and a demo kite with a
+  // central minirib.
+  //
+  // They are in the reference data too. LEP section 12 is "H V and VH ribs",
+  // and the Swoop2 carries 124 of them: an H rib spans two adjacent ribs at
+  // one chord station and holds the surfaces apart, a V rib is the diagonal
+  // this tool already builds, a VH is both.
+  //
+  // They were being read as nothing at all.
+  const docHV = parseLep(
+    readFileSync('data/reference/lep/swoop2-20260829.lep', 'utf8'));
+  const hv = parseHVRibs(docHV);
+
+  check('section 12 is read rather than dropped',
+    hv.count > 100, `${hv.count} entries`);
+  check('and the count matches what the file declares',
+    hv.count === hv.declared, `${hv.count} against ${hv.declared}`);
+  check('each entry names the two ribs it spans',
+    hv.entries.every((e) => Number.isFinite(e.fromRib)
+      && Number.isFinite(e.toRib) && e.toRib !== e.fromRib));
+  check('and there is more than one type in a real wing',
+    Object.keys(hv.byType).length > 1,
+    `types ${Object.keys(hv.byType).join(', ')}`);
+
+  // Recorded as UNBUILT, not quietly absorbed. The geometry is real work and
+  // inventing it would be worse than saying the data is there and unused.
+  check('the result says plainly that they are not built',
+    hv.modelled === false && /not built/.test(hv.note));
 }
 
 // ---------------------------------------------------------------------------

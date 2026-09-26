@@ -5,8 +5,8 @@ open dist/paraglider-design-tool.html, because that file is self-contained,
 but it cannot be rebuilt, tested or audited.
 
      11029  build.py
-     17665  README.md
-     54692  ROADMAP.md
+     17741  README.md
+     55092  ROADMAP.md
 
 src/core/   35 files — the maths — every module the build inlines
      17588  src/core/aero.js
@@ -21,11 +21,11 @@ src/core/   35 files — the maths — every module the build inlines
       8731  src/core/flatdev.js
       7344  src/core/inflated.js
       7807  src/core/intake.js
-     22909  src/core/lep.js
+     25246  src/core/lep.js
     116476  src/core/lineplan.js
       6756  src/core/lines.js
      66589  src/core/loads.js
-      8456  src/core/lobe.js
+      9507  src/core/lobe.js
      12189  src/core/marking.js
       2110  src/core/num.js
      16108  src/core/ovalization.js
@@ -46,7 +46,7 @@ src/core/   35 files — the maths — every module the build inlines
       9106  src/core/xfoil.js
 
 src/ui/   3 files — the interface: markup, style and the one script
-    123272  src/ui/app.js
+    123614  src/ui/app.js
       5531  src/ui/index.html
      13419  src/ui/style.css
 
@@ -55,7 +55,7 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
      12786  tests/full-pipeline.mjs
      18515  tests/phase1-audit.mjs
       8318  tests/reference-sweep.mjs
-    519498  tests/run-tests.js
+    522702  tests/run-tests.js
 
 tools/   17 files — build helpers, figures, audit, legacy .xls reader
      23443  tools/audit.mjs
@@ -63,7 +63,7 @@ tools/   17 files — build helpers, figures, audit, legacy .xls reader
       2999  tools/check-assertions.mjs
       6378  tools/check-options.mjs
       2667  tools/check-provenance.mjs
-      4438  tools/check-references.mjs
+      4595  tools/check-references.mjs
       3022  tools/check-units.mjs
       5841  tools/check.mjs
       4773  tools/corpus-learnings.mjs
@@ -76,7 +76,7 @@ tools/   17 files — build helpers, figures, audit, legacy .xls reader
       8186  tools/read_xls.py
       2905  tools/read_xlsx.py
 
-docs/   36 files — notes on what was validated and what was not
+docs/   37 files — notes on what was validated and what was not
       4358  docs/assumptions.md
       3861  docs/brakes.md
       4671  docs/cad-export.md
@@ -101,6 +101,7 @@ docs/   36 files — notes on what was validated and what was not
      19803  docs/loads-and-materials.md
       7989  docs/nesting.md
       8765  docs/niviuk-import.md
+      3099  docs/openglider.md
       2210  docs/panels.md
       7210  docs/reference-wings.md
       6103  docs/rib-stress.md
@@ -160,7 +161,7 @@ data/reference/   134 files — production data used for validation
   vibegt-ML.tsv vibegt-MS.tsv vibegt-S.tsv vibegt-XL.tsv vibegt-XS.tsv zeno2-L.tsv
   zeno2-ML.tsv zeno2-MS.tsv zeno2-S.tsv
 
-239 files, 2300 KB
-sha256 of the tree: e68a14d5090604d6c51699a6abf753cb
+240 files, 2310 KB
+sha256 of the tree: a405eba354edebd0aa05ef54053b9621
 
 Verify with:  node tools/audit.mjs

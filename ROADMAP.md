@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1843-test validation suite and a benchmark with regression budgets
+- [x] 1851-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,14 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **OpenGlider reviewed** — see `docs/openglider.md`. Its mini-ribs are
+      the concrete gap; its panel method and FEM are separate projects, not
+      libraries to borrow.
+- [x] **LEP section 12 read** — the Swoop2 carries 124 H/V/VH ribs and this
+      tool was reading none of them.
+- [ ] **Mini-ribs built** — read and reported now, not constructed. The next
+      structural piece.
 
 - [x] **Chord fraction was array index in three places** — the billow
       profile, where a diagonal attaches, and where every line attaches. The

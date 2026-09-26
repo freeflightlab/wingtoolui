@@ -38,7 +38,11 @@ const code = codeFiles.map(read).join('\n')
 
 // Names that are not code at all: wing and project names written in
 // camelCase because that is how their authors write them.
-const NOT_CODE = new Set(['gnuLAB2']);
+const NOT_CODE = new Set([
+  'gnuLAB2',    // Laboratori d'envol's own design program
+  'paraFEM',    // a separate OpenGlider project, named in docs/openglider.md
+  'parabem',    // likewise
+]);
 
 // Names that WERE code and were deliberately removed. Documents may mention
 // them — CONTRIBUTING.md records that `buildRiserAssembly` duplicated

@@ -596,3 +596,66 @@ export function designToLep(model, template = null) {
   const doc = template || blankLepDocument(model.wing.ribs.length);
   return writeLep(writeDesignIntoLep(doc, model));
 }
+
+/**
+ * Section 12: H, V and VH ribs.
+ *
+ * The Swoop2 carries **124 of them** and this project reads none. They are
+ * the internal ribs that are not diagonals: an H rib spans between two
+ * adjacent ribs at one chord station, holding the surfaces apart; a V rib is
+ * the diagonal this tool already models; a VH is both.
+ *
+ * OpenGlider models them — its own screenshots show "testcell with miniribs"
+ * and a demo kite with a central minirib — and a modern wing uses them to
+ * hold the nose shape between ribs without the weight and drag of a full one.
+ *
+ * This reads them and reports what is there. It does not build them: the
+ * geometry is a real piece of work and inventing it would be worse than
+ * saying the data is present and unused.
+ *
+ * Each row is: index, type, ribA anchorA, ribB anchorB, width, then three
+ * fields whose meaning this project has not established.
+ */
+export function parseHVRibs(doc) {
+  // `doc.sections` is an array, and a section holds `dataIndices` into
+  // `doc.lines` rather than the lines themselves — reading `sec.lines` gave
+  // an object with no filter on it.
+  const sec = (doc?.sections ?? []).find((x) => Number(x.number) === 12);
+  const lines = (sec?.dataIndices ?? [])
+    .map((i) => doc.lines[i])
+    .filter((l) => typeof l === 'string' && l.trim() && !l.startsWith('*'));
+  if (!lines.length) {
+    return { count: 0, declared: 0, entries: [], note: 'no section 12' };
+  }
+
+  const declared = parseInt(lines[0].trim(), 10);
+  const entries = [];
+  for (const raw of lines.slice(1)) {
+    const f = raw.trim().split(/\s+/).map(Number);
+    // A header row of two numbers, then rows of eight or nine.
+    if (f.length < 7 || f.some((v) => !Number.isFinite(v))) continue;
+    entries.push({
+      index: f[0],
+      type: f[1],
+      fromRib: f[2],
+      fromAnchor: f[3],
+      toRib: f[4],
+      toAnchor: f[5],
+      widthCm: f[6],
+    });
+  }
+
+  const byType = {};
+  for (const e of entries) byType[e.type] = (byType[e.type] || 0) + 1;
+
+  return {
+    declared: Number.isFinite(declared) ? declared : entries.length,
+    count: entries.length,
+    entries,
+    byType,
+    modelled: false,
+    note: `${entries.length} H/V/VH ribs in the file, types `
+      + `${Object.keys(byType).join(', ')}. Read but not built: this tool `
+      + 'models diagonals only.',
+  };
+}
