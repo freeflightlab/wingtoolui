@@ -1330,14 +1330,55 @@ function centroid3(pts) {
   return s.map((v) => v / pts.length);
 }
 
+/**
+ * A point at a fraction of the CHORD along a rib surface.
+ *
+ * This interpolated by array INDEX while every caller passes a chord
+ * fraction — the anchor rows are `{ A: 0.085, B: 0.30, C: 0.53, D: 0.78 }`,
+ * positions along the chord.
+ *
+ * Points are spread evenly along the SURFACE and the nose has more surface
+ * per unit chord than the flat middle, so the two disagree. **This decides
+ * where every line attaches to the wing**, and on a 24-point surface the A
+ * anchor at 8.5% landed at 6.8% — 37 mm forward on a 2.19 m rib, on the row
+ * that carries most of the load.
+ *
+ * Third instance of the same mistake: the billow profile in `ovalization.js`
+ * and `pointAt` in `vribs.js` were the others. Found by looking for the
+ * pattern rather than waiting for each to show itself.
+ */
 function pointOnSurface(poly, frac) {
   const n = poly.length;
-  const i = Math.min(n - 2, Math.max(0, Math.floor(frac * (n - 1))));
-  const f = frac * (n - 1) - i;
+  if (n < 2) return poly[0] ? poly[0].slice() : [0, 0, 0];
+
+  const a = poly[0];
+  const b = poly[n - 1];
+  const ax = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const len2 = ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2];
+
+  if (!(len2 > 0)) {
+    const i0 = Math.min(n - 2, Math.max(0, Math.floor(frac * (n - 1))));
+    const f0 = frac * (n - 1) - i0;
+    return [
+      poly[i0][0] + f0 * (poly[i0 + 1][0] - poly[i0][0]),
+      poly[i0][1] + f0 * (poly[i0 + 1][1] - poly[i0][1]),
+      poly[i0][2] + f0 * (poly[i0 + 1][2] - poly[i0][2]),
+    ];
+  }
+
+  const along = (p) => (((p[0] - a[0]) * ax[0] + (p[1] - a[1]) * ax[1]
+    + (p[2] - a[2]) * ax[2]) / len2);
+
+  const want = Math.min(1, Math.max(0, frac));
+  let i = 1;
+  while (i < n - 1 && along(poly[i]) < want) i++;
+  const t0 = along(poly[i - 1]);
+  const t1 = along(poly[i]);
+  const g = t1 > t0 ? Math.min(1, Math.max(0, (want - t0) / (t1 - t0))) : 0;
   return [
-    poly[i][0] + f * (poly[i + 1][0] - poly[i][0]),
-    poly[i][1] + f * (poly[i + 1][1] - poly[i][1]),
-    poly[i][2] + f * (poly[i + 1][2] - poly[i][2]),
+    poly[i - 1][0] + g * (poly[i][0] - poly[i - 1][0]),
+    poly[i - 1][1] + g * (poly[i][1] - poly[i - 1][1]),
+    poly[i - 1][2] + g * (poly[i][2] - poly[i - 1][2]),
   ];
 }
 

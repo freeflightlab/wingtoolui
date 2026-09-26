@@ -9188,6 +9188,73 @@ section('The wing as a 3D model');
 }
 
 // ---------------------------------------------------------------------------
+section('Chord fraction is not array index');
+
+{
+  // Three places in this project interpolated along a rib surface by array
+  // INDEX while their callers passed a CHORD fraction:
+  //
+  //   ovalization.js  the billow profile and the chordwise pressure
+  //   vribs.js        where a diagonal attaches
+  //   lineplan.js     where every line attaches
+  //
+  // Points are spread evenly along the SURFACE, and the nose carries far
+  // more surface per unit chord than the flat middle, so the two never
+  // agree. The first was found by accident; the other two by looking for
+  // the pattern.
+  const wingF = buildWing({
+    planform: planformFromDesignInputs({
+      span: 11.31, rootChord: 2.35, tipChord: 0.5, tipSweep: 1.3,
+    }),
+    lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, 5.655),
+    airfoil: naca4('4415'), cells: 24, pointsPerSurface: 24,
+  });
+  const ribF = wingF.ribs[4];
+
+  // How far apart the two readings are, on the wing's own geometry.
+  const poly = ribF.lower;
+  const n = poly.length;
+  const a = poly[0];
+  const b = poly[n - 1];
+  const ax = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const len2 = ax[0] ** 2 + ax[1] ** 2 + ax[2] ** 2;
+  const along = (p) => (((p[0] - a[0]) * ax[0] + (p[1] - a[1]) * ax[1]
+    + (p[2] - a[2]) * ax[2]) / len2);
+
+  const worstGap = Math.max(...poly.map((p, i) => Math.abs(along(p) - i / (n - 1))));
+  // 1.5 points on the lower surface of this rib, 2.2 on the upper — the
+  // upper is more curved, so index drifts further from chord there. Either
+  // way it is tens of millimetres, not rounding.
+  check('index and chord disagree by points of chord, not rounding',
+    worstGap > 0.01,
+    `${(worstGap * 100).toFixed(1)} points of chord at worst, `
+    + `${(worstGap * ribF.chord * 1000).toFixed(0)} mm on this rib`);
+
+  // The projection has to be monotonic for the walk to be valid: a surface
+  // that doubled back would need a different method.
+  const projected = poly.map(along);
+  check('the projection runs monotonically nose to tail',
+    projected.every((v, i) => i === 0 || v >= projected[i - 1]));
+
+  // The diagonals place their apex at the row's chord fraction.
+  const afF = naca4('4415');
+  afF.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const vF = buildVRibs({
+    wing: wingF, airfoil: afF, rows: ['B'], baseSpread: 0.18, maxReach: 1,
+  });
+  const apex = vF.vribs.find((g) => g.fromRib === 4) || vF.vribs[0];
+  const apexRib = wingF.ribs[apex.fromRib];
+  const a2 = apexRib.lower[0];
+  const b2 = apexRib.lower[apexRib.lower.length - 1];
+  const ax2 = [b2[0] - a2[0], b2[1] - a2[1], b2[2] - a2[2]];
+  const l2 = ax2[0] ** 2 + ax2[1] ** 2 + ax2[2] ** 2;
+  const at = (((apex.apex[0] - a2[0]) * ax2[0] + (apex.apex[1] - a2[1]) * ax2[1]
+    + (apex.apex[2] - a2[2]) * ax2[2]) / l2);
+  near('a diagonal attaches at the chord fraction it was given',
+    at, 0.30, 0.005, ' of chord');
+}
+
+// ---------------------------------------------------------------------------
 section('The cell intake');
 
 {

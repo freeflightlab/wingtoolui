@@ -253,14 +253,60 @@ function triangleArea(p, q, r) {
   return 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
 }
 
+/**
+ * A point at a fraction of the CHORD along a rib surface.
+ *
+ * This interpolated by array INDEX — `frac * (n - 1)` — while every caller
+ * passes a chord fraction: the anchor rows are `{ A: 0.085, B: 0.30, ... }`,
+ * which are positions along the chord, not positions in an array.
+ *
+ * Points are spread evenly along the SURFACE, and the nose has more surface
+ * per unit chord than the flat middle, so the two do not agree. On a 24-point
+ * upper surface the A anchor at 8.5% landed at 6.3% — **2.2 points of chord,
+ * 37 mm on a 2.19 m rib** — and every diagonal attached there.
+ *
+ * The same mistake as the billow profile in `ovalization.js`, found by
+ * looking for the pattern rather than waiting for it to show.
+ *
+ * The chord axis is the line from the first point to the last, and each
+ * point's position is its projection onto it.
+ */
 function pointAt(poly, frac) {
   const n = poly.length;
-  const idx = Math.min(n - 2, Math.max(0, Math.floor(frac * (n - 1))));
-  const f = frac * (n - 1) - idx;
+  if (n < 2) return poly[0] ? poly[0].slice() : [0, 0, 0];
+
+  const a = poly[0];
+  const b = poly[n - 1];
+  const ax = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const len2 = ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2];
+
+  // A degenerate surface has no chord to measure along; fall back to index.
+  if (!(len2 > 0)) {
+    const i0 = Math.min(n - 2, Math.max(0, Math.floor(frac * (n - 1))));
+    const f0 = frac * (n - 1) - i0;
+    return [
+      poly[i0][0] + f0 * (poly[i0 + 1][0] - poly[i0][0]),
+      poly[i0][1] + f0 * (poly[i0 + 1][1] - poly[i0][1]),
+      poly[i0][2] + f0 * (poly[i0 + 1][2] - poly[i0][2]),
+    ];
+  }
+
+  const along = (p) => (((p[0] - a[0]) * ax[0] + (p[1] - a[1]) * ax[1]
+    + (p[2] - a[2]) * ax[2]) / len2);
+
+  const want = Math.min(1, Math.max(0, frac));
+  // The surface runs nose to tail, so its projection is monotonic: walk until
+  // the station is passed, then interpolate within that segment.
+  let i = 1;
+  while (i < n - 1 && along(poly[i]) < want) i++;
+  const t0 = along(poly[i - 1]);
+  const t1 = along(poly[i]);
+  const f = t1 > t0 ? (want - t0) / (t1 - t0) : 0;
+  const g = Math.min(1, Math.max(0, f));
   return [
-    poly[idx][0] + f * (poly[idx + 1][0] - poly[idx][0]),
-    poly[idx][1] + f * (poly[idx + 1][1] - poly[idx][1]),
-    poly[idx][2] + f * (poly[idx + 1][2] - poly[idx][2]),
+    poly[i - 1][0] + g * (poly[i][0] - poly[i - 1][0]),
+    poly[i - 1][1] + g * (poly[i][1] - poly[i - 1][1]),
+    poly[i - 1][2] + g * (poly[i][2] - poly[i - 1][2]),
   ];
 }
 

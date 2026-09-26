@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**1834 tests across nine check stages**, all passing. Phases 1 and 5 are
+**1837 tests across nine check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -65,7 +65,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1834 unit checks against known geometry and the sources |
+| `npm test` | 1837 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -258,7 +258,7 @@ Thirteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 1834 checks |
+| unit suite | the maths, 1837 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -305,6 +305,7 @@ across six manufacturers.
 | `docs/reference-wings.md` | the reference wings against their published figures |
 | `docs/certification.md` | what a flight test report does and does not contain |
 | `docs/cad-export.md` | the 3D model, and why OBJ rather than STEP or STL |
+| `docs/chord-fraction.md` | three places that confused array index with chord |
 | `docs/panels.md` | panel development, and whether the wing sews |
 | `docs/fabric.md` | cloth by location, and what the tool refuses |
 | `docs/line-sets.md` | choosing N line types, and whether a cascade holds trim |
