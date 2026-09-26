@@ -4482,6 +4482,63 @@ section('Exports with no caller');
   check('and both changes are small',
     Math.abs(ease.leftPct) < 0.5 && Math.abs(ease.rightPct) < 0.5);
 
+  // The ease must not depend on how the surface was SAMPLED.
+  //
+  // Bowing a panel outward is geometry. How much length that adds to each
+  // seam is a property of the shape, not of how many points were used to
+  // describe it — so the answer has to converge, and two different point
+  // distributions have to agree.
+  //
+  // It did neither. The billow profile was indexed by point NUMBER while the
+  // transitions and the chordwise loading are in CHORD fraction, and the two
+  // differ by up to 8.6 points of chord on a 24-point panel: the profile was
+  // applied about a tenth of a chord too far aft. With evenly spread points
+  // that error was at least consistent, so the result looked stable; with
+  // points clustered at the nose it drifted from 0.08% to 0.14% as density
+  // rose and both seams came out lengthening.
+  const easeAt = (points, cluster) => {
+    const wE = buildWing({
+      planform: planformFromDesignInputs({
+        span: 11.31, rootChord: 2.35, tipChord: 0.5, tipSweep: 1.3,
+      }),
+      lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, 5.655),
+      airfoil: naca4('4415'), cells: 24, pointsPerSurface: points,
+    });
+    if (cluster) {
+      for (const rib of wE.ribs) {
+        for (const k of ['upper', 'lower']) {
+          const idx = resampleSurface(rib[k].map((p, i) => [i, 0]), points,
+            { spacing: 'cosine' });
+          rib[k] = idx.map(([fi]) => {
+            const i0 = Math.min(rib[k].length - 2, Math.max(0, Math.floor(fi)));
+            const f = fi - i0;
+            const a = rib[k][i0];
+            const b = rib[k][i0 + 1];
+            return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f,
+              a[2] + (b[2] - a[2]) * f];
+          });
+        }
+      }
+    }
+    const pe = developWing(wE).find(
+      (x) => x.cell === 1 && x.surface === 'upper');
+    return seamEasing(pe.panel, applyOvalization(pe.panel, { amount: 0.06 }));
+  };
+
+  const coarseE = easeAt(24, false);
+  const fineE = easeAt(160, false);
+  near('the ease converges as the surface is sampled more finely',
+    coarseE.leftPct, fineE.leftPct, 0.003, '%');
+
+  const clusteredE = easeAt(160, true);
+  near('and two different point distributions agree',
+    fineE.leftPct, clusteredE.leftPct, 0.002, '%');
+  near('on the other seam too',
+    fineE.rightPct, clusteredE.rightPct, 0.002, '%');
+  check('with the signs still opposite under clustering',
+    Math.sign(clusteredE.leftDelta) === -Math.sign(clusteredE.rightDelta),
+    `${clusteredE.leftPct.toFixed(4)}% vs ${clusteredE.rightPct.toFixed(4)}%`);
+
   // The brake helpers in lines.js predate buildBrakePlan but are still the
   // handbook's own construction.
   const bAnchors = brakeAnchors(wingE, { everyNthRib: 2 });

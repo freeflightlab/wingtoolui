@@ -2811,8 +2811,33 @@ function applyOvalization(panel, {
   const outR = [];
   const excesses = [];
 
+  // Chord fraction for each point, not point number.
+  //
+  // This read `t = i / (n - 1)`. The transitions and the chordwise loading
+  // are both defined in CHORD fraction, and point number only tracks chord
+  // if the points are evenly spread along it — which they never are, because
+  // they are spread evenly along the SURFACE and the nose has far more
+  // surface per unit chord.
+  //
+  // On a 24-point panel the two differ by up to **8.6 points of chord**, so
+  // the billow profile and the pressure peak were being applied about a
+  // tenth of a chord too far aft. Clustering the points made it worse and
+  // non-convergent: the seam ease drifted from 0.08% to 0.14% as density
+  // rose, where it should not depend on sampling at all.
+  //
+  // The fraction is measured by projecting each point onto the line from the
+  // first to the last, which is the chord of the developed seam.
+  const axis = [left[n - 1][0] - left[0][0], left[n - 1][1] - left[0][1]];
+  const axisLen2 = axis[0] * axis[0] + axis[1] * axis[1];
+  const chordFraction = (i) => {
+    if (!(axisLen2 > 0)) return n > 1 ? i / (n - 1) : 0;
+    const d = [left[i][0] - left[0][0], left[i][1] - left[0][1]];
+    const u = (d[0] * axis[0] + d[1] * axis[1]) / axisLen2;
+    return Math.min(1, Math.max(0, u));
+  };
+
   for (let i = 0; i < n; i++) {
-    const t = i / (n - 1);
+    const t = chordFraction(i);
     const width = Math.hypot(right[i][0] - left[i][0], right[i][1] - left[i][1]);
 
     let scale;
