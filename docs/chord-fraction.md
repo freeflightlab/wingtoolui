@@ -78,3 +78,21 @@ it:
 and two different point distributions agree
   got 0.0323%, expected 0.1389% ± 0.002%
 ```
+
+---
+
+## Looking for the class, not the instance
+
+Having found the chord-versus-index confusion three times, the same question
+applies to units: this project names values after them — `lengthMM`,
+`chordM`, `alphaDeg`, `tensionN` — and nothing checked the names were true.
+
+`npm run check:units` compares the suffixes of any two named values combined
+with `+`, `-` or a comparison, and looks for a degree value handed straight to
+a trig function. **Zero mismatches across 51 unit-bearing comparisons.**
+
+Its first version reported 25, every one of them `MM` against `MM` misread as
+`MM` against `M`, because the pattern let `\w+M` swallow the first `M` of a
+`MM` suffix. A detector that is entirely noise is worse than none: it teaches
+you to skip the output. It compares suffixes properly now, and is verified by
+removing a radian conversion and watching it fail.

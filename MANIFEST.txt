@@ -5,7 +5,7 @@ open dist/paraglider-design-tool.html, because that file is self-contained,
 but it cannot be rebuilt, tested or audited.
 
      11029  build.py
-     17538  README.md
+     17665  README.md
      54692  ROADMAP.md
 
 src/core/   35 files — the maths — every module the build inlines
@@ -57,14 +57,15 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
       8318  tests/reference-sweep.mjs
     516936  tests/run-tests.js
 
-tools/   16 files — build helpers, figures, audit, legacy .xls reader
+tools/   17 files — build helpers, figures, audit, legacy .xls reader
      23443  tools/audit.mjs
       5571  tools/catalogue.mjs
       2999  tools/check-assertions.mjs
       6378  tools/check-options.mjs
       2667  tools/check-provenance.mjs
       4438  tools/check-references.mjs
-      5516  tools/check.mjs
+      3022  tools/check-units.mjs
+      5841  tools/check.mjs
       4773  tools/corpus-learnings.mjs
       5984  tools/doctor.mjs
       2908  tools/find.mjs
@@ -80,7 +81,7 @@ docs/   36 files — notes on what was validated and what was not
       3861  docs/brakes.md
       4671  docs/cad-export.md
       3946  docs/certification.md
-      3425  docs/chord-fraction.md
+      4293  docs/chord-fraction.md
       9840  docs/collecting-reference-data.md
       2545  docs/comparing.md
      19207  docs/construction.md
@@ -159,7 +160,7 @@ data/reference/   134 files — production data used for validation
   vibegt-ML.tsv vibegt-MS.tsv vibegt-S.tsv vibegt-XL.tsv vibegt-XS.tsv zeno2-L.tsv
   zeno2-ML.tsv zeno2-MS.tsv zeno2-S.tsv
 
-238 files, 2292 KB
-sha256 of the tree: 2f5e3808c06e3c19b76254ace79146e9
+239 files, 2296 KB
+sha256 of the tree: d0930d37b3c77a3e12928f2f3c41d103
 
 Verify with:  node tools/audit.mjs

@@ -50,6 +50,11 @@ const stages = [
   // Names quoted in comments and documents must exist in the code. A rename
   // breaks the callers, which tests catch; it leaves the prose pointing at
   // nothing, which they do not.
+  // A name that states its unit must be used in that unit. Three places
+  // interpolated by array index while their callers passed a chord fraction,
+  // which is the same shape of mistake in a space rather than a unit.
+  ['units', 'node tools/check-units.mjs',
+    /(\d+) values used outside the unit their name claims/],
   ['references', 'node tools/check-references.mjs',
     /(\d+) names that point at nothing in the code/],
   ['options', 'node tools/check-options.mjs',

@@ -29,7 +29,7 @@ find them; this does.
 node tools/check.mjs
 ```
 
-Thirteen stages, one command. All thirteen must pass.
+Fourteen stages, one command. All fourteen must pass.
 
 ## What the checks are for
 
@@ -42,6 +42,7 @@ Thirteen stages, one command. All thirteen must pass.
 | interface | features with no button, buttons with no effect |
 | reference sweep | wings that parse but describe impossible geometry |
 | assertions | checks that cannot fail, which report success |
+| units | a value used outside the unit its name claims |
 | references | names in comments and documents that point at nothing |
 | options | calls that look right, run clean, and do nothing |
 | corpus | model constants that have drifted from their data |

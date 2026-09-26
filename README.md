@@ -46,7 +46,7 @@ cd wingtoolui
 
 npm run doctor      # is this checkout complete? run this first
 npm run build       # bundle src/ into dist/paraglider-design-tool.html
-npm run check       # everything, Thirteen stages, one command
+npm run check       # everything, fourteen stages, one command
 ```
 
 **Publishing to GitHub? Read [`PUBLISHING.md`](PUBLISHING.md) first.** Uploading
@@ -71,6 +71,7 @@ being worked on:
 | `npm run test:ui` | the interface: every control, every button pressed |
 | `npm run test:refs` | every wing in the database against the physics |
 | `npm run check:assertions` | checks that cannot fail |
+| `npm run check:units` | names that state a unit, used in another |
 | `npm run check:references` | names in prose that point at nothing |
 | `npm run check:options` | options passed that a function never reads |
 | `npm run check:corpus` | every dataset measured, against the model's own constants |
@@ -88,7 +89,7 @@ And two tools that are not tests:
 The scripts are thin wrappers — `node tools/check.mjs` and the rest work
 directly if you prefer.
 
-`check.mjs` runs all thirteen in one command, because six commands meant five got
+`check.mjs` runs all fourteen in one command, because six commands meant five got
 skipped. The full-pipeline stage carries a **pinned baseline of 3 known
 problems**: treating them as failures would make the command red every run and
 train everyone to ignore it, while letting the number drift up silently would
@@ -253,7 +254,7 @@ speed is stated as an assumption and inverted from published data.
 
 ## Validation
 
-Thirteen stages, one command:
+fourteen stages, one command:
 
 | stage | catches |
 | --- | --- |
@@ -264,6 +265,7 @@ Thirteen stages, one command:
 | interface | features with no button, buttons with no effect |
 | reference sweep | wings that parse but describe impossible geometry |
 | assertions | checks that cannot fail, which report success |
+| units | a value used outside the unit its name claims |
 | references | names in comments and documents that point at nothing |
 | options | calls that look right, run clean, and do nothing |
 | corpus | model constants that have drifted from their data |

@@ -16,6 +16,7 @@
     "test:ui": "node tools/ui-test.cjs",
     "test:refs": "node tests/reference-sweep.mjs",
     "check:assertions": "node tools/check-assertions.mjs",
+    "check:units": "node tools/check-units.mjs",
     "check:references": "node tools/check-references.mjs",
     "check:options": "node tools/check-options.mjs",
     "check:corpus": "node tools/corpus-learnings.mjs",
