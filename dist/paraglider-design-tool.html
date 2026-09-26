@@ -18382,11 +18382,57 @@ let M = {}; // derived model, rebuilt on every change
 let LEP = null; // imported LEparagliding document, kept as the export template
 let XPOLAR = null; // imported XFOIL section polar, when there is one
 
+/** The one complete design in the library, as opposed to a specification. */
+const SWOOP2_ID = "Laboratori d'envol Swoop2  (complete design)";
+
 /* ---------------------------------------------------------------- model -- */
 
 /** Take the size from a published wing, leaving the shape alone. */
 function applyReference() {
   if (!S.reference || S.reference === S._appliedReference) return;
+
+  // The Swoop2 is a COMPLETE design, not a specification.
+  //
+  // It was loadable only from a button in the Files panel, while the picker
+  // that says "Start from a published wing" offered 55 sizes and not the one
+  // wing this project reproduces exactly. Somebody looking for a wing to
+  // start from would never have found it.
+  //
+  // Every other entry gives a size and leaves the shape to defaults. This one
+  // brings its own ribs, its own aerofoils and its own line plan, so it takes
+  // the import path rather than the parametric one.
+  if (S.reference === SWOOP2_ID) {
+    if (typeof SWOOP2_LEP !== 'string' || !SWOOP2_LEP.length) {
+      setStatus('The Swoop2 is not in this build.');
+      S.reference = '';
+      return;
+    }
+    try {
+      const doc = parseLep(SWOOP2_LEP);
+      const design = lepToDesign(doc);
+      LEP = { doc, design, info: describeLep(doc) };
+      S._appliedReference = S.reference;
+      S.name = design.name || 'Swoop2';
+      if (design.anchorFractions) {
+        S.anchorA = design.anchorFractions.A * 100;
+        S.anchorB = design.anchorFractions.B * 100;
+        S.anchorC = design.anchorFractions.C * 100;
+        S.anchorD = design.anchorFractions.D * 100;
+      }
+      S._referenceNote = `${design.name || 'Swoop2'}: a complete design from `
+        + `Laboratori d'envol — ${design.cells} cells, `
+        + `${design.geometry.ribCount} ribs, its own aerofoils and line plan. `
+        + 'Not a size to build on: the geometry is the wing itself.';
+    } catch (e) {
+      setStatus(`Swoop2: ${e.message}`);
+      S.reference = '';
+    }
+    return;
+  }
+
+  // Any other reference replaces an imported design with a parametric one.
+  LEP = null;
+
   const entry = REFERENCE_LIB.find((e) => e.id === S.reference);
   if (!entry) return;
   const r = referenceDesignInputs(entry.source);
@@ -18851,10 +18897,19 @@ function hint(host, text) { host.append(el('div', 'hint', text)); }
 function buildControls() {
   const P = clear('g-planform');
   if (REFERENCE_LIB.length) {
+    const haveSwoop = typeof SWOOP2_LEP === 'string' && SWOOP2_LEP.length > 0;
     selectField(P, 'reference', 'Start from a published wing',
-      [['', '—']].concat(REFERENCE_LIB.map((e) => [e.id, `${e.id}  ${e.flatArea} m²`])));
-    hint(P, 'Seven families of published sizes. Loads the size only: a specification '
-      + 'does not say how elliptical the leading edge is, or what section the wing uses.');
+      [['', '—']]
+        .concat(haveSwoop ? [[SWOOP2_ID, SWOOP2_ID]] : [])
+        .concat(REFERENCE_LIB.map((e) => [e.id, `${e.id}  ${e.flatArea} m²`])));
+    const families = new Set(REFERENCE_LIB.map((e) => e.family)).size;
+    hint(P, `${REFERENCE_LIB.length} published sizes across ${families} `
+      + 'families, which load the SIZE only: a specification does not say how '
+      + 'elliptical the leading edge is, or what section the wing uses. '
+      + (haveSwoop
+        ? 'The Swoop2 at the top is different — a complete design, geometry '
+          + 'and all.'
+        : ''));
   }
   checkField(P, 'dimensions', 'Dimensions on the drawings');
   slider(P, 'span', 'Flat span', 4, 16, 0.05, (v) => v.toFixed(2), ' m');

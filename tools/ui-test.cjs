@@ -34,6 +34,7 @@ const nodes = {};
 // stubbed. A registry is the difference between a selector that finds things
 // and one that can only ever return nothing.
 const created = [];
+globalThis.__createdNodes = created;
 function mk(tag='div'){
   const n = {
     tagName:tag, children:[], _text:'', className:'', style:{}, files:[],
@@ -712,6 +713,62 @@ try {
       process.exit(1);
     }
     console.log(`  ok   all ${ids.length} viewports can be saved as SVG or PNG`);
+  }
+
+  // The Swoop2 has to be in the PICKER, not only behind a button elsewhere.
+  //
+  // It was loadable from the Files panel while the control that says "Start
+  // from a published wing" offered 55 specifications and not the one complete
+  // design in the library. Somebody looking for a wing to start from would
+  // never have found it.
+  {
+    const S7 = globalThis.__S;
+    const wasRef = S7.reference;
+    // Walk the real control panel for an <option> carrying the id.
+    //
+    // My first version read `globalThis.__selects`, which does not exist —
+    // so `sel` was null, the condition short-circuited, and the check could
+    // never fail. That is the shape `check-assertions` exists to catch, and
+    // I wrote one anyway.
+    const swoopId = "Laboratori d'envol Swoop2  (complete design)";
+    globalThis.__controls();
+    // `tagName`, not `tag` — the stub's own field name. Reading the wrong one
+    // found no options at all, and the guard below is the only reason that
+    // showed up rather than passing silently.
+    const optionValues = globalThis.__createdNodes
+      .filter((n) => n.tagName === 'option' && n.value !== undefined)
+      .map((n) => n.value);
+    if (!optionValues.length) {
+      console.log('  FAIL found no options at all; the walk is wrong');
+      process.exit(1);
+    }
+    if (!optionValues.includes(swoopId)) {
+      console.log('  FAIL the Swoop2 is not an option in the wing picker');
+      process.exit(1);
+    }
+
+    S7.reference = swoopId;
+    globalThis.__rebuild();
+    const m = globalThis.__getM();
+    if (Math.abs(m.metrics.area - 18.0) > 0.05) {
+      console.log(`  FAIL picking the Swoop2 gives ${m.metrics.area.toFixed(2)} m2, `
+        + 'published is 18.00');
+      process.exit(1);
+    }
+
+    // And choosing a specification afterwards must drop the imported
+    // geometry, or the tool shows a Geo 7 built out of Swoop2 ribs.
+    S7.reference = 'Ozone Geo 7 XS';
+    globalThis.__rebuild();
+    const g = globalThis.__getM();
+    if (g.wing.ribs.length === m.wing.ribs.length) {
+      console.log('  FAIL switching to a specification kept the imported design');
+      process.exit(1);
+    }
+    console.log(`  ok   the Swoop2 loads from the picker at `
+      + `${m.metrics.area.toFixed(2)} m2, and switching away clears it`);
+    S7.reference = wasRef;
+    globalThis.__rebuild();
   }
 
   const baseline = pressAll();

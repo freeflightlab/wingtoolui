@@ -141,3 +141,46 @@ A feature that works in isolation is not one that works downstream. The centre
 cell is nested with everything else, paid for in the bill, reaches the cutting
 file, leaves the rib count untouched and carries a line plan — asserted, not
 assumed, because the missing centre panel was exactly that kind of gap.
+
+---
+
+## The complete design was not in the picker
+
+The Swoop2 was loadable from a button in the **Files** panel, while the
+control that says *"Start from a published wing"* offered 55 specifications
+and not the one complete design in the library.
+
+Somebody looking for a wing to start from would never have found it.
+
+It is the first entry in the picker now. Every other entry gives a **size**
+and leaves the shape to defaults — a specification does not say how elliptical
+a leading edge is or what section a wing uses. The Swoop2 brings its own ribs,
+its own aerofoils and its own line plan, so it takes the import path instead:
+
+> Swoop2: a complete design from Laboratori d'envol — 50 cells, 51 ribs, its
+> own aerofoils and line plan. Not a size to build on: the geometry is the
+> wing itself.
+
+Choosing any specification afterwards clears the imported geometry, or the
+tool would show a Geo 7 built out of Swoop2 ribs. That is asserted, because
+nothing else would have noticed.
+
+The hint under the picker also claimed *"Seven families"* when there were
+eleven — it counts them now rather than stating a number that was true once.
+
+### A check that could not fail, again
+
+My first version of the picker test read `globalThis.__selects`, which does
+not exist. `sel` was null, the condition short-circuited, and the check could
+never have failed.
+
+The replacement walks the created-node registry for an `<option>` carrying the
+id — and the first attempt at THAT read `n.tag` where the stub's field is
+`n.tagName`, so it found no options at all. It only showed up because the walk
+has a guard that fails when it finds nothing.
+
+Both are verified by removing the option and watching the check fail:
+
+```
+FAIL the Swoop2 is not an option in the wing picker
+```
