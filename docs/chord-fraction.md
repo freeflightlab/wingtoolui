@@ -96,3 +96,31 @@ Its first version reported 25, every one of them `MM` against `MM` misread as
 `MM` suffix. A detector that is entirely noise is worse than none: it teaches
 you to skip the output. It compares suffixes properly now, and is verified by
 removing a radian conversion and watching it fail.
+
+---
+
+## Three measurements, two of them wrong
+
+Continuing the hunt turned up no more of these — but it did turn up how easy
+the measuring is to get wrong.
+
+Checking whether twist actually arrives at the tip:
+
+| attempt | result | what was wrong |
+| --- | --- | --- |
+| passed `washinDeg` | no response at any setting | the parameter is `washin: {total, mode}` |
+| read rise over run in world axes | 2.56° for an asked 4.5° | the rib is tilted; dihedral is in the answer |
+| un-rotated the rib first | **4.500° for 4.500°** | — |
+
+The second is the dangerous one. A consistent 58% across every setting looks
+exactly like a model delivering a fixed fraction of its input, and it would
+have been an entirely plausible bug report. The ruler was tilted.
+
+The fix for measuring it is the same transform the rib view uses to draw a
+rib: un-rotate by the rib's own beta, then read the chord line. That is pinned
+as a test with the reasoning attached, because the next person to check this
+will reach for rise-over-run too.
+
+Also checked and clean: every rib surface runs nose to tail (50 of 50), and
+the Selig and Lednicer importers produce the same section from the same
+aerofoil.

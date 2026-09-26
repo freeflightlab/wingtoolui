@@ -15,7 +15,7 @@ import {
 } from '../src/core/trimdrift.js';
 import { planformFromDesignInputs, analyticPlanform, planformMetrics, flatArea, ribStations, totalCells, planformOutline } from '../src/core/planform.js';
 import { naca4, splitSurfaces, resampleSurface, airfoilMetrics, parseAirfoilText , LIBRARY } from '../src/core/airfoil.js';
-import { buildLobe, lobeMetrics, radiusForProjectedRatio, minArrowRatio } from '../src/core/lobe.js';
+import { buildLobe, washinAt, lobeMetrics, radiusForProjectedRatio, minArrowRatio } from '../src/core/lobe.js';
 import { buildWing, projectedArea , ribLoops, mirrorRib } from '../src/core/wing3d.js';
 import { analyticPlanform as _ap } from '../src/core/planform.js';
 import { developPanel, developmentError, developWing } from '../src/core/flatdev.js';
@@ -9185,6 +9185,63 @@ section('The wing as a 3D model');
   const bare = wingToOBJ({ wing: wingO, name: 'Bare' });
   check('a wing with no line plan still exports',
     bare.includes('g upper_surface') && !bare.includes('g lines_'));
+}
+
+// ---------------------------------------------------------------------------
+section('Washin arrives where it was asked for');
+
+{
+  // Twist is invisible to every internal check: the wing agrees with itself
+  // whether the tip is twisted 4.5 degrees or 2.5, and the only way to know
+  // is to measure the built geometry against the number that was asked for.
+  const pfW = planformFromDesignInputs({
+    span: 11.31, rootChord: 2.35, tipChord: 0.5, tipSweep: 1.3,
+  });
+
+  // Measured IN THE RIB'S OWN PLANE.
+  //
+  // A rib on an arc is tilted, so reading the chord line's rise over its run
+  // in world coordinates mixes the dihedral into the answer: a tip asked for
+  // 4.5 degrees read as 2.56, a consistent 58%, which looks exactly like a
+  // model delivering the wrong fraction of its input. It was the ruler.
+  //
+  // Un-rotating the rib by its own beta first — the same transform the rib
+  // view uses to draw it — gives the twist and nothing else.
+  const twistInOwnPlane = (rib) => {
+    const b = (rib.betaDeg * Math.PI) / 180;
+    const oy = rib.lobePoint[0];
+    const oz = rib.lobePoint[1];
+    const flat = ([x, y, z]) => [x - rib.xLE,
+      -(y - oy) * Math.sin(b) + (z - oz) * Math.cos(b)];
+    const a = flat(rib.lower[0]);
+    const c = flat(rib.lower[rib.lower.length - 1]);
+    return Math.atan2(-(c[1] - a[1]), c[0] - a[0]) * (180 / Math.PI);
+  };
+
+  for (const total of [0, 2, 4.5, 8]) {
+    const wW = buildWing({
+      planform: pfW,
+      lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfW.halfSpan),
+      airfoil: naca4('4415'), cells: 24, pointsPerSurface: 24,
+      washin: { total, mode: 'linear' },
+    });
+    const tip = wW.ribs[wW.ribs.length - 1];
+    near(`a washin of ${total} degrees reaches the tip`,
+      twistInOwnPlane(tip) - twistInOwnPlane(wW.ribs[0]), total, 0.01, ' deg');
+  }
+
+  // And it is distributed the way the mode says, not just present at the tip.
+  const linear = [0, 0.25, 0.5, 0.75, 1]
+    .map((f) => washinAt(f * 5.655, 5.655, { total: 4.5, mode: 'linear' }));
+  check('linear washin rises evenly across the span',
+    linear.every((v, i) => i === 0 || Math.abs((v - linear[i - 1]) - 1.125) < 1e-9),
+    linear.map((v) => v.toFixed(2)).join(', '));
+
+  const quad = [0, 0.5, 1]
+    .map((f) => washinAt(f * 5.655, 5.655, { total: 4.5, mode: 'quadratic' }));
+  check('and quadratic washin holds most of it back for the tip',
+    quad[1] < linear[2] && Math.abs(quad[2] - 4.5) < 1e-9,
+    `${quad[1].toFixed(2)} at mid-span against ${linear[2].toFixed(2)} linear`);
 }
 
 // ---------------------------------------------------------------------------

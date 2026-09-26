@@ -55,7 +55,7 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
      12786  tests/full-pipeline.mjs
      18515  tests/phase1-audit.mjs
       8318  tests/reference-sweep.mjs
-    516936  tests/run-tests.js
+    519498  tests/run-tests.js
 
 tools/   17 files — build helpers, figures, audit, legacy .xls reader
      23443  tools/audit.mjs
@@ -81,7 +81,7 @@ docs/   36 files — notes on what was validated and what was not
       3861  docs/brakes.md
       4671  docs/cad-export.md
       3946  docs/certification.md
-      4293  docs/chord-fraction.md
+      5476  docs/chord-fraction.md
       9840  docs/collecting-reference-data.md
       2545  docs/comparing.md
      19207  docs/construction.md
@@ -160,7 +160,7 @@ data/reference/   134 files — production data used for validation
   vibegt-ML.tsv vibegt-MS.tsv vibegt-S.tsv vibegt-XL.tsv vibegt-XS.tsv zeno2-L.tsv
   zeno2-ML.tsv zeno2-MS.tsv zeno2-S.tsv
 
-239 files, 2296 KB
-sha256 of the tree: d0930d37b3c77a3e12928f2f3c41d103
+239 files, 2300 KB
+sha256 of the tree: e68a14d5090604d6c51699a6abf753cb
 
 Verify with:  node tools/audit.mjs
