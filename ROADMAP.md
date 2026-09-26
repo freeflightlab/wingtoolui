@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1812-test validation suite and a benchmark with regression budgets
+- [x] 1825-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,11 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **CAD export** — the wing as OBJ: both surfaces, the ribs and every
+      line in named groups sharing one vertex pool. STL cannot carry lines
+      and STEP is a hand-written entity graph that opens as nothing if it is
+      slightly wrong. See `docs/cad-export.md`.
 
 - [x] **Light mode, viewport export and a parameter table** — colours mapped
       at one point rather than at every call site; SVG and PNG on every

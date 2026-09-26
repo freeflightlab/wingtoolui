@@ -995,3 +995,160 @@ export function outlinesFromSegments(segments, { tolerance = 1e-4 } = {}) {
       : `${loops.length} closed outlines, nothing left over`,
   };
 }
+
+/**
+ * The wing as a 3D model, for CAD.
+ *
+ * ---------------------------------------------------------------------------
+ * Why OBJ
+ * ---------------------------------------------------------------------------
+ * The thing being exported is two surfaces, a set of ribs, and a few hundred
+ * LINES. That last part decides it.
+ *
+ * **STL** carries triangles and nothing else — no curves, no grouping, no
+ * names. Half of a paraglider is its line cascade, and STL cannot represent a
+ * line at all. It would export a sail and silently drop the rigging.
+ *
+ * **IGES** can hold curves and surfaces, but it is a 1980s format with
+ * uneven modern support and no clean way to group entities into named parts.
+ *
+ * **STEP** carries the most information of any of them — true B-rep surfaces
+ * and a real assembly tree — and it is the right answer for a machined part.
+ * It is the wrong answer here. Writing valid AP214 means emitting a correct
+ * entity graph of cartesian points, b-spline surfaces, faces, shells and
+ * product structure, and any mistake produces a file that opens as nothing.
+ * A paraglider has no parametric feature tree to preserve: its surfaces are
+ * ruled between rib curves, so a mesh loses essentially nothing.
+ *
+ * **OBJ** is the only light, universally-read format that carries polygon
+ * surfaces AND polylines AND named groups in one file. Blender, Rhino,
+ * Fusion, FreeCAD, MeshLab and every three.js viewer read it. It is plain
+ * text, so it diffs and compresses.
+ *
+ * Groups share a single vertex pool, which is exactly what was wanted: the
+ * upper surface, the lower surface, the ribs and the lines are independently
+ * selectable and hideable, while the ribs still share their edges with the
+ * surfaces rather than being a separate floating copy.
+ *
+ * The whole wing is written, not the half that is modelled. A CAD model of
+ * half a paraglider is a curiosity.
+ */
+export function wingToOBJ({
+  wing, linePlan = null, name = 'wing', mirror = true, includeLines = true,
+} = {}) {
+  if (!wing?.ribs?.length) throw new Error('wingToOBJ needs a wing with ribs');
+
+  const v = [];
+  const index = new Map();
+  // Vertices are shared between groups, so a rib edge is the same points as
+  // the panel edge beside it rather than a duplicate sitting on top of it.
+  // `+0` turns -0 into 0 before the key is made.
+  //
+  // Mirroring the centreline gives y = -0, which prints as "-0.000000" and
+  // keys differently from "0.000000" — the same point stored twice. Four
+  // copies of the trailing-edge point appeared that way, and a CAD package
+  // reading them sees coincident vertices and an open edge where there is
+  // none.
+  const round = (x) => Number((x + 0).toFixed(6)) + 0;
+  const vert = (p) => {
+    const q = [round(p[0]), round(p[1]), round(p[2])];
+    const key = `${q[0]},${q[1]},${q[2]}`;
+    let i = index.get(key);
+    if (i === undefined) {
+      v.push(q);
+      i = v.length;            // OBJ indices are 1-based
+      index.set(key, i);
+    }
+    return i;
+  };
+
+  // Both halves, or just the one modelled.
+  const sides = mirror ? [1, -1] : [1];
+  const flip = (p, s) => [p[0], p[1] * s, p[2]];
+
+  const faces = { upper: [], lower: [] };
+  const ribLines = [];
+
+  for (const s of sides) {
+    for (let r = 0; r < wing.ribs.length; r++) {
+      const rib = wing.ribs[r];
+
+      // The rib outline as a closed polyline: up one surface, back the other.
+      const loop = rib.upper.map((p) => vert(flip(p, s)))
+        .concat(rib.lower.slice(1, -1).reverse().map((p) => vert(flip(p, s))));
+      ribLines.push(loop.concat([loop[0]]));
+
+      // Panels between this rib and the next, on each surface.
+      const next = wing.ribs[r + 1];
+      if (!next) continue;
+      for (const surf of ['upper', 'lower']) {
+        const a = rib[surf];
+        const b = next[surf];
+        const n = Math.min(a.length, b.length);
+        for (let i = 0; i < n - 1; i++) {
+          const q = [
+            vert(flip(a[i], s)), vert(flip(a[i + 1], s)),
+            vert(flip(b[i + 1], s)), vert(flip(b[i], s)),
+          ];
+          // Wind the mirrored half the other way so its normals face out.
+          faces[surf].push(s > 0 ? q : q.slice().reverse());
+        }
+      }
+    }
+
+    // The centre cell, when a cell straddles the centreline: the panel
+    // between the innermost rib and its mirror. Written once, from the
+    // positive side, because it belongs to neither half.
+    if (wing.centreRib === false && s > 0 && wing.ribs.length) {
+      const inner = wing.ribs[0];
+      for (const surf of ['upper', 'lower']) {
+        const a = inner[surf];
+        for (let i = 0; i < a.length - 1; i++) {
+          faces[surf].push([
+            vert(flip(a[i], -1)), vert(flip(a[i + 1], -1)),
+            vert(flip(a[i + 1], 1)), vert(flip(a[i], 1)),
+          ]);
+        }
+      }
+    }
+  }
+
+  // Lines, as polylines by row so each row can be picked out.
+  const lineGroups = {};
+  if (includeLines && linePlan?.lines?.length) {
+    for (const s of sides) {
+      for (const l of linePlan.lines) {
+        if (!l.from || !l.to) continue;
+        const row = l.row || 'line';
+        (lineGroups[row] ||= []).push([
+          vert(flip(l.from, s)), vert(flip(l.to, s)),
+        ]);
+      }
+    }
+  }
+
+  const out = [
+    `# ${name} — paraglider, exported as OBJ`,
+    '#',
+    '# Groups: upper_surface, lower_surface, ribs, and one per line row.',
+    '# They share a vertex pool, so a rib edge IS the panel edge beside it.',
+    '# Units are metres. X is chordwise, Y spanwise, Z up.',
+    `o ${name.replace(/\s+/g, '_')}`,
+  ];
+  for (const p of v) {
+    out.push(`v ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)}`);
+  }
+  for (const [surf, list] of [['upper_surface', faces.upper],
+    ['lower_surface', faces.lower]]) {
+    out.push(`g ${surf}`);
+    for (const f of list) out.push(`f ${f.join(' ')}`);
+  }
+  out.push('g ribs');
+  for (const l of ribLines) out.push(`l ${l.join(' ')}`);
+  for (const [row, segs] of Object.entries(lineGroups)) {
+    out.push(`g lines_${row}`);
+    for (const seg of segs) out.push(`l ${seg.join(' ')}`);
+  }
+
+  return `${out.join('\n')}\n`;
+}

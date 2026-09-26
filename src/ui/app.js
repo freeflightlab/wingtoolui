@@ -992,6 +992,18 @@ function buildControls() {
       + `${r.ribsWithHolesInLoadPath.length} with a hole in a load path.`);
   }, 'btn');
 
+  button(grid, 'Wing 3D (OBJ)', () => {
+    // The whole wing as a 3D model: both surfaces, the ribs and every line,
+    // in named groups that share one vertex pool.
+    try {
+      save(`${S.name}.obj`, wingToOBJ({
+        wing: M.wing, linePlan: M.linePlan, name: S.name,
+      }));
+    } catch (e) {
+      setStatus(`OBJ: ${e.message}`);
+    }
+  }, 'btn');
+
   button(grid, 'Design parameters', () => {
     // Every setting and every derived figure, in one table.
     //

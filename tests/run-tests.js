@@ -23,7 +23,7 @@ import { solveArc, applyOvalization, wideningProfile , DEFAULT_TRANSITIONS , arc
 import { solveEquilibrium, lift3DFactor, simplifiedCalage , polarSweep, glideAngleTable, solveEquilibriumFromWing, trimFromCalage } from '../src/core/equilibrium.js';
 import { canopyAnchors, centroid, buildCascade , brakeAnchors, applyBrakeDistribution } from '../src/core/lines.js';
 import {
-  panelsToDXF, ribsToDXF, panelsToSVG, nestPanels, fabricEstimate, layoutBands,
+  panelsToDXF, wingToOBJ, ribsToDXF, panelsToSVG, nestPanels, fabricEstimate, layoutBands,
   vribsToDXF, vribFabricEstimate, markedPanelsToDXF, tiledPages, PAPER,
   parseDXF, outlineArea, outlinesFromSegments,
 } from '../src/core/export.js';
@@ -8993,6 +8993,94 @@ section('The reference set against the manufacturers');
     return Math.abs((z.cells + 1) - 48) > 0;
   })();
   check('a wrong cell count would be caught', canFail);
+}
+
+// ---------------------------------------------------------------------------
+section('The wing as a 3D model');
+
+{
+  // OBJ, because the export has to carry LINES.
+  //
+  // STL holds triangles and nothing else: it would write the sail and
+  // silently drop the rigging, which is half the design. IGES can hold
+  // curves but has no clean grouping and uneven modern support. STEP carries
+  // the most of any of them and is the right answer for a machined part —
+  // but a paraglider has no parametric feature tree to preserve, its
+  // surfaces are ruled between rib curves, and a hand-written AP214 entity
+  // graph that is slightly wrong opens as nothing at all.
+  const wingO = demoWing();
+  const afO = naca4('4415');
+  afO.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const planO = buildLinePlan({
+    wing: wingO, airfoil: afO, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  const obj = wingToOBJ({ wing: wingO, linePlan: planO, name: 'Test' });
+  const lines = obj.split('\n');
+  const verts = lines.filter((l) => l.startsWith('v '))
+    .map((l) => l.slice(2).split(' ').map(Number));
+  const groups = lines.filter((l) => l.startsWith('g '))
+    .map((l) => l.slice(2));
+
+  // The four things asked for, independently selectable.
+  for (const g of ['upper_surface', 'lower_surface', 'ribs']) {
+    check(`the model has a ${g} group`, groups.includes(g), groups.join(', '));
+  }
+  check('and a group for every line row',
+    groups.filter((g) => g.startsWith('lines_')).length >= 3,
+    groups.filter((g) => g.startsWith('lines_')).join(', '));
+
+  check('surfaces are faces and lines are polylines',
+    lines.some((l) => l.startsWith('f ')) && lines.some((l) => l.startsWith('l ')));
+
+  // A file whose indices run past its vertex list opens as nothing.
+  const refs = [];
+  for (const l of lines) {
+    if (l[0] === 'f' || l[0] === 'l') {
+      for (const t of l.slice(2).split(' ')) refs.push(Number(t));
+    }
+  }
+  check('every index points at a vertex that exists',
+    Math.min(...refs) >= 1 && Math.max(...refs) <= verts.length,
+    `${Math.min(...refs)} to ${Math.max(...refs)} of ${verts.length}`);
+
+  // Groups share one vertex pool, so a rib edge IS the panel edge beside it
+  // rather than a duplicate sitting on top of it.
+  const unique = new Set(verts.map((p) => p.join(','))).size;
+  check('no vertex is written twice',
+    unique === verts.length, `${verts.length - unique} duplicates`);
+
+  // -0 keys differently from 0 and defeats the sharing. Four copies of the
+  // trailing-edge centreline point appeared that way, and removing the sign
+  // took 181 vertices out of the file.
+  check('and the centreline does not produce negative zero',
+    !obj.includes('-0.000000'));
+
+  // The whole wing, not the half that is modelled.
+  const ys = verts.map((p) => p[1]);
+  check('both halves are written',
+    Math.min(...ys) < -0.5 && Math.max(...ys) > 0.5,
+    `${Math.min(...ys).toFixed(2)} to ${Math.max(...ys).toFixed(2)} m`);
+  check('and they are symmetric about the centreline',
+    Math.abs(Math.min(...ys) + Math.max(...ys)) < 1e-6);
+
+  // The spanwise extent is the PROJECTED span, because this is the wing in
+  // the air rather than the flat pattern.
+  const projected = Math.max(...ys) - Math.min(...ys);
+  check('the model spans the projected span, not the flat one',
+    projected < planformMetrics(wingO.planform).span,
+    `${projected.toFixed(2)} m against a flat `
+    + `${planformMetrics(wingO.planform).span.toFixed(2)} m`);
+
+  // The lines reach the maillon.
+  const zs = verts.map((p) => p[2]);
+  check('the lines run down to the maillon',
+    Math.min(...zs) < -5, `${Math.min(...zs).toFixed(2)} m`);
+
+  // Without a line plan it still writes a usable sail.
+  const bare = wingToOBJ({ wing: wingO, name: 'Bare' });
+  check('a wing with no line plan still exports',
+    bare.includes('g upper_surface') && !bare.includes('g lines_'));
 }
 
 // ---------------------------------------------------------------------------
