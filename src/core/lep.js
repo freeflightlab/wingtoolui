@@ -648,14 +648,37 @@ export function parseHVRibs(doc) {
   const byType = {};
   for (const e of entries) byType[e.type] = (byType[e.type] || 0) + 1;
 
+  // The three types do NOT share a field layout.
+  //
+  // Reading them all the same way made type 11 come out perfectly sensible —
+  // 70 entries, every one spanning adjacent ribs at an anchor, all 2 cm — and
+  // the other two come out as nonsense: type 16 referenced **rib 100 on a
+  // 26-rib half wing**, and type 15 had a 60 cm "width".
+  //
+  // A row of type 15 reads `15  25 3  1 0  60.0  28.0  85.  2.` — four
+  // numeric fields after the rib pair where type 11 has one and three zeros.
+  // They are different records that happen to live in the same section.
+  //
+  // So only type 11 is claimed. The others are counted and reported as
+  // present and not understood, which is the truthful thing to say about a
+  // record whose columns have not been established.
+  const H_RIB = 11;
+  const usable = entries.filter((e) => e.type === H_RIB);
+  const unread = entries.filter((e) => e.type !== H_RIB);
+
   return {
     declared: Number.isFinite(declared) ? declared : entries.length,
     count: entries.length,
     entries,
     byType,
+    /** Type 11 only: the H ribs, whose columns are established. */
+    hRibs: usable,
+    /** Present in the file, with a layout this project has not worked out. */
+    notUnderstood: unread.length,
     modelled: false,
-    note: `${entries.length} H/V/VH ribs in the file, types `
-      + `${Object.keys(byType).join(', ')}. Read but not built: this tool `
-      + 'models diagonals only.',
+    note: `${entries.length} H/V/VH ribs in the file: ${usable.length} of `
+      + `type ${H_RIB} read, ${unread.length} of types `
+      + `${[...new Set(unread.map((e) => e.type))].join(', ')} present but `
+      + 'their columns are not established.',
   };
 }

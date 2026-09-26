@@ -11,7 +11,7 @@ patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
 One offline HTML file, 733 KB, no build step and no network. That constraint
-drove the architecture: 35 core modules bundled into a single scope, with the
+drove the architecture: 36 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
 **37,000 lines**: 17,000 core, 2,100 interface, 10,300 tests, 2,000 tools,
@@ -86,7 +86,7 @@ by it.
 
 ## 5. What is missing
 
-**41 open items.** The substantial ones:
+**40 open items.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
@@ -116,8 +116,11 @@ whose numbers are traceable — not a certification tool. It says where every
 material figure came from, refuses geometry that is not a wing, and marks its
 own estimates.
 
-**The aerodynamics is the weakest part.** Lifting line plus thin-aerofoil
-theory with an empirical polar, and one unexplained 10% discrepancy. It is
+**The aerodynamics is the weakest part**, though less so than it was. A
+vortex lattice now solves the wing as it actually sits in the air — the arc
+included, rather than corrected for afterwards — and it is validated against
+the cases with known exact answers: the lift slope approaches 2 pi at high
+aspect ratio, and an elliptical wing gives a span efficiency of 1.006. It is
 good enough to compare designs and rank trades; it is not good enough to
 predict a polar a manufacturer would publish.
 

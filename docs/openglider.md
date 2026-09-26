@@ -32,11 +32,60 @@ types appear in that one wing.
 
 > 124 H/V/VH ribs in the file are not built.
 
-**They are read, not built.** The geometry is real work, and inventing it
-would be worse than saying the data is present and unused. It is on the
-roadmap as the next structural piece.
+**All 70 build now** — 3116 cm² of cloth the tool was ignoring — through the
+H-rib builder that was already in `vribs.js`.
 
-### The panel method and the FEM — not taken
+Only type 11 is claimed. Reading all three the same way made it look perfectly
+sensible and the others nonsense: **type 16 referenced rib 100 on a 26-rib
+half wing**, and type 15 had a 60 cm "width". A type-15 row reads
+`15  25 3  1 0  60.0  28.0  85.  2.` — four numeric fields where type 11 has
+one and three zeros. They are different records sharing a section, and the
+other 54 are counted and reported as present with columns not established,
+rather than parsed into plausible-looking rubbish.
+
+### I wrote the builder twice
+
+There was already a `buildHRibs` in `vribs.js` and I wrote a second one before
+noticing. CONTRIBUTING records five functions in this project written twice
+for exactly this reason, and `tools/find.mjs` exists to catch it — but it
+searches names and doc comments, and that function's comment does not say
+"H rib", so it did not surface. Removed, and the file entries now feed the
+one that was already there.
+
+### The panel method — partly taken
+
+I said a panel method was not a sensible trade in one offline file. That was
+right about VSAERO and wrong about the general point, so a **vortex lattice**
+is in now.
+
+It is a real step, not a reskin of the lifting line. Prandtl's equation is
+solved on a straight flat span; a paraglider is bent through 30 to 40 degrees
+of dihedral, and this project was computing on the flat wing and applying a
+correction. The lattice puts a horseshoe on every strip **where the strip
+really is**, with the strip's own normal, so the arc enters because the
+geometry says so.
+
+What that buys, on one wing bent from flat to a 0.80 projected ratio:
+
+| | flat | arced |
+| --- | --- | --- |
+| CL | 0.468 | **0.418** |
+| span efficiency | 1.020 | **1.130** |
+
+The lift loss a correction factor can approximate. **The efficiency gain it
+cannot** — an arced wing sheds a non-planar wake, which is more efficient for
+the same reason a winglet is. That is real information the old model could not
+produce.
+
+Validated where the answer is known: the lift slope approaches 2 pi at high
+aspect ratio, and an elliptical wing gives a span efficiency of 1.006.
+
+It came out at **0.503** first — exactly double the induced drag, because the
+Trefftz integral is `(rho/2) * integral(Gamma * w)` and the half was missing.
+A factor of two in a quantity with a known exact answer is the easiest kind of
+error to find, and only because the answer is known.
+
+### The FEM — not taken
 
 OpenGlider's roadmap builds on a self-coded VSAERO panel method and an
 explicit nonlinear FEM for line forces and deformation. Those are the right

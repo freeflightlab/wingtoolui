@@ -434,8 +434,58 @@ export function buildHRibs({
   chordTo = 0.60,
   heightFraction = 0.35,
   points = 16,
+  // H ribs as a design file states them, rather than one span for the whole
+  // wing.
+  //
+  // `parseHVRibs` returns LEP section 12's type-11 rows: which two ribs each
+  // strip joins, which anchor station it sits at, and how wide it is. The
+  // Swoop2 carries 70, one between each adjacent pair at each of three
+  // stations, 2 cm wide — and every one of them was being ignored.
+  //
+  // A file entry gives a chord STATION and a width; this function works in a
+  // chord RANGE, so the width is laid either side of the station.
+  entries = null,
+  anchorFractions = null,
 }) {
   const ribs = wing.ribs;
+
+  // From the file, each entry becomes its own pair and its own chord range.
+  if (entries?.length) {
+    const fracs = anchorFractions
+      ?? Object.values(wing.airfoil?.anchors ?? { A: 0.085, B: 0.30, C: 0.53 });
+    const built = [];
+    const skipped = [];
+    for (const e of entries) {
+      const i = e.fromRib - 1;
+      const j = e.toRib - 1;
+      if (!ribs[i] || !ribs[j]) {
+        skipped.push({ ...e, why: 'rib out of range' });
+        continue;
+      }
+      const station = fracs[Math.max(0, Math.min(fracs.length - 1,
+        (e.fromAnchor ?? 1) - 1))];
+      const chordM = ribs[i].chord || 1;
+      const half = ((e.widthCm ?? 2) / 100) / chordM / 2;
+      const from = Math.max(0.01, station - half);
+      const to = Math.min(0.99, station + half);
+      const one = buildHRibs({
+        wing, ribPairs: [[i, j]], chordFrom: from, chordTo: to,
+        heightFraction, points,
+      });
+      built.push(...one.hribs.map((h) => ({
+        ...h, anchor: e.fromAnchor, widthCm: e.widthCm, fromFile: true,
+      })));
+    }
+    return {
+      hribs: built,
+      count: built.length,
+      skipped,
+      totalAreaM2: built.reduce((a, h) => a + h.areaM2, 0),
+      note: `${built.length} H ribs from the design file`
+        + (skipped.length ? `, ${skipped.length} skipped` : ''),
+    };
+  }
+
   const pairs = ribPairs
     || ribs.slice(0, -1).map((_, i) => [i, i + 1]);
 

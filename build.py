@@ -76,6 +76,7 @@ MODULES = [
     "inflated.js",
     "trimdrift.js",
     "fabric.js",
+    "vlm.js",
     "bom.js",
     "loads.js",
     "scaling.js",

@@ -7,6 +7,7 @@
  * property the algorithm must obey, or a number printed in the handbook.
  */
 
+import { vortexLattice, stripsFromWing } from '../src/core/vlm.js';
 import {
   fabricSchedule, clothWeightsFor, CLOTH, LOCATIONS,
 } from '../src/core/fabric.js';
@@ -9250,10 +9251,172 @@ section('What the Swoop2 carries that this tool does not');
     Object.keys(hv.byType).length > 1,
     `types ${Object.keys(hv.byType).join(', ')}`);
 
-  // Recorded as UNBUILT, not quietly absorbed. The geometry is real work and
-  // inventing it would be worse than saying the data is there and unused.
-  check('the result says plainly that they are not built',
-    hv.modelled === false && /not built/.test(hv.note));
+  // Only the type whose columns are established is claimed.
+  //
+  // Reading all three the same way made type 11 look perfectly sensible — 70
+  // entries, every one spanning adjacent ribs — and the other two nonsense:
+  // type 16 referenced rib 100 on a 26-rib half wing, and type 15 had a 60 cm
+  // "width". They are different records sharing a section.
+  check('type 11 is read and the rest are counted, not guessed',
+    hv.hRibs.length === 70 && hv.notUnderstood === 54,
+    `${hv.hRibs.length} read, ${hv.notUnderstood} not understood`);
+  check('every one it claims spans adjacent ribs',
+    hv.hRibs.every((e) => Math.abs(e.toRib - e.fromRib) === 1));
+
+  // And they are BUILT now, through the H-rib builder that was already there.
+  const wingHV = buildWing({
+    planform: planformFromDesignInputs({
+      span: 10.48, rootChord: 2.09, tipChord: 0.5, tipSweep: 1.2,
+    }),
+    lobe: buildLobe({ type: 'circle', projectedRatio: 0.807 }, 5.24),
+    airfoil: (() => {
+      const a = naca4('4415');
+      a.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+      return a;
+    })(),
+    cells: 25, pointsPerSurface: 24,
+  });
+  const built = buildHRibs({
+    wing: wingHV, entries: hv.hRibs, anchorFractions: [0.085, 0.30, 0.53],
+  });
+  check('all of them build on a wing of the right size',
+    built.count === hv.hRibs.length && built.skipped.length === 0,
+    built.note);
+  check('and they are a real quantity of cloth, not a rounding',
+    built.totalAreaM2 > 0.2,
+    `${(built.totalAreaM2 * 1e4).toFixed(0)} cm2`);
+  check('each carries the anchor and width the file gave it',
+    built.hribs.every((h) => h.fromFile && h.anchor > 0 && h.widthCm > 0));
+
+  // A file entry gives a chord STATION and a width; the builder works in a
+  // chord RANGE, so the width is laid either side of the station.
+  const first = built.hribs[0];
+  near('the strip straddles its anchor station',
+    (first.chordFrom + first.chordTo) / 2, 0.085, 0.002, ' of chord');
+}
+
+// ---------------------------------------------------------------------------
+section('A vortex lattice over the wing as it sits');
+
+{
+  // `liftingLine` solves Prandtl's equation on a straight, flat span. A
+  // paraglider is bent through 30 to 40 degrees of dihedral, and the model
+  // has no way to represent that — this project handled it with a correction
+  // applied afterwards.
+  //
+  // A lattice puts a horseshoe on every strip where the strip really is,
+  // with the strip's own normal, so the arc affects the answer because the
+  // geometry says so.
+  const rect = (AR, n) => {
+    const span = 10;
+    const chord = span / AR;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const y0 = -span / 2 + (span * i) / n;
+      const y1 = -span / 2 + (span * (i + 1)) / n;
+      out.push({
+        leftLE: [0, y0, 0], leftTE: [chord, y0, 0],
+        rightLE: [0, y1, 0], rightTE: [chord, y1, 0],
+      });
+    }
+    return out;
+  };
+  const slopeOf = (st) => {
+    const a = vortexLattice({ strips: st, alphaDeg: 2 });
+    const b = vortexLattice({ strips: st, alphaDeg: 4 });
+    return (b.CL - a.CL) / ((2 * Math.PI) / 180);
+  };
+
+  // The limit that says the method is right at all: as aspect ratio grows,
+  // the lift slope must approach the two-dimensional 2*pi.
+  const highAR = slopeOf(rect(200, 60));
+  check('at very high aspect ratio the lift slope approaches 2 pi',
+    highAR > 6.0 && highAR < 2 * Math.PI,
+    `${highAR.toFixed(3)} against ${(2 * Math.PI).toFixed(3)}`);
+  check('and it falls with aspect ratio, as finite-span theory says',
+    slopeOf(rect(4, 40)) < slopeOf(rect(12, 40)));
+
+  // The decisive check: an elliptical wing must have a span efficiency of 1.
+  //
+  // It came out at 0.503 — exactly double the induced drag — because the
+  // Trefftz integral is `(rho/2) * integral(Gamma * w)` and the half was
+  // missing. A factor of two in a quantity with a known exact answer is the
+  // easiest kind of error to find, and only because the answer is known.
+  const ell = (n) => {
+    const span = 10;
+    const AR = 8;
+    const cRoot = (4 * span) / (Math.PI * AR);
+    const out = [];
+    const chordAt = (y) => cRoot * Math.sqrt(Math.max(0, 1 - ((2 * y) / span) ** 2));
+    for (let i = 0; i < n; i++) {
+      const y0 = -span / 2 + (span * i) / n;
+      const y1 = -span / 2 + (span * (i + 1)) / n;
+      out.push({
+        leftLE: [0, y0, 0], leftTE: [chordAt(y0), y0, 0],
+        rightLE: [0, y1, 0], rightTE: [chordAt(y1), y1, 0],
+      });
+    }
+    return out;
+  };
+  const elliptical = vortexLattice({ strips: ell(60), alphaDeg: 5 });
+  near('an elliptical wing has a span efficiency of one',
+    elliptical.oswald, 1.0, 0.02);
+  check('and a rectangular one is worse',
+    vortexLattice({ strips: rect(8, 60), alphaDeg: 5 }).oswald
+      < elliptical.oswald);
+
+  // The point of the exercise: what the arc does, from the geometry.
+  const arced = (ratio, n) => {
+    const span = 10;
+    const cRoot = (span / 6) * 1.2;
+    const out = [];
+    const place = (t) => {
+      const flat = (t * span) / 2;
+      if (ratio >= 1) return [flat, 0];
+      const R = (span / 2) / Math.acos(ratio);
+      const th = flat / R;
+      return [R * Math.sin(th), -R * (1 - Math.cos(th))];
+    };
+    const chordAt = (t) => cRoot * Math.sqrt(Math.max(0.04, 1 - t * t * 0.85));
+    for (let i = 0; i < n; i++) {
+      const t0 = -1 + (2 * i) / n;
+      const t1 = -1 + (2 * (i + 1)) / n;
+      const [y0, z0] = place(t0);
+      const [y1, z1] = place(t1);
+      out.push({
+        leftLE: [0, y0, z0], leftTE: [chordAt(t0), y0, z0],
+        rightLE: [0, y1, z1], rightTE: [chordAt(t1), y1, z1],
+      });
+    }
+    return out;
+  };
+  const flat = vortexLattice({ strips: arced(1.0, 48), alphaDeg: 6 });
+  const bent = vortexLattice({ strips: arced(0.80, 48), alphaDeg: 6 });
+
+  check('bending the same wing into an arc loses lift',
+    bent.CL < flat.CL * 0.95,
+    `${flat.CL.toFixed(4)} becomes ${bent.CL.toFixed(4)}, `
+    + `${((1 - bent.CL / flat.CL) * 100).toFixed(1)}% down`);
+  check('and the projected span shrinks with it',
+    bent.spanM < flat.spanM * 0.95,
+    `${flat.spanM.toFixed(2)} m becomes ${bent.spanM.toFixed(2)} m`);
+
+  // The non-obvious one, and the reason this is worth having: an arced wing
+  // sheds its wake in a non-planar sheet, which is MORE efficient — the same
+  // reason a winglet works. A correction factor on a flat solution cannot
+  // produce that.
+  check('but the span efficiency rises, because the wake is not planar',
+    bent.oswald > flat.oswald * 1.05,
+    `${flat.oswald.toFixed(3)} becomes ${bent.oswald.toFixed(3)}`);
+
+  // It runs on a real wing.
+  const wingV = demoWing();
+  const solved = vortexLattice({ strips: stripsFromWing(wingV), alphaDeg: 6 });
+  check('and it solves a wing built by this tool',
+    solved.CL > 0.2 && solved.CL < 1.2 && solved.panels > 20,
+    solved.note);
+  check('with a loading for every strip',
+    solved.loading.length === solved.panels);
 }
 
 // ---------------------------------------------------------------------------
