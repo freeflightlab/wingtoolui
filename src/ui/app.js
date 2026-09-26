@@ -195,10 +195,33 @@ function applyReference() {
 function applyTheme() {
   const root = document.documentElement;
   if (root && root.setAttribute) root.setAttribute('data-theme', S.theme);
+  // The button says what pressing it will DO, not what is currently on.
+  const btn = document.getElementById('themeBtn');
+  if (btn) btn.textContent = S.theme === 'light' ? 'Dark' : 'Light';
+}
+
+/**
+ * The theme switch lives in the masthead.
+ *
+ * It was a select at the bottom of the Planform panel, under six sliders
+ * about leading-edge ellipticity — somewhere nobody would look for a colour
+ * scheme, and it was reported as missing. Appearance is not a design
+ * parameter and does not belong among them.
+ */
+function wireThemeButton() {
+  const btn = document.getElementById('themeBtn');
+  if (!btn || btn._wired) return;
+  btn._wired = true;
+  btn.addEventListener('click', () => {
+    S.theme = S.theme === 'light' ? 'dark' : 'light';
+    applyTheme();
+    rebuild();
+  });
 }
 
 function rebuild() {
   applyTheme();
+  wireThemeButton();
   addViewportSavers();
   applyReference();
   const t0 = performance.now();
@@ -625,7 +648,6 @@ function buildControls() {
   slider(P, 'tipSweep', 'Tip sweep back', 0, 3, 0.01, (v) => v.toFixed(2), ' m');
   slider(P, 'ellipticityLE', 'Leading edge — elliptical', 0, 1, 0.01, (v) => (v * 100).toFixed(0), '%');
   slider(P, 'ellipticityTE', 'Trailing edge — elliptical', 0, 1, 0.01, (v) => (v * 100).toFixed(0), '%');
-  selectField(P, 'theme', 'Appearance', [['dark', 'Dark'], ['light', 'Light']]);
   checkField(P, 'centreRib', 'Rib on the centreline (off = centre cell)');
   slider(P, 'cells', 'Full cells each side', 4, 40, 1, (v) => v.toFixed(0));
   hint(P, `${S.centreRib ? S.cells * 2 : S.cells * 2 + 1} cells across the `

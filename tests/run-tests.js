@@ -9077,6 +9077,53 @@ section('The wing as a 3D model');
   check('the lines run down to the maillon',
     Math.min(...zs) < -5, `${Math.min(...zs).toFixed(2)} m`);
 
+  // The lines are in the file, as polylines grouped by row. A viewer that
+  // only reads faces will not show them, but they are there and Blender,
+  // Rhino and MeshLab all read them.
+  const polylines = lines.filter((l) => l.startsWith('l ')).length;
+  check('every line is written as a polyline',
+    polylines >= planO.lines.length,
+    `${polylines} polylines for ${planO.lines.length} lines and `
+    + `${wingO.ribs.length} ribs`);
+
+  // A proper leading edge.
+  //
+  // A wing is built with as few points per surface as the panel work needs,
+  // spread EVENLY along the surface — so the nose, the roundest part of the
+  // section, came out as a single straight cut across it. On a 2.19 m chord
+  // the first station landed at 2.53%.
+  const noseGaps = (objText) => {
+    const vs = objText.split('\n').filter((l) => l.startsWith('v '))
+      .map((l) => l.slice(2).split(' ').map(Number));
+    const y0 = vs[0][1];
+    const near = vs.filter((p) => Math.abs(p[1] - y0) < 0.25)
+      .sort((a, b) => a[0] - b[0]);
+    return near.slice(0, 4).map((p, i) => (near[i + 1]
+      ? Math.abs(near[i + 1][0] - p[0]) : 0));
+  };
+  const coarse = wingToOBJ({ wing: wingO, name: 'C', spacing: 'none' });
+  const fine = wingToOBJ({ wing: wingO, name: 'F' });
+  check('the nose is sampled far more finely than the wing is built',
+    Math.max(...noseGaps(fine)) < Math.max(...noseGaps(coarse)) / 5,
+    `${(Math.max(...noseGaps(coarse)) * 1000).toFixed(1)} mm becomes `
+    + `${(Math.max(...noseGaps(fine)) * 1000).toFixed(1)} mm`);
+  check('which means more of everything in the file',
+    fine.length > coarse.length * 1.5);
+
+  // But NOT by changing the wing. Switching cosine spacing on globally
+  // changed how ovalization eases the two seams of a panel, and a leading
+  // edge in a 3D model is not a reason to change what gets sewn.
+  const builtPoints = wingO.ribs[5].upper.length;
+  wingToOBJ({ wing: wingO, linePlan: planO, name: 'again' });
+  check('the wing itself is untouched by the export',
+    wingO.ribs[5].upper.length === builtPoints && builtPoints < 60,
+    `${builtPoints} points per surface before and after`);
+
+  // Upper and lower meet at the nose, or the model has a slit down it.
+  const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  check('the surfaces meet at the leading edge',
+    d3(wingO.ribs[5].upper[0], wingO.ribs[5].lower[0]) < 1e-9);
+
   // Without a line plan it still writes a usable sail.
   const bare = wingToOBJ({ wing: wingO, name: 'Bare' });
   check('a wing with no line plan still exports',

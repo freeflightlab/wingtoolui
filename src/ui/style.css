@@ -508,3 +508,16 @@ input[type=range]::-moz-range-thumb {
   cursor: pointer;
 }
 .vp-save-btn:hover { color: var(--text); border-color: var(--rule); }
+
+/* The theme switch, in the masthead where somebody would look for it. */
+.themebtn {
+  font: 11px/1 var(--mono);
+  color: var(--text-dim);
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 5px 10px;
+  margin-left: 10px;
+  cursor: pointer;
+}
+.themebtn:hover { color: var(--text); border-color: var(--text-faint); }

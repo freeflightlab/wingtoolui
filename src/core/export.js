@@ -1,3 +1,4 @@
+import { resampleSurface } from './airfoil.js';
 import { markPanels, markPlacedSeams, DEFAULT_MARKING } from './marking.js';
 import { nestByProfile } from './pairing.js';
 /* export.js — DXF and SVG output.
@@ -1035,8 +1036,41 @@ export function outlinesFromSegments(segments, { tolerance = 1e-4 } = {}) {
  */
 export function wingToOBJ({
   wing, linePlan = null, name = 'wing', mirror = true, includeLines = true,
+  pointsPerSurface = 60, spacing = 'cosine',
 } = {}) {
   if (!wing?.ribs?.length) throw new Error('wingToOBJ needs a wing with ribs');
+
+  // The ribs are re-sampled for the model, with points clustered at the nose.
+  //
+  // A wing is built with as few points per surface as the panel work needs —
+  // 24 is typical — spread evenly along the surface. That is fine for cutting
+  // and wrong for looking at: on a 2.19 m chord the first station landed at
+  // 2.53% and the leading edge, the roundest part of the section, came out as
+  // a single straight cut across it.
+  //
+  // Cosine spacing puts the first station at 0.04% chord instead. It is done
+  // HERE rather than in the wing, because switching it on globally changed
+  // how ovalization eases the two seams of a panel, and a leading edge in a
+  // 3D model is not a reason to change what gets sewn.
+  const ribs = wing.ribs.map((rib) => {
+    if (!spacing || spacing === 'none') return rib;
+    const re = (pts) => {
+      // resampleSurface works in 2D; the rib points are 3D, so each axis is
+      // carried through the same parameterisation.
+      const flat = pts.map((p) => [p[0], p[2]]);
+      const idx = resampleSurface(
+        pts.map((p, i) => [i, 0]), pointsPerSurface, { spacing });
+      return idx.map(([fi]) => {
+        const i0 = Math.min(pts.length - 2, Math.max(0, Math.floor(fi)));
+        const f = Math.min(1, Math.max(0, fi - i0));
+        const a = pts[i0];
+        const b = pts[i0 + 1];
+        return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f,
+          a[2] + (b[2] - a[2]) * f];
+      });
+    };
+    return { ...rib, upper: re(rib.upper), lower: re(rib.lower) };
+  });
 
   const v = [];
   const index = new Map();
@@ -1070,8 +1104,8 @@ export function wingToOBJ({
   const ribLines = [];
 
   for (const s of sides) {
-    for (let r = 0; r < wing.ribs.length; r++) {
-      const rib = wing.ribs[r];
+    for (let r = 0; r < ribs.length; r++) {
+      const rib = ribs[r];
 
       // The rib outline as a closed polyline: up one surface, back the other.
       const loop = rib.upper.map((p) => vert(flip(p, s)))
@@ -1079,7 +1113,7 @@ export function wingToOBJ({
       ribLines.push(loop.concat([loop[0]]));
 
       // Panels between this rib and the next, on each surface.
-      const next = wing.ribs[r + 1];
+      const next = ribs[r + 1];
       if (!next) continue;
       for (const surf of ['upper', 'lower']) {
         const a = rib[surf];
@@ -1099,8 +1133,8 @@ export function wingToOBJ({
     // The centre cell, when a cell straddles the centreline: the panel
     // between the innermost rib and its mirror. Written once, from the
     // positive side, because it belongs to neither half.
-    if (wing.centreRib === false && s > 0 && wing.ribs.length) {
-      const inner = wing.ribs[0];
+    if (wing.centreRib === false && s > 0 && ribs.length) {
+      const inner = ribs[0];
       for (const surf of ['upper', 'lower']) {
         const a = inner[surf];
         for (let i = 0; i < a.length - 1; i++) {

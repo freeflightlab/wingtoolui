@@ -154,6 +154,16 @@ the test measured something adjacent to what mattered.
 
 ## 7. Light mode, and getting a drawing out
 
+### Where the switch is
+
+In the **masthead**, beside the wing name, labelled with what pressing it will
+do rather than what is currently on.
+
+It was a select at the bottom of the Planform panel, under six sliders about
+leading-edge ellipticity — somewhere nobody would look for a colour scheme,
+and it was reported as missing entirely. Appearance is not a design parameter
+and does not belong among them.
+
 ### Two themes
 
 The drawings are SVG with explicit `stroke` attributes, which a stylesheet

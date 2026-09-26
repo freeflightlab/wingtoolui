@@ -892,6 +892,15 @@ try {
   const declared = [...src.match(/const S = \{[\s\S]*?\n\};/)[0]
     .matchAll(/(\w+):/g)].map((m) => m[1]);
   const internalOnly = ['name', 'nCrit', 'airfoilCustom', 'ribIndex', 'tab'];
+  // Reached by a control outside the panel: `theme` is a button in the
+  // masthead, because a colour scheme is not a design parameter and burying
+  // it under six ellipticity sliders meant it was reported as missing.
+  // Asserted to exist rather than merely excused.
+  if (!/themeBtn/.test(src)) {
+    console.log('  FAIL theme has no control anywhere, in or out of the panel');
+    process.exit(1);
+  }
+  internalOnly.push('theme');
   const unreachable = declared.filter(
     (k) => !boundKeys.includes(k) && !internalOnly.includes(k));
   if (unreachable.length) {

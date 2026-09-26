@@ -194,7 +194,7 @@ export function splitSurfaces(af) {
 }
 
 /** Resample a surface polyline to n points, evenly spaced in arc length. */
-export function resampleSurface(poly, n) {
+export function resampleSurface(poly, n, { spacing = 'uniform' } = {}) {
   const cum = [0];
   for (let i = 1; i < poly.length; i++) {
     cum.push(cum[i - 1] + Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]));
@@ -202,7 +202,26 @@ export function resampleSurface(poly, n) {
   const total = cum[cum.length - 1];
   const out = [];
   for (let k = 0; k < n; k++) {
-    const s = (k / (n - 1)) * total;
+    // Cosine spacing clusters points at both ends of the surface.
+    //
+    // Uniform arc length spread them evenly, which throws away the clustering
+    // `naca4` generates and leaves the NOSE — where curvature is highest —
+    // sampled as coarsely as the flat middle. On a 2.19 m chord at 24 points
+    // the first station landed at 2.53% chord, so the leading edge was one
+    // straight cut across the roundest part of the section.
+    //
+    // The same clustering also puts more panel-development points where the
+    // surface bends most, which is where a developed panel earns its error.
+    //
+    // It is NOT the default. Switching it on globally changed how
+    // ovalization eases the two seams of a panel — the two deltas stopped
+    // being opposite in sign — and that is a real effect on a cutting file
+    // which I do not yet understand. A leading edge in a 3D model is not a
+    // reason to change what gets sewn, so the surfaces that feed the CAD
+    // export ask for it and everything else is left alone.
+    const u = k / (n - 1);
+    const t = spacing === 'cosine' ? (1 - Math.cos(u * Math.PI)) / 2 : u;
+    const s = t * total;
     if (s <= 0) { out.push(poly[0].slice()); continue; }
     if (s >= total) { out.push(poly[poly.length - 1].slice()); continue; }
     let i = 1;
