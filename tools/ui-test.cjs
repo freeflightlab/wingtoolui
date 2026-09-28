@@ -815,8 +815,44 @@ try {
       console.log('  FAIL rotating the isometric view changes nothing');
       process.exit(1);
     }
+    // The default elevation must not look ALONG the arc.
+    //
+    // A paraglider's tips drop about 27 degrees below its root. Set the
+    // elevation to that and the camera looks straight down the arc, which
+    // projects to nothing: the wing renders as a flat line and the cascade
+    // hangs off it at angles that look wrong because the thing they hang
+    // from has collapsed.
+    //
+    // The default was 25 degrees — within two of the degenerate angle for a
+    // typical wing — and that is how it shipped looking wrong.
+    const m3 = globalThis.__getM();
+    const arcSpread = (elDeg) => {
+      const az = (S3.isoAz * Math.PI) / 180;
+      const e = (elDeg * Math.PI) / 180;
+      const p = ([x, y, z]) => (x * Math.sin(az) + y * Math.cos(az))
+        * Math.sin(e) + z * Math.cos(e);
+      const r = m3.wing.ribs[0].upper[0];
+      const tp = m3.wing.ribs[m3.wing.ribs.length - 1].upper[0];
+      return Math.abs(p(tp) - p(r));
+    };
+    const arcAt = (z) => Math.abs(Math.atan2(
+      Math.abs(m3.wing.ribs[m3.wing.ribs.length - 1].upper[0][2] - z),
+      Math.abs(m3.wing.ribs[m3.wing.ribs.length - 1].upper[0][1]))) * 180 / Math.PI;
+    const degenerate = arcAt(m3.wing.ribs[0].upper[0][2]);
+    if (Math.abs(S3.isoEl - degenerate) < 6) {
+      console.log(`  FAIL the default elevation ${S3.isoEl} looks along the `
+        + `${degenerate.toFixed(0)} degree arc and flattens the wing`);
+      process.exit(1);
+    }
+    if (arcSpread(S3.isoEl) < 0.5 * arcSpread(0)) {
+      console.log('  FAIL the default elevation loses most of the arc: '
+        + `${arcSpread(S3.isoEl).toFixed(2)} against ${arcSpread(0).toFixed(2)}`);
+      process.exit(1);
+    }
+
     console.log(`  ok   isometric view: ${without} elements of wing, `
-      + `${withLines - without} of cascade, and it rotates`);
+      + `${withLines - without} of cascade, rotates, and shows the arc `
+      + `(${arcSpread(S3.isoEl).toFixed(2)} of ${arcSpread(0).toFixed(2)})`);
   }
 
   const baseline = pressAll();

@@ -401,3 +401,40 @@ Sizes are distributed now — the first `length % groups` chunks take one extra
 — and an empty input returns nothing rather than one empty group, which was a
 regression the first fix introduced and which produced NaN line lengths
 several steps away.
+
+---
+
+## 8. The wing hangs over its maillon
+
+A paraglider hangs with the pilot below the point the lift acts through, and
+the risers close to vertical.
+
+The maillon was placed at **x = 0 — the leading edge**. The anchors span a
+quarter to three quarters of the chord, so every line raked about a metre
+forward to reach a point under the nose, and the whole cascade sat at a large
+angle to the wing it hangs from. In the 3D model it looked like the wing had
+been dragged forward off its own risers.
+
+| | before | after |
+| --- | --- | --- |
+| hang point | 0.0% of chord | **31.9%** |
+| forward rake | 1.02 m | **0.28 m** |
+
+### Where it should be
+
+At the load-weighted centroid of the load-bearing anchors — where the
+resultant of the lines acts, so the wing balances over the pilot. It is
+computed from the anchors rather than assumed, so a wing with an unusual
+layout hangs from its own balance point: move the anchors aft and the hang
+point follows.
+
+### Why nothing caught it
+
+Every internal check passed. The lines were the right lengths, the loads
+closed at every cascade level, the cascade was geometrically consistent with
+itself, and the exported line sheet matched the model.
+
+It was only wrong **against how a wing flies** — which is not a property any
+of those checks look at. The tests now assert the hang point sits between 20%
+and 60% of chord, that the rake is under a quarter of the chord, and that the
+riser-level lines average nearer vertical than horizontal.

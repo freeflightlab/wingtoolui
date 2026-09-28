@@ -233,6 +233,34 @@ the leading and trailing edges picked out, and the cascade coloured by row at
 OpenGlider renders its wings in 3D through FreeCAD. This is the same idea in
 the one file.
 
+### The default elevation looked along the arc
+
+It shipped looking wrong, and the reason is specific.
+
+A paraglider's tips drop about **27 degrees** below its root. Set the camera's
+elevation to that and it looks straight down the arc, which then projects to
+nothing — the wing renders as a flat line and the cascade hangs off it at
+angles that look impossible, because the thing they hang from has collapsed.
+
+**The default was 25 degrees.** Within two of the degenerate angle for a
+typical wing.
+
+| elevation | arc visible on screen |
+| --- | --- |
+| 0° | 2.52 |
+| 15° | 1.17 |
+| **25°** | **0.22 — vanished** |
+| 45° | 1.66 |
+
+The default is 12° now, and the view says so when the slider is taken near the
+degenerate angle:
+
+> the arc runs at 28°, so this elevation looks along it and flattens the wing
+> — move the slider
+
+A test asserts the default keeps at least half the arc, and fails on the old
+one: `the default elevation 25 looks along the 28 degree arc`.
+
 ### It is a picture, and that is the distinction
 
 Line *width* here is free to be legible, because nothing about a drawing

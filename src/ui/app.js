@@ -57,7 +57,7 @@ const S = {
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', dimensions: true,
-  isoAz: 35, isoEl: 25, isoLines: true, riserLayout: 'A/B/C+D', splitFrom: 62,
+  isoAz: 35, isoEl: 12, isoLines: true, riserLayout: 'A/B/C+D', splitFrom: 62,
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
   useRodSpec: false,
   rodSpec: 'leading edge  12.0 18.5   7.0 15.0   1.5  0 25\n'
@@ -1936,9 +1936,30 @@ function drawIso() {
   }
 
   c.fit();
+
+  // Warn when the camera is looking ALONG the arc.
+  //
+  // A paraglider's tips drop about 27 degrees below its root. Set the
+  // elevation to that and the camera looks straight down the arc, which then
+  // projects to nothing: the wing renders as a flat line and the cascade
+  // hangs off it at angles that look wrong because the thing they hang from
+  // has collapsed.
+  //
+  // The default was 25 degrees — within two of the degenerate angle for a
+  // typical wing, which is how it shipped looking wrong.
+  const rootP = M.wing.ribs[0].upper[0];
+  const tipP = M.wing.ribs[M.wing.ribs.length - 1].upper[0];
+  const arcDeg = Math.abs(Math.atan2(Math.abs(tipP[2] - rootP[2]),
+    Math.abs(tipP[1] - rootP[1])) * (180 / Math.PI));
+  const nearDegenerate = Math.abs(S.isoEl - arcDeg) < 6;
+
   document.getElementById('note-iso').textContent =
     `azimuth ${S.isoAz}°  ·  elevation ${S.isoEl}°  ·  `
-    + `${M.linePlan?.lines?.length ?? 0} lines at true position`;
+    + `${M.linePlan?.lines?.length ?? 0} lines at true position`
+    + (nearDegenerate
+      ? `  ·  the arc runs at ${arcDeg.toFixed(0)}°, so this elevation looks `
+        + 'along it and flattens the wing — move the slider'
+      : '');
 }
 
 function drawFront() {

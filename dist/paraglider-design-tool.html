@@ -4768,7 +4768,42 @@ function buildLinePlanInner({
   if (layout === LAYOUT_OMITTED) layout = RISER_LAYOUTS['A/B/C+D'];
 
   const fractions = airfoil?.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
-  const maillon = [0, karabinerSeparationM / 2, -lineLengthM];
+  // The maillon hangs under the wing's BALANCE POINT, not under its nose.
+  //
+  // This read `[0, ..., -lineLengthM]` — x = 0 is the leading edge. The
+  // anchors span 0.22 to 1.82 m of chord, so every line raked about a metre
+  // forward to reach a point under the nose, and the whole cascade sat at a
+  // large angle to the wing it hangs from. A paraglider does not fly like
+  // that: it hangs with the risers close to vertical and the pilot below the
+  // point the lift acts through.
+  //
+  // That point is the calage — where the risers attach along the chord, which
+  // `solveEquilibrium` reports and real wings put near 40 to 45%. Placed
+  // there, the lines run down rather than forward, and the angle between the
+  // wing and its risers becomes the small one it is in the air.
+  //
+  // It is computed from the anchors rather than assumed, so a wing with an
+  // unusual layout still hangs from its own balance point: the load-bearing
+  // anchors are averaged, weighted towards the front rows because that is
+  // where the load is.
+  const hangX = (() => {
+    const rows = Object.entries(fractions)
+      .filter(([row]) => !['K', 'BR', 'ST'].includes(row));
+    if (!rows.length) return 0;
+    // Front rows carry more, so weight by the share convention.
+    const share = { A: 0.35, B: 0.35, C: 0.20, D: 0.10, E: 0.05 };
+    let num = 0;
+    let den = 0;
+    for (const [row, frac] of rows) {
+      const wgt = share[row] ?? 0.1;
+      num += frac * wgt;
+      den += wgt;
+    }
+    const chordFraction = den > 0 ? num / den : 0.4;
+    const rootRib = wing.ribs[0];
+    return (rootRib?.xLE ?? 0) + chordFraction * (rootRib?.chord ?? 0);
+  })();
+  const maillon = [hangX, karabinerSeparationM / 2, -lineLengthM];
 
   const lines = [];
   const risers = [];
@@ -19099,7 +19134,7 @@ const S = {
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', dimensions: true,
-  isoAz: 35, isoEl: 25, isoLines: true, riserLayout: 'A/B/C+D', splitFrom: 62,
+  isoAz: 35, isoEl: 12, isoLines: true, riserLayout: 'A/B/C+D', splitFrom: 62,
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
   useRodSpec: false,
   rodSpec: 'leading edge  12.0 18.5   7.0 15.0   1.5  0 25\n'
@@ -20978,9 +21013,30 @@ function drawIso() {
   }
 
   c.fit();
+
+  // Warn when the camera is looking ALONG the arc.
+  //
+  // A paraglider's tips drop about 27 degrees below its root. Set the
+  // elevation to that and the camera looks straight down the arc, which then
+  // projects to nothing: the wing renders as a flat line and the cascade
+  // hangs off it at angles that look wrong because the thing they hang from
+  // has collapsed.
+  //
+  // The default was 25 degrees — within two of the degenerate angle for a
+  // typical wing, which is how it shipped looking wrong.
+  const rootP = M.wing.ribs[0].upper[0];
+  const tipP = M.wing.ribs[M.wing.ribs.length - 1].upper[0];
+  const arcDeg = Math.abs(Math.atan2(Math.abs(tipP[2] - rootP[2]),
+    Math.abs(tipP[1] - rootP[1])) * (180 / Math.PI));
+  const nearDegenerate = Math.abs(S.isoEl - arcDeg) < 6;
+
   document.getElementById('note-iso').textContent =
     `azimuth ${S.isoAz}°  ·  elevation ${S.isoEl}°  ·  `
-    + `${M.linePlan?.lines?.length ?? 0} lines at true position`;
+    + `${M.linePlan?.lines?.length ?? 0} lines at true position`
+    + (nearDegenerate
+      ? `  ·  the arc runs at ${arcDeg.toFixed(0)}°, so this elevation looks `
+        + 'along it and flattens the wing — move the slider'
+      : '');
 }
 
 function drawFront() {

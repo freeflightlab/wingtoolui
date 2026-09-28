@@ -9582,6 +9582,74 @@ section('A vortex lattice over the wing as it sits');
 }
 
 // ---------------------------------------------------------------------------
+section('The wing hangs over its maillon');
+
+{
+  // A paraglider hangs with the pilot below the point the lift acts through,
+  // and the risers close to vertical. The maillon was placed at `x = 0` —
+  // the LEADING EDGE — while the anchors span a quarter to three quarters of
+  // the chord, so every line raked about a metre forward to reach a point
+  // under the nose and the whole cascade sat at a large angle to the wing it
+  // hangs from.
+  //
+  // Nothing internal could see it: the lines were the right lengths, the
+  // loads closed, the cascade was geometrically consistent. It was only wrong
+  // against how a wing flies.
+  const wingH = demoWing();
+  const afH = naca4('4415');
+  afH.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const planH = buildLinePlan({
+    wing: wingH, airfoil: afH, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  const rootH = wingH.ribs[0];
+  const chordFractionOf = (x) => (x - rootH.lower[0][0]) / rootH.chord;
+
+  check('the maillon hangs under the wing, not under its nose',
+    chordFractionOf(planH.maillon[0]) > 0.2,
+    `${(chordFractionOf(planH.maillon[0]) * 100).toFixed(1)}% of chord`);
+  check('and not behind it either',
+    chordFractionOf(planH.maillon[0]) < 0.6,
+    `${(chordFractionOf(planH.maillon[0]) * 100).toFixed(1)}% of chord`);
+
+  // The point is where the load-bearing anchors average out, weighted the way
+  // the rows carry load. That is where the resultant of the lines acts, so it
+  // is where the wing balances over the pilot.
+  const anchorsH = planH.lines.filter((l) => l.level === 'upper')
+    .map((l) => l.from[0]);
+  const midChord = (Math.min(...anchorsH) + Math.max(...anchorsH)) / 2;
+  const rake = Math.abs(midChord - planH.maillon[0]);
+  check('so the cascade hangs down rather than raking forward',
+    rake < rootH.chord * 0.25,
+    `${rake.toFixed(2)} m of rake on a ${rootH.chord.toFixed(2)} m chord`);
+
+  // The lowest lines are the risers, and they should be closer to vertical
+  // than to horizontal.
+  const lowest = planH.lines.filter((l) => Math.min(l.from[2], l.to[2]) < -4);
+  const fromVertical = lowest.map((l) => {
+    const d = [l.to[0] - l.from[0], l.to[1] - l.from[1], l.to[2] - l.from[2]];
+    return Math.acos(Math.abs(d[2]) / Math.hypot(d[0], d[1], d[2]))
+      * (180 / Math.PI);
+  });
+  check('and the riser-level lines hang nearer vertical than horizontal',
+    fromVertical.reduce((a, b) => a + b, 0) / fromVertical.length < 45,
+    `${(fromVertical.reduce((a, b) => a + b, 0) / fromVertical.length).toFixed(1)}`
+    + ' degrees from vertical on average');
+
+  // A wing with its anchors moved back must hang further back with them.
+  const afBack = naca4('4415');
+  afBack.anchors = { A: 0.20, B: 0.40, C: 0.60, D: 0.85 };
+  const planBack = buildLinePlan({
+    wing: wingH, airfoil: afBack, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  check('moving the anchors aft moves the hang point aft with them',
+    planBack.maillon[0] > planH.maillon[0],
+    `${chordFractionOf(planH.maillon[0]).toFixed(3)} becomes `
+    + `${chordFractionOf(planBack.maillon[0]).toFixed(3)} of chord`);
+}
+
+// ---------------------------------------------------------------------------
 section('Washin arrives where it was asked for');
 
 {

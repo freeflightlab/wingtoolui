@@ -963,7 +963,42 @@ function buildLinePlanInner({
   if (layout === LAYOUT_OMITTED) layout = RISER_LAYOUTS['A/B/C+D'];
 
   const fractions = airfoil?.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
-  const maillon = [0, karabinerSeparationM / 2, -lineLengthM];
+  // The maillon hangs under the wing's BALANCE POINT, not under its nose.
+  //
+  // This read `[0, ..., -lineLengthM]` — x = 0 is the leading edge. The
+  // anchors span 0.22 to 1.82 m of chord, so every line raked about a metre
+  // forward to reach a point under the nose, and the whole cascade sat at a
+  // large angle to the wing it hangs from. A paraglider does not fly like
+  // that: it hangs with the risers close to vertical and the pilot below the
+  // point the lift acts through.
+  //
+  // That point is the calage — where the risers attach along the chord, which
+  // `solveEquilibrium` reports and real wings put near 40 to 45%. Placed
+  // there, the lines run down rather than forward, and the angle between the
+  // wing and its risers becomes the small one it is in the air.
+  //
+  // It is computed from the anchors rather than assumed, so a wing with an
+  // unusual layout still hangs from its own balance point: the load-bearing
+  // anchors are averaged, weighted towards the front rows because that is
+  // where the load is.
+  const hangX = (() => {
+    const rows = Object.entries(fractions)
+      .filter(([row]) => !['K', 'BR', 'ST'].includes(row));
+    if (!rows.length) return 0;
+    // Front rows carry more, so weight by the share convention.
+    const share = { A: 0.35, B: 0.35, C: 0.20, D: 0.10, E: 0.05 };
+    let num = 0;
+    let den = 0;
+    for (const [row, frac] of rows) {
+      const wgt = share[row] ?? 0.1;
+      num += frac * wgt;
+      den += wgt;
+    }
+    const chordFraction = den > 0 ? num / den : 0.4;
+    const rootRib = wing.ribs[0];
+    return (rootRib?.xLE ?? 0) + chordFraction * (rootRib?.chord ?? 0);
+  })();
+  const maillon = [hangX, karabinerSeparationM / 2, -lineLengthM];
 
   const lines = [];
   const risers = [];
