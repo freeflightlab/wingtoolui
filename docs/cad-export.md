@@ -104,11 +104,31 @@ A leading edge in a 3D model is not a reason to change a pattern. The export
 asks for the finer sampling; the wing is left alone, and a test asserts the
 rib point count is the same before and after exporting.
 
-## The lines are there
+## The lines are there, and now visible
 
-362 polylines in nine groups on a typical wing — `lines_A` through `lines_S`,
-one polyline per line, plus a closed polyline per rib.
+They were in the file and invisible. OBJ's `l` element is **optional**, and a
+great many importers read only faces — so a model with 362 polylines of line
+cascade opened as a bare sail in most viewers.
 
-A viewer that reads only faces will not show them. Blender, Rhino and MeshLab
-all read `l` elements. A test asserts there is at least one polyline per line
-in the plan.
+Each line is now also swept into a **tube**, which is geometry every viewer
+draws.
+
+### At its real diameter
+
+Not a nominal thickness. The diameter comes from the line selection, which
+runs 0.43 to 2.50 mm across the catalogue, so the model is to scale: an A line
+really is thicker than a brake line and a designer can see which is which.
+
+On a typical wing the selection chose six sizes and all six are in the model:
+
+| chosen | 0.50 | 0.60 | 0.65 | 0.80 | 0.83 | 1.10 mm |
+| --- | --- | --- | --- | --- | --- | --- |
+| **in the model** | 0.50 | 0.60 | 0.65 | 0.80 | 0.83 | 1.10 mm |
+
+Six-sided tubes: enough to read as round at line diameters, and 912 extra
+faces rather than the several thousand a smooth tube would cost. The file
+grows from 271 KB to 341 KB.
+
+The polylines stay — they are the honest path of the line, and Blender, Rhino
+and MeshLab all read them. A wing with no line selection still gets tubes, at
+a stated nominal diameter.

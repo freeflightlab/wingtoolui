@@ -1073,8 +1073,13 @@ function buildControls() {
     // The whole wing as a 3D model: both surfaces, the ribs and every line,
     // in named groups that share one vertex pool.
     try {
+      // The line selection gives each line its real diameter, so the tubes
+      // in the model are to scale: an A line really is thicker than a brake
+      // line, and it is visible in any viewer rather than being an OBJ
+      // polyline most importers drop.
       save(`${S.name}.obj`, wingToOBJ({
-        wing: M.wing, linePlan: M.linePlan, name: S.name,
+        wing: M.wing, linePlan: M.linePlan, lineSelection: M.lineSelection,
+        name: S.name,
       }));
     } catch (e) {
       setStatus(`OBJ: ${e.message}`);

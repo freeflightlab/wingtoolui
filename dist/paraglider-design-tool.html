@@ -17823,6 +17823,9 @@ function outlinesFromSegments(segments, { tolerance = 1e-4 } = {}) {
 function wingToOBJ({
   wing, linePlan = null, name = 'wing', mirror = true, includeLines = true,
   pointsPerSurface = 60, spacing = 'cosine',
+  // Lines as solid tubes at their real diameter, not only as polylines.
+  lineSelection = null, lineTubes = true, tubeSides = 6,
+  defaultLineDiameterMM = 1.2,
 } = {}) {
   if (!wing?.ribs?.length) throw new Error('wingToOBJ needs a wing with ribs');
 
@@ -17933,16 +17936,84 @@ function wingToOBJ({
     }
   }
 
-  // Lines, as polylines by row so each row can be picked out.
+  // Lines, as polylines AND as tubes at their real diameter.
+  //
+  // A polyline is the honest representation of a line's path, and most
+  // viewers ignore it: OBJ's `l` element is optional and a great many
+  // importers read only faces. The lines were in the file and invisible.
+  //
+  // So each line is also swept into a tube of its actual diameter — from the
+  // line selection where there is one, which runs from 0.43 to 2.50 mm across
+  // the catalogue. That is geometry every viewer draws, and it is to scale:
+  // an A line really is thicker than a brake line, and a designer looking at
+  // the model can see which is which.
   const lineGroups = {};
+  const tubeFaces = {};
+
+  // A diameter for each line, by name, from the selection.
+  const diameterOf = new Map();
+  if (lineSelection?.lines?.length) {
+    for (const sel of lineSelection.lines) {
+      if (sel?.name && sel.line?.diameterMM > 0) {
+        diameterOf.set(sel.name, sel.line.diameterMM / 1000);
+      }
+    }
+  }
+
   if (includeLines && linePlan?.lines?.length) {
     for (const s of sides) {
       for (const l of linePlan.lines) {
         if (!l.from || !l.to) continue;
         const row = l.row || 'line';
-        (lineGroups[row] ||= []).push([
-          vert(flip(l.from, s)), vert(flip(l.to, s)),
-        ]);
+        const a = flip(l.from, s);
+        const b = flip(l.to, s);
+        (lineGroups[row] ||= []).push([vert(a), vert(b)]);
+
+        if (!lineTubes) continue;
+        const dia = diameterOf.get(l.name) ?? defaultLineDiameterMM / 1000;
+        const r = dia / 2;
+
+        // A frame perpendicular to the line. Any vector not parallel to it
+        // will do to start; the cross products make the rest orthogonal.
+        const ax = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const len = Math.hypot(ax[0], ax[1], ax[2]);
+        if (!(len > 0)) continue;
+        const u = [ax[0] / len, ax[1] / len, ax[2] / len];
+        const seed = Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+        const p1 = [
+          u[1] * seed[2] - u[2] * seed[1],
+          u[2] * seed[0] - u[0] * seed[2],
+          u[0] * seed[1] - u[1] * seed[0],
+        ];
+        const p1n = Math.hypot(p1[0], p1[1], p1[2]) || 1;
+        const e1 = [p1[0] / p1n, p1[1] / p1n, p1[2] / p1n];
+        const e2 = [
+          u[1] * e1[2] - u[2] * e1[1],
+          u[2] * e1[0] - u[0] * e1[2],
+          u[0] * e1[1] - u[1] * e1[0],
+        ];
+
+        const ring = (centre) => {
+          const out = [];
+          for (let k = 0; k < tubeSides; k++) {
+            const th = (2 * Math.PI * k) / tubeSides;
+            const c = Math.cos(th) * r;
+            const d = Math.sin(th) * r;
+            out.push(vert([
+              centre[0] + e1[0] * c + e2[0] * d,
+              centre[1] + e1[1] * c + e2[1] * d,
+              centre[2] + e1[2] * c + e2[2] * d,
+            ]));
+          }
+          return out;
+        };
+        const ra = ring(a);
+        const rb = ring(b);
+        const faces = (tubeFaces[row] ||= []);
+        for (let k = 0; k < tubeSides; k++) {
+          const k2 = (k + 1) % tubeSides;
+          faces.push([ra[k], ra[k2], rb[k2], rb[k]]);
+        }
       }
     }
   }
@@ -17968,6 +18039,9 @@ function wingToOBJ({
   for (const [row, segs] of Object.entries(lineGroups)) {
     out.push(`g lines_${row}`);
     for (const seg of segs) out.push(`l ${seg.join(' ')}`);
+    // The same lines as surfaces, so a viewer that reads only faces still
+    // shows the cascade.
+    for (const f of tubeFaces[row] ?? []) out.push(`f ${f.join(' ')}`);
   }
 
   return `${out.join('\n')}\n`;
@@ -19995,8 +20069,13 @@ function buildControls() {
     // The whole wing as a 3D model: both surfaces, the ribs and every line,
     // in named groups that share one vertex pool.
     try {
+      // The line selection gives each line its real diameter, so the tubes
+      // in the model are to scale: an A line really is thicker than a brake
+      // line, and it is visible in any viewer rather than being an OBJ
+      // polyline most importers drop.
       save(`${S.name}.obj`, wingToOBJ({
-        wing: M.wing, linePlan: M.linePlan, name: S.name,
+        wing: M.wing, linePlan: M.linePlan, lineSelection: M.lineSelection,
+        name: S.name,
       }));
     } catch (e) {
       setStatus(`OBJ: ${e.message}`);

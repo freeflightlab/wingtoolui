@@ -9168,9 +9168,63 @@ section('The wing as a 3D model');
   check('the lines run down to the maillon',
     Math.min(...zs) < -5, `${Math.min(...zs).toFixed(2)} m`);
 
-  // The lines are in the file, as polylines grouped by row. A viewer that
-  // only reads faces will not show them, but they are there and Blender,
-  // Rhino and MeshLab all read them.
+  // The lines are SURFACES as well as polylines.
+  //
+  // OBJ's `l` element is optional and a great many importers read only
+  // faces, so the cascade was in the file and invisible in most viewers.
+  // Each line is now also swept into a tube — and at its REAL diameter,
+  // from the line selection, which runs 0.43 to 2.50 mm across the
+  // catalogue. An A line really is thicker than a brake line, and a
+  // designer looking at the model can see which is which.
+  const catO = parseMaterialsTable(
+    readFileSync('data/reference/line-materials.tsv', 'utf8'));
+  const loadsO = analyseLoads({
+    plan: planO, planform: wingO.planform, stations: wingO.stations,
+    totalMassKg: 95, alphaDeg: 6,
+  });
+  const selO = selectLines(loadsO.tensions, { table: catO });
+
+  const withTubes = wingToOBJ({
+    wing: wingO, linePlan: planO, lineSelection: selO, name: 'T',
+  });
+  const noTubes = wingToOBJ({
+    wing: wingO, linePlan: planO, name: 'T', lineTubes: false,
+  });
+  const faceCount = (t) => t.split('\n').filter((l) => l.startsWith('f ')).length;
+  check('the lines are swept into surfaces, not only polylines',
+    faceCount(withTubes) > faceCount(noTubes),
+    `${faceCount(noTubes)} faces becomes ${faceCount(withTubes)}`);
+
+  // To scale, and every size present.
+  const vertsT = withTubes.split('\n').filter((l) => l.startsWith('v '))
+    .map((l) => l.slice(2).split(' ').map(Number));
+  let group = '';
+  const tubeEdges = [];
+  for (const row of withTubes.split('\n')) {
+    if (row.startsWith('g ')) group = row.slice(2);
+    if (row.startsWith('f ') && group.startsWith('lines_')) {
+      const f = row.slice(2).split(' ').map((t) => vertsT[Number(t) - 1]);
+      tubeEdges.push(Math.hypot(f[0][0] - f[1][0], f[0][1] - f[1][1],
+        f[0][2] - f[1][2]));
+    }
+  }
+  // Six-sided: the ring chord equals the radius, so the diameter is twice it.
+  const modelled = [...new Set(tubeEdges.map((e) => (e * 2000).toFixed(2)))];
+  const chosen = [...new Set(selO.lines.filter((l) => l.line)
+    .map((l) => l.line.diameterMM.toFixed(2)))];
+  check('every diameter the selection chose appears in the model',
+    chosen.every((d) => modelled.includes(d)),
+    `chose ${chosen.sort().join(', ')} mm`);
+  check('and they are not all one nominal size',
+    modelled.length > 3, `${modelled.length} distinct diameters`);
+
+  // Without a selection it still exports, at a stated nominal size.
+  const nominal = wingToOBJ({ wing: wingO, linePlan: planO, name: 'N' });
+  check('a wing with no line selection still gets tubes',
+    faceCount(nominal) > faceCount(noTubes));
+
+  // The polylines remain: they are the honest path, and Blender, Rhino and
+  // MeshLab all read them.
   const polylines = lines.filter((l) => l.startsWith('l ')).length;
   check('every line is written as a polyline',
     polylines >= planO.lines.length,

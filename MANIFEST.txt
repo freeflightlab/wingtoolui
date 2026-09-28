@@ -6,7 +6,7 @@ but it cannot be rebuilt, tested or audited.
 
      11043  build.py
      17741  README.md
-     55219  ROADMAP.md
+     55502  ROADMAP.md
 
 src/core/   36 files — the maths — every module the build inlines
      17588  src/core/aero.js
@@ -15,7 +15,7 @@ src/core/   36 files — the maths — every module the build inlines
      13932  src/core/bom.js
       5574  src/core/compare.js
      18055  src/core/equilibrium.js
-     45801  src/core/export.js
+     48793  src/core/export.js
       5800  src/core/fabric.js
       8800  src/core/family.js
       8731  src/core/flatdev.js
@@ -47,7 +47,7 @@ src/core/   36 files — the maths — every module the build inlines
       9106  src/core/xfoil.js
 
 src/ui/   3 files — the interface: markup, style and the one script
-    123614  src/ui/app.js
+    123918  src/ui/app.js
       5531  src/ui/index.html
      13419  src/ui/style.css
 
@@ -56,7 +56,7 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
      12786  tests/full-pipeline.mjs
      18515  tests/phase1-audit.mjs
       8318  tests/reference-sweep.mjs
-    529458  tests/run-tests.js
+    531959  tests/run-tests.js
 
 tools/   17 files — build helpers, figures, audit, legacy .xls reader
      23443  tools/audit.mjs
@@ -80,7 +80,7 @@ tools/   17 files — build helpers, figures, audit, legacy .xls reader
 docs/   37 files — notes on what was validated and what was not
       4358  docs/assumptions.md
       3861  docs/brakes.md
-      4671  docs/cad-export.md
+      5537  docs/cad-export.md
       3946  docs/certification.md
       5476  docs/chord-fraction.md
       9840  docs/collecting-reference-data.md
@@ -162,7 +162,7 @@ data/reference/   134 files — production data used for validation
   vibegt-ML.tsv vibegt-MS.tsv vibegt-S.tsv vibegt-XL.tsv vibegt-XS.tsv zeno2-L.tsv
   zeno2-ML.tsv zeno2-MS.tsv zeno2-S.tsv
 
-241 files, 2333 KB
-sha256 of the tree: 8fe52b203f0b67952de1709c4cdfcf69
+241 files, 2340 KB
+sha256 of the tree: 56fcb473e21fb5b0e9fda9c55cd2220e
 
 Verify with:  node tools/audit.mjs
