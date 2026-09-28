@@ -125,9 +125,34 @@ On a typical wing the selection chose six sizes and all six are in the model:
 | --- | --- | --- | --- | --- | --- | --- |
 | **in the model** | 0.50 | 0.60 | 0.65 | 0.80 | 0.83 | 1.10 mm |
 
-Six-sided tubes: enough to read as round at line diameters, and 912 extra
-faces rather than the several thousand a smooth tube would cost. The file
-grows from 271 KB to 341 KB.
+### True scale, and why not to fudge it
+
+At true scale a 0.5 mm line on a 10.3 m span is **1/20,605 of the model** —
+sub-pixel at any sensible zoom. The whole cascade was in the file and the
+model still opened looking like a bare sail.
+
+The obvious fix is to draw the lines thicker, and for one round that was the
+default. **It was wrong.** A model whose dimensions are not the design's
+dimensions is not a model of the design, and anyone measuring it gets the
+wrong answer — which is the one thing a CAD export must not do.
+
+So the export is at **true scale**, and you zoom in to see the lines. That is
+what a paraglider looks like. The header says so:
+
+```
+# Line tubes are drawn 1.0x their true diameter (true scale).
+# True diameters, mm: 0.50, 0.60, 0.65, 0.80, 0.83, 1.10
+```
+
+`3D line thickness x true` remains for anyone who wants a picture rather than
+a model.
+
+**The place to look at the cascade is the isometric view in the tool.** A
+picture may use a legible line width; a model may not use a false diameter.
+
+Six-sided tubes: enough to read as round, and 912 extra faces rather than the
+several thousand a smooth tube would cost. The file grows from 271 KB to
+341 KB.
 
 The polylines stay — they are the honest path of the line, and Blender, Rhino
 and MeshLab all read them. A wing with no line selection still gets tubes, at

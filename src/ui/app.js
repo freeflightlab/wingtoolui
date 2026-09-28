@@ -56,13 +56,15 @@ const S = {
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
-  lineRow: 'all', compareTo: '', dimensions: true, riserLayout: 'A/B/C+D', splitFrom: 62,
+  lineRow: 'all', compareTo: '', dimensions: true,
+  isoAz: 35, isoEl: 25, isoLines: true, riserLayout: 'A/B/C+D', splitFrom: 62,
   rods: true, rodFrom: 12, rodTo: 18.5, rodDia: 1.5, rodReach: 100,
   useRodSpec: false,
   rodSpec: 'leading edge  12.0 18.5   7.0 15.0   1.5  0 25\n'
     + 'mid           23.5 29.5   63.0 70.0  1.1  0 25',
   famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
   lineBrand: 'all', lineStrength: 'kinked', maxLineTypes: 5, serviceHours: 200,
+  objLineScale: 1,
   clothLE: 'Porcher Skytex 27 hard', clothUpper: 'Porcher Skytex 32',
   clothLower: 'Porcher Skytex 32', clothRib: 'Porcher Skytex 40 hard',
   useCascadeSpec: false,
@@ -641,6 +643,9 @@ function buildControls() {
           + 'and all.'
         : ''));
   }
+  slider(P, 'isoAz', 'Isometric — azimuth', -180, 180, 5, (v) => v.toFixed(0), '°');
+  slider(P, 'isoEl', 'Isometric — elevation', -80, 80, 5, (v) => v.toFixed(0), '°');
+  checkField(P, 'isoLines', 'Lines in the isometric view');
   checkField(P, 'dimensions', 'Dimensions on the drawings');
   slider(P, 'span', 'Flat span', 4, 16, 0.05, (v) => v.toFixed(2), ' m');
   slider(P, 'rootChord', 'Root chord', 0.8, 4, 0.01, (v) => v.toFixed(2), ' m');
@@ -899,6 +904,12 @@ function buildControls() {
   hint(AS, 'A workshop buys from one supplier. Restricting the table changes '
     + 'which line is chosen at every anchor, and so the drag, the mass and '
     + 'the bill of materials.');
+  numberField(AS, 'objLineScale', '3D line thickness x true', 1, 50, 1);
+  hint(AS, 'The 3D model carries the lines at their real diameter, so at a '
+    + 'whole-wing view they are about a twenty-thousandth of the span and you '
+    + 'have to zoom in to see them — which is what a paraglider looks like. '
+    + 'Raise this only if you want a picture rather than a model; the file '
+    + 'header states whatever was used.');
   numberField(AS, 'maxLineTypes', 'Line types to stock at most', 1, 10, 1);
   hint(AS, 'A workshop cannot stock twenty diameters. Four types typically '
     + 'cost under half a per cent of drag against a different line at every '
@@ -1077,10 +1088,20 @@ function buildControls() {
       // in the model are to scale: an A line really is thicker than a brake
       // line, and it is visible in any viewer rather than being an OBJ
       // polyline most importers drop.
-      save(`${S.name}.obj`, wingToOBJ({
+      // 0 means let it choose a visible thickness; anything else is the
+      // factor, and 1 is true scale.
+      //
+      // Computed here rather than inline: a ternary inside the call reads to
+      // the options checker as a second option key, and it reported
+      // `objLineScale` as an argument `wingToOBJ` does not accept.
+      const objScale = S.objLineScale > 0 ? S.objLineScale : 1;
+      const obj = wingToOBJ({
         wing: M.wing, linePlan: M.linePlan, lineSelection: M.lineSelection,
-        name: S.name,
-      }));
+        name: S.name, lineDiameterScale: objScale,
+      });
+      save(`${S.name}.obj`, obj);
+      const scaleLine = obj.split('\n').find((l) => /drawn .*x their true/.test(l));
+      if (scaleLine) setStatus(null, scaleLine.replace(/^# /, ''));
     } catch (e) {
       setStatus(`OBJ: ${e.message}`);
     }
@@ -1435,6 +1456,7 @@ function draw() {
   if (S.tab === 'structure') { drawDiagonals(); return; }
   drawPlan();
   drawFront();
+  drawIso();
   drawSection();
   drawCut();
   drawBalanceTable();
@@ -1833,6 +1855,90 @@ function drawPlan() {
   c.fit();
   document.getElementById('note-plan').textContent =
     `${M.metrics.area.toFixed(2)} m²  ·  AR ${M.metrics.aspectRatio.toFixed(2)}  ·  MAC ${M.metrics.mac.toFixed(2)} m  ·  1 m grid`;
+}
+
+/**
+ * The wing in three dimensions.
+ *
+ * Every other view here is an orthographic projection down one axis, which is
+ * what a cutting file needs and is not how anyone pictures a wing. The line
+ * cascade in particular is unreadable in plan — it collapses onto itself —
+ * and in the front view it is a fan of overlapping segments.
+ *
+ * This is the honest answer to wanting to see the cascade. The alternative,
+ * briefly taken, was to draw the lines in the 3D export thicker than they
+ * are; a model whose dimensions are not the design's is not a model of the
+ * design. Here the drawing is a picture, so line WIDTH is free to be legible
+ * while every position stays true.
+ *
+ * Rotated by azimuth and elevation and projected orthographically — no
+ * perspective, so lengths along a given direction stay comparable and the
+ * view can be measured off.
+ */
+function drawIso() {
+  const az = (S.isoAz * Math.PI) / 180;
+  const el = (S.isoEl * Math.PI) / 180;
+  const ca = Math.cos(az);
+  const sa = Math.sin(az);
+  const ce = Math.cos(el);
+  const se = Math.sin(el);
+
+  // x chordwise, y spanwise, z up.
+  const project = ([x, y, z]) => {
+    const xr = x * ca - y * sa;
+    const yr = x * sa + y * ca;
+    return [xr, yr * se + z * ce];
+  };
+
+  const all = [];
+  for (const rib of M.wing.ribs) {
+    for (const p of rib.upper) all.push(project(p));
+  }
+  const c = canvas('vp-iso', all);
+
+  const side = (pts, sgn) => pts.map(([x, y, z]) => project([x, sgn * y, z]));
+
+  // Both halves, so it reads as a wing rather than half of one.
+  for (const sgn of [1, -1]) {
+    for (const rib of M.wing.ribs) {
+      const loop = rib.upper.concat(rib.lower.slice().reverse());
+      c.path(side(loop, sgn), '#35d6e8', 0.55, { close: true, opacity: 0.55 });
+    }
+    // Leading and trailing edges, to give the surface a shape.
+    for (const [pick, colour] of [
+      [(r) => r.upper[0], '#5fd97a'],
+      [(r) => r.upper[r.upper.length - 1], '#e85bc4'],
+    ]) {
+      c.path(M.wing.ribs.map((r) => {
+        const p = pick(r);
+        return project([p[0], sgn * p[1], p[2]]);
+      }), colour, 1.2);
+    }
+  }
+
+  // The cascade, at true positions and a legible width.
+  if (S.isoLines && M.linePlan?.lines?.length) {
+    const ROW = {
+      A: '#ff5e5e', B: '#ffa23e', C: '#e8c547', D: '#5ec8ff',
+      E: '#9d7bff', K: '#8a8a8a', S: '#00e0a0', Z: '#ff00d0',
+    };
+    for (const sgn of [1, -1]) {
+      for (const l of M.linePlan.lines) {
+        if (!l.from || !l.to) continue;
+        c.path([
+          project([l.from[0], sgn * l.from[1], l.from[2]]),
+          project([l.to[0], sgn * l.to[1], l.to[2]]),
+        ], ROW[l.row] || '#6e8bff', l.level === 'main' ? 0.9 : 0.45,
+        { opacity: 0.75 });
+      }
+    }
+    c.dot(project([0, 0, -S.lineLength]), '#ff5e5e', 2.5);
+  }
+
+  c.fit();
+  document.getElementById('note-iso').textContent =
+    `azimuth ${S.isoAz}°  ·  elevation ${S.isoEl}°  ·  `
+    + `${M.linePlan?.lines?.length ?? 0} lines at true position`;
 }
 
 function drawFront() {
@@ -2715,7 +2821,7 @@ function saveViewportPNG(id, filename, scale = 3) {
  */
 function addViewportSavers() {
   const views = [
-    ['vp-plan', 'plan'], ['vp-front', 'front'], ['vp-section', 'section'],
+    ['vp-plan', 'plan'], ['vp-front', 'front'], ['vp-iso', 'isometric'], ['vp-section', 'section'],
     ['vp-cut', 'cut'], ['vp-rib', 'rib'], ['vp-diag', 'structure'],
     ['vp-lineplan', 'lines'], ['vp-polar', 'polar'], ['vp-atmos', 'atmosphere'],
   ];

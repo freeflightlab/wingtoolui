@@ -9209,7 +9209,26 @@ section('The wing as a 3D model');
     }
   }
   // Six-sided: the ring chord equals the radius, so the diameter is twice it.
-  const modelled = [...new Set(tubeEdges.map((e) => (e * 2000).toFixed(2)))];
+  // Measured at TRUE scale, so these are the diameters the selection chose.
+  const trueForSizes = wingToOBJ({
+    wing: wingO, linePlan: planO, lineSelection: selO, name: 'T',
+    lineDiameterScale: 1,
+  });
+  const trueVerts = trueForSizes.split('\n').filter((l) => l.startsWith('v '))
+    .map((l) => l.slice(2).split(' ').map(Number));
+  const trueEdges = [];
+  {
+    let g = '';
+    for (const row of trueForSizes.split('\n')) {
+      if (row.startsWith('g ')) g = row.slice(2);
+      if (row.startsWith('f ') && g.startsWith('lines_')) {
+        const f = row.slice(2).split(' ').map((t) => trueVerts[Number(t) - 1]);
+        trueEdges.push(Math.hypot(f[0][0] - f[1][0], f[0][1] - f[1][1],
+          f[0][2] - f[1][2]));
+      }
+    }
+  }
+  const modelled = [...new Set(trueEdges.map((e) => (e * 2000).toFixed(2)))];
   const chosen = [...new Set(selO.lines.filter((l) => l.line)
     .map((l) => l.line.diameterMM.toFixed(2)))];
   check('every diameter the selection chose appears in the model',
@@ -9217,6 +9236,95 @@ section('The wing as a 3D model');
     `chose ${chosen.sort().join(', ')} mm`);
   check('and they are not all one nominal size',
     modelled.length > 3, `${modelled.length} distinct diameters`);
+
+  // Drawn thick enough to see.
+  //
+  // At true scale a 0.5 mm line on a 10.3 m span is **1/20,605 of the
+  // model** — sub-pixel at any sensible zoom. The whole cascade was in the
+  // file and the model still opened looking like a bare sail, which is what
+  // it was reported as doing twice after the tubes were already there.
+  //
+  // The lines really are that thin and the model is not wrong. But a drawing
+  // nobody can see is not doing its job, so they are thickened the way a map
+  // draws a road wider than its true width.
+  const spanOf = (t) => {
+    const v = t.split('\n').filter((l) => l.startsWith('v '))
+      .map((l) => Number(l.split(' ')[2]));
+    return Math.max(...v) - Math.min(...v);
+  };
+  const thinnestTube = (t) => {
+    const v = t.split('\n').filter((l) => l.startsWith('v '))
+      .map((l) => l.slice(2).split(' ').map(Number));
+    let g = '';
+    let m = Infinity;
+    for (const row of t.split('\n')) {
+      if (row.startsWith('g ')) g = row.slice(2);
+      if (row.startsWith('f ') && g.startsWith('lines_')) {
+        const f = row.slice(2).split(' ').map((x) => v[Number(x) - 1]);
+        m = Math.min(m, 2 * Math.hypot(f[0][0] - f[1][0], f[0][1] - f[1][1],
+          f[0][2] - f[1][2]));
+      }
+    }
+    return m;
+  };
+
+  const trueScale = wingToOBJ({
+    wing: wingO, linePlan: planO, lineSelection: selO, name: 'T',
+    lineDiameterScale: 1,
+  });
+  check('at true scale the lines are far too thin to see',
+    thinnestTube(trueScale) / spanOf(trueScale) < 1 / 5000,
+    `1/${Math.round(spanOf(trueScale) / thinnestTube(trueScale))} of the span`);
+
+  // And that is what the default gives, because the model's dimensions are
+  // the design's dimensions.
+  //
+  // It briefly defaulted to an automatic thickening so the cascade would be
+  // visible at wing scale. That was a fudge: a model whose dimensions are
+  // not the design's is not a model of the design, and anyone measuring it
+  // would get the wrong answer. You zoom in instead.
+  check('and true scale is what the export gives by default',
+    Math.abs(thinnestTube(withTubes) - thinnestTube(trueScale)) < 1e-9,
+    `${(thinnestTube(withTubes) * 1000).toFixed(2)} mm`);
+
+  // The option remains for anyone who wants a picture rather than a model.
+  const thickened = wingToOBJ({
+    wing: wingO, linePlan: planO, lineSelection: selO, name: 'T',
+    lineDiameterScale: 20,
+  });
+  check('a thickened picture is available on request',
+    thinnestTube(thickened) > thinnestTube(withTubes) * 15);
+
+  // Thickening must not flatten the differences, or the point of using real
+  // diameters is lost.
+  const drawnSizes = new Set();
+  {
+    const v = withTubes.split('\n').filter((l) => l.startsWith('v '))
+      .map((l) => l.slice(2).split(' ').map(Number));
+    let g = '';
+    for (const row of withTubes.split('\n')) {
+      if (row.startsWith('g ')) g = row.slice(2);
+      if (row.startsWith('f ') && g.startsWith('lines_')) {
+        const f = row.slice(2).split(' ').map((x) => v[Number(x) - 1]);
+        drawnSizes.add((2 * Math.hypot(f[0][0] - f[1][0], f[0][1] - f[1][1],
+          f[0][2] - f[1][2]) * 1000).toFixed(2));
+      }
+    }
+  }
+  // The RATIO is what matters, not the count: scaling by twenty magnifies
+  // floating-point noise into extra distinct values at two decimal places,
+  // so counting them is measuring the rounding rather than the geometry.
+  const ratioOf = (set) => {
+    const nums = [...set].map(Number).filter((v) => v > 0);
+    return Math.max(...nums) / Math.min(...nums);
+  };
+  near('the thick lines are exactly as much thicker as they really are',
+    ratioOf(drawnSizes), ratioOf(new Set(modelled)), 0.02);
+
+  // Nothing is hidden: the factor and the real diameters are in the file.
+  check('the file states the factor and the true diameters',
+    /drawn [\d.]+x their true diameter/.test(withTubes)
+    && /True diameters, mm: [\d.]+/.test(withTubes));
 
   // Without a selection it still exports, at a stated nominal size.
   const nominal = wingToOBJ({ wing: wingO, linePlan: planO, name: 'N' });

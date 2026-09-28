@@ -1040,6 +1040,29 @@ export function wingToOBJ({
   // Lines as solid tubes at their real diameter, not only as polylines.
   lineSelection = null, lineTubes = true, tubeSides = 6,
   defaultLineDiameterMM = 1.2,
+  // How thick to DRAW the lines, against how thick they are.
+  //
+  // At true scale a 0.5 mm line on a 10.3 m span is 1/20,605 of the model.
+  // That is sub-pixel at any sensible zoom, so a model with the entire
+  // cascade in it opens looking like a bare sail — which is exactly what it
+  // was reported as doing, twice, after the tubes were already there.
+  //
+  // The lines really are that thin; the model is not wrong. But a drawing
+  // nobody can see is not doing its job, so the tubes are drawn thickened by
+  // default, in the way a map draws a road wider than its true width.
+  //
+  // **Defaults to 1: true scale.**
+  //
+  // It briefly defaulted to an automatic thickening so the cascade would be
+  // visible at wing scale. That was a fudge: a model whose dimensions are
+  // not the design's dimensions is not a model of the design, and anyone
+  // measuring it would get the wrong answer.
+  //
+  // At true scale the lines are genuinely 1/20,000 of the span and you have
+  // to zoom in to see them. That is what a paraglider looks like. The option
+  // remains for anyone who wants a picture rather than a model, and whatever
+  // is used is stated in the file header.
+  lineDiameterScale = 1,
 } = {}) {
   if (!wing?.ribs?.length) throw new Error('wingToOBJ needs a wing with ribs');
 
@@ -1174,6 +1197,23 @@ export function wingToOBJ({
     }
   }
 
+  // The span the model covers, for the automatic scale.
+  const modelSpan = (() => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const rib of ribs) {
+      for (const p of rib.upper) { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); }
+    }
+    return Number.isFinite(lo) ? (hi - lo) * (mirror ? 2 : 1) : 10;
+  })();
+  const thinnest = (() => {
+    const all = [...diameterOf.values()];
+    return all.length ? Math.min(...all) : defaultLineDiameterMM / 1000;
+  })();
+  const tubeScale = lineDiameterScale === 'auto'
+    ? Math.max(1, (modelSpan / 1000) / thinnest)
+    : Math.max(0, Number(lineDiameterScale) || 1);
+
   if (includeLines && linePlan?.lines?.length) {
     for (const s of sides) {
       for (const l of linePlan.lines) {
@@ -1184,7 +1224,8 @@ export function wingToOBJ({
         (lineGroups[row] ||= []).push([vert(a), vert(b)]);
 
         if (!lineTubes) continue;
-        const dia = diameterOf.get(l.name) ?? defaultLineDiameterMM / 1000;
+        const trueDia = diameterOf.get(l.name) ?? defaultLineDiameterMM / 1000;
+        const dia = trueDia * tubeScale;
         const r = dia / 2;
 
         // A frame perpendicular to the line. Any vector not parallel to it
@@ -1236,6 +1277,10 @@ export function wingToOBJ({
     `# ${name} — paraglider, exported as OBJ`,
     '#',
     '# Groups: upper_surface, lower_surface, ribs, and one per line row.',
+    `# Line tubes are drawn ${tubeScale.toFixed(1)}x their true diameter`
+      + `${tubeScale > 1.01 ? ', so they can be seen at wing scale' : ' (true scale)'}.`,
+    `# True diameters, mm: ${[...new Set([...diameterOf.values()])]
+      .sort((a, b) => a - b).map((d) => (d * 1000).toFixed(2)).join(', ') || 'not selected'}`,
     '# They share a vertex pool, so a rib edge IS the panel edge beside it.',
     '# Units are metres. X is chordwise, Y spanwise, Z up.',
     `o ${name.replace(/\s+/g, '_')}`,

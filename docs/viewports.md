@@ -214,3 +214,31 @@ exist, and `M.lengths.totalM`, which is not the field name — the real ones are
 `flyingMetres`, `sewnMetres` and `cutMetres`, three different numbers a
 builder needs separately. Caught because the Swoop2 is pushed through every
 button.
+
+---
+
+## 8. The isometric view
+
+Every other viewport is an orthographic projection down one axis, which is
+what a cutting file needs and is not how anyone pictures a wing. The line
+cascade especially: it collapses onto itself in plan, and in the front view it
+is a fan of overlapping segments.
+
+The isometric view rotates the geometry by azimuth and elevation and projects
+it orthographically — no perspective, so lengths along a given direction stay
+comparable and the view can still be measured off. Both halves are drawn, with
+the leading and trailing edges picked out, and the cascade coloured by row at
+**true positions**.
+
+OpenGlider renders its wings in 3D through FreeCAD. This is the same idea in
+the one file.
+
+### It is a picture, and that is the distinction
+
+Line *width* here is free to be legible, because nothing about a drawing
+claims to be a measurement. That is exactly why the 3D **export** may not do
+the same thing with line *diameter*: a model whose dimensions are not the
+design's is not a model of the design.
+
+Wanting to see the cascade is a reason to draw a picture of it, not a reason
+to falsify the model.

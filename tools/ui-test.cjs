@@ -698,7 +698,7 @@ try {
   // Every viewport can be saved, and a new one gets the control without
   // anyone remembering to add it.
   {
-    const ids = ['vp-plan', 'vp-front', 'vp-section', 'vp-cut', 'vp-rib',
+    const ids = ['vp-plan', 'vp-front', 'vp-iso', 'vp-section', 'vp-cut', 'vp-rib',
       'vp-diag', 'vp-lineplan', 'vp-polar', 'vp-atmos'];
     const missing = ids.filter((id) => {
       const svg = document.getElementById(id);
@@ -769,6 +769,54 @@ try {
       + `${m.metrics.area.toFixed(2)} m2, and switching away clears it`);
     S7.reference = wasRef;
     globalThis.__rebuild();
+  }
+
+  // The isometric view, which is where the line cascade is actually legible.
+  //
+  // Every other viewport is an orthographic projection down one axis: the
+  // cascade collapses onto itself in plan and is a fan of overlapping
+  // segments in front view. The alternative, briefly taken, was to draw the
+  // lines in the 3D EXPORT thicker than they are — a model whose dimensions
+  // are not the design's is not a model of the design. A picture may use a
+  // legible line width; a model may not use a false diameter.
+  {
+    const S3 = globalThis.__S;
+    globalThis.__tab('wing');
+    globalThis.__rebuild();
+    const withLines = document.getElementById('vp-iso').children.length;
+    const was = S3.isoLines;
+    S3.isoLines = false;
+    globalThis.__rebuild();
+    const without = document.getElementById('vp-iso').children.length;
+    S3.isoLines = was;
+    globalThis.__rebuild();
+
+    if (without < 10) {
+      console.log('  FAIL the isometric view draws no wing');
+      process.exit(1);
+    }
+    if (withLines <= without) {
+      console.log('  FAIL the isometric view draws no line cascade');
+      process.exit(1);
+    }
+    // Rotating it must change what is drawn, or the projection is not using
+    // the angles.
+    const azWas = S3.isoAz;
+    const a = (() => {
+      S3.isoAz = 0; globalThis.__rebuild();
+      const v = document.getElementById('vp-iso');
+      return [...(v.children || [])].map((n) => n.attrs && n.attrs.d).join('|');
+    })();
+    S3.isoAz = 60; globalThis.__rebuild();
+    const b = [...(document.getElementById('vp-iso').children || [])]
+      .map((n) => n.attrs && n.attrs.d).join('|');
+    S3.isoAz = azWas; globalThis.__rebuild();
+    if (a === b) {
+      console.log('  FAIL rotating the isometric view changes nothing');
+      process.exit(1);
+    }
+    console.log(`  ok   isometric view: ${without} elements of wing, `
+      + `${withLines - without} of cascade, and it rotates`);
   }
 
   const baseline = pressAll();
