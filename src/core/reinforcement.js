@@ -732,3 +732,158 @@ export function parseRodSpec(text, { ribCount = null } = {}) {
 export const SWOOP2_ROD_SPEC = `# name        upper        lower       dia  ribs
 leading edge  12.0 18.5    7.0 15.0    1.5  0 25
 mid           23.5 29.5    63.0 70.0   1.1  0 25`;
+
+/**
+ * A nose rod as ONE piece, the way its own design program counts it.
+ *
+ * ---------------------------------------------------------------------------
+ * What the file actually says
+ * ---------------------------------------------------------------------------
+ * `noseRodGroup` builds a rod as two parts — one on the upper surface, one on
+ * the lower — because section 21 gives two chordwise extents per bloc. That is
+ * how the extents are written and it is not how the rod is made.
+ *
+ * Laboratori d'envol's own output for the Swoop2 lists **51 joncs in 2 blocs,
+ * 37.14 m in total**, and the longest is 82.6 cm on a wing whose bloc-1
+ * extents span 12.0 to 18.5 per cent of a 2.09 m chord. Six and a half per
+ * cent of that chord is 14 cm. An 82.6 cm rod is not a chordwise extent.
+ *
+ * It is one continuous piece running from its upper extent, **round the
+ * leading edge**, to its lower extent, measured along the surface. That is
+ * what a leading-edge rod is: a single length of nylon threaded through a
+ * sleeve that wraps the nose, which is what holds the nose shape. Two
+ * separate pieces butted at the leading edge would hinge exactly where the
+ * rod exists to stop it hinging.
+ *
+ * So one rib in one bloc is one jonc, and its length is the arc from upper
+ * extent to lower extent the long way round.
+ */
+export function buildNoseJoncs({
+  wing, blocs, minLengthM = 0.05,
+}) {
+  if (!wing?.ribs?.length) throw new Error('buildNoseJoncs needs a wing');
+  if (!blocs?.length) throw new Error('buildNoseJoncs needs at least one bloc');
+
+  // Distance along a surface from the leading edge out to a chord fraction.
+  //
+  // Measured along the SURFACE, not across the chord: that is what a rod
+  // threaded through a sleeve follows, and on the nose the two differ a great
+  // deal because the surface is curving hard.
+  const alongSurface = (pts, toFraction) => {
+    const n = pts.length;
+    if (n < 2) return 0;
+    const a = pts[0];
+    const b = pts[n - 1];
+    const ax = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const len2 = ax[0] ** 2 + ax[1] ** 2 + ax[2] ** 2;
+    const chordAt = (p) => (len2 > 0
+      ? ((p[0] - a[0]) * ax[0] + (p[1] - a[1]) * ax[1] + (p[2] - a[2]) * ax[2]) / len2
+      : 0);
+    let s = 0;
+    for (let i = 1; i < n; i++) {
+      if (chordAt(pts[i]) > toFraction) {
+        // Part of the way into this segment.
+        const t0 = chordAt(pts[i - 1]);
+        const t1 = chordAt(pts[i]);
+        const f = t1 > t0 ? (toFraction - t0) / (t1 - t0) : 0;
+        s += f * Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1],
+          pts[i][2] - pts[i - 1][2]);
+        break;
+      }
+      s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1],
+        pts[i][2] - pts[i - 1][2]);
+    }
+    return s;
+  };
+
+  const out = [];
+  const skipped = [];
+
+  for (const [b, bloc] of blocs.entries()) {
+    const from = bloc.fromRib ?? 1;
+    const to = bloc.toRib ?? wing.ribs.length;
+    for (let r = from; r <= to; r++) {
+      const rib = wing.ribs[r - 1];
+      if (!rib) { skipped.push({ bloc: b + 1, rib: r, why: 'no such rib' }); continue; }
+
+      const upperM = alongSurface(rib.upper, bloc.upperTo ?? 0);
+      const lowerM = alongSurface(rib.lower, bloc.lowerTo ?? 0);
+      const lengthM = upperM + lowerM;
+
+      if (lengthM < minLengthM) {
+        skipped.push({ bloc: b + 1, rib: r, why: 'too short to be a rod' });
+        continue;
+      }
+
+      out.push({
+        bloc: b + 1,
+        type: bloc.type ?? 1,
+        jonc: r,
+        ribIndex: r - 1,
+        upperToFraction: bloc.upperTo,
+        lowerToFraction: bloc.lowerTo,
+        upperM,
+        lowerM,
+        lengthM,
+        diameterMM: bloc.diameterMM ?? 1.5,
+      });
+    }
+  }
+
+  const byBloc = {};
+  const notUnderstood = blocs
+    .map((b, i) => ({ bloc: i + 1, why: b.why }))
+    .filter((b, i) => blocs[i].understood === false);
+  for (const j of out) {
+    (byBloc[j.bloc] ||= { count: 0, totalM: 0 });
+    byBloc[j.bloc].count++;
+    byBloc[j.bloc].totalM += j.lengthM;
+  }
+
+  return {
+    joncs: out,
+    count: out.length,
+    skipped,
+    byBloc,
+    /** Blocs whose extents this project has not decoded. */
+    notUnderstood,
+    totalM: out.reduce((s, j) => s + j.lengthM, 0),
+    note: `${out.length} joncs in ${Object.keys(byBloc).length} blocs, `
+      + `${out.reduce((s, j) => s + j.lengthM, 0).toFixed(2)} m of rod`
+      + (notUnderstood.length
+        ? `; bloc ${notUnderstood.map((b) => b.bloc).join(', ')} not understood`
+        : ''),
+  };
+}
+
+/**
+ * The Swoop2's own blocs, from section 21.
+ *
+ * Bloc 1 is a nose wrap and reads cleanly: extents of 18.5% upper and 15.0%
+ * lower, one piece round the leading edge. Modelled that way it gives 14.35 m
+ * against the program's own 16.53 m — 13% low, which is the parametric wing
+ * here not being the Swoop2's exact rib geometry.
+ *
+ * **Bloc 2 is not understood.** Its rows read `23.5 29.5` and `63.0 70.0`,
+ * which as chord extents are two short segments totalling about 13% of chord
+ * — 27 cm on this wing. The program prints joncs up to **99.3 cm**. Read as a
+ * nose wrap instead it gives 39.5 m against a published 20.6 m, which is as
+ * wrong the other way.
+ *
+ * Neither reading fits, so neither is claimed. The bloc is carried with
+ * `understood: false` and left out of the modelled total rather than being
+ * parsed into a number that looks like an answer.
+ */
+export const SWOOP2_JONC_BLOCS = [
+  {
+    type: 1, fromRib: 1, toRib: 25, upperTo: 0.185, lowerTo: 0.150,
+    diameterMM: 1.5, understood: true, wrapsNose: true,
+  },
+  {
+    type: 4, fromRib: 1, toRib: 26, upperTo: 0.295, lowerTo: 0.700,
+    diameterMM: 1.1, understood: false,
+    why: 'section 21 gives 23.5-29.5% upper and 63.0-70.0% lower; as two '
+      + 'segments that is 27 cm where the program prints up to 99.3 cm, and '
+      + 'as a nose wrap it is 92% too long',
+  },
+];

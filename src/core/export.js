@@ -1216,7 +1216,10 @@ export function wingToOBJ({
 
   if (includeLines && linePlan?.lines?.length) {
     for (const s of sides) {
-      for (const l of linePlan.lines) {
+      // The riser webbing goes in with the lines: it is what carries the load
+      // between the pilot and the cascade, and a model without it shows the
+      // fan starting at the karabiner.
+      for (const l of [...linePlan.lines, ...(linePlan.riserWebbing ?? [])]) {
         if (!l.from || !l.to) continue;
         const row = l.row || 'line';
         const a = flip(l.from, s);

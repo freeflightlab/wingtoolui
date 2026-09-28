@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1910-test validation suite and a benchmark with regression budgets
+- [x] 1928-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,14 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **Riser webbing in the geometry** — the cascade fanned out from the
+      karabiner itself, a main line sitting 48 degrees from vertical for its
+      whole length. Risers hang vertically now and the fan starts above them.
+      See `docs/risers.md`.
+- [x] **The Swoop2 rods checked against its own program** — 51 joncs in 2
+      blocs, not 208. A jonc is one piece wrapping the nose. Bloc 2 remains
+      undecoded and says so. See `docs/rods-validated.md`.
 
 - [x] **A free body check** — `freebody.js`. Weight, lift, drag and line
       tension as one body in gravity, with the geometry checked against the

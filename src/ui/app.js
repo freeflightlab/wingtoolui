@@ -1965,7 +1965,22 @@ function drawIso() {
         { opacity: 0.75 });
       }
     }
-    c.dot(project([0, 0, -S.lineLength]), '#ff5e5e', 2.5);
+    // The riser webbing and the karabiner, which is where the pilot is.
+    //
+    // Webbing hangs vertically under the pilot's weight, and the cascade fans
+    // out from its top — not from the karabiner. Drawing the lines straight
+    // to the karabiner put the whole fan on the pilot.
+    for (const sgn of [1, -1]) {
+      for (const r of M.linePlan.riserWebbing ?? []) {
+        c.path([
+          project([r.from[0], sgn * r.from[1], r.from[2]]),
+          project([r.to[0], sgn * r.to[1], r.to[2]]),
+        ], '#ffffff', 1.6, { opacity: 0.9 });
+      }
+    }
+    const kara = M.linePlan.karabiner ?? [0, 0, -S.lineLength];
+    c.dot(project([kara[0], kara[1], kara[2]]), '#ff5e5e', 2.5);
+    c.dot(project([kara[0], -kara[1], kara[2]]), '#ff5e5e', 2.5);
   }
 
   c.fit();

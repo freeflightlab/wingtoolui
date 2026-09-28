@@ -75,7 +75,7 @@ import {
 } from '../src/core/pairing.js';
 import {
   buildReinforcement, massBudget, DEFAULT_REINFORCEMENT,
-  buildRods, parseRodSpec, noseRodGroup, SWOOP2_ROD_SPEC, rodGroup, buildRodGroups, checkRodClearance, ROD_MATERIALS, DEFAULT_ROD_SPEC,
+  buildRods, parseRodSpec, noseRodGroup, SWOOP2_ROD_SPEC, rodGroup, buildRodGroups, buildNoseJoncs, SWOOP2_JONC_BLOCS, checkRodClearance, ROD_MATERIALS, DEFAULT_ROD_SPEC,
   buildTabs, checkTabClearance, DEFAULT_TAB,
 } from '../src/core/reinforcement.js';
 import {
@@ -9873,6 +9873,141 @@ section('Diagonals attach to seams, not to the middle of a panel');
     `worst ${seam.worstLegRatio.toFixed(2)} to 1`);
   check('each diagonal carries its own leg ratio',
     seam.diagonals.every((d) => Number.isFinite(d.legRatio) && d.legRatio >= 1));
+}
+
+// ---------------------------------------------------------------------------
+section('The Swoop2 rods, against its own program');
+
+{
+  // The rods were read from section 21 and never checked against anything.
+  // Laboratori d'envol's own output for the Swoop2 lists every jonc it
+  // computes, which is ground truth: **51 joncs in 2 blocs, 37.14 m**.
+  //
+  // The model produced 208 rods and 20.8 m. Four times too many pieces and
+  // about half the material.
+  const pubJ = readFileSync('data/reference/swoop2-joncs.tsv', 'utf8')
+    .split('\n').filter((l) => l && !l.startsWith('#')).slice(1)
+    .map((l) => l.split('\t'));
+  const byBlocPub = {};
+  for (const r of pubJ) {
+    const b = Number(r[0]);
+    (byBlocPub[b] ||= { n: 0, totalCm: 0 });
+    byBlocPub[b].n++;
+    byBlocPub[b].totalCm += Number(r[3]);
+  }
+  check('the published rod lengths are loaded',
+    pubJ.length === 51, `${pubJ.length} joncs`);
+  check('in two blocs, of 25 and 26',
+    byBlocPub[1].n === 25 && byBlocPub[2].n === 26);
+
+  // A jonc is ONE piece wrapping the nose. The longest in bloc 1 is 82.6 cm
+  // on a wing whose bloc-1 extents span 12.0 to 18.5 per cent of a 2.09 m
+  // chord — and 6.5 per cent of that chord is 14 cm. An 82.6 cm rod is not a
+  // chordwise extent; it is the arc from the upper extent, round the leading
+  // edge, to the lower one.
+  const longest = Math.max(...pubJ.filter((r) => r[0] === '1')
+    .map((r) => Number(r[3])));
+  check('a jonc is far longer than its chordwise extent',
+    longest > 0.30 * 209,
+    `${longest} cm on a 209 cm chord, extents spanning 6.5% of it`);
+
+  const wingJ = buildWing({
+    planform: planformFromDesignInputs({
+      span: 10.48, rootChord: 2.0907, tipChord: 0.5, tipSweep: 1.2,
+    }),
+    lobe: buildLobe({ type: 'circle', projectedRatio: 0.807 }, 5.24),
+    airfoil: naca4('4415'), cells: 25, pointsPerSurface: 80,
+  });
+  const joncs = buildNoseJoncs({ wing: wingJ, blocs: SWOOP2_JONC_BLOCS });
+
+  check('the model now makes one jonc per rib per bloc',
+    joncs.count === pubJ.length,
+    `${joncs.count} against ${pubJ.length} published`);
+  check('and the count matches bloc by bloc',
+    joncs.byBloc[1].count === byBlocPub[1].n
+    && joncs.byBloc[2].count === byBlocPub[2].n);
+
+  // Bloc 1 is within reach: 14.35 m against 16.53, which is this parametric
+  // wing not being the Swoop2's exact rib geometry.
+  const bloc1Err = Math.abs(joncs.byBloc[1].totalM
+    - byBlocPub[1].totalCm / 100) / (byBlocPub[1].totalCm / 100);
+  check('bloc 1 total length is within 20% of the published figure',
+    bloc1Err < 0.20,
+    `${joncs.byBloc[1].totalM.toFixed(2)} m against `
+    + `${(byBlocPub[1].totalCm / 100).toFixed(2)} m, ${(bloc1Err * 100).toFixed(0)}% out`);
+
+  // Bloc 2 is NOT understood and says so. Its rows read 23.5-29.5 and
+  // 63.0-70.0, which as two segments is 27 cm where the program prints up to
+  // 99.3, and as a nose wrap is 92% too long. Neither fits, so neither is
+  // claimed.
+  check('bloc 2 is carried as not understood rather than guessed',
+    joncs.notUnderstood.some((b) => b.bloc === 2),
+    joncs.note);
+  check('and the reason is recorded',
+    /99.3 cm|92%/.test(joncs.notUnderstood.find((b) => b.bloc === 2).why));
+}
+
+// ---------------------------------------------------------------------------
+section('The risers hang, they do not fan');
+
+{
+  // A paraglider does not hang its lines from the karabiner. Between the
+  // karabiner and the lines there is half a metre of riser webbing, and it
+  // hangs VERTICALLY because the pilot's weight pulls straight down on it.
+  // The cascade fans out from the top of that webbing.
+  //
+  // This model ran the lines from the karabiner itself, so the fan started at
+  // the pilot: a main line reached nearly three metres sideways and sat 48
+  // degrees from vertical for its whole length.
+  const wingR = demoWing();
+  const afR = naca4('4415');
+  afR.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const planR = buildLinePlan({
+    wing: wingR, airfoil: afR, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+
+  check('there is riser webbing between the karabiner and the lines',
+    (planR.riserWebbing ?? []).length > 0,
+    `${(planR.riserWebbing ?? []).length} risers`);
+
+  // Vertical is not an approximation. Webbing carries only tension, so under
+  // a weight it lies along the line of that weight.
+  for (const r of planR.riserWebbing) {
+    const d = [r.to[0] - r.from[0], r.to[1] - r.from[1], r.to[2] - r.from[2]];
+    near(`riser ${r.row} hangs vertically`,
+      Math.hypot(d[0], d[1]), 0, 1e-9, ' m off vertical');
+  }
+
+  check('the karabiner is below the riser top, not above it',
+    planR.karabiner[2] < planR.riserTop[2],
+    `${planR.karabiner[2].toFixed(2)} against ${planR.riserTop[2].toFixed(2)} m`);
+
+  // `lineLengthM` is the length of the LINES: wing to riser top. The risers
+  // hang below that.
+  //
+  // Putting the riser top half a metre ABOVE a fixed karabiner instead
+  // shortened every line, and the wing's total line length fell from 215 m to
+  // 187 against a published figure that counts lines and not webbing.
+  near('the lines end at the stated line length',
+    Math.abs(planR.riserTop[2]), 6.5, 1e-9, ' m');
+  near('and the karabiner hangs a riser below that',
+    Math.abs(planR.karabiner[2]), 7.0, 1e-9, ' m');
+
+  // A riser is webbing, not a line: no name in the line-naming convention,
+  // not cut from line stock, not part of a total line length. Pushing it into
+  // `plan.lines` broke the name parser and the length total at once, which is
+  // the system saying it is not a line.
+  // The deepest LINE level is `main`; a riser is webbing. Giving it a line
+  // level undoes a rename this project already made once — the audit has a
+  // rule about it and caught this.
+  check('risers are kept out of the lines',
+    !planR.lines.some((l) => l.level === 'riser'));
+  check('and carry no line level at all',
+    planR.riserWebbing.every((r) => r.level === undefined && r.kind === 'webbing'));
+  check('and out of the riser definitions, which are a different thing',
+    Array.isArray(planR.risers) && planR.risers[0]?.rows !== undefined,
+    'plan.risers still carries which rows each riser takes');
 }
 
 // ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@ demonstrating the method. Flat area, span, root chord, cell and rib counts
 reproduce **exactly**. 37 LEP sections parse. Its published per-line loads
 close at every cascade level.
 
-**Against 21 wings from six manufacturers**, 136 reference files. Every line
+**Against 21 wings from six manufacturers**, 137 reference files. Every line
 sheet is held to five physical invariants, not merely parsed. The
 anchor-density table the generator calibrates against is **measured from the
 corpus**, not hand-entered — 27 designs, and a check stage fails if the

@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**1910 tests across nine check stages**, all passing. Phases 1 and 5 are
+**1928 tests across nine check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -65,7 +65,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1910 unit checks against known geometry and the sources |
+| `npm test` | 1928 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -259,7 +259,7 @@ fourteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 1910 checks |
+| unit suite | the maths, 1928 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -303,6 +303,7 @@ across six manufacturers.
 | `docs/inflated.md` | the built shape against the flying one |
 | `docs/shaping.md` | 3D shaping of the nose, and two wrong derivations |
 | `docs/risers.md` | riser-aware line plans and split A risers |
+| `docs/rods-validated.md` | the Swoop2 rods against its own computed output |
 | `docs/free-body.md` | does the whole machine balance as a body in gravity |
 | `docs/hang-point.md` | where the wing hangs, and why the calage decides it |
 | `docs/line-plans.md` | risers, naming, topology inference |

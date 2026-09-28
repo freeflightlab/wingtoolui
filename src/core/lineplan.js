@@ -879,6 +879,9 @@ function buildLinePlanInner({
   // plan under test was not the plan described, and nothing failed.
   layout = LAYOUT_OMITTED,
   everyNthRib = 2,
+  // The riser webbing between karabiner and lines. It hangs vertically: the
+  // pilot's weight pulls straight down on it.
+  riserLengthM = 0.50,
   // Where the wing balances, as a fraction of chord, from the equilibrium
   // solve. The lines converge there, because that is what decides the
   // attitude the wing flies at.
@@ -985,11 +988,37 @@ function buildLinePlanInner({
   // unusual layout still hangs from its own balance point: the load-bearing
   // anchors are averaged, weighted towards the front rows because that is
   // where the load is.
-  const maillon = [
+  // `lineLengthM` is the length of the LINES: wing to riser top.
+  //
+  // The risers hang BELOW that, and the karabiner below them. Putting the
+  // riser top half a metre above a fixed karabiner instead shortened every
+  // line, and the wing's total line length fell from 215 m to 187 — against a
+  // published figure that counts lines and not webbing.
+  const riserTop = [
     hangPointFromAnchors(wing, fractions, calageFraction),
     karabinerSeparationM / 2,
     -lineLengthM,
   ];
+  const karabiner = [riserTop[0], riserTop[1], riserTop[2] - riserLengthM];
+
+  // The risers, and why they matter to the geometry.
+  //
+  // A paraglider does not hang its lines from the karabiner. Between the
+  // karabiner and the lines there is half a metre of riser webbing, and it
+  // hangs VERTICALLY, because the pilot's weight is pulling straight down on
+  // it. The line cascade fans out from the top of that webbing.
+  //
+  // This model ran the lines from the karabiner itself, so the fan started at
+  // the pilot: a main line reached nearly three metres sideways from the
+  // karabiner and sat 48 degrees from vertical for its whole length. Nothing
+  // on a real wing does that — the risers take the load straight up and the
+  // spreading happens above them.
+  //
+  // Vertical is not an approximation here. Webbing is flexible and carries
+  // only tension, so under a weight it lies along the line of that weight.
+  //
+  // Everything above the risers hangs from their top.
+  const maillon = riserTop;
 
   const lines = [];
   const risers = [];
@@ -1186,6 +1215,44 @@ function buildLinePlanInner({
     plan.lines = plan.lines.concat(bp.lines);
     plan.brakePlan = bp;
   }
+  // The riser webbing itself, as lines, so the model shows what carries the
+  // load between pilot and cascade.
+  if (riserLengthM > 0) {
+    // `plan.risers` is already the riser DEFINITIONS — which rows each one
+    // carries. This is the webbing geometry, which is a different thing, and
+    // overwriting the first with the second broke a test that reads
+    // `plan.risers[2].rows`.
+    plan.riserWebbing = [];
+    const risers = [...new Set(plan.lines
+      .filter((l) => l.level === 'main' && l.riser)
+      .map((l) => l.riser))];
+    for (const riser of (risers.length ? risers : ['A'])) {
+      // Recorded separately from the lines.
+      //
+      // A riser is webbing, not a line: it has no name in the line-naming
+      // convention, is not cut from line stock, and does not belong in a
+      // total line length. Pushing it into `plan.lines` broke the name parser
+      // and the length total at once, which is the system saying it is not a
+      // line.
+      plan.riserWebbing.push({
+        row: riser,
+        // No `level`. The deepest LINE level is `main`; a riser is webbing,
+        // and giving it a line level is the rename this project already made
+        // once, undone. The audit caught it.
+        kind: 'webbing',
+        name: `riser-${riser}`,
+        riser,
+        from: karabiner.slice(),
+        to: riserTop.slice(),
+        lengthMM: Math.round(riserLengthM * 1000),
+        anchors: [],
+      });
+    }
+    plan.karabiner = karabiner;
+    plan.riserTop = riserTop;
+    plan.riserLengthM = riserLengthM;
+  }
+
   plan.totals = planTotals(plan);
   plan.totalLengthM = plan.lines.reduce((s, l) => s + (l.lengthMM * 2) / 1000, 0);
   plan.mergedRows = mergeRows || [];
