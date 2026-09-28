@@ -879,6 +879,10 @@ function buildLinePlanInner({
   // plan under test was not the plan described, and nothing failed.
   layout = LAYOUT_OMITTED,
   everyNthRib = 2,
+  // Where the wing balances, as a fraction of chord, from the equilibrium
+  // solve. The lines converge there, because that is what decides the
+  // attitude the wing flies at.
+  calageFraction = null,
   groupSize = 2,
   riserLengthMM = 500,
   lineLengthM = 6.5,
@@ -981,24 +985,11 @@ function buildLinePlanInner({
   // unusual layout still hangs from its own balance point: the load-bearing
   // anchors are averaged, weighted towards the front rows because that is
   // where the load is.
-  const hangX = (() => {
-    const rows = Object.entries(fractions)
-      .filter(([row]) => !['K', 'BR', 'ST'].includes(row));
-    if (!rows.length) return 0;
-    // Front rows carry more, so weight by the share convention.
-    const share = { A: 0.35, B: 0.35, C: 0.20, D: 0.10, E: 0.05 };
-    let num = 0;
-    let den = 0;
-    for (const [row, frac] of rows) {
-      const wgt = share[row] ?? 0.1;
-      num += frac * wgt;
-      den += wgt;
-    }
-    const chordFraction = den > 0 ? num / den : 0.4;
-    const rootRib = wing.ribs[0];
-    return (rootRib?.xLE ?? 0) + chordFraction * (rootRib?.chord ?? 0);
-  })();
-  const maillon = [hangX, karabinerSeparationM / 2, -lineLengthM];
+  const maillon = [
+    hangPointFromAnchors(wing, fractions, calageFraction),
+    karabinerSeparationM / 2,
+    -lineLengthM,
+  ];
 
   const lines = [];
   const risers = [];
@@ -1183,6 +1174,13 @@ function buildLinePlanInner({
       wing,
       lineLengthM,
       karabinerSeparationM,
+      // The same hang point the load-bearing cascade uses.
+      //
+      // Without it the brakes fell back to their own default and ran to a
+      // handle under the LEADING EDGE while the main lines hung correctly
+      // under the wing. Giving `buildBrakePlan` the right default was not
+      // enough, because this call never asked for it.
+      hangPointX: maillon[0],
       ...(typeof brakes === 'object' ? brakes : {}),
     });
     plan.lines = plan.lines.concat(bp.lines);
@@ -1768,6 +1766,108 @@ export function bgdStatedTopology(table, row) {
  * @param {number} anchors    attachment points wanted
  * @param {number} tipBias    0 = even, 1 = strongly bunched outboard
  */
+/**
+ * Where the risers hang along the chord.
+ *
+ * A paraglider hangs with the pilot below the point the lift acts through, so
+ * the maillon sits at the load-weighted centroid of the load-bearing anchors
+ * — where the resultant of the lines acts. Brakes and the stabilo are left
+ * out: they do not carry the wing.
+ *
+ * ONE definition, because there were two maillons and fixing one left the
+ * other at the leading edge. The main cascade hung correctly and the brakes
+ * still ran forward to a handle under the nose.
+ */
+export function hangPointFromAnchors(wing, fractions, calageFraction = null) {
+  // The CALAGE, when the equilibrium has been solved.
+  //
+  // A paraglider's angle of incidence is set by its line lengths: the wing
+  // hangs from the maillon and sits at whatever attitude those lengths
+  // dictate. The point it hangs from is the calage — where the moment
+  // balances, with the lift acting forward of it and the section's own
+  // pitching moment making up the difference. That is chapter 4's whole
+  // subject and `solveEquilibrium` computes it.
+  //
+  // This used a load-weighted average of the anchor positions instead, which
+  // is a plausible-looking geometric proxy and not the same thing. On a
+  // typical wing it came out at 31.9% of chord where the equilibrium says
+  // **50.6%** — the wing was hung 18.7 points of chord too far forward, so
+  // the model pitched nose-down against the attitude it would really fly at.
+  //
+  // These are flying machines. Where the mass hangs decides how they fly, and
+  // a geometric average of some attachment points does not know that.
+  if (Number.isFinite(calageFraction) && calageFraction > 0) {
+    const rootRib = wing?.ribs?.[0];
+    if (rootRib) {
+      return (rootRib.xLE ?? 0) + calageFraction * (rootRib.chord ?? 0);
+    }
+  }
+  // A calage that cannot balance is not used.
+  //
+  // `solveEquilibrium` has a `legacySpreadsheet` mode that reproduces a 2012
+  // worksheet, and it omits the aerofoil's own pitching moment from the
+  // balance. The number it returns is right for matching that worksheet and
+  // wrong as geometry: it puts the hang point FORWARD of the centre of
+  // pressure, where the lift-weight couple adds to the section's nose-down
+  // moment instead of opposing it. A wing hung there could not fly.
+  //
+  // `usableCalage` below is the guard. Legacy remains available for
+  // reproducing the worksheet's numbers; it just does not get to place the
+  // lines.
+
+  // Without a solved equilibrium, fall back to the anchor centroid — better
+  // than the leading edge, and the caller is told which was used.
+  return hangPointFromAnchorCentroid(wing, fractions);
+}
+
+/**
+ * Whether a solved calage can be used to hang a wing.
+ *
+ * Taking moments about the hang point, lift acting FORWARD of it gives a
+ * nose-up couple, which is what balances an aerofoil's nose-down pitching
+ * moment. So a usable calage sits AFT of the centre of pressure. One forward
+ * of it describes a wing that cannot balance, and the 2012-spreadsheet mode
+ * returns exactly that because it leaves the aerofoil moment out.
+ */
+export function usableCalage(balance) {
+  if (!balance || !Number.isFinite(balance.calageFraction)) {
+    return { ok: false, why: 'no calage solved' };
+  }
+  if (!(balance.calageFraction > 0 && balance.calageFraction < 1)) {
+    return { ok: false, why: 'calage is not a fraction of chord' };
+  }
+  if (Number.isFinite(balance.xcpFraction)
+    && balance.calageFraction < balance.xcpFraction) {
+    return {
+      ok: false,
+      why: `the calage (${(balance.calageFraction * 100).toFixed(1)}%) is `
+        + `forward of the centre of pressure `
+        + `(${(balance.xcpFraction * 100).toFixed(1)}%), so the wing could not `
+        + 'balance there',
+    };
+  }
+  return { ok: true, why: null };
+}
+
+/** The load-weighted centroid of the load-bearing anchors. */
+function hangPointFromAnchorCentroid(wing, fractions) {
+  const rows = Object.entries(fractions || {})
+    .filter(([row]) => !['K', 'BR', 'ST', 'S'].includes(row));
+  const rootRib = wing?.ribs?.[0];
+  if (!rows.length || !rootRib) return 0;
+  // Front rows carry more of the load, so weight by the share convention.
+  const share = { A: 0.35, B: 0.35, C: 0.20, D: 0.10, E: 0.05 };
+  let num = 0;
+  let den = 0;
+  for (const [row, frac] of rows) {
+    const w = share[row] ?? 0.1;
+    num += frac * w;
+    den += w;
+  }
+  const chordFraction = den > 0 ? num / den : 0.4;
+  return (rootRib.xLE ?? 0) + chordFraction * (rootRib.chord ?? 0);
+}
+
 export function brakeAnchorRibs(ribCount, anchors, tipBias = 0.55) {
   // More anchors than ribs cannot be placed. The monotonic repair below
   // clamps at the tip, so asking for too many silently returned the outermost
@@ -1805,6 +1905,10 @@ export function brakeAnchorRibs(ribCount, anchors, tipBias = 0.55) {
  * six middle lines onto three riser lines onto one shared lower line.
  */
 export function buildBrakePlan({
+  // Where the risers hang along the chord. Defaults to the same load-weighted
+  // point `buildLinePlan` uses, so the brakes hang from where the wing
+  // actually balances rather than from its nose.
+  hangPointX = null,
   wing,
   handlePoint = null,
   pulleyPoint = null,
@@ -1818,7 +1922,21 @@ export function buildBrakePlan({
   levelFractions = [0.64, 0.78],
 } = {}) {
   const ribs = wing.ribs;
-  const maillon = [0, karabinerSeparationM / 2, -lineLengthM];
+  // The SAME hang point the main cascade uses.
+  //
+  // This was a second copy of `[0, ..., -lineLengthM]` — the leading edge —
+  // and fixing the one in `buildLinePlan` left it behind. So the main lines
+  // hung correctly under the wing while the brakes still ran forward to a
+  // handle under the nose, which is exactly the "brakes still projected
+  // forward" that was reported after the first fix.
+  //
+  // Two copies of a position is one too many. It is passed in now, and
+  // defaults to the same load-weighted hang point rather than to zero.
+  const maillon = [
+    hangPointX ?? hangPointFromAnchors(wing, anchors),
+    karabinerSeparationM / 2,
+    -lineLengthM,
+  ];
   const pulley = pulleyPoint || maillon;
   const handle = handlePoint
     || [maillon[0] + handleAftM, maillon[1], maillon[2] - handleDropM];

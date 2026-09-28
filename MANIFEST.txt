@@ -5,7 +5,7 @@ open dist/paraglider-design-tool.html, because that file is self-contained,
 but it cannot be rebuilt, tested or audited.
 
      11043  build.py
-     17741  README.md
+     17820  README.md
      55502  ROADMAP.md
 
 src/core/   36 files — the maths — every module the build inlines
@@ -22,7 +22,7 @@ src/core/   36 files — the maths — every module the build inlines
       7344  src/core/inflated.js
       7807  src/core/intake.js
      26452  src/core/lep.js
-    118153  src/core/lineplan.js
+    123570  src/core/lineplan.js
       6756  src/core/lines.js
      66589  src/core/loads.js
       9507  src/core/lobe.js
@@ -47,7 +47,7 @@ src/core/   36 files — the maths — every module the build inlines
       9106  src/core/xfoil.js
 
 src/ui/   3 files — the interface: markup, style and the one script
-    129247  src/ui/app.js
+    131101  src/ui/app.js
       5663  src/ui/index.html
      13419  src/ui/style.css
 
@@ -56,7 +56,7 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
      12786  tests/full-pipeline.mjs
      18515  tests/phase1-audit.mjs
       8318  tests/reference-sweep.mjs
-    539871  tests/run-tests.js
+    548175  tests/run-tests.js
 
 tools/   17 files — build helpers, figures, audit, legacy .xls reader
      23443  tools/audit.mjs
@@ -77,7 +77,7 @@ tools/   17 files — build helpers, figures, audit, legacy .xls reader
       8186  tools/read_xls.py
       2905  tools/read_xlsx.py
 
-docs/   37 files — notes on what was validated and what was not
+docs/   38 files — notes on what was validated and what was not
       4358  docs/assumptions.md
       3861  docs/brakes.md
       6545  docs/cad-export.md
@@ -91,12 +91,13 @@ docs/   37 files — notes on what was validated and what was not
      10686  docs/environment-and-aero.md
       2158  docs/fabric.md
       9515  docs/full-pipeline.md
+      5346  docs/hang-point.md
       3353  docs/inflated.md
       9041  docs/inspection.md
       4588  docs/intake.md
       2724  docs/lengths.md
       5576  docs/lep-format.md
-     17725  docs/line-plans.md
+     16241  docs/line-plans.md
       4117  docs/line-sets.md
       4890  docs/line-sheets.md
      19803  docs/loads-and-materials.md
@@ -162,7 +163,7 @@ data/reference/   134 files — production data used for validation
   vibegt-ML.tsv vibegt-MS.tsv vibegt-S.tsv vibegt-XL.tsv vibegt-XS.tsv zeno2-L.tsv
   zeno2-ML.tsv zeno2-MS.tsv zeno2-S.tsv
 
-241 files, 2361 KB
-sha256 of the tree: 28decb47fd1a0f7a6b1ccf9293bf1309
+242 files, 2381 KB
+sha256 of the tree: 42042322ee30ba8677b57f3d5aaff3e8
 
 Verify with:  node tools/audit.mjs

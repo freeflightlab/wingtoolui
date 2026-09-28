@@ -99,7 +99,7 @@ import { applyReflex } from '../src/core/airfoil.js';
 import { parsePolar, commandScript, airfoilToDat, checkPolarMatch } from '../src/core/xfoil.js';
 import {
   parseLineName, parseLineTable, summarise, inferTopology, inferRiserLength,
-  buildLinePlan, comparePlans, referenceTotals, RISER_LAYOUTS, parseCascadeSpec, cascadeSpecFor,
+  buildLinePlan, comparePlans, referenceTotals, RISER_LAYOUTS, hangPointFromAnchors, usableCalage, parseCascadeSpec, cascadeSpecFor,
   parsePhiLineSheet, checkPhiSheet, phiLineLength,
   parseBgdLineTable, bgdCascadeTotals, bgdStatedTopology,
   parseUpLineSheet, loopAllowanceCost,
@@ -9647,6 +9647,172 @@ section('The wing hangs over its maillon');
     planBack.maillon[0] > planH.maillon[0],
     `${chordFractionOf(planH.maillon[0]).toFixed(3)} becomes `
     + `${chordFractionOf(planBack.maillon[0]).toFixed(3)} of chord`);
+
+  // EVERY row, including the brakes.
+  //
+  // Fixing the maillon in `buildLinePlan` left a second copy of it inside
+  // `buildBrakePlan`, still at the leading edge — so the load-bearing lines
+  // hung correctly under the wing while the brakes ran forward to a handle
+  // under the nose. Two definitions of one position is one too many.
+  const withBrakes = buildLinePlan({
+    wing: wingH, airfoil: afH, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5, brakes: true,
+  });
+  const forwardOfNose = withBrakes.lines.filter(
+    (l) => chordFractionOf(Math.min(l.from[0], l.to[0])) < 0.05);
+  check('no line runs forward to the leading edge',
+    forwardOfNose.length === 0,
+    forwardOfNose.length
+      ? `${forwardOfNose.length} lines, rows `
+        + `${[...new Set(forwardOfNose.map((l) => l.row))].join(', ')}`
+      : `${withBrakes.lines.length} lines checked`);
+
+  const brakeLines = withBrakes.lines.filter((l) => l.row === 'K');
+  check('the brakes exist to be checked', brakeLines.length > 0);
+  const handleX = Math.min(...brakeLines.map((l) => Math.min(l.from[0], l.to[0])));
+  near('and their handle hangs from the same point as the risers',
+    handleX, withBrakes.maillon[0], 0.01, ' m');
+
+  // There is ONE definition of the hang point, so this cannot drift apart
+  // again.
+  check('the hang point comes from a single shared function',
+    Math.abs(hangPointFromAnchors(wingH, afH.anchors) - withBrakes.maillon[0])
+      < 1e-9);
+
+  // The wing hangs from where it BALANCES, and balance is checkable.
+  //
+  // A paraglider's angle of incidence is set by its line lengths: it hangs
+  // from the maillon and sits at whatever attitude those lengths dictate. The
+  // point it hangs from is the calage, and `solveEquilibrium` computes it
+  // from the moment balance.
+  //
+  // The line plan used a load-weighted average of the anchor positions
+  // instead — a plausible geometric proxy that knows nothing about balance.
+  // These are flying machines; where the mass hangs decides how they fly.
+  // `cm` and `cz` matter: the balance point IS the moment balance, so a
+  // solve without the section's pitching moment is answering a different
+  // question. Omitting them gave calage 36.6% with the centre of pressure at
+  // 29.7% — forward of the hang point, which cannot balance — and that was
+  // the test being wrong, not the model.
+  const balH = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+  });
+
+  // The physical relation, independent of any particular number.
+  //
+  // Take moments about the hang point. Lift acts up at the centre of
+  // pressure; if that is FORWARD of the hang point the couple is nose-UP,
+  // which is what balances an aerofoil's nose-down pitching moment. So the
+  // wing hangs from a point AFT of its centre of pressure.
+  //
+  // I asserted the opposite first, from reasoning the couple out backwards,
+  // and the model failed a test that was itself wrong. The direction is worth
+  // stating carefully because getting it round the wrong way is easy and
+  // looks equally plausible.
+  check('the wing hangs from a point aft of its centre of pressure',
+    balH.calageFraction > balH.xcpFraction,
+    `calage ${(balH.calageFraction * 100).toFixed(1)}%, `
+    + `centre of pressure ${(balH.xcpFraction * 100).toFixed(1)}%`);
+
+  // And the more nose-down the section, the further aft it must hang to
+  // generate the nose-up couple that balances it.
+  const noseDown = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+  });
+  const noseUp = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: 0.042,
+  });
+  check('a more nose-down section hangs further aft',
+    noseDown.calageFraction > noseUp.calageFraction,
+    `${(noseUp.calageFraction * 100).toFixed(1)}% nose-up against `
+    + `${(noseDown.calageFraction * 100).toFixed(1)}% nose-down`);
+
+  const hungFromBalance = buildLinePlan({
+    wing: wingH, airfoil: afH, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+    calageFraction: balH.calageFraction,
+  });
+  near('the lines converge on the calage, not on an anchor average',
+    chordFractionOf(hungFromBalance.maillon[0]), balH.calageFraction, 0.005,
+    ' of chord');
+  check('which is a different place from the anchor centroid',
+    Math.abs(chordFractionOf(hungFromBalance.maillon[0])
+      - chordFractionOf(planH.maillon[0])) > 0.03,
+    `${(chordFractionOf(planH.maillon[0]) * 100).toFixed(1)}% against `
+    + `${(chordFractionOf(hungFromBalance.maillon[0]) * 100).toFixed(1)}%`);
+
+  // Changing the trim must move the hang point, because that is the whole
+  // relationship: line lengths set the incidence, the incidence sets where
+  // the wing balances.
+  const fast = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 2, cz: 0.9, cm: -0.042,
+  });
+  const slow = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 9, cz: 0.9, cm: -0.042,
+  });
+  check('a different angle of attack balances at a different point',
+    Math.abs(fast.calageFraction - slow.calageFraction) > 0.01,
+    `${(fast.calageFraction * 100).toFixed(1)}% at 2 degrees, `
+    + `${(slow.calageFraction * 100).toFixed(1)}% at 9`);
+
+  // A calage that cannot balance is refused.
+  //
+  // `solveEquilibrium` has a `legacySpreadsheet` mode reproducing a 2012
+  // worksheet, and it leaves the aerofoil's own pitching moment OUT of the
+  // balance. The number is right for matching that worksheet and wrong as
+  // geometry: it puts the hang point forward of the centre of pressure, where
+  // the lift-weight couple adds to the section's nose-down moment instead of
+  // opposing it. A wing hung there could not fly.
+  //
+  // The two modes disagreed about the sign of that relationship and the tool
+  // would have used whichever it was handed.
+  const handbook = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.33, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+  });
+  const legacy = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.33, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+    legacySpreadsheet: true,
+  });
+
+  check('the handbook balance hangs the wing aft of its centre of pressure',
+    usableCalage(handbook).ok,
+    `calage ${(handbook.calageFraction * 100).toFixed(1)}%, `
+    + `cp ${(handbook.xcpFraction * 100).toFixed(1)}%`);
+  check('the 2012 worksheet mode does not, because it omits the aerofoil moment',
+    !usableCalage(legacy).ok,
+    `calage ${(legacy.calageFraction * 100).toFixed(1)}%, `
+    + `cp ${(legacy.xcpFraction * 100).toFixed(1)}%`);
+  check('and the refusal says why',
+    /forward of the centre of pressure/.test(usableCalage(legacy).why));
+
+  // Refused means the lines fall back to the anchor centroid, not to the
+  // unusable number and not to the nose.
+  const onLegacy = buildLinePlan({
+    wing: wingH, airfoil: afH, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+    calageFraction: usableCalage(legacy).ok ? legacy.calageFraction : null,
+  });
+  check('a refused calage falls back rather than hanging the wing wrongly',
+    Math.abs(chordFractionOf(onLegacy.maillon[0]) - legacy.calageFraction) > 0.05
+    && chordFractionOf(onLegacy.maillon[0]) > 0.2,
+    `${(chordFractionOf(onLegacy.maillon[0]) * 100).toFixed(1)}% of chord`);
+
+  // And an imported design that has no D row must not pin it to the nose.
+  //
+  // `undefined * 100` is NaN, which settled as 0, so loading a three-row wing
+  // put the D anchor at the LEADING EDGE and left it there afterwards.
+  const threeRow = { A: 0.11, B: 0.39, C: 0.67 };
+  check('a missing row does not drag the hang point to the nose',
+    hangPointFromAnchors(wingH, threeRow) > rootH.lower[0][0] + rootH.chord * 0.2,
+    `${(((hangPointFromAnchors(wingH, threeRow) - rootH.lower[0][0])
+      / rootH.chord) * 100).toFixed(1)}% of chord`);
 }
 
 // ---------------------------------------------------------------------------

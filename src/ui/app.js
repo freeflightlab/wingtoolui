@@ -123,10 +123,18 @@ function applyReference() {
       S._appliedReference = S.reference;
       S.name = design.name || 'Swoop2';
       if (design.anchorFractions) {
-        S.anchorA = design.anchorFractions.A * 100;
-        S.anchorB = design.anchorFractions.B * 100;
-        S.anchorC = design.anchorFractions.C * 100;
-        S.anchorD = design.anchorFractions.D * 100;
+        // A row the imported design does not have must KEEP its current
+        // value, not become zero.
+        //
+        // `undefined * 100` is NaN, which settled as 0 — so loading a
+        // three-row wing pinned the D anchor to the LEADING EDGE, and it
+        // stayed there after returning to a parametric wing. The D lines
+        // then ran forward off the nose, which is what "the risers are
+        // projected forward" looked like.
+        for (const row of ['A', 'B', 'C', 'D']) {
+          const f = design.anchorFractions[row];
+          if (Number.isFinite(f) && f > 0) S[`anchor${row}`] = f * 100;
+        }
       }
       S._referenceNote = `${design.name || 'Swoop2'}: a complete design from `
         + `Laboratori d'envol — ${design.cells} cells, `
@@ -369,6 +377,15 @@ function rebuild() {
     const writtenCascade = S.useCascadeSpec ? parseCascadeSpec(S.cascadeSpec) : null;
 
     const linePlan = buildLinePlan({
+      // Hang the wing from where it BALANCES, not from an average of the
+      // anchor positions.
+      //
+      // A paraglider's angle of incidence is set by its line lengths, and the
+      // point it hangs from is the calage — which `solveEquilibrium` has just
+      // computed. Using a geometric centroid instead put the maillon 18.7
+      // points of chord too far forward on a typical wing, so the model
+      // pitched nose-down against the attitude it would really fly at.
+      calageFraction: usableCalage(balance).ok ? balance.calageFraction : null,
       wing, airfoil, layout: RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'],
       everyNthRib: 2, lineLengthM: S.lineLength,
       mergeRows: MERGES[S.mergeRows] || null,
@@ -1339,10 +1356,18 @@ function buildControls() {
       const nameField = document.getElementById('wingName');
       if (nameField) nameField.value = S.name;
       if (design.anchorFractions) {
-        S.anchorA = design.anchorFractions.A * 100;
-        S.anchorB = design.anchorFractions.B * 100;
-        S.anchorC = design.anchorFractions.C * 100;
-        S.anchorD = design.anchorFractions.D * 100;
+        // A row the imported design does not have must KEEP its current
+        // value, not become zero.
+        //
+        // `undefined * 100` is NaN, which settled as 0 — so loading a
+        // three-row wing pinned the D anchor to the LEADING EDGE, and it
+        // stayed there after returning to a parametric wing. The D lines
+        // then ran forward off the nose, which is what "the risers are
+        // projected forward" looked like.
+        for (const row of ['A', 'B', 'C', 'D']) {
+          const f = design.anchorFractions[row];
+          if (Number.isFinite(f) && f > 0) S[`anchor${row}`] = f * 100;
+        }
       }
       buildControls();
       rebuild();
@@ -1372,10 +1397,18 @@ function buildControls() {
       S.name = design.name || S.name;
       document.getElementById('wingName').value = S.name;
       if (design.anchorFractions) {
-        S.anchorA = design.anchorFractions.A * 100;
-        S.anchorB = design.anchorFractions.B * 100;
-        S.anchorC = design.anchorFractions.C * 100;
-        S.anchorD = design.anchorFractions.D * 100;
+        // A row the imported design does not have must KEEP its current
+        // value, not become zero.
+        //
+        // `undefined * 100` is NaN, which settled as 0 — so loading a
+        // three-row wing pinned the D anchor to the LEADING EDGE, and it
+        // stayed there after returning to a parametric wing. The D lines
+        // then ran forward off the nose, which is what "the risers are
+        // projected forward" looked like.
+        for (const row of ['A', 'B', 'C', 'D']) {
+          const f = design.anchorFractions[row];
+          if (Number.isFinite(f) && f > 0) S[`anchor${row}`] = f * 100;
+        }
       }
       if (design.intake) {
         S.intakeStart = design.intake.start * 100;
