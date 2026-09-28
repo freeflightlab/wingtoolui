@@ -413,3 +413,44 @@ expose — but it is a choice a designer makes and checks, not a default they
 inherit.
 
 The tests caught that when I tried to ship it on by default.
+
+---
+
+## 14. Seam to seam, not across a seam
+
+`buildVRibs` puts the apex on one rib's lower surface and spreads the base
+**across the upper panel** of a neighbour — a band of cloth landing in the
+middle of a panel rather than on the seam where that panel is sewn to its rib.
+Fabric loaded mid-panel pulls the panel out of shape. A seam is where the
+structure is.
+
+`buildSeamDiagonals` builds the V: **one bottom seam to the two top seams
+either side of it.** The apex sits on rib *i*'s lower surface at the anchor;
+the two feet sit on the upper surfaces of ribs *i−1* and *i+1*, at the same
+chord station. Every attachment lands on a seam. The inverted form — two
+bottom seams to the top seam between them — is the same triangle upside down.
+
+Where a V will not fit because a leg would be too short to sew, the caller is
+told **which ribs want an H rib instead** rather than being handed a 75 mm
+triangle. On the test wing that is 7 positions of 11.
+
+### It is still not symmetric, and I expected it to be
+
+I built this expecting the V to cancel the asymmetry: the arc's tilt adds to
+one leg and subtracts from the other, so taking both sides should even it out.
+
+**It does not.** The legs still differ by up to 4.3 to 1 near the tip, and the
+cause is not the arc but **sweep**. The ribs are rotated to follow the swept
+leading edge, so a point at 30% chord on rib 9 sits at y = 3.406 where that
+rib's station is 3.767 — constant chord-fraction points bunch together going
+outboard. Add the offset between a rib's lower surface and its upper, and one
+leg grows while the other shrinks.
+
+| | spanwise gap | vertical gap |
+| --- | --- | --- |
+| apex to inboard foot | 0.476 m | 0.458 m |
+| apex to outboard foot | **0.137 m** | **0.043 m** |
+
+So this fixes the attachment and does not fix the asymmetry. `legRatio` is
+reported per diagonal rather than left to be discovered, and it is asserted to
+be present rather than asserted to be 1.

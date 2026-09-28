@@ -946,3 +946,151 @@ export function diagonalGeometry(vribs, {
         ].filter(Boolean).join(', '),
   };
 }
+
+/**
+ * Diagonals that attach seam to seam, never across a seam.
+ *
+ * ---------------------------------------------------------------------------
+ * What was wrong
+ * ---------------------------------------------------------------------------
+ * `buildVRibs` puts the apex on one rib's lower surface and spreads the base
+ * across the UPPER PANEL of a neighbour — a band of cloth landing in the
+ * middle of a panel rather than on the seam where that panel is sewn to its
+ * rib. Fabric loaded in the middle of a panel pulls the panel out of shape;
+ * a seam is where the structure is.
+ *
+ * It was also one-sided, and that is what made it degenerate. A rib on an arc
+ * is tilted, so its thickness has a spanwise component, and a one-sided
+ * diagonal takes that offset ADDED going inboard and SUBTRACTED going
+ * outboard. The result was 685 mm one way and 82 mm the other from the same
+ * rib, an 8:1 spread across a wing, with the outboard leg collapsing to
+ * nothing near the tip.
+ *
+ * ---------------------------------------------------------------------------
+ * What a diagonal actually is
+ * ---------------------------------------------------------------------------
+ * A V: **one bottom seam to the two top seams either side of it.** The apex
+ * sits on rib i's lower surface at the anchor, and the two feet sit on the
+ * upper surfaces of ribs i-1 and i+1 — on the seams, at the same chord
+ * station.
+ *
+ * It spreads the anchor load into the cells either side rather than into one,
+ * which is what a diagonal is for, and every attachment lands on a seam.
+ *
+ * It is NOT symmetric, and I expected it to be. The legs still differ — up to
+ * 4.3 to 1 near the tip — and the cause is SWEEP rather than the arc. The
+ * ribs are rotated to follow the swept leading edge, so a point at 30% chord
+ * on rib 9 sits at y = 3.406 where that rib's station is 3.767: constant
+ * chord-fraction points bunch together going outboard. Add the offset between
+ * a rib's lower surface and its upper and one leg grows while the other
+ * shrinks.
+ *
+ * So this fixes the attachment — seams, not the middle of a panel — and does
+ * not fix the asymmetry. `legRatio` reports it per diagonal rather than
+ * leaving it to be discovered.
+ *
+ * The inverted form — two bottom seams to the top seam between them — is the
+ * same triangle upside down and is built by `inverted: true`.
+ *
+ * Where neither fits, because a leg would be too short to sew, the caller is
+ * told which ribs need an H rib instead rather than being handed a 75 mm
+ * triangle.
+ */
+export function buildSeamDiagonals({
+  wing, airfoil, rows = ['B'], anchorRibs = null,
+  minLegM = 0.12, inverted = false, points = 12,
+} = {}) {
+  if (!wing?.ribs?.length) throw new Error('buildSeamDiagonals needs a wing');
+  const ribs = wing.ribs;
+  const fractions = airfoil?.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const anchors = anchorRibs
+    || ribs.map((_, i) => i).filter((i) => i % 2 === 0);
+
+  const out = [];
+  const needHRib = [];
+
+  for (const i of anchors) {
+    // The two neighbours it reaches. Both must exist: a V with one leg is
+    // the one-sided diagonal this replaces.
+    const left = ribs[i - 1];
+    const right = ribs[i + 1];
+    if (!left || !right) {
+      if (ribs[i]) needHRib.push({ rib: i, why: 'no rib on both sides' });
+      continue;
+    }
+
+    for (const row of rows) {
+      const frac = fractions[row];
+      if (!(frac > 0 && frac < 1)) continue;
+
+      // Apex on the seam of rib i; feet on the seams of its neighbours.
+      // `pointAt` places by CHORD fraction, so all three sit at the same
+      // station along the chord.
+      const apexSurface = inverted ? 'upper' : 'lower';
+      const footSurface = inverted ? 'lower' : 'upper';
+      const apex = pointAt(ribs[i][apexSurface], frac);
+      const footL = pointAt(left[footSurface], frac);
+      const footR = pointAt(right[footSurface], frac);
+
+      const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      const legL = d3(apex, footL);
+      const legR = d3(apex, footR);
+
+      if (Math.min(legL, legR) < minLegM) {
+        needHRib.push({
+          rib: i, row,
+          why: `the shorter leg is ${(Math.min(legL, legR) * 1000).toFixed(0)}`
+            + ` mm, under ${(minLegM * 1000).toFixed(0)}`,
+        });
+        continue;
+      }
+
+      // The triangle, sampled along each leg so it can be developed.
+      const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+      const legPoints = (foot) => {
+        const pts = [];
+        for (let k = 0; k < points; k++) pts.push(lerp(apex, foot, k / (points - 1)));
+        return pts;
+      };
+
+      out.push({
+        row,
+        apexRib: i,
+        leftRib: i - 1,
+        rightRib: i + 1,
+        chordFraction: frac,
+        inverted,
+        apex,
+        footLeft: footL,
+        footRight: footR,
+        legLeftM: legL,
+        legRightM: legR,
+        // Symmetric by construction: this is the number that was 8 to 1.
+        legRatio: Math.max(legL, legR) / Math.min(legL, legR),
+        baseWidthM: d3(footL, footR),
+        left: legPoints(footL),
+        right: legPoints(footR),
+        areaM2: 0.5 * d3(footL, footR) * ((legL + legR) / 2),
+      });
+    }
+  }
+
+  const ratios = out.map((d) => d.legRatio);
+  const legs = out.flatMap((d) => [d.legLeftM, d.legRightM]);
+
+  return {
+    diagonals: out,
+    count: out.length,
+    /** Ribs where a V will not fit; these want an H rib instead. */
+    needHRib,
+    worstLegRatio: ratios.length ? Math.max(...ratios) : 0,
+    shortestLegM: legs.length ? Math.min(...legs) : 0,
+    longestLegM: legs.length ? Math.max(...legs) : 0,
+    note: `${out.length} seam-to-seam diagonals, legs `
+      + `${legs.length ? (Math.min(...legs) * 1000).toFixed(0) : 0}-`
+      + `${legs.length ? (Math.max(...legs) * 1000).toFixed(0) : 0} mm, worst `
+      + `leg ratio ${ratios.length ? Math.max(...ratios).toFixed(2) : 0}`
+      + (needHRib.length ? `; ${needHRib.length} places want an H rib` : ''),
+  };
+}

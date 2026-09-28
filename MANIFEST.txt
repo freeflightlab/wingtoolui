@@ -6,7 +6,7 @@ but it cannot be rebuilt, tested or audited.
 
      11062  build.py
      17898  README.md
-     56162  ROADMAP.md
+     56367  ROADMAP.md
 
 src/core/   37 files — the maths — every module the build inlines
      17588  src/core/aero.js
@@ -43,7 +43,7 @@ src/core/   37 files — the maths — every module the build inlines
       9694  src/core/trimdrift.js
       2605  src/core/viewfit.js
      11418  src/core/vlm.js
-     37833  src/core/vribs.js
+     43912  src/core/vribs.js
       8637  src/core/wing3d.js
       9106  src/core/xfoil.js
 
@@ -57,7 +57,7 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
      12786  tests/full-pipeline.mjs
      18515  tests/phase1-audit.mjs
       8318  tests/reference-sweep.mjs
-    552150  tests/run-tests.js
+    555049  tests/run-tests.js
 
 tools/   17 files — build helpers, figures, audit, legacy .xls reader
      23443  tools/audit.mjs
@@ -88,7 +88,7 @@ docs/   39 files — notes on what was validated and what was not
       2545  docs/comparing.md
      19207  docs/construction.md
      20319  docs/departures.md
-     17295  docs/diagonal-ribs.md
+     19241  docs/diagonal-ribs.md
      10686  docs/environment-and-aero.md
       2158  docs/fabric.md
       2854  docs/free-body.md
@@ -165,7 +165,7 @@ data/reference/   134 files — production data used for validation
   vibegt-ML.tsv vibegt-MS.tsv vibegt-S.tsv vibegt-XL.tsv vibegt-XS.tsv zeno2-L.tsv
   zeno2-ML.tsv zeno2-MS.tsv zeno2-S.tsv
 
-244 files, 2398 KB
-sha256 of the tree: f04b722ff607c2aa130d0d8ff506ec78
+244 files, 2408 KB
+sha256 of the tree: 44ab86527727fb61f2d1522bbb84f4c3
 
 Verify with:  node tools/audit.mjs

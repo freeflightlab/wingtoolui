@@ -79,7 +79,7 @@ import {
   buildTabs, checkTabClearance, DEFAULT_TAB,
 } from '../src/core/reinforcement.js';
 import {
-  buildVRibs, diagonalGeometry, diagonalTension, checkDiagonalTension, developFan, fanDevelopmentError, vribLoads,
+  buildVRibs, buildSeamDiagonals, diagonalGeometry, diagonalTension, checkDiagonalTension, developFan, fanDevelopmentError, vribLoads,
   buildHRibs, internalStructure,
 } from '../src/core/vribs.js';
 import {
@@ -9814,6 +9814,65 @@ section('The wing hangs over its maillon');
     hangPointFromAnchors(wingH, threeRow) > rootH.lower[0][0] + rootH.chord * 0.2,
     `${(((hangPointFromAnchors(wingH, threeRow) - rootH.lower[0][0])
       / rootH.chord) * 100).toFixed(1)}% of chord`);
+}
+
+// ---------------------------------------------------------------------------
+section('Diagonals attach to seams, not to the middle of a panel');
+
+{
+  // `buildVRibs` puts the apex on one rib's lower surface and spreads the base
+  // across the UPPER PANEL of a neighbour — a band of cloth landing in the
+  // middle of a panel rather than on the seam where that panel is sewn to its
+  // rib. Fabric loaded mid-panel pulls the panel out of shape; a seam is
+  // where the structure is.
+  //
+  // A diagonal is a V: one bottom seam to the two top seams either side.
+  const wingS = demoWing();
+  const afS = naca4('4415');
+  afS.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const seam = buildSeamDiagonals({ wing: wingS, airfoil: afS, rows: ['B'] });
+
+  check('every diagonal reaches the ribs either side of its anchor',
+    seam.diagonals.every((d) => d.leftRib === d.apexRib - 1
+      && d.rightRib === d.apexRib + 1),
+    `${seam.count} diagonals`);
+  check('and both feet land on a rib seam at the anchor station',
+    seam.diagonals.every((d) => Math.abs(d.chordFraction - 0.30) < 1e-9));
+  check('with an apex on the opposite surface from its feet',
+    seam.diagonals.every((d) => !d.inverted));
+
+  // The inverted form is the same triangle the other way up: two bottom seams
+  // to the top seam between them.
+  const inv = buildSeamDiagonals({
+    wing: wingS, airfoil: afS, rows: ['B'], inverted: true,
+  });
+  check('the inverted form builds too',
+    inv.count > 0 && inv.diagonals.every((d) => d.inverted), inv.note);
+
+  // Where a V will not fit, the caller is told to use an H rib rather than
+  // being handed a 75 mm triangle.
+  check('places where no diagonal fits ask for an H rib instead',
+    seam.needHRib.length > 0,
+    `${seam.needHRib.length} of ${seam.needHRib.length + seam.count} `
+    + `positions: ${seam.needHRib[0].why}`);
+  check('and every one it does build has legs worth sewing',
+    seam.diagonals.every((d) => Math.min(d.legLeftM, d.legRightM) >= 0.12),
+    `shortest leg ${(seam.shortestLegM * 1000).toFixed(0)} mm`);
+
+  // KNOWN, and not what I expected.
+  //
+  // I built this expecting the V to be symmetric — the arc's tilt adding to
+  // one leg and subtracting from the other, cancelling once both sides are
+  // taken. It does not. The legs still differ up to 4.3 to 1 near the tip,
+  // and the cause is SWEEP: the ribs are rotated to follow the swept leading
+  // edge, so a point at 30% chord on rib 9 sits at y = 3.406 where that rib's
+  // station is 3.767. Constant chord-fraction points bunch together going
+  // outboard.
+  check('the legs are still not symmetric, and the ratio is reported',
+    seam.worstLegRatio > 1.2,
+    `worst ${seam.worstLegRatio.toFixed(2)} to 1`);
+  check('each diagonal carries its own leg ratio',
+    seam.diagonals.every((d) => Number.isFinite(d.legRatio) && d.legRatio >= 1));
 }
 
 // ---------------------------------------------------------------------------
