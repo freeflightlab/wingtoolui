@@ -8,6 +8,7 @@
  */
 
 import { vortexLattice, stripsFromWing } from '../src/core/vlm.js';
+import { freeBodyCheck } from '../src/core/freebody.js';
 import {
   fabricSchedule, clothWeightsFor, CLOTH, LOCATIONS,
 } from '../src/core/fabric.js';
@@ -9813,6 +9814,89 @@ section('The wing hangs over its maillon');
     hangPointFromAnchors(wingH, threeRow) > rootH.lower[0][0] + rootH.chord * 0.2,
     `${(((hangPointFromAnchors(wingH, threeRow) - rootH.lower[0][0])
       / rootH.chord) * 100).toFixed(1)}% of chord`);
+}
+
+// ---------------------------------------------------------------------------
+section('Does the whole machine balance?');
+
+{
+  // This project checked a great deal about a wing and nothing about it
+  // FLYING. Every part agreed with every other part while the maillon sat
+  // under the leading edge, the brakes ran forward to a handle under the
+  // nose, and the lines hung the wing at an attitude it could never hold.
+  // Each was found by a person looking at a picture.
+  //
+  // A free body diagram is the instrument that finds them without a person.
+  const pfB = planformFromDesignInputs({
+    span: 11.6, rootChord: 2.45, tipChord: 0.55, tipSweep: 1.4,
+  });
+  const mB = planformMetrics(pfB);
+  const afB = naca4('4415');
+  afB.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const wingB = buildWing({
+    planform: pfB,
+    lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfB.halfSpan),
+    airfoil: afB, cells: 20, pointsPerSurface: 24,
+  });
+  const balB = solveEquilibrium({
+    area: mB.area, span: pfB.span, chord: pfB.chord(0), lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+  });
+  const planB = buildLinePlan({
+    wing: wingB, airfoil: afB, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5, brakes: true,
+    calageFraction: usableCalage(balB).ok ? balB.calageFraction : null,
+  });
+  const fb = freeBodyCheck({ wing: wingB, linePlan: planB, balance: balB });
+
+  // The forces, which follow from the glide angle alone in steady flight.
+  near('lift and drag carry the weight between them',
+    Math.hypot(fb.liftN, fb.dragN), fb.weightN, 1, ' N');
+  near('and the glide angle is the arctangent of the glide ratio',
+    fb.glideAngleDeg, Math.atan2(1, fb.glideRatio) * (180 / Math.PI), 1e-9, ' deg');
+
+  // The moment is the solver's own sum, not a second one computed here.
+  //
+  // My first version took moments about the centre of mass using only lift
+  // times its lever plus the section moment, and reported a residual couple
+  // of -155 Nm on a wing that balances exactly. It was missing pilot drag
+  // (-139 Nm), line drag (-63) and wing weight (+40). An incomplete free body
+  // gives a confident wrong answer, which is worse than none.
+  check('the balance closes',
+    Math.abs(fb.solverResidualNm) < 1e-6,
+    `${fb.solverResidualNm.toExponential(1)} Nm`);
+
+  // The check the solver cannot do: it balances whatever hang point it is
+  // given, so only the GEOMETRY can be checked against it.
+  near('and the wing is drawn hanging where it balances',
+    fb.hangErrorFraction, 0, 0.03, ' of chord');
+
+  check('the angle of incidence is one a wing flies at',
+    fb.incidenceDeg > -2 && fb.incidenceDeg < 18,
+    `${fb.incidenceDeg.toFixed(1)} degrees`);
+  check('and so is the glide angle',
+    fb.glideAngleDeg > 2 && fb.glideAngleDeg < 20,
+    `${fb.glideAngleDeg.toFixed(1)} degrees`);
+
+  // A KNOWN FAULT, recorded rather than hidden.
+  //
+  // Out at the tip the arc has brought the surface down to about the level of
+  // its own cascade junction, so an upper line runs nearly spanwise — 441 mm
+  // long with 14 mm of drop. It pulls the anchor sideways and reacts none of
+  // the lift holding that part of the wing up. Twelve of ninety-nine lines
+  // are like this.
+  //
+  // The mean is NOT the test: a tip five metres out on six-metre lines is
+  // genuinely at 37 degrees, so an average near 35 is real geometry.
+  check('flat lines out at the tip are detected',
+    fb.nearHorizontal.length > 0,
+    `${fb.nearHorizontal.length} of ${planB.lines.length} lie flatter than `
+    + '75 degrees from vertical');
+  check('and the check names the worst one',
+    fb.nearHorizontal[0].dropM < 0.05 && fb.nearHorizontal[0].lengthM > 0.2,
+    `${fb.nearHorizontal[0].row} at rib ${fb.nearHorizontal[0].ribIndex}`);
+  check('so the free body reports the wing as not yet right',
+    !fb.ok, fb.note);
 }
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
 One offline HTML file, 733 KB, no build step and no network. That constraint
-drove the architecture: 36 core modules bundled into a single scope, with the
+drove the architecture: 37 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
 **37,000 lines**: 17,000 core, 2,100 interface, 10,300 tests, 2,000 tools,
@@ -86,7 +86,7 @@ by it.
 
 ## 5. What is missing
 
-**40 open items.** The substantial ones:
+**42 open items.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.

@@ -77,6 +77,7 @@ MODULES = [
     "trimdrift.js",
     "fabric.js",
     "vlm.js",
+    "freebody.js",
     "bom.js",
     "loads.js",
     "scaling.js",

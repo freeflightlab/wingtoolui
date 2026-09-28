@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1893-test validation suite and a benchmark with regression budgets
+- [x] 1902-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -361,6 +361,16 @@ validation notes flagged.
 ---
 
 ## Audit
+
+- [x] **A free body check** — `freebody.js`. Weight, lift, drag and line
+      tension as one body in gravity, with the geometry checked against the
+      balance rather than only against itself. See `docs/free-body.md`.
+- [ ] **Flat lines at the tip** — 12 of 99 lines run nearly spanwise, 441 mm
+      long with 14 mm of drop. The cascade node lands beside the anchor
+      rather than below it where the arc is steep. Detected, not fixed.
+- [ ] **Diagonals at the tip** — attach seam to seam rather than across
+      seams: one bottom seam to two top seams, or two bottom to the top seam
+      between them. Where no diagonal fits, an H rib instead.
 
 - [x] **Lines in the 3D model as tubes at their real diameter** — OBJ
       polylines are optional and most importers drop them, so the cascade was
