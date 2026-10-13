@@ -625,14 +625,19 @@ export function trimEnvelope({
  * @param {object} o
  * @param {number} o.lengthMM       trim length, karabiner to maillon
  * @param {string[]} o.rows         which rows meet which riser
- * @param {number} o.webbingWidthMM
- * @param {number} o.webbingGsm     areal weight of the webbing
+ * @param {number} o.webbingGramsPerM  what a metre of the webbing weighs
  */
 export function buildRiserWebbing({
   lengthMM = 500,
   rows = ['A', 'B', 'C'],
-  webbingWidthMM = 20,
-  webbingGsm = 0.220,
+  // An order of magnitude, with two figures behind it and neither of them a
+  // riser maker's: a 12 mm polyamide webbing with a Dyneema core, rated
+  // 1500 daN, is sold at 23 g/m; and the Swoop2's own file takes its risers
+  // as a 5 mm Dyneema cord at 10 g/m.
+  //
+  // This was an AREAL weight — 220 g/m2 on a 20 mm strap, which is the
+  // weight of a heavy cloth and comes to 4.4 g/m.
+  webbingGramsPerM = 20,
   speedSystem = true,
   travelMM = 0,
   trimmerTravelMM = 0,
@@ -646,18 +651,21 @@ export function buildRiserWebbing({
   const speedWebbingMM = speedSystem ? lengthMM * 1.6 : 0;
 
   const strapMM = perSide * lengthMM + speedWebbingMM;
-  const areaM2 = (strapMM / 1000) * (webbingWidthMM / 1000) * sides;
+  const strapMetres = (strapMM / 1000) * sides;
 
   return {
     lengthMM,
     rows,
     ridersPerSide: perSide,
     maillons: (maillonsPerSide ?? perSide) * sides,
-    strapMetres: (strapMM / 1000) * sides,
-    webbingAreaM2: areaM2,
+    strapMetres,
+    // The straps to the lines alone, which is what a bill of materials
+    // counts as riser webbing.
+    lineStrapMetres: ((perSide * lengthMM) / 1000) * sides,
+    webbingGramsPerM,
     // Webbing only. Maillons, pulleys and handles are hardware and counted
     // as such rather than smeared into a mass per metre.
-    webbingMassKg: areaM2 * webbingGsm,
+    webbingMassKg: (strapMetres * webbingGramsPerM) / 1000,
     speedSystem,
     travelMM,
     trimmerTravelMM,

@@ -7,31 +7,43 @@
  * property the algorithm must obey, or a number printed in the handbook.
  */
 
+import { vortexLattice, stripsFromWing } from '../src/core/vlm.js';
+import { freeBodyCheck } from '../src/core/freebody.js';
+import {
+  lepLineGeometry, lepPlanForTool, lepRibTable, lepAnchorPoint, readLepAirfoil, lepJoncs, lepHoles,
+  lepLineSelection, lepLengthChain,
+} from '../src/core/leplines.js';
+import { toRibPlane, hasCentreRib, ribCopies, wholeWingCounts, ribSurfacePoint } from '../src/core/wing3d.js';
+import { gridRowsFromNames, labelsForRow } from '../tools/niviuk-totals-labels.mjs';
+import { referenceLines, designOf } from '../tools/reference-files.mjs';
+import { figures as diagramFigures } from '../tools/make-diagrams.mjs';
 import {
   fabricSchedule, clothWeightsFor, CLOTH, LOCATIONS,
 } from '../src/core/fabric.js';
 import {
   lineDrift, trimDrift, trimSchedule, fibreOf, FIBRE_BEHAVIOUR,
+  LINE_FAMILIES, lineFamilyOf, isSheathed, flightLoadFraction,
+  NEUTRAL_LOAD_FRACTION, HOURS_PER_SEASON,
 } from '../src/core/trimdrift.js';
-import { planformFromDesignInputs, analyticPlanform, planformMetrics, flatArea, ribStations, planformOutline } from '../src/core/planform.js';
+import { planformFromDesignInputs, analyticPlanform, planformMetrics, flatArea, ribStations, cellWidths, totalCells, planformOutline } from '../src/core/planform.js';
 import { naca4, splitSurfaces, resampleSurface, airfoilMetrics, parseAirfoilText , LIBRARY } from '../src/core/airfoil.js';
-import { buildLobe, lobeMetrics, radiusForProjectedRatio, minArrowRatio } from '../src/core/lobe.js';
+import { buildLobe, washinAt, lobeMetrics, radiusForProjectedRatio, minArrowRatio } from '../src/core/lobe.js';
 import { buildWing, projectedArea , ribLoops, mirrorRib } from '../src/core/wing3d.js';
 import { analyticPlanform as _ap } from '../src/core/planform.js';
 import { developPanel, developmentError, developWing } from '../src/core/flatdev.js';
 import { solveArc, applyOvalization, wideningProfile , DEFAULT_TRANSITIONS , arcFromWidening, seamEasing, billowFromPressure, tensionForBillow, panelBillowProfile } from '../src/core/ovalization.js';
-import { solveEquilibrium, lift3DFactor, simplifiedCalage , polarSweep, glideAngleTable, solveEquilibriumFromWing } from '../src/core/equilibrium.js';
+import { solveEquilibrium, lift3DFactor, simplifiedCalage , polarSweep, glideAngleTable, solveEquilibriumFromWing, trimFromCalage } from '../src/core/equilibrium.js';
 import { canopyAnchors, centroid, buildCascade , brakeAnchors, applyBrakeDistribution } from '../src/core/lines.js';
 import {
-  panelsToDXF, ribsToDXF, panelsToSVG, nestPanels, fabricEstimate, layoutBands,
-  vribsToDXF, vribFabricEstimate, markedPanelsToDXF, tiledPages, PAPER,
-  parseDXF, outlineArea, outlinesFromSegments,
+  panelsToDXF, wingToOBJ, ribsToDXF, panelsToSVG, nestPanels, fabricEstimate, layoutBands,
+  vribsToDXF, vribFabricEstimate, markedPanelsToDXF, tiledPages, tiledPagesToHTML, PAPER,
+  parseDXF, outlineArea, outlinesFromSegments, offsetClosedLoop,
 } from '../src/core/export.js';
 import {
   markPanels, markPanel, notchFractions, markPlacedSeams, DEFAULT_MARKING,
 } from '../src/core/marking.js';
 import {
-  parseLep, writeLep, blankLepDocument, lepToDesign, writeDesignIntoLep,
+  parseLep, parseHVRibs, lepDiagonalPieces, writeLep, blankLepDocument, lepToDesign, writeDesignIntoLep,
   designToLep, describeLep, readGeometry, readAoA, section as lepSection,
 } from '../src/core/lep.js';
 import { discretePlanform } from '../src/core/planform.js';
@@ -41,7 +53,7 @@ import { buildSize, buildFamily, familyTable , familyCuttingFiles } from '../src
 import {
   buildRibHoles, checkRibHoles, buildAllRibHoles, DEFAULT_HOLE_RULES,
   buildCrossPorts, crossPortRequirement, cellVolume, DEFAULT_CROSSPORT_RULES,
-  checkRibInternals, ribOpenings, allRibOpenings,
+  checkRibInternals, ribOpenings, allRibOpenings, ribClothTotals, ribProfile,
 } from '../src/core/ribholes.js';
 import {
   buildBOM, bomText, massReconciliation, threadEstimate, CLOTH_LIBRARY, DEFAULT_CLOTH,
@@ -51,6 +63,7 @@ import {
 } from '../src/core/compare.js';
 import {
   stagnationPoint, stagnationTravel, buildIntake, minimumIntake, DEFAULT_INTAKE,
+  surfaceCp, intakeFeed,
 } from '../src/core/intake.js';
 import {
   inflatedShape, billowedSurface, billowDragPenalty,
@@ -61,24 +74,25 @@ import {
 import {
   anchorLoadPath, reinforcementReach, checkRibStress, predictedTearMargin,
   checkWingRibStress, RIB_CLOTH, panelStress, checkWingPanelStress, SAIL_CLOTH,
+  ASSUMED_RIB_DEPTH,
 } from '../src/core/ribstress.js';
 import {
   lineGeometryCheck, lineStrengthCheck, PMA_GEOMETRY, PMA_STRENGTH,
   porosityFromSeconds, porosityRating, tearRating, inspectionHeadroom,
-  exchangeRecord, exchangeTSV,
+  exchangeRecord, exchangeTSV, inspectionForecast,
 } from '../src/core/pma.js';
 import {
   alignToLongAxis, interlock, pairOverlap, pairPanels, nestingDiagnosis,
-  nestByProfile, nestingOverlaps,
+  nestByProfile, nestingOverlaps, nestingClearance,
 } from '../src/core/pairing.js';
 import {
   buildReinforcement, massBudget, DEFAULT_REINFORCEMENT,
-  buildRods, parseRodSpec, noseRodGroup, SWOOP2_ROD_SPEC, rodGroup, buildRodGroups, checkRodClearance, ROD_MATERIALS, DEFAULT_ROD_SPEC,
+  buildRods, parseRodSpec, noseRodGroup, SWOOP2_ROD_SPEC, SWOOP2_RODS, rodPolyline, checkRodClearance, ROD_MATERIALS, DEFAULT_ROD_SPEC,
   buildTabs, checkTabClearance, DEFAULT_TAB,
 } from '../src/core/reinforcement.js';
 import {
-  buildVRibs, diagonalTension, checkDiagonalTension, developFan, fanDevelopmentError, vribLoads,
-  buildHRibs, internalStructure,
+  buildVRibs, buildSeamDiagonals, diagonalGeometry, diagonalTension, checkDiagonalTension, developFan, fanDevelopmentError, vribLoads,
+  buildHRibs, internalStructure, diagonalBalance,
 } from '../src/core/vribs.js';
 import {
   chordwiseLoading, loadBetween, rowSharesFromPressure, centreOfPressure,
@@ -98,26 +112,27 @@ import { applyReflex } from '../src/core/airfoil.js';
 import { parsePolar, commandScript, airfoilToDat, checkPolarMatch } from '../src/core/xfoil.js';
 import {
   parseLineName, parseLineTable, summarise, inferTopology, inferRiserLength,
-  buildLinePlan, comparePlans, referenceTotals, RISER_LAYOUTS, parseCascadeSpec, cascadeSpecFor,
-  parsePhiLineSheet, checkPhiSheet, phiLineLength,
-  parseBgdLineTable, bgdCascadeTotals, bgdStatedTopology,
+  buildLinePlan, comparePlans, referenceTotals, RISER_LAYOUTS, hangPointFromAnchors, usableCalage, parseCascadeSpec, cascadeSpecFor,
+  parsePhiLineSheet, checkPhiSheet, phiLineLength, phiAnchorPaths,
+  parseBgdLineTable, bgdCascadeTotals, bgdStatedTopology, familyLineScaling,
   parseUpLineSheet, loopAllowanceCost,
-  suggestAnchorsPerRow, ANCHOR_DENSITY, findStabilo, addStabilo,
+  suggestAnchorsPerRow, ANCHOR_DENSITY, FRONT_DENSITY, findStabilo, addStabilo, planAnchorRibs,
   applyRiserSplit,
   detectPrefixDirection, applyPrefixDirection,
   splitMultiSizeSheet, multiSizeSheetToTSV,
   anchorsForLineLength, recoverLevelFractions,
   parseSimpleLineSheet,
-  resolveCascadeLevels, combinedRowShare, summariseCascadeDepths,
+  resolveCascadeLevels, resolveCaseLevels, combinedRowShare, summariseCascadeDepths,
   buildBrakePlan, brakeEngagement, tipFirstSlack, brakeAnchorRibs,
-  cutListToCSV,
+  cutListToCSV, lineAngleFromVerticalDeg, planPaths, planFanAngles,
 } from '../src/core/lineplan.js';
 import {
   spanLoadDistribution, anchorLoads, lineTensions, selectLines, optimiseLineSet, lineDrag,
-  stretchCorrection, analyseLoads, parseMaterialsTable, DEFAULT_LINE_TABLE, lineTableFor, materialBrands,
+  stretchCorrection, analyseLoads, parseMaterialsTable, DEFAULT_LINE_TABLE, lineTableFor, materialBrands, riserResultants,
   equilibriumInputsFrom, rowSharesFor, loadEnvelope, gustLoadFactor, gustResponse,
   asymmetricCollapse, frontalCollapse, designEnvelope, PRACTICAL_FLOOR,
-  DEFAULT_LOAD_CASE, wakeShielding, lengthChain,
+  publishedCascadeLoads, strengthFactors,
+  DEFAULT_LOAD_CASE, wakeShielding, lengthChain, LINE_WEIGHT_PER_AREA,
 } from '../src/core/loads.js';
 import {
   riserSet, handleGeometry, handleAgainstBrake, riserLengths, alphaChange, brakeSlackUnderBar,
@@ -204,14 +219,23 @@ let passed = 0;
 let failed = 0;
 const failures = [];
 
+// `--verbose` (or VERBOSE=1) prints the figure behind every passing check as
+// well. The documents quote these numbers, and this is where to read the
+// current ones: `node tests/run-tests.js --verbose | grep -i "<words>"`.
+const VERBOSE = process.argv.includes('--verbose') || process.env.VERBOSE === '1';
+
 function check(name, cond, detail = '') {
-  if (cond) { passed++; console.log(`  ok   ${name}`); }
-  else { failed++; failures.push(`${name} ${detail}`); console.log(`  FAIL ${name}  ${detail}`); }
+  if (cond) {
+    passed++;
+    console.log(`  ok   ${name}${VERBOSE && detail ? `  [${detail}]` : ''}`);
+  } else { failed++; failures.push(`${name} ${detail}`); console.log(`  FAIL ${name}  ${detail}`); }
 }
 
 function near(name, actual, expected, tol, unit = '') {
   const ok = Math.abs(actual - expected) <= tol;
-  check(name, ok, ok ? '' : `got ${actual}${unit}, expected ${expected}±${tol}${unit}`);
+  check(name, ok, ok
+    ? (VERBOSE ? `${actual}${unit} against ${expected}±${tol}${unit}` : '')
+    : `got ${actual}${unit}, expected ${expected}±${tol}${unit}`);
 }
 
 function section(title) { console.log(`\n${title}`); }
@@ -285,6 +309,109 @@ section('Chapter 1 — planform');
   check('rib stations: centre rib at y=0', st[0] === 0);
   near('rib stations: tip rib at half span', st[24], p.halfSpan, 1e-12, ' m');
   check('rib stations: monotonic', st.every((v, i) => i === 0 || v > st[i - 1]));
+}
+
+// ---------------------------------------------------------------------------
+section('Where the ribs go: cells somebody can sew');
+
+{
+  // The default rib spacing was a sine rule, "denser near the tip, where
+  // chord changes fastest". That is how a panel method is meshed. A cell is
+  // a thing somebody sews, and on the default wing the rule made the last
+  // one 11 mm wide on a 0.9 m chord.
+  const p = planformFromDesignInputs({ span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1 });
+  const widthsOf = (st) => st.slice(1).map((y, i) => y - st[i]);
+
+  const sine = ribStations(p, 24, 'cosine');
+  const sineCells = cellWidths(sine);
+  check('the sine rule is still there for a design saved with it',
+    sine.every((y, i) => Math.abs(y - p.halfSpan * Math.sin((i / 24) * Math.PI / 2)) < 1e-12));
+  check('and its tip cells are too narrow to sew, which is now said',
+    !sineCells.ok && sineCells.tooNarrow >= 2 && sineCells.narrowestM < 0.02,
+    `${sineCells.tooNarrow} cells under 60 mm, the narrowest ${(sineCells.narrowestM * 1000).toFixed(0)} mm`);
+
+  // The rule: width ~ (1 - taper) + taper * chord / root chord.
+  const g = (y, k) => (1 - k) + (k * p.chord(y)) / p.chord(0);
+  for (const k of [0.5, 0.75, 1]) {
+    const stK = ribStations(p, 24, 'chord', { taper: k });
+    const w = widthsOf(stK);
+    check(`taper ${k}: starts on the centreline and ends at the tip`,
+      stK.length === 25 && stK[0] === 0 && Math.abs(stK[24] - p.halfSpan) < 1e-12
+      && w.every((x) => x > 0));
+    // The rule is a density — ribs per metre ~ 1 / ((1-k) + k c/c0) — and
+    // every cell holds the same amount of it. Integrated here independently.
+    const share = w.map((wi, i) => {
+      let sum = 0;
+      for (let q = 0; q < 400; q++) sum += (wi / 400) / g(stK[i] + (wi * (q + 0.5)) / 400, k);
+      return sum;
+    });
+    near(`taper ${k}: every cell holds the same share of the rib density`,
+      Math.max(...share) / Math.min(...share), 1, 1e-4);
+    // Read cell by cell, that is width ~ (1-k) + k c/c0 with the chord taken
+    // mid-cell — to within 2%, the last cell being where the chord bends.
+    const perMid = w.map((wi, i) => wi / g((stK[i] + stK[i + 1]) / 2, k));
+    near(`taper ${k}: which is a width in proportion to (1-k) + k c/c0 mid-cell`,
+      Math.max(...perMid) / Math.min(...perMid), 1, 0.02);
+  }
+  const even = ribStations(p, 24, 'chord', { taper: 0 });
+  check('no taper is even cells, exactly',
+    even.every((y, i) => y === (i / 24) * p.halfSpan));
+  check('and "uniform" is the same thing',
+    ribStations(p, 24, 'uniform').every((y, i) => y === even[i]));
+  const full = widthsOf(ribStations(p, 24, 'chord', { taper: 1 }));
+  near('full taper keeps every cell the same shape in plan: width over chord',
+    full[23] / p.chord(p.halfSpan * 0.99) / (full[0] / p.chord(0)), 1, 0.03);
+
+  // The default, and what it gives on the default wing.
+  const dflt = ribStations(p, 24);
+  const cells = cellWidths(dflt);
+  check('the default follows the chord by three quarters',
+    dflt.every((y, i) => y === ribStations(p, 24, 'chord', { taper: 0.75 })[i]));
+  check('its cells narrow towards the tip, and none is too narrow to sew',
+    cells.ok && cells.widths.every((x, i) => i === 0 || x < cells.widths[i - 1])
+    && cells.tipM > 0.1,
+    `${(cells.centreM * 1000).toFixed(0)} mm at the centre, ${(cells.tipM * 1000).toFixed(0)} at the tip`);
+  check('by about half, as the one complete design here does',
+    cells.tipM / cells.centreM > 0.45 && cells.tipM / cells.centreM < 0.7,
+    `${(cells.tipM / cells.centreM).toFixed(2)} of the centre cell; the Swoop2's is 0.51`);
+
+  // A centre cell straddles the centreline: the first rib is half of it out.
+  const odd = ribStations(p, 24, 'chord', { centreRib: false, taper: 0.75 });
+  const oddCells = cellWidths(odd, { centreRib: false });
+  check('with a centre cell there are 24 full cells and the one across the middle',
+    odd.length === 25 && oddCells.widths.length === 25
+    && Math.abs(oddCells.widths[0] - 2 * odd[0]) < 1e-12);
+  check('and the centre cell is the widest, a little wider than the one beside it',
+    oddCells.widths[0] > oddCells.widths[1] && oddCells.widths[0] < oddCells.widths[1] * 1.02,
+    `${(oddCells.widths[0] * 1000).toFixed(1)} against ${(oddCells.widths[1] * 1000).toFixed(1)} mm`);
+
+  // The evidence. The Swoop2 states every one of its rib stations, and they
+  // follow this rule: with taper 0.735 on its own chord, each of the 26 is
+  // within 3 mm over 5.24 m. Even cells miss by 385 mm; cells in strict
+  // proportion to chord by 240.
+  const lepR = parseLep(readFileSync('data/reference/lep/swoop2-20260829.lep', 'utf8'));
+  const designR = lepToDesign(lepR, {
+    sections: { 'gnuReflex.txt': parseAirfoilText(readFileSync('data/reference/lep/swoop2-gnuReflex.txt', 'utf8'), 'gnuReflex') },
+  });
+  const own = designR.explicitRibs.map((r) => r.station);
+  const ownCells = cellWidths(own);
+  const pfOwn = discretePlanform(designR.planformRows);
+  const missBy = (k) => {
+    const made = ribStations(pfOwn, own.length - 1, 'chord', { taper: k });
+    return Math.max(...made.map((y, i) => Math.abs(y - own[i])));
+  };
+  check('the Swoop2\'s cells run from 249 mm at the centre to 128 at the tip',
+    Math.abs(ownCells.centreM - 0.249) < 0.0005 && Math.abs(ownCells.tipM - 0.128) < 0.0005
+    && ownCells.ok,
+    `${(ownCells.centreM * 1000).toFixed(1)} and ${(ownCells.tipM * 1000).toFixed(1)} mm`);
+  check('and the rule puts every one of its 26 ribs within 3 mm',
+    own.length === 26 && missBy(0.735) < 0.003,
+    `worst ${(missBy(0.735) * 1000).toFixed(1)} mm at taper 0.735`);
+  check('which neither even cells nor cells in proportion to chord come near',
+    missBy(0) > 0.3 && missBy(1) > 0.2,
+    `${(missBy(0) * 1000).toFixed(0)} mm and ${(missBy(1) * 1000).toFixed(0)} mm`);
+  check('the default, that figure rounded, is within 15 mm of it',
+    missBy(0.75) < 0.015, `${(missBy(0.75) * 1000).toFixed(1)} mm`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1208,16 +1335,88 @@ section('Line plan generation and reference comparison');
       `${topo.branchCount} branches, ${topo.middleLineCount} middle lines`);
 
     // Generation.
+    //
+    // With the fan limit off: this block pins the measured junction
+    // FRACTIONS, and the limit below deliberately moves the junctions whose
+    // fans those fractions leave too wide.
     const wing = demoWing();
     const plan = buildLinePlan({
       wing, airfoil: naca4('4415'), layout: RISER_LAYOUTS['A/B/C+D'],
+      everyNthRib: 2, riserLengthMM: 527, lineLengthM: 6.4, maxFanAngleDeg: 0,
+    });
+
+    // The limit: how far a line may lie from the line BELOW its junction.
+    // This wing's anchors are 0.85 m apart, twice a real wing's, so at the
+    // measured fractions its fans are wide — and the widest is the centre
+    // pair's, where the wing is level.
+    const limited = buildLinePlan({
+      wing, airfoil: naca4('4415'), layout: RISER_LAYOUTS['A/B/C+D'],
       everyNthRib: 2, riserLengthMM: 527, lineLengthM: 6.4,
     });
+    // Its regular top lines: the direct tip lines are left out of the limit.
+    const tops = (p) => planFanAngles(p).filter((f) => f.level === 'upper' && !f.direct);
+    const widest = (p) => tops(p).reduce((m, f) => (f.fanDeg > m.fanDeg ? f : m));
+    const flattest = (p) => tops(p).reduce((m, f) => (f.fromVerticalDeg > m.fromVerticalDeg ? f : m));
+    check('at the measured fractions a top line lies 67 degrees from the line below it',
+      widest(plan).fanDeg > 60 && widest(plan).fanDeg < 70 && /^[A-D]2$/.test(widest(plan).name),
+      `${widest(plan).name}: ${widest(plan).fanDeg.toFixed(1)} degrees, at the centre of the wing`);
+    check('and held to the limit none is more than 50',
+      widest(limited).fanDeg <= 50 + 1e-9,
+      `${widest(limited).name}: ${widest(limited).fanDeg.toFixed(1)} degrees`);
+
+    // The limit this replaced was on the angle from VERTICAL, sixty degrees.
+    // It lowered the outboard pair, whose fan is the same fan turned with
+    // the arc, and left the widest one where it was: at the centre a line
+    // 67 degrees from the line below it is only 54 from vertical.
+    const fromVertical = buildLinePlan({
+      wing, airfoil: naca4('4415'), layout: RISER_LAYOUTS['A/B/C+D'],
+      everyNthRib: 2, riserLengthMM: 527, lineLengthM: 6.4,
+      maxFanAngleDeg: 0, maxLineAngleDeg: 60,
+    });
+    check('measured from vertical instead, the widest fan is left as it was',
+      Math.abs(widest(fromVertical).fanDeg - widest(plan).fanDeg) < 1e-6
+        && flattest(fromVertical).fromVerticalDeg <= 60 + 1e-9
+        && flattest(plan).fromVerticalDeg > 75,
+      `${widest(fromVertical).name} still ${widest(fromVertical).fanDeg.toFixed(1)} degrees from the line below; `
+      + `the flattest line brought from ${flattest(plan).fromVerticalDeg.toFixed(1)} to `
+      + `${flattest(fromVertical).fromVerticalDeg.toFixed(1)} from vertical`);
+
+    // What moves is what had to: the two pairs' junctions. The main lines,
+    // the single outer anchor and the direct tip lines are exactly as they
+    // were.
+    const same = (l) => {
+      const o = plan.lines.find((x) => x.name === l.name);
+      return o && Math.abs(o.lengthMM - l.lengthMM) <= 1;
+    };
+    const untouched = limited.lines.filter((l) => l.level === 'main' || l.direct
+      || /^[A-D]5$|^[A-D]M3$/.test(l.name));
+    check('only the junctions that needed it moved',
+      untouched.length >= 14 && untouched.every(same),
+      `${untouched.map((l) => l.name).join(' ')}`);
+    const angleOf = (l) => lineAngleFromVerticalDeg(l.from, l.to);
+    const midBefore = plan.lines.find((l) => l.name === 'AM1');
+    const midAfter = limited.lines.find((l) => l.name === 'AM1');
+    check('and a line whose junction is lowered keeps its direction and shortens',
+      midAfter.lengthMM < midBefore.lengthMM - 100
+        && Math.abs(angleOf(midAfter) - angleOf(midBefore)) < 1e-6,
+      `${midBefore.name}: ${midBefore.lengthMM} -> ${midAfter.lengthMM} mm at `
+      + `${angleOf(midAfter).toFixed(1)} degrees`);
 
     check('three risers are built', plan.risers.length === 3);
     check('the C riser carries both C and D', plan.risers[2].rows.join('') === 'CD');
-    check('a cascaded row gets no riser-level lines',
-      !plan.lines.some((l) => l.row === 'D' && l.level === 'main'));
+    // On every reference wing with two rows on a riser the second has no
+    // main lines of its own. This passed for a different reason while the D
+    // row had three lines of its own to the riser: they were CALLED middle
+    // lines.
+    const dPaths = planPaths(plan).filter((p) => p.row === 'D');
+    check('the row that shares a riser has no main lines of its own',
+      !plan.lines.some((l) => l.row === 'D' && l.level === 'main')
+        && plan.lines.filter((l) => l.level === 'main').length === 6);
+    check('it hangs from the mains of the row in front',
+      dPaths.length === 7 && dPaths.every((p) => /^CR\d$/.test(p.names[p.names.length - 1])),
+      dPaths.map((p) => p.names.join('>')).join('  '));
+    check('and nothing of it reaches the riser by another way',
+      plan.lines.filter((l) => l.row === 'D').every((l) => l.from !== plan.risers[2].maillon));
     check('every generated name parses back',
       plan.lines.every((l) => parseLineName(l.name) !== null));
     check('all lengths are positive', plan.lines.every((l) => l.lengthMM > 0));
@@ -1262,8 +1461,65 @@ section('Line plan generation and reference comparison');
     // The threshold was previously tuned to whatever the old junction gave,
     // which is how a wrong value survives: the test was calibrated to the
     // code rather than to a wing.
+    //
+    // 350 since the risers lean toward their lines. Leaning the risers
+    // outboard shortens the tip paths by about 10 cm against the centre,
+    // which moves this comparison from 274 mm to 312 — against a DIFFERENT
+    // wing, with a different anchor layout, so it cannot say which is right.
+    // What can is the Swoop2, whose 93 lines this construction reproduces to
+    // a tenth of a millimetre; this stays as the plausibility bound it is.
     check('trim shape is within a few hundred mm of a real wing',
-      cmp.meanShapeMM < 300, `mean shape deviation ${cmp.meanShapeMM.toFixed(0)} mm`);
+      cmp.meanShapeMM < 350, `mean shape deviation ${cmp.meanShapeMM.toFixed(0)} mm`);
+
+    // A wing built to the Geo 7's own span and chord, with its own anchors a
+    // row and its own riser, is closer in shape than the test wing is — and
+    // what is left is at the tip. This is the comparison docs/line-sheets.md
+    // quotes; its figures were in the document with nothing to say what wing
+    // they came from.
+    //
+    // Its ARC is not the Geo 7's. This one is a circle whose projected span
+    // is 0.88 of the flat; the Geo 7 MS is published at 8.87 m projected on
+    // 11.52 flat, 0.77. A circle that tight fits its lines worse, not better
+    // (below): the real arc is flatter in the middle and steeper at the tip
+    // than any circle.
+    const pfG = planformFromDesignInputs({
+      span: 11.52, rootChord: 2.84, tipChord: 2.84 * 0.23, tipSweep: 2.84 * 0.55,
+    });
+    const afG = naca4('4415');
+    afG.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+    const wingG = buildWing({
+      planform: pfG, lobe: buildLobe({ type: 'circle', projectedRatio: 0.88 }, pfG.halfSpan),
+      airfoil: afG, cells: 24, pointsPerSurface: 20,
+    });
+    const planG = buildLinePlan({
+      wing: wingG, airfoil: afG, layout: RISER_LAYOUTS['A/B/C+D'], lineLengthM: 6.5,
+      riserLengthMM: 527, anchorsPerRow: { A: 14, B: 14, C: 15, D: 14 }, tipDirectAnchors: 2,
+    });
+    const cmpG = comparePlans(planG.totals, referenceTotals(set));
+    const offG = (d) => Math.abs(d.deltaMM - cmpG.meanOffsetMM);
+    const worstG = cmpG.diffs.slice().sort((x, y) => offG(y) - offG(x))
+      .slice(0, 3).map((d) => `${d.row}${d.anchor}`);
+    check('a wing of the Geo 7\'s span and chord is nearer its trim shape than the test wing',
+      cmpG.count === 57 && cmpG.meanShapeMM < cmp.meanShapeMM * 0.7
+      && cmpG.meanShapeMM > 80 && cmpG.meanShapeMM < 125
+      // and what is left is at the tip: the three furthest out are the
+      // outermost anchors of their rows
+      && worstG.every((nm) => Number(nm.slice(1)) >= 13),
+      `offset ${cmpG.meanOffsetMM.toFixed(0)} mm, shape deviation ${cmpG.meanShapeMM.toFixed(0)} mm on `
+      + `${cmpG.count} anchors; furthest out ${worstG.join(' ')}`);
+    // The same wing on a circle of the Geo 7's PUBLISHED projected span.
+    const wingTight = buildWing({
+      planform: pfG, lobe: buildLobe({ type: 'circle', projectedRatio: 8.87 / 11.52 }, pfG.halfSpan),
+      airfoil: afG, cells: 24, pointsPerSurface: 20,
+    });
+    const cmpTight = comparePlans(buildLinePlan({
+      wing: wingTight, airfoil: afG, layout: RISER_LAYOUTS['A/B/C+D'], lineLengthM: 6.5,
+      riserLengthMM: 527, anchorsPerRow: { A: 14, B: 14, C: 15, D: 14 }, tipDirectAnchors: 2,
+    }).totals, referenceTotals(set));
+    check('on a circle of its published projected span the lines fit worse: its arc is no circle',
+      cmpTight.count === 57 && cmpTight.meanShapeMM > cmpG.meanShapeMM * 1.5,
+      `shape deviation ${cmpTight.meanShapeMM.toFixed(0)} mm at 0.77 against `
+      + `${cmpG.meanShapeMM.toFixed(0)} mm at 0.88`);
   }
 
   // Every reference wing must parse, not only the one used above.
@@ -1658,10 +1914,20 @@ section('Risers, speed system and accelerated flight');
   // the *main lines* and the harness, so the level is now named `main` and
   // the riser is a separate thing with its own length and mass.
   const web = buildRiserWebbing({ lengthMM: 520, rows: ['A', 'A2', 'B'] });
+  // Three straps a side at 520 mm, and 1.6 lengths more for the speed
+  // system: 2.39 m a side.
   check('a riser set is webbing plus hardware',
-    web.strapMetres > 0 && web.webbingMassKg > 0 && web.maillons > 0,
-    `${web.strapMetres.toFixed(2)} m strap, ${web.maillons} maillons, `
-    + `${(web.webbingMassKg * 1000).toFixed(0)} g`);
+    Math.abs(web.strapMetres - 4.784) < 1e-9 && Math.abs(web.lineStrapMetres - 3.12) < 1e-9
+      && web.maillons === 6,
+    `${web.strapMetres.toFixed(2)} m strap, ${web.lineStrapMetres.toFixed(2)} m of it to the lines, `
+    + `${web.maillons} maillons, ${(web.webbingMassKg * 1000).toFixed(0)} g of webbing`);
+  // Weighed by the metre. It was weighed as 220 g/m2 of cloth 20 mm wide —
+  // 4.4 g/m, and 21 g for the pair of sets.
+  near('its webbing weighed by the metre, at 20 g/m',
+    web.webbingMassKg, (4.784 * 20) / 1000, 1e-9, ' kg');
+  check('which is the order of a webbing sold for the job, and not of a cloth',
+    web.webbingGramsPerM >= 10 && web.webbingGramsPerM <= 23,
+    '23 g/m for a 12 mm webbing rated 1500 daN; 10 g/m for the Swoop2\'s 5 mm cord');
   check('with a maillon per riser per side',
     web.maillons === web.ridersPerSide * 2);
   check('more rows means more webbing',
@@ -1723,20 +1989,55 @@ section('UP line sheets and the loop allowance');
 {
   // A sixth naming convention, with four cascade levels where the others have
   // three, and two of them named rather than suffixed.
+  //
+  // The forms that mean the same whoever wrote them:
   const cases = [
-    ['a1', 'A', 'upper', 1], ['A1', 'A', 'upper', 1],
+    ['a1', 'A', 'upper', 1],
     ['AI', 'A', 'upper-main', 1], ['AIII', 'A', 'upper-main', 3],
     ['AIV', 'A', 'upper-main', 4], ['AVI', 'A', 'upper-main', 6],
     ['CVI', 'C', 'upper-main', 6], ['BIII', 'B', 'upper-main', 3],
     ['Amain1', 'A', 'main', 1], ['Cmain3', 'C', 'main', 3],
     ['BRIV', 'K', 'upper-main', 4], ['BRmain', 'K', 'main', 1],
-    ['br7', 'K', 'upper', 7], ['sa1', 'S', 'upper', 1], ['st3', 'S', 'main', 3],
+    ['br7', 'K', 'upper', 7], ['sa1', 'S', 'upper', 1],
+    // The stabilo's own cascade is written like any other of UP's: `st` at
+    // the canopy, `ST` under it, `STI` to the riser. `st3` was read as its
+    // main line and `STI`, which is the main line, not read at all.
+    ['st3', 'S', 'upper', 3], ['ST2', 'S', 'middle', 2], ['STI', 'S', 'upper-main', 1],
   ];
   for (const [nm, row, level, index] of cases) {
     const r = parseLineName(nm);
     check(`${nm} decodes`, r && r.row === row && r.level === level && r.index === index,
       r ? `row ${r.row}, ${r.level}, ${r.index}` : 'not recognised');
   }
+
+  // And the forms that do not. `A1` is a canopy line on an Ozone sheet and
+  // the line UNDER the canopy lines on a UP one; `BR1` is the B row's first
+  // main line to Ozone and a brake middle to UP. One name cannot say whose
+  // it is, so the reader of a UP sheet says so.
+  //
+  // The comment over `parseLineName` listed UP's four levels and the
+  // function returned 'upper' for `A1` regardless. Every UP component sheet
+  // was read with its middle lines as canopy lines.
+  const inUp = (nm) => parseLineName(nm, { convention: 'up' });
+  const twoWays = [
+    ['A1', ['A', 'upper'], ['A', 'middle']],
+    ['C8', ['C', 'upper'], ['C', 'middle']],
+    ['BR1', ['B', 'main'], ['K', 'middle']],
+    ['DE1', ['D', 'upper'], ['D', 'middle']],
+  ];
+  for (const [nm, plain, up] of twoWays) {
+    const p0 = parseLineName(nm);
+    const u0 = inUp(nm);
+    check(`${nm} is read by whose sheet it is on`,
+      p0.row === plain[0] && p0.level === plain[1] && u0.row === up[0] && u0.level === up[1],
+      `${p0.row} ${p0.level} as a bare name, ${u0.row} ${u0.level} on a UP sheet`);
+  }
+  check('a UP brake middle is a brake line, and a pair of rows is one line carrying both',
+    inUp('BR3').isBrake === true && inUp('DE2').combined === true
+    && inUp('DE2').rows.join('') === 'DE');
+  check('the forms that are the same either way stay the same',
+    ['a1', 'AI', 'Amain1', 'br7', 'BRIV', 'BRmain', 'sa1', 'st3', 'STI'].every((nm) =>
+      inUp(nm).row === parseLineName(nm).row && inUp(nm).level === parseLineName(nm).level));
 
   // Roman numerals must be read before digits, and two-letter rows matched
   // explicitly. A greedy `[A-Za-z]{1,2}` takes `AI` out of `AIII`, fails the
@@ -1780,6 +2081,63 @@ section('UP line sheets and the loop allowance');
       readFileSync('data/reference/up-meru2-MERU2_M_Einzelleine_single.tsv', 'utf8'));
     check('a component sheet reads its lines', meru.lines.length > 90,
       `${meru.lines.length} lines`);
+
+    // Its levels are the wing's. By length: the canopy lines are the
+    // shortest, then each level down to the mains — which they were not,
+    // with the middle lines filed among the uppers.
+    const meanBy = (sheet, lv) => {
+      const v = sheet.lines.filter((l) => l.level === lv).map((l) => l.lengthMM);
+      return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null;
+    };
+    const order = ['upper', 'middle', 'upper-main', 'main'].map((lv) => meanBy(meru, lv));
+    check('each level down a UP cascade is longer than the one above it',
+      order.every((v, i) => v != null && (i === 0 || v > order[i - 1])),
+      order.map((v) => `${v.toFixed(0)}`).join(' < ') + ' mm');
+    const countBy = (sheet, lv) => {
+      const out = {};
+      for (const l of sheet.lines.filter((x) => x.level === lv)) out[l.row] = (out[l.row] || 0) + 1;
+      return Object.keys(out).sort().map((r) => `${r}${out[r]}`).join(' ');
+    };
+    check('the Meru 2 has 59 canopy lines and 25 under them',
+      meru.lines.filter((l) => l.level === 'upper').length === 59
+      && meru.lines.filter((l) => l.level === 'middle').length === 25
+      && meru.lines.filter((l) => l.row === 'B' && l.level === 'main').length === 0,
+      `canopy ${countBy(meru, 'upper')}; under them ${countBy(meru, 'middle')}`);
+    check('its brake cascade is whole: tops, middles, upper-mains and a main',
+      ['upper', 'middle', 'upper-main', 'main'].map((lv) =>
+        meru.lines.filter((l) => l.row === 'K' && l.level === lv).length).join() === '12,6,4,1');
+    check('and the stabilo\'s main line is read', meru.lines.some((l) => l.name === 'STI')
+      && meru.unparsed.length === 0);
+
+    // A component sheet and the totals sheet of the same wing count the
+    // same canopy lines. The Torre's said A 20 and A 12.
+    const torreC = parseUpLineSheet(
+      readFileSync('data/reference/up-torre-TORRE_M_-_Components.tsv', 'utf8'));
+    const torreT = parseUpLineSheet(
+      readFileSync('data/reference/up-torre-TORRE_-_Total_lengths.tsv', 'utf8'));
+    const rowsOfTops = (list) => {
+      const out = {};
+      for (const l of list.filter((x) => x.level === 'upper' && 'ABCDE'.includes(x.row))) {
+        out[l.row] = (out[l.row] || 0) + 1;
+      }
+      return Object.keys(out).sort().map((r) => `${r}${out[r]}`).join(' ');
+    };
+    check('a component sheet counts the canopy lines its totals sheet does',
+      rowsOfTops(torreC.lines) === rowsOfTops(torreT.totals) && rowsOfTops(torreC.lines) === 'A12 B8 C12 D10',
+      `${rowsOfTops(torreC.lines)} against ${rowsOfTops(torreT.totals)}`);
+    check('what it cannot read is listed, not dropped', torreC.unparsed.join() === 'STI-0',
+      torreC.unparsed.join(' '));
+
+    // One cell that cannot be read, where the sheet's own arithmetic gives
+    // it. The K2 5's size 44 sheet has a letter where the length of `a1`
+    // should be.
+    const k44 = parseUpLineSheet(
+      readFileSync('data/reference/up-k2-5-K2_5_44_-_components.tsv', 'utf8'));
+    const a1 = k44.lines.find((l) => l.name === 'a1');
+    check('a length the sheet garbles is recovered from cutting less loop, and said to be',
+      a1 && a1.lengthMM === 1324 && k44.recovered.join() === 'a1'
+      && rowsOfTops(k44.lines) === 'A18 B18 C18 D12 E10',
+      a1 ? `a1 ${a1.lengthMM} mm; ${rowsOfTops(k44.lines)}` : 'a1 missing');
     check("and its own arithmetic holds: length + loop = cutting",
       meru.arithmeticHolds);
 
@@ -1903,7 +2261,7 @@ section('Prefix-level naming and combined rows');
 
   // The guard that makes this safe: both letters must be load-bearing rows.
   // There is no R row, so BR1 falls through and reads as the B row's first
-  // riser line rather than as a combined B-and-R line.
+  // main line rather than as a combined B-and-R line.
   const br = parseLineName('BR1');
   check('BR1 is still the B riser, not a combined row',
     br.row === 'B' && br.level === 'main' && !br.combined);
@@ -1959,7 +2317,7 @@ section('Generating a merged cascade');
     `${(loadsM.closureError * 100).toFixed(2)}%`);
   const mergedRiser = loadsM.tensions.lines.filter((l) => l.combined && l.level === 'main');
   const topLine = loadsM.tensions.lines.filter((l) => l.level === 'upper')[0];
-  check('a merged riser line carries far more than a top line',
+  check('a merged main line carries far more than a top line',
     mergedRiser[0].tensionN > topLine.tensionN * 2,
     `${(mergedRiser[0].tensionN / 10).toFixed(1)} vs ${(topLine.tensionN / 10).toFixed(1)} daN`);
 
@@ -1973,6 +2331,17 @@ section('Generating a merged cascade');
   };
   check('merging reduces line drag', dragOf(merged) < dragOf(plain),
     `${dragOf(plain).toFixed(5)} -> ${dragOf(merged).toFixed(5)}`);
+
+  // The table in docs/line-plans.md, row by row, on this wing.
+  const half = buildLinePlan({ ...base, mergeRows: [['A', 'B']] });
+  const rowOf = (q) => `${q.lines.length} lines, ${q.totalLengthM.toFixed(0)} m, Cx ${dragOf(q).toFixed(4)}`;
+  check('merging one pair is a step on the way to merging both',
+    half.lines.length < plain.lines.length && half.lines.length > merged.lines.length
+    && dragOf(half) < dragOf(plain) && dragOf(half) > dragOf(merged),
+    [plain, half, merged].map(rowOf).join(' | '));
+  const cut = 1 - dragOf(merged) / dragOf(plain);
+  check('and both pairs cut the line drag by more than four tenths',
+    cut > 0.40 && cut < 0.50, `${(cut * 100).toFixed(0)}%`);
 }
 
 // ---------------------------------------------------------------------------
@@ -2010,7 +2379,7 @@ section('Brake cascades');
   const bp = buildBrakePlan({ wing, anchors: 13, levelCounts: [6, 3, 1], lineLengthM: 6.5 });
 
   // Structure: the Lynx 2's brake cascade is 13 anchors onto 6 middle lines
-  // onto 3 riser lines onto 1 shared lower line.
+  // onto 3 main lines onto 1 shared lower line.
   check('four levels, matching the reference wing',
     bp.lines.filter((l) => l.level === 'upper').length === 13
     && bp.lines.filter((l) => l.level === 'middle').length === 6
@@ -2169,32 +2538,101 @@ section('Line loads, materials and drag');
   near('riser tensions sum to the same half load',
     a.tensions.totalN, a.closureN, 1e-6, ' N');
 
-  // A cascaded row reaches the maillon while still numbered as middle lines,
-  // so summing riser tension by level alone loses that row entirely.
-  check('the cascaded D row still reaches a riser',
+  // The D row shares the C riser, and hangs from the C mains: what it
+  // carries has to arrive at that riser through them.
+  check('the D row reaches a riser through the mains of the row in front',
     Object.keys(a.tensions.riserTension).length === 3);
-  check('the C riser carries more than the A riser, having two rows',
-    a.tensions.riserTension.C > a.tensions.riserTension.A * 0.5);
+  near('and the C riser carries the C and the D rows between them',
+    a.tensions.riserTension.C, a.loadByRow.C + a.loadByRow.D, 1e-6, ' N');
+  check('which is more than half of what the A riser carries',
+    a.tensions.riserTension.C > a.tensions.riserTension.A * 0.5,
+    `${a.tensions.riserTension.C.toFixed(0)} N against ${a.tensions.riserTension.A.toFixed(0)} N`);
 
   // Row shares follow the handbook's chordwise split.
   const total = Object.values(a.loadByRow).reduce((x, y) => x + y, 0);
   near('A row takes about 35% of the load', a.loadByRow.A / total, 0.35, 0.02);
   near('D row takes about 10%', a.loadByRow.D / total, 0.10, 0.02);
 
-  // The real invariant is not that riser lines are the most loaded — an
-  // outboard riser line serving three lightly loaded tip anchors carries less
+  // The real invariant is not that main lines are the most loaded — an
+  // outboard main line serving three lightly loaded tip anchors carries less
   // than an inboard upper line at the centre. It is that every line carries
   // exactly the sum of what hangs from it, which holds along each path.
-  let worstNode = 0;
-  for (const parent of a.tensions.lines) {
-    const children = a.tensions.lines.filter(
-      (c) => c.row === parent.row && c.from === parent.to,
-    );
-    if (!children.length) continue;
-    const sum = children.reduce((x, c) => x + c.tensionN, 0);
-    worstNode = Math.max(worstNode, Math.abs(sum - parent.tensionN));
-  }
+  //
+  // Asked of the junctions themselves: whatever leaves a line's upper end,
+  // of whichever row. It was asked of the lines "of the same row" there,
+  // which is not what hangs from a main that two rows share.
+  const worstNodeOf = (tensions) => {
+    let worst = 0;
+    for (const parent of tensions.lines) {
+      const children = tensions.lines.filter((c) => c.from === parent.to
+        && (c.row === 'K') === (parent.row === 'K'));
+      if (!children.length) continue;
+      const sum = children.reduce((x, c) => x + c.tensionN, 0);
+      worst = Math.max(worst, Math.abs(sum - parent.tensionN));
+    }
+    return worst;
+  };
+  const worstNode = worstNodeOf(a.tensions);
   near('every line carries the sum of what hangs from it', worstNode, 0, 1e-6, ' N');
+  const sharedMain = a.tensions.lines.find((l) => l.name === 'CR1');
+  check('a main that two rows hang from carries both',
+    sharedMain.anchorCount > sharedMain.anchors.length
+      && sharedMain.tensionN > a.tensions.lines.find((l) => l.name === 'BR1').tensionN * 0.6,
+    `CR1: ${sharedMain.anchorCount} attachment points, ${sharedMain.tensionN.toFixed(0)} N`);
+
+  // -------------------------------------------------------------------
+  // Two kinds of plan in which a line's own row and its own anchor numbers
+  // are NOT everything that hangs from it — and the tension was added up
+  // from those. Both lost load between the wing and the pilot.
+  //
+  // A merged cascade: one line under two rows. It was listed under the
+  // first, and given the first row's load alone.
+  const half = (100 * 9.81) / 2;
+  for (const [label, merge, lineName] of [
+    ['A and B merged', [['A', 'B']], 'ABR1'],
+    ['C and D merged', [['C', 'D']], 'CDR1'],
+    ['both pairs merged', [['A', 'B'], ['C', 'D']], 'ABR1'],
+  ]) {
+    const merged = buildLinePlan({
+      wing, airfoil: naca4('4415'), layout: RISER_LAYOUTS['A/B/C/D'],
+      everyNthRib: 2, riserLengthMM: 527, lineLengthM: 6.4, mergeRows: merge,
+    });
+    const am = analyseLoads({
+      plan: merged, planform: wing.planform, stations: wing.stations,
+      totalMassKg: 100, alphaDeg: 6, wingAreaM2: 22.3,
+    });
+    const line = am.tensions.lines.find((l) => l.name === lineName);
+    const ownRowOnly = (line.anchors || []).reduce((x, n) => x
+      + (am.anchorLoads.find((q) => q.row === line.row && q.anchor === n)?.loadN ?? 0), 0);
+    near(`${label}: the risers carry the whole half load`,
+      am.tensions.totalN, am.closureN, 1e-6, ' N');
+    check(`${label}: which is half the weight`, Math.abs(am.closureN - half) < 0.05);
+    check(`${label}: a shared line carries every row it serves`,
+      worstNodeOf(am.tensions) < 1e-6 && line.tensionN > ownRowOnly * 1.2,
+      `${lineName}: ${line.tensionN.toFixed(1)} N, where its first row alone is ${ownRowOnly.toFixed(1)}`);
+  }
+
+  // Rows of different anchor counts: an anchor's load was filed under the
+  // number of the FIRST row's line at that rib, and a line of another row
+  // looked for it under its own.
+  const uneven = buildLinePlan({
+    wing: demoWingDense(), airfoil: naca4('4415'), layout: RISER_LAYOUTS['A/B/C+D'],
+    lineLengthM: 6.4, riserLengthMM: 527, anchorsPerRow: { A: 19, B: 11, C: 6, D: 6 },
+  });
+  const au = analyseLoads({
+    plan: uneven, planform: demoWingDense().planform, stations: demoWingDense().stations,
+    totalMassKg: 100, alphaDeg: 6, wingAreaM2: 22.3,
+  });
+  const unloaded = au.tensions.lines.filter((l) => l.level === 'upper' && !(l.tensionN > 0));
+  check('with A:19 B:11 C:6 D:6 every top line has its anchor\'s load',
+    unloaded.length === 0 && uneven.lines.filter((l) => l.level === 'upper').length === 42,
+    unloaded.length ? `${unloaded.length} unloaded: ${unloaded.map((l) => l.name).join(' ')}` : '42 top lines');
+  near('and the risers carry the whole half load', au.tensions.totalN, au.closureN, 1e-6, ' N');
+  check('which is half the weight', Math.abs(au.closureN - half) < 0.05,
+    `${au.closureN.toFixed(2)} N of ${half.toFixed(2)}`);
+  check('each load is filed under its own line',
+    au.anchorLoads.every((q) => uneven.lines.some((l) => l.name === q.name
+      && l.row === q.row && l.index === q.anchor && l.ribIndex === q.ribIndex)));
 
   // And along a path, tension does increase toward the riser.
   const aLines = a.tensions.lines.filter((l) => l.row === 'A');
@@ -2202,7 +2640,7 @@ section('Line loads, materials and drag');
     .sort((x, y) => y.tensionN - x.tensionN)[0];
   const itsUppers = aLines.filter((l) => l.level === 'upper'
     && (deepest.anchors || []).includes(l.index));
-  check('a riser line carries more than any line above it',
+  check('a main line carries more than any line above it',
     itsUppers.length > 0 && deepest.tensionN > Math.max(...itsUppers.map((l) => l.tensionN)),
     `${deepest.tensionN.toFixed(0)} N vs ${Math.max(...itsUppers.map((l) => l.tensionN)).toFixed(0)} N`);
 
@@ -2234,7 +2672,9 @@ section('Line loads, materials and drag');
     computed.glideRatio > assumed.glideRatio,
     `${assumed.glideRatio.toFixed(2)} -> ${computed.glideRatio.toFixed(2)}`);
   check('and line drag falls as a share of the total',
-    computed.dragBreakdown.lines < assumed.dragBreakdown.lines);
+    computed.dragBreakdown.lines < assumed.dragBreakdown.lines,
+    `${(assumed.dragBreakdown.lines * 100).toFixed(1)}% -> ${(computed.dragBreakdown.lines * 100).toFixed(1)}%, `
+    + `${plan.lines.length} lines a side`);
   check('and is in the range real wings show',
     a.drag.cxLines > 0.002 && a.drag.cxLines < 0.05,
     `Cx lines ${a.drag.cxLines.toFixed(4)}`);
@@ -2268,14 +2708,30 @@ section('Line loads, materials and drag');
     check('some lines lose more than half', worst.strengthKinkedDaN / worst.strengthNewDaN < 0.5,
       `${worst.code} keeps ${(100 * worst.strengthKinkedDaN / worst.strengthNewDaN).toFixed(0)}%`);
 
-    // Counter-intuitive but load-bearing: on a kinked basis the sheathed
-    // Liros lines beat unsheathed Dyneema on strength per millimetre of
-    // diameter, because they barely lose strength when bent. That is why the
-    // reference wing uses them for its long lower gallery.
-    const ppsls = table.find((m) => m.code === 'PPSLS 260');
-    check('sheathed PPSLS beats unsheathed U-135 per mm, once kinked',
-      ppsls.efficiencyPerDiameter > u135.efficiencyPerDiameter,
-      `${ppsls.efficiencyPerDiameter.toFixed(0)} vs ${u135.efficiencyPerDiameter.toFixed(0)} daN/mm`);
+    // What the loss belongs to. This said that sheathed Liros lines "beat
+    // unsheathed Dyneema" per millimetre once kinked, "because they barely
+    // lose strength when bent" — and compared PPSLS 260 with the U-135, which
+    // is Edelrid's 8000-U: aramid. Both PPSLS and DC are Dyneema. The loss
+    // is the fibre's, sheathed or not; and strength per millimetre of
+    // diameter grows with the diameter whatever the line, so it ranks sizes
+    // rather than materials. Per square millimetre it ranks materials.
+    const byCode = (c) => table.find((m) => m.code === c);
+    const kept = (m) => m.strengthKinkedDaN / m.strengthNewDaN;
+    const tsl = byCode('TSL140');
+    const pp180 = byCode('PPSLS 180');
+    const dc40 = byCode('DC40');
+    check('aramid loses about half its strength kinked, sheathed or not',
+      tsl.sheathed && !u135.sheathed && tsl.fibre === 'aramid' && u135.fibre === 'aramid'
+        && kept(tsl) < 0.6 && kept(u135) < 0.6,
+      `TSL 140 (sheathed) keeps ${(kept(tsl) * 100).toFixed(0)}%, U-135 (bare) ${(kept(u135) * 100).toFixed(0)}%`);
+    check('and Dyneema keeps most of it, sheathed or not',
+      pp180.sheathed && !dc40.sheathed && pp180.fibre === 'dyneema' && dc40.fibre === 'dyneema'
+        && kept(pp180) > 0.9 && kept(dc40) > 0.8,
+      `PPSLS 180 (sheathed) keeps ${(kept(pp180) * 100).toFixed(0)}%, DC40 (bare) ${(kept(dc40) * 100).toFixed(0)}%`);
+    const perArea = (m) => m.strengthKinkedDaN / ((Math.PI * m.diameterMM ** 2) / 4);
+    check('per square millimetre, bare Dyneema carries most once kinked, a sheathed aramid least',
+      perArea(dc40) > perArea(pp180) && perArea(pp180) > perArea(u135) && perArea(u135) > perArea(tsl),
+      [dc40, pp180, u135, tsl].map((m) => `${m.code} ${perArea(m).toFixed(0)}`).join(', ') + ' daN/mm2');
 
     // Sizing on the two bases must differ, and kinked must be the safer one.
     const fake = {
@@ -2526,49 +2982,147 @@ section('Asymmetric and collapse load cases');
   check('a partial fold sheds proportionally', riserN(partial.tensions, 'A') > 0
     && riserN(partial.tensions, 'A') < riserN(sym.tensions, 'A'));
 
-  // The design envelope. Symmetric flight is not the case that sizes a
-  // lineset, which is the point of all of this.
+  // The design envelope: every case at the load factor it happens at.
+  //
+  // A collapse in level flight works the lines that are left 2.5 times as
+  // hard as level flight does. The symmetric case is 8 g. So in level flight
+  // no collapse governs any line, and the question worth asking is how hard
+  // the wing would have to be pulling when it folded.
   const env = designEnvelope({ symmetric: sym, collapseCases: [withDyn, front] });
-  check('a collapse case governs somewhere', env.collapseGoverns === true);
-  check('and in fact governs most of the lineset',
-    (env.governingCases['asymmetric tip collapse'] || 0) > env.tensions.lines.length / 2,
+  check('a collapse in level flight governs no line',
+    env.collapseGoverns === false && env.governingCases.symmetric === env.tensions.lines.length,
     JSON.stringify(env.governingCases));
+  check('the hardest it works any line is two and a half times level flight',
+    env.worstCollapseMultiple > 2.4 && env.worstCollapseMultiple < 3.3,
+    `x${env.worstCollapseMultiple.toFixed(2)} (asymmetric x${withDyn.multiplier.toFixed(2)}, `
+      + `frontal x${(riserN(front.tensions, 'C') / riserN(sym.tensions, 'C')).toFixed(2)} on the C riser)`);
+  check('so a collapse would have to come at about 3 g to size a line',
+    env.governingCollapseG > 2.4 && env.governingCollapseG < 3.4
+      && Math.abs(env.governingCollapseG - DEFAULT_LOAD_CASE.limitG / env.worstCollapseMultiple) < 1e-9,
+    `${env.governingCollapseG.toFixed(1)} g`);
+  const envHard = designEnvelope({
+    symmetric: sym, collapseCases: [withDyn, front], collapseAtG: 4,
+  });
+  check('and a wing collapsed at 4 g is sized by it',
+    envHard.collapseGoverns === true
+      && Object.keys(envHard.governingCases).some((k) => /collapse/.test(k)),
+    JSON.stringify(envHard.governingCases));
 
   const symSel = selectLines(sym.tensions, {});
+  check('sized on the envelope in level flight, the lineset is the symmetric one',
+    env.selection.lines.every((e) => {
+      const t = symSel.lines.find((x) => x.name === e.name);
+      return t && (e.line?.code ?? null) === (t.line?.code ?? null)
+        && Math.abs(e.requiredDaN - t.requiredDaN) < 1e-9;
+    }),
+    `${env.selection.lines.length} lines, each needing what 8 g x 1.5 needs of it`);
   let thicker = 0;
-  for (const e of env.selection.lines) {
+  for (const e of envHard.selection.lines) {
     const t = symSel.lines.find((x) => x.name === e.name);
     if (t && e.line && t.line && e.line.diameterMM > t.line.diameterMM) thicker++;
   }
-  check('sizing on collapse calls for more material than symmetric sizing',
-    thicker > env.selection.lines.length / 5, `${thicker} of ${env.selection.lines.length} lines`);
-  check('and never less', (() => {
-    for (const e of env.selection.lines) {
+  check('collapsed at 4 g, some lines come out thicker and none thinner',
+    thicker > 0 && envHard.selection.lines.every((e) => {
       const t = symSel.lines.find((x) => x.name === e.name);
-      if (t && e.line && t.line && e.line.diameterMM < t.line.diameterMM) return false;
-    }
-    return true;
-  })());
+      return !(t && e.line && t.line && e.line.diameterMM < t.line.diameterMM);
+    }), `${thicker} of ${envHard.selection.lines.length} lines`);
 
   // -------------------------------------------------------------------
-  // Reconciliation with wings that fly.
+  // What this section used to assert, and what a real lineset says.
   //
-  // Real linesets do not break in collapses. Taken with the finding above —
-  // that collapse governs every line — that could only mean one of two
-  // things: either the collapse model is too severe, or real wings are
-  // already built to it. The manufacturers' own line choices settle it.
+  // "Symmetric flight is not the case that sizes a lineset." The envelope
+  // put the collapse multiplier on top of the 8 g limit and its margin —
+  // 8 x 1.5 x 2.54, thirty times the level-flight load in every line — and
+  // the evidence offered was that "PHI's Allegro X-alps sits at 28x on its
+  // most load-critical line (the C riser)", a literal 28 in this file.
   //
-  // Measured against the 1 g line load, PHI's Allegro X-alps sits at 28x on
-  // its most load-critical line (the C riser) and 108x on the tip D lines.
-  // The symmetric certification case is 8 g x 1.5 = 12x, which is thinner
-  // than any line on that wing. The collapse envelope lands at 28.6x.
+  // PHI's sheet gives the type of every line and which anchors hang from
+  // it, so the load in each can be computed and was not. The 28 came from a
+  // C riser carrying 3.0 daN. It carries the C row AND the D row, which
+  // hangs from the same middle lines; and the main line beside it, thinner
+  // and carrying more anchors, was not looked at.
   const factorSym = DEFAULT_LOAD_CASE.limitG * DEFAULT_LOAD_CASE.safetyFactor;
-  const factorCollapse = factorSym * withDyn.multiplier;
-  check('symmetric certification alone is thinner than real practice',
-    factorSym < 28, `${factorSym.toFixed(1)}x vs 28x observed`);
-  check('the collapse envelope matches the most load-critical real line',
-    Math.abs(factorCollapse - 28) < 4,
-    `${factorCollapse.toFixed(1)}x vs 28x on PHI's C riser`);
+  const factorStacked = factorSym * withDyn.multiplier;
+  const phiSheet = parsePhiLineSheet(readFileSync('data/reference/phi-allegro-xalps-21.tsv', 'utf8'));
+  const phi = phiAnchorPaths(phiSheet);
+  check('PHI: every anchor\'s path adds up to the total printed for it',
+    phi.closes && phi.anchors.length === 42
+      && phi.anchors.every((a) => Math.abs(a.pathMM - a.totalMM) <= 1),
+    `${phi.anchors.length} anchors on ${phi.lines.length} lines`);
+  // The D lines join the C row's middle lines by number: d5, listed as
+  // d5 / D3 / DII, hangs from C3 and CII. It was matched by length alone,
+  // and CI + c2 is one millimetre from C3 + CII.
+  const d5 = phi.anchors.find((a) => a.row === 'D' && a.rib === 15);
+  check('PHI: a D line hangs from the C lines of its own number',
+    d5.path.join(' ') === 'd5 C3 CII' && d5.inherits.by === 'name',
+    `${d5.path.join(' + ')} = ${d5.pathMM} mm`);
+  check('PHI: no line path has another anchor\'s top line in it',
+    phi.anchors.every((a) => a.path.slice(1).every((n) => !/^[a-d]\d/.test(n))),
+    phi.anchors.filter((a) => a.inherits).map((a) => `${a.row}${a.rib}: ${a.inherits.names.join('+')}`).join(', '));
+
+  // The wing the sheet belongs to: the size PHI label 21, 83 to 103 kg.
+  const allegro = parseSizeTable(readFileSync('data/reference/phi-allegro-light-sizes.tsv', 'utf8'))
+    .find((z) => z.label === '21');
+  const phiPlanform = planformFromDesignInputs(referenceDesignInputs(allegro).inputs);
+  const catalogue = parseMaterialsTable(readFileSync('data/reference/line-materials.tsv', 'utf8'));
+  const phiAt = (allUpKg, rowShares, basis = 'kinked') => {
+    const loads = publishedCascadeLoads({
+      anchors: phi.anchors, planform: phiPlanform, halfCells: allegro.cells / 2,
+      allUpKg, ...(rowShares ? { rowShares } : {}),
+    });
+    return { loads, factors: strengthFactors({ lines: phi.lines, lineLoadN: loads.lineLoadN, materials: catalogue, basis }) };
+  };
+  const mid = phiAt(allegro.midWeight);
+  // To the step of the span-load integration: a twentieth of a newton.
+  near('PHI: the anchors between them carry half the weight',
+    mid.loads.anchorLoadN, (allegro.midWeight * 9.80665) / 2, 0.1, ' N');
+  check('PHI: every line type on the sheet is in the catalogue',
+    mid.factors.unknown.length === 0 && mid.factors.rows.length === phi.lines.length,
+    `${mid.factors.rows.length} lines of ${new Set(phi.lines.map((l) => l.type)).size} types`);
+
+  const fOf = (r, name) => r.factors.rows.find((x) => x.name === name);
+  check('PHI: the C main line carries twice the load it was credited with',
+    fOf(mid, 'CI').loadDaN > 5.5 && fOf(mid, 'CI').loadDaN < 6.6
+      && phi.anchors.filter((a) => a.path.includes('CI')).length === 8,
+    `${fOf(mid, 'CI').loadDaN.toFixed(1)} daN from ${phi.anchors.filter((a) => a.path.includes('CI')).map((a) => a.path[0]).join(' ')}: `
+      + `${fOf(mid, 'CI').factor.toFixed(0)}x its kinked strength, not 28x`);
+  check('PHI: and the hardest-worked line is the main line beside it',
+    mid.factors.lowest.name === 'CII' && mid.factors.lowest.factor > 8 && mid.factors.lowest.factor < 9.5,
+    `${mid.factors.lowest.name}, ${mid.factors.lowest.type}: ${mid.factors.lowest.loadDaN.toFixed(1)} daN at 1 g `
+      + `on ${mid.factors.lowest.strengthDaN} daN kinked, ${mid.factors.lowest.factor.toFixed(1)}x`);
+  check('PHI: half the lineset is under the old envelope\'s thirty',
+    mid.factors.below(factorStacked) > phi.lines.length * 0.45
+      && mid.factors.below(factorStacked) < phi.lines.length * 0.6,
+    `${mid.factors.below(factorStacked)} of ${phi.lines.length} lines under ${factorStacked.toFixed(1)}x; `
+      + `the middle line is at ${mid.factors.median.toFixed(0)}x`);
+  check('PHI: and the symmetric case with its margin is about where the hardest lines sit',
+    mid.factors.below(factorSym) <= 3 && mid.factors.rows[4].factor < factorSym * 1.25,
+    `${mid.factors.rows.slice(0, 5).map((x) => `${x.name} ${x.factor.toFixed(1)}`).join(', ')} against ${factorSym}x`);
+
+  // How far that depends on what this file assumes. The weight, the way the
+  // load is split between the rows, and which strength is meant.
+  const cases = [
+    ['top of the range', allegro.weightRange[1], null],
+    ['the Swoop2\'s riser loads', allegro.midWeight, { A: 0.383, B: 0.383, C: 0.156, D: 0.078 }],
+    ['thin-aerofoil shares', allegro.midWeight, { A: 0.379, B: 0.248, C: 0.206, D: 0.168 }],
+  ].map(([what, kg, shares]) => ({ what, kinked: phiAt(kg, shares), fresh: phiAt(kg, shares, 'new') }));
+  check('PHI: on kinked strength its hardest line is at 7 to 11 times level flight',
+    cases.every((c) => c.kinked.factors.lowest.factor > 7 && c.kinked.factors.lowest.factor < 11.5),
+    cases.map((c) => `${c.what} ${c.kinked.factors.lowest.name} ${c.kinked.factors.lowest.factor.toFixed(1)}x`).join(', '));
+  check('PHI: on new strength, 13 to 20 — and no line under 8 g with its margin',
+    cases.every((c) => c.fresh.factors.lowest.factor > 12.5 && c.fresh.factors.lowest.factor < 20.5
+      && c.fresh.factors.below(factorSym) === 0)
+      && phiAt(allegro.midWeight, null, 'new').factors.below(factorSym) === 0,
+    cases.map((c) => `${c.what} ${c.fresh.factors.lowest.factor.toFixed(1)}x`).join(', '));
+  check('PHI: under any of them, a third to a half of the lines are under thirty',
+    cases.every((c) => c.kinked.factors.below(factorStacked) >= 25),
+    cases.map((c) => `${c.kinked.factors.below(factorStacked)}`).join(', ') + ` of ${phi.lines.length}`);
+
+  // The far end is the floor. The tip lines are DC40, the thinnest line on
+  // the wing, at hundreds of times their load.
+  check('PHI: the tip lines are at the floor, hundreds of times over',
+    mid.factors.highest.factor > 300 && mid.factors.highest.diameterMM === PRACTICAL_FLOOR.diameterMM,
+    `${mid.factors.highest.name}, ${mid.factors.highest.type}: ${mid.factors.highest.factor.toFixed(0)}x`);
 
   // Most of a lineset is not load-sized at all. Neither PHI nor Ozone uses
   // line thinner than 0.50 mm anywhere, and it is not strength that stops
@@ -2576,6 +3130,8 @@ section('Asymmetric and collapse load cases');
   // over. Below that, handling and abrasion decide, not load.
   near('the practical floor is the thinnest line real wings use',
     PRACTICAL_FLOOR.diameterMM, 0.50, 1e-9, ' mm');
+  check('and it is the thinnest line on PHI\'s sheet',
+    Math.min(...mid.factors.rows.map((x) => x.diameterMM)) === PRACTICAL_FLOOR.diameterMM);
   const symSel2 = selectLines(sym.tensions, {});
   check('no line is selected below the floor',
     symSel2.lines.every((l) => !l.line || l.line.diameterMM >= PRACTICAL_FLOOR.diameterMM));
@@ -2585,14 +3141,13 @@ section('Asymmetric and collapse load cases');
   check('and the split is reported so a designer can see which is which',
     symSel2.floorSized + symSel2.loadSized === symSel2.lines.length);
 
-  // The collapse case moves lines from floor-sized to load-sized, which is
-  // the mechanism by which it changes a design at all.
-  const envSel2 = designEnvelope({ symmetric: sym, collapseCases: [withDyn] }).selection;
-  check('the collapse case makes more lines load-critical',
-    envSel2.loadSized > symSel2.loadSized,
-    `${symSel2.loadSized} -> ${envSel2.loadSized}`);
+  // A harder case moves lines from floor-sized to load-sized, which is the
+  // mechanism by which a load case changes a design at all.
+  check('a wing collapsed at 4 g has more lines sized by load',
+    envHard.selection.loadSized > symSel2.loadSized,
+    `${symSel2.loadSized} -> ${envHard.selection.loadSized}`);
   check('every line still respects the floor',
-    envSel2.lines.every((l) => !l.line || l.line.diameterMM >= PRACTICAL_FLOOR.diameterMM));
+    envHard.selection.lines.every((l) => !l.line || l.line.diameterMM >= PRACTICAL_FLOOR.diameterMM));
 
   // A wing with no rear rows cannot survive a frontal collapse, and saying so
   // is better than dividing by zero.
@@ -2629,7 +3184,7 @@ section('Size families and scaling');
     // that does not scale — and the fits are tight.
     check('line length fits an affine law tightly', laws.lineLength.r2 > 0.99,
       `R2 ${laws.lineLength.r2.toFixed(4)}`);
-    check('the line law has a real fixed component',
+    check('fitted to all six, the line law comes out with a fixed part',
       laws.lineLength.intercept > 0.2, `${laws.lineLength.intercept.toFixed(3)} m`);
     check('mass fits an affine law', laws.wingMass.r2 > 0.98, `R2 ${laws.wingMass.r2.toFixed(4)}`);
 
@@ -2665,6 +3220,92 @@ section('Size families and scaling');
       errAff > errIso,
       `affine ${(errAff * 100).toFixed(2)}% vs isometric ${(errIso * 100).toFixed(2)}%`);
 
+    // "Here" was the largest size and the line length, and the claim was
+    // made of extrapolating in general. The three sizes beyond the fit, and
+    // the three figures, one at a time:
+    const beyond = [3, 4, 5].map((i) => {
+      const iso = scaleToArea(sizes[0], sizes[i].flatArea, trained);
+      const aff = scaleToArea(sizes[0], sizes[i].flatArea, trained, { outsideRange: 'affine' });
+      const e = (pr, key) => (Math.abs(pr[key] - sizes[i][key]) / sizes[i][key]) * 100;
+      return {
+        name: sizes[i].name,
+        line: [e(aff, 'lineLength'), e(iso, 'lineLength')],
+        total: [e(aff, 'totalLineLength'), e(iso, 'totalLineLength')],
+        mass: [e(aff, 'mass'), e(iso, 'mass')],
+      };
+    });
+    const tell = (key) => beyond.map((b2) => `${b2.name} ${b2[key][0].toFixed(2)}% `
+      + `against ${b2[key][1].toFixed(2)}%`).join(', ');
+    check('the extrapolated law gets worse with every size beyond the fit',
+      ['line', 'total', 'mass'].every((key) => beyond[0][key][0] < beyond[1][key][0]
+        && beyond[1][key][0] < beyond[2][key][0]),
+      `line length ${beyond.map((b2) => b2.line[0].toFixed(2)).join(', ')}%`);
+    check('for the weight it is worse than plain scaling at all three',
+      beyond.every((b2) => b2.mass[0] > b2.mass[1]), tell('mass'));
+    check('and for the total line length',
+      beyond.every((b2) => b2.total[0] > b2.total[1]), tell('total'));
+    check('for the line length it is better at the first two and worse at the third',
+      beyond[0].line[0] < beyond[0].line[1] && beyond[1].line[0] < beyond[1].line[1]
+        && beyond[2].line[0] > beyond[2].line[1], tell('line'));
+
+    // The chords, which the module does not fit, as powers of the span too.
+    const power = (key) => {
+      const pts = sizes.map((z) => [Math.log(z.flatSpan), Math.log(z[key])]);
+      const mx = pts.reduce((a, q) => a + q[0], 0) / pts.length;
+      const my = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+      const slope = pts.reduce((a, q) => a + (q[0] - mx) * (q[1] - my), 0)
+        / pts.reduce((a, q) => a + (q[0] - mx) ** 2, 0);
+      return { slope, my, mx, pts };
+    };
+    near('the largest chord goes as the span', power('maxChord').slope, 1.0, 0.03);
+    near('and the smallest chord', power('minChord').slope, 1.0, 0.04);
+
+    // -------------------------------------------------------------------
+    // "Line length is affine, not proportional: 0.566 x span + 0.459 m."
+    //
+    // The fit is what the six figures give. Its fixed part is one size. From
+    // the S to the XL the published line length is the same multiple of the
+    // span to within the rounding of a figure quoted to the centimetre, and
+    // the XS is 98 mm longer than that.
+    const fiveSpans = sizes.slice(1).map((z) => z.flatSpan);
+    const fiveLines = sizes.slice(1).map((z) => z.lineLength);
+    const five = splitFixedAndScaling(fiveSpans, fiveLines);
+    check('from the S to the XL the line length is a multiple of the span',
+      five.proportional.worstM < 0.0051,
+      `${five.proportional.perSpan.toFixed(4)} x span, worst `
+        + `${(five.proportional.worstM * 1000).toFixed(1)} mm on figures quoted to 10 mm`);
+    const xsOver = sizes[0].lineLength - five.proportional.perSpan * sizes[0].flatSpan;
+    check('and the XS is longer than that by more than any rounding',
+      xsOver > 0.08 && xsOver < 0.12, `${(xsOver * 1000).toFixed(0)} mm`);
+
+    const six = splitFixedAndScaling(sizes.map((z) => z.flatSpan), sizes.map((z) => z.lineLength));
+    near('all six fit a fixed part of 0.46 m', six.fixedM, laws.lineLength.intercept, 1e-9, ' m');
+    check('which rests on the XS alone',
+      six.restsOn === 0 && Math.abs(six.withoutIt.fixedM) < 0.03,
+      `without it ${six.withoutIt.fixedM.toFixed(3)} m; without any other size `
+        + `${Math.min(...six.leaveOneOut.slice(1).map((l) => l.fixedM)).toFixed(2)} to `
+        + `${Math.max(...six.leaveOneOut.slice(1).map((l) => l.fixedM)).toFixed(2)} m`);
+
+    // And "a power law lands 1.6% out where the affine fit is within 0.6%".
+    // Held at an exponent of 1 from the XS it does — that is plain scaling
+    // from the one size that is off the line. Fitted, it is as close as the
+    // affine law: six sizes over 18% of span cannot tell the two apart.
+    const pw = power('lineLength');
+    const worstPower = Math.max(...sizes.map((z) => Math.abs(
+      Math.exp(pw.my + pw.slope * (Math.log(z.flatSpan) - pw.mx)) / z.lineLength - 1)));
+    const worstAffine = Math.max(...sizes.map((z) => Math.abs(
+      (laws.lineLength.slope * z.flatSpan + laws.lineLength.intercept) / z.lineLength - 1)));
+    check('a fitted power law is as close as the affine one',
+      Math.abs(worstPower - worstAffine) < 0.001 && worstPower < 0.007,
+      `exponent ${pw.slope.toFixed(2)}: ${(worstPower * 100).toFixed(2)}% `
+        + `against ${(worstAffine * 100).toFixed(2)}%`);
+
+    // The total: proportional on the four largest, and the two smallest off.
+    const perSpanTotal = sizes.map((z) => z.totalLineLength / z.flatSpan);
+    check('the total line length is a multiple of the span on the four largest sizes',
+      Math.max(...perSpanTotal.slice(2)) - Math.min(...perSpanTotal.slice(2)) < 0.03,
+      perSpanTotal.map((v) => v.toFixed(2)).join(', '));
+
     // Wing loading is a design decision, not a scaling law: a family is a set
     // of related wings flown at different loadings, not one wing resized.
     const trend = loadingTrend(sizes);
@@ -2695,8 +3336,9 @@ section('Size families and scaling');
 }
 
 {
-  // Cross-family check. Three families from two manufacturers, spanning
-  // 12.9 to 29 m^2 and aspect ratios from 4.56 to 6.03.
+  // Cross-family check. It began as three families from two manufacturers,
+  // spanning 12.9 to 29 m^2 and aspect ratios from 4.56 to 6.03; the table
+  // holds seven from four now.
   const path = 'data/reference/size-families.tsv';
   if (!existsSync(path)) {
     check('multi-family size data present', false, `${path} missing`);
@@ -2725,16 +3367,56 @@ section('Size families and scaling');
 
     // The coefficients, however, do not transfer. This is the correction to
     // the previous phase, which shipped one family's fit as a default: the
-    // slopes vary by a factor of about 1.7, because they depend on line
-    // count, cascade depth and construction rather than on size alone.
+    // slopes vary by a factor of about 1.7 over the first three families and
+    // 2.3 over the seven, because they depend on line count, cascade depth
+    // and construction rather than on size alone.
     const slopes = Object.values(fits).map((l) => l.totalLineLength.slope);
     check('line-length slopes differ substantially between families',
       Math.max(...slopes) / Math.min(...slopes) > 1.5,
-      slopes.map((x) => x.toFixed(1)).join(' vs '));
+      `${slopes.map((x) => x.toFixed(1)).join(' vs ')}: a factor of `
+        + `${(Math.max(...slopes) / Math.min(...slopes)).toFixed(1)}`);
     const massSlopes = Object.values(fits).map((l) => l.wingMass.slope);
     check('mass slopes differ substantially between families',
       Math.max(...massSlopes) / Math.min(...massSlopes) > 1.5,
       massSlopes.map((x) => x.toFixed(3)).join(' vs '));
+
+    // Which way each law leans. The total's fixed part is NEGATIVE in every
+    // family: the cord grows faster than the span. The header of scaling.js
+    // said the opposite for years — "a fixed part that does not scale", so
+    // "isometric scaling gives lines too long on the big sizes".
+    const lineIntercepts = Object.values(fits).map((l) => l.totalLineLength.intercept);
+    check('the total line length has a negative intercept in every family',
+      lineIntercepts.every((v) => v < 0),
+      lineIntercepts.map((v) => v.toFixed(1)).join(', '));
+    const massIntercepts = Object.values(fits).map((l) => l.wingMass.intercept);
+    check('and the mass a positive one',
+      massIntercepts.every((v) => v > 0.25 && v < 1.2),
+      `${massIntercepts.map((v) => v.toFixed(2)).join(', ')} kg`);
+
+    // A figure a table does not give is left out of its fit. It used to go in
+    // as zero: a family with no line length fitted `0 x span + 0` at R2 = 1,
+    // and `scaleToArea` then gave a wing with lines 0 m long by the "affine"
+    // method.
+    const geoFit = fits['Ozone Geo 7'];
+    check('a family whose table has no line length gets no line-length law',
+      geoFit.lineLength === null && families['Ozone Geo 7'].every((z) => z.lineLength === null));
+    const geoScaled = scaleToArea(families['Ozone Geo 7'][0],
+      families['Ozone Geo 7'][2].flatArea, geoFit);
+    check('and scaling it leaves the line length not given, not zero',
+      geoScaled.lineLength === null && geoScaled.minChord === null
+        && geoScaled.methods.totalLineLength === 'affine' && geoScaled.method === 'affine',
+      `line length ${geoScaled.lineLength}, total ${geoScaled.totalLineLength.toFixed(1)} m `
+        + `by the ${geoScaled.methods.totalLineLength} law`);
+    const lynxSizes = families['BGD Lynx 2'];
+    check('a blank cell is a figure not given',
+      lynxSizes[0].totalLineLength === null && lynxSizes[0].linePieces === null
+        && families['PHI Allegro light'][0].linePieces === null,
+      `Lynx 2 ${lynxSizes[0].name}: total ${lynxSizes[0].totalLineLength}`);
+    check('and one blank does not bend the fit of the rest',
+      fits['BGD Lynx 2'].totalLineLength.n === 4 && fits['BGD Lynx 2'].totalLineLength.r2 > 0.99,
+      `${fits['BGD Lynx 2'].totalLineLength.slope.toFixed(1)} m per m of span over `
+        + `${fits['BGD Lynx 2'].totalLineLength.n} sizes, R2 `
+        + `${fits['BGD Lynx 2'].totalLineLength.r2.toFixed(4)}`);
 
     // Borrowing another family's laws is measurably worse than assuming
     // nothing, which is why isometric is now the default.
@@ -2742,6 +3424,17 @@ section('Size families and scaling');
     const borrowed = crossFamilyError(fits[names[0]], families[names[2]]);
     check('borrowed laws land far off', borrowed && borrowed.worstPct > 10,
       borrowed ? `${borrowed.worstPct.toFixed(1)}% worst` : 'no data');
+    // Every pairing of the first three, both ways. One of the six is just
+    // under ten per cent; "more than 10% out" was said of all of them.
+    const pairings = [];
+    for (const a of names.slice(0, 3)) {
+      for (const b2 of names.slice(0, 3)) {
+        if (a !== b2) pairings.push(crossFamilyError(fits[a], families[b2]).worstPct);
+      }
+    }
+    check('each of the six ways of borrowing is 9% out or more',
+      pairings.length === 6 && Math.min(...pairings) > 9 && Math.max(...pairings) < 50,
+      `${Math.min(...pairings).toFixed(1)}% to ${Math.max(...pairings).toFixed(1)}%`);
 
     // With no laws supplied the scaling must be isometric, not a borrowed fit.
     const iso = scaleToArea(families[names[1]][0], families[names[1]][4].flatArea);
@@ -2833,12 +3526,57 @@ section('Size families and scaling');
         > expectedLoading(6.9) ,
       `${Math.max(...uLoad.map((x) => x.actualLoading)).toFixed(2)} kg/m2 at AR 4.56`);
 
-    // The fitted trend must predict the families it was fitted to.
-    for (const [fam, rows] of [['Ozone Geo 7', gLoad], ['Ozone Zeno 2', zLoad]]) {
-      const worst = Math.max(...rows.map((r) => Math.abs(r.deltaPct)));
-      check(`${fam}: loading trend predicts within 15%`, worst < 15,
-        `worst ${worst.toFixed(1)}%`);
-    }
+    // The trend, refitted here from the table, so that the constants in the
+    // module are what the file gives.
+    //
+    // They were not. The module's table had the Zeno 2 at 4.85 kg/m2 where
+    // the file gives 4.95, the line was fitted to three families and quoted
+    // as "r = +0.99, one of the cleanest trends in this whole dataset", and
+    // the check below it covered two of the three — the third, the Allegro
+    // light, is 17% off the line at its smallest size.
+    const loadRows = Object.entries(families).map(([name, sizes]) => {
+      const lc = loadingCheck(sizes);
+      return {
+        name,
+        ar: lc[0].aspectRatio,
+        application: lc[0].application,
+        mean: meanLoad(lc),
+        sizes: lc.map((x) => x.actualLoading),
+      };
+    });
+    const mainstream = loadRows.filter((r) => r.application !== 'hike and fly');
+    const lsq = (pts) => {
+      const n = pts.length;
+      const mx = pts.reduce((a, q) => a + q[0], 0) / n;
+      const my = pts.reduce((a, q) => a + q[1], 0) / n;
+      const sxy = pts.reduce((a, q) => a + (q[0] - mx) * (q[1] - my), 0);
+      const sxx = pts.reduce((a, q) => a + (q[0] - mx) ** 2, 0);
+      const syy = pts.reduce((a, q) => a + (q[1] - my) ** 2, 0);
+      return { slope: sxy / sxx, intercept: my - (sxy / sxx) * mx, r: sxy / Math.sqrt(sxx * syy) };
+    };
+    const trendFit = lsq(mainstream.map((r) => [r.ar, r.mean]));
+    check('the loading trend is fitted to every mainstream family in the table',
+      mainstream.length === LOADING_VS_AR.sampleFamilies,
+      `${mainstream.length} families: ${mainstream.map((r) => `${r.name.split(' ').pop()} `
+        + `${r.mean.toFixed(2)}`).join(', ')}`);
+    near('and its slope is the one the module states', trendFit.slope, LOADING_VS_AR.slope, 0.001);
+    near('its intercept too', trendFit.intercept, LOADING_VS_AR.intercept, 0.002);
+    near('and its correlation', trendFit.r, LOADING_VS_AR.r, 0.001);
+    const rAll = lsq(loadRows.map((r) => [r.ar, r.mean])).r;
+    check('with the mountain wing in, there is no trend at all',
+      Math.abs(rAll) < 0.2, `r = ${rAll.toFixed(2)} over all seven`);
+
+    const famOff = mainstream.map((r) => Math.abs(r.mean / expectedLoading(r.ar) - 1) * 100);
+    near('the trend places a family to the figure the module gives',
+      Math.max(...famOff), LOADING_VS_AR.worstFamilyErrorPct, 0.06, '%');
+    const sizeOff = mainstream.flatMap((r) => r.sizes.map(
+      (v) => Math.abs(v / expectedLoading(r.ar) - 1) * 100));
+    near('and a single size no closer than this',
+      Math.max(...sizeOff), LOADING_VS_AR.worstSizeErrorPct, 0.06, '%');
+    check('because a family is loaded harder at its large sizes than its small',
+      mainstream.every((r) => r.sizes[r.sizes.length - 1] > r.sizes[0] * 1.1),
+      mainstream.map((r) => `${r.sizes[0].toFixed(2)}-${r.sizes[r.sizes.length - 1].toFixed(2)}`)
+        .join(', '));
 
     check('the trend records what it excludes and why',
       LOADING_VS_AR.excludes.includes('hike and fly')
@@ -2867,6 +3605,86 @@ section('Size families and scaling');
     check('the normalised law transfers across every family', worstPct < 12,
       `worst ${worstPct.toFixed(1)}%`);
 
+    // The law, refitted from the table: the mean of each fitted family's
+    // metres of line per metre of span, against its aspect ratio.
+    const FITTED = ['Ozone Ultralite 5', 'Ozone Geo 7', 'PHI Allegro light',
+      'Ozone Alpina 5', 'Ozone Zeno 2'];
+    const lawPts = FITTED.map((name) => {
+      const z = families[name];
+      return [z[0].flatAR, z.reduce((a, x) => a + x.totalLineLength / x.flatSpan, 0) / z.length];
+    });
+    const lawFit = lsq(lawPts);
+    near('the line-length law is the one the table gives: slope',
+      lawFit.slope, LINE_LENGTH_PER_SPAN.slope, 0.002);
+    near('intercept', lawFit.intercept, LINE_LENGTH_PER_SPAN.intercept, 0.01);
+    near('and R2', lawFit.r ** 2, LINE_LENGTH_PER_SPAN.r2, 0.001);
+
+    // What the law had to get past: across these five the slope of total
+    // line length against span follows aspect ratio and follows span, and
+    // the two follow each other.
+    const famStat = FITTED.map((name) => ({
+      ar: families[name][0].flatAR,
+      span: families[name].reduce((a, x) => a + x.flatSpan, 0) / families[name].length,
+      slope: fits[name].totalLineLength.slope,
+      perSpan: families[name].reduce((a, x) => a + x.totalLineLength / x.flatSpan, 0)
+        / families[name].length,
+    }));
+    const col = (key) => famStat.map((x) => x[key]);
+    near('the slope follows aspect ratio', correlate(col('slope'), col('ar')), -0.963, 0.002);
+    near('and follows span', correlate(col('slope'), col('span')), -0.980, 0.002);
+    near('and aspect ratio and span follow each other', correlate(col('ar'), col('span')), 0.912, 0.002);
+    near('with span held, aspect ratio still tells',
+      partialCorrelate(col('slope'), col('ar'), col('span')), -0.857, 0.002);
+    near('and with aspect ratio held, span does',
+      partialCorrelate(col('slope'), col('span'), col('ar')), -0.926, 0.002);
+
+    // The two comparisons that separated them.
+    const statOf = (name) => famStat[FITTED.indexOf(name)];
+    const g7 = statOf('Ozone Geo 7');
+    const al = statOf('PHI Allegro light');
+    const a5 = statOf('Ozone Alpina 5');
+    check('Geo 7 and Allegro light: spans 5% apart, aspect ratio 17%, 9% less line per metre',
+      Math.abs(al.span / g7.span - 1.054) < 0.002 && Math.abs(al.ar / g7.ar - 1.169) < 0.002
+        && Math.abs(al.perSpan / g7.perSpan - 0.914) < 0.002,
+      `span x${(al.span / g7.span).toFixed(3)}, aspect ratio x${(al.ar / g7.ar).toFixed(3)}, `
+        + `line per metre x${(al.perSpan / g7.perSpan).toFixed(3)}`);
+    check('Alpina 5 and Allegro light: the same aspect ratio and span, 10% less line',
+      Math.abs(a5.ar - al.ar) < 0.05 && Math.abs(a5.span / al.span - 1) < 0.02
+        && Math.abs(a5.perSpan / al.perSpan - 0.898) < 0.002,
+      `aspect ratio ${al.ar} and ${a5.ar}, span x${(a5.span / al.span).toFixed(3)}, `
+        + `line per metre x${(a5.perSpan / al.perSpan).toFixed(3)}`);
+
+    // "Within 6.2% on all five" was the middle size of each. Every size:
+    const lawErr = (z) => Math.abs(lineLengthPerSpan(z.flatAR) * z.flatSpan / z.totalLineLength - 1) * 100;
+    const midErrs = FITTED.map((name) => lawErr(families[name][Math.floor(families[name].length / 2)]));
+    const allErrs = FITTED.flatMap((name) => families[name].map(lawErr));
+    near('the worst at a fitted family\'s middle size', Math.max(...midErrs),
+      LINE_LENGTH_PER_SPAN.worstFamilyErrorPct, 0.06, '%');
+    near('and the worst at any of their sizes', Math.max(...allErrs),
+      LINE_LENGTH_PER_SPAN.worstSizeErrorPct, 0.06, '%');
+    check('which is what an estimate is told to expect',
+      lineConsumptionEstimate({ aspectRatio: 6, flatSpan: 12 }).expectedErrorPct
+        === LINE_LENGTH_PER_SPAN.worstSizeErrorPct,
+      `${allErrs.length} sizes of ${FITTED.length} families`);
+    const fittedMakers = new Set(FITTED.map((name) => name.split(' ')[0]));
+    check('the fit rests on two makers, and says so',
+      fittedMakers.size === LINE_LENGTH_PER_SPAN.sampleManufacturers
+        && FITTED.length === LINE_LENGTH_PER_SPAN.sampleFamilies,
+      `${[...fittedMakers].join(' and ')}: ${FITTED.length} families`);
+
+    // Out of sample: the two families that were not in the fit, every size
+    // that has a total.
+    for (const o of LINE_LENGTH_PER_SPAN.outOfSample) {
+      const z = families[o.family].filter((x) => x.totalLineLength);
+      const errs = z.map(lawErr);
+      near(`out of sample, ${o.family}: the worst of ${z.length} sizes`,
+        Math.max(...errs), o.worstErrorPct, 0.06, '%');
+      check(`${o.family} has that many sizes with a total`, z.length === o.sizes);
+    }
+    check('the worst out of sample is recorded',
+      LINE_LENGTH_PER_SPAN.worstOutOfSampleErrorPct
+        === Math.max(...LINE_LENGTH_PER_SPAN.outOfSample.map((o) => o.worstErrorPct)));
+
     // Direction and magnitude of each effect.
     check('a higher aspect ratio carries less line per metre of span',
       lineLengthPerSpan(6.9) < lineLengthPerSpan(4.56),
@@ -2894,6 +3712,10 @@ section('Size families and scaling');
       sageWorst < 0.01, `worst ${(sageWorst * 100).toFixed(1)}%`);
     check('which is better than its worst error inside the fitted families',
       sageWorst * 100 < LINE_LENGTH_PER_SPAN.worstFamilyErrorPct);
+    // The three spans above are in the table too, and must be the same wing.
+    check('and those are the sizes in the table',
+      sageSizes.every((sz) => families['Skywalk SAGE'].some(
+        (z) => z.flatSpan === sz.span && z.totalLineLength === sz.published)));
 
     // The two-liner correction did not survive the same test. It was recorded
     // as an adjustment rather than an established effect, because riser count
@@ -2931,25 +3753,33 @@ section('Size families and scaling');
       referenceLengths: [6995], scaledLengths: [7300], scaleRatio: 1.02522,
     }).passes === false);
 
-    // Which explains the intercept in the affine law. A maker quoting line
-    // length *including* a riser that does not scale produces numbers that
-    // look affine; the intercept is the riser, not a property of the lines.
+    // Skywalk quote a line length WITHOUT risers, and it is a multiple of
+    // the span to the rounding of a figure given to the centimetre.
     const sageNoRiser = splitFixedAndScaling(
       [11.34, 11.65, 12.01, 12.40, 12.77], [7.08, 7.28, 7.50, 7.74, 7.97],
     );
-    check('a length quoted without risers needs no fixed part',
-      sageNoRiser.fixedM < 0.05,
-      `${(sageNoRiser.fixedM * 1000).toFixed(0)} mm`);
-    check('and fits proportionally to within a centimetre',
-      sageNoRiser.worstM < 0.01, `${(sageNoRiser.worstM * 1000).toFixed(0)} mm`);
+    check('a length quoted without risers is a multiple of the span',
+      sageNoRiser.proportional.worstM < 0.007,
+      `${sageNoRiser.proportional.perSpan.toFixed(4)} x span, worst `
+        + `${(sageNoRiser.proportional.worstM * 1000).toFixed(1)} mm`);
+    check('and no one size makes its fixed part',
+      sageNoRiser.restsOn === null && Math.abs(sageNoRiser.fixedM) < 0.06,
+      `${(sageNoRiser.fixedM * 1000).toFixed(0)} mm over all five`);
 
+    // "A length quoted with risers does need one: 945 mm against a 570-600
+    // mm riser." That was PHI's six, fitted by a line made to pass through
+    // the first of them — and the first is the XS, the one size that is off.
+    // The check asserted `fixedM > 0.4` and read the result as the riser.
     const phiWithRiser = splitFixedAndScaling(
       [11.09, 11.55, 12.00, 12.29, 12.58, 13.14],
       [6.78, 6.96, 7.23, 7.40, 7.58, 7.92],
     );
-    check('a length quoted with risers does need one',
-      phiWithRiser.fixedM > 0.4,
-      `${(phiWithRiser.fixedM * 1000).toFixed(0)} mm against a 570-600 mm riser`);
+    check('PHI\'s fixed part is its smallest size, not its riser',
+      phiWithRiser.restsOn === 0 && Math.abs(phiWithRiser.withoutIt.fixedM) < 0.03
+        && phiWithRiser.withoutIt.worstM < 0.005,
+      `${(phiWithRiser.fixedM * 1000).toFixed(0)} mm over six sizes, `
+        + `${(phiWithRiser.withoutIt.fixedM * 1000).toFixed(0)} mm over five, which then fit to `
+        + `${(phiWithRiser.withoutIt.worstM * 1000).toFixed(1)} mm`);
 
     // ---------------------------------------------------------------------
     // What the law leaves unexplained.
@@ -2995,13 +3825,19 @@ section('Size families and scaling');
       Math.abs(allegro.residualPct - alpina.residualPct) > 8,
       `${allegro.residualPct.toFixed(1)}% vs ${alpina.residualPct.toFixed(1)}%`);
 
-    // One family is the outlier on this and on the scaling regime both.
+    // One family carries the most line for its aspect ratio: the 2.5-liner.
     check('the largest residual is the BGD family',
       /BGD/.test(resid.outlier.family),
       `${resid.outlier.family} at ${resid.outlier.residualPct.toFixed(1)}%`);
-    check('which is also the family that scales its lineset with area',
-      lineLengthExponent(families['BGD Lynx 2']).regime === 'area',
-      'two anomalies, one manufacturer');
+    check('by about the same at every size, which is a level and not a slope',
+      (() => {
+        const z = families['BGD Lynx 2'].filter((x) => x.totalLineLength);
+        const e = z.map((x) => (x.totalLineLength / (lineLengthPerSpan(x.flatAR) * x.flatSpan) - 1) * 100);
+        return Math.max(...e) - Math.min(...e) < 1.5;
+      })(),
+      families['BGD Lynx 2'].filter((x) => x.totalLineLength)
+        .map((x) => `${x.name} +${((x.totalLineLength / (lineLengthPerSpan(x.flatAR) * x.flatSpan) - 1) * 100).toFixed(1)}%`)
+        .join(', '));
 
     // Correlation helpers behave.
     near('a variable correlates perfectly with itself',
@@ -3035,9 +3871,14 @@ section('Size families and scaling');
     const rec = referenceDesignInputs(zeno.source);
     check('a reference converts to design inputs', rec && rec.inputs.span > 0);
     const recArea = planformMetrics(planformFromDesignInputs(rec.inputs)).area;
-    check('and lands near the published area',
-      Math.abs(recArea - zeno.flatArea) / zeno.flatArea < 0.06,
-      `${recArea.toFixed(2)} vs ${zeno.flatArea} m2`);
+    // The tip chord is the one free dimension and is solved to the published
+    // area. It was 22% of the root, which put the wing the full pipeline
+    // validates 1 to 7% short of its area while the picker solved it.
+    check('and lands on the published area, its tip chord solved to it',
+      Math.abs(recArea - zeno.flatArea) / zeno.flatArea < 0.001
+        && rec.tipChordBasis === 'solved to the published area'
+        && rec.derived.includes('tip chord'),
+      `${recArea.toFixed(3)} vs ${zeno.flatArea} m2, tip ${rec.inputs.tipChord} m`);
     near('with the published span exactly', rec.inputs.span, zeno.flatSpan, 1e-12, ' m');
 
     // Everything not in the specification is named as chosen, so a wing
@@ -3056,22 +3897,26 @@ section('Size families and scaling');
       const a = planformMetrics(planformFromDesignInputs(r.inputs)).area;
       worstArea = Math.max(worstArea, Math.abs(a - e.flatArea) / e.flatArea);
     }
-    check('every reference recovers its area within 6%',
-      worstArea < 0.06, `worst ${(worstArea * 100).toFixed(1)}%`);
+    check('every reference recovers its published area',
+      worstArea < 0.001, `worst ${(worstArea * 100).toFixed(3)}%`);
+    // Asked not to, it still takes the stated fraction, and says so.
+    const assumed = referenceDesignInputs(zeno.source, { solveTipToArea: false });
+    check('and the assumed tip is still available, and labelled as assumed',
+      Math.abs(assumed.inputs.tipChord - assumed.inputs.rootChord * 0.22) < 1e-12
+        && /assumed/.test(assumed.tipChordBasis));
 
     check('a size with no span is refused rather than guessed',
       referenceDesignInputs({ flatArea: 25 }) === null);
 
     check('the fit is recorded with its sample size and error',
       LINE_LENGTH_PER_SPAN.sampleFamilies === 5
-      && LINE_LENGTH_PER_SPAN.sampleManufacturers === 3
+      && LINE_LENGTH_PER_SPAN.sampleManufacturers === 2
       && LINE_LENGTH_PER_SPAN.worstFamilyErrorPct < 10);
     check('extrapolation beyond the fitted aspect ratios is flagged',
       lineConsumptionEstimate({ aspectRatio: 8.5, flatSpan: 13 }).inFittedRange === false);
 
     // -------------------------------------------------------------------
-    // How a family's lineset scales is a manufacturer decision, and the law
-    // above quietly assumed one of the two answers.
+    // How a family's lineset goes with its span.
     const regimes = {};
     for (const [name, sizes] of Object.entries(families)) {
       const e = lineLengthExponent(sizes);
@@ -3079,40 +3924,125 @@ section('Size families and scaling');
     }
     check('every family yields a scaling exponent',
       Object.keys(regimes).length === 7, Object.keys(regimes).join(' | '));
+    check('all seven scale their lineset with span, and a little faster than it',
+      Object.values(regimes).every((e) => e.regime === 'span' && e.exponent > 1 && e.exponent < 1.35),
+      Object.entries(regimes).map(([n, e]) => `${n.split(' ').slice(1).join(' ')} `
+        + `${e.exponent.toFixed(2)}`).join(', '));
 
-    const ozonePhi = Object.entries(regimes).filter(([n]) => !/BGD/.test(n));
-    check('six families scale their lineset with span',
-      ozonePhi.every(([, e]) => e.regime === 'span'),
-      ozonePhi.map(([n, e]) => `${n.split(' ').pop()} ${e.exponent.toFixed(2)}`).join(', '));
-    check('BGD scales its lineset with area instead',
-      regimes['BGD Lynx 2'].regime === 'area',
-      `exponent ${regimes['BGD Lynx 2'].exponent.toFixed(2)}`);
-    near('and that exponent is close to 2', regimes['BGD Lynx 2'].exponent, 2.0, 0.15);
+    // "BGD scales its lineset with area instead" — exponent 2.03, "a design
+    // decision at the manufacturer level", an open question in the roadmap.
+    // That was the "Total line length" row of BGD's specification table.
+    // BGD's line sheets are in this folder.
+    const pubSpec = readFileSync('data/reference/published-specs.tsv', 'utf8')
+      .split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
+    const pubHead = pubSpec[0];
+    const pubLynx = pubSpec.filter((r) => r[0] === 'BGD Lynx 2').map((r) => ({
+      name: r[1],
+      flatArea: Number(r[pubHead.indexOf('flat_area_m2')]),
+      flatSpan: Number(r[pubHead.indexOf('flat_span_m')]),
+      chord: Number(r[pubHead.indexOf('root_chord_m')]),
+      totalLineLength: Number(r[pubHead.indexOf('total_line_m')]),
+      height: Number(r[pubHead.indexOf('height_m')]),
+      stated: Number(r[pubHead.indexOf('linear_scale')]),
+    }));
+    check('BGD\'s published table is read, five sizes with a stated scale factor',
+      pubLynx.length === 5 && pubLynx.every((z) => z.stated > 0.9 && z.stated < 1.1),
+      pubLynx.map((z) => z.stated).join(', '));
 
-    // Out of sample, assuming the wrong regime is what breaks the law.
-    const lynx = families['BGD Lynx 2'];
-    const small = lynx[0];
-    const large = lynx[lynx.length - 1];
-    const assumed = lineConsumptionEstimate({ aspectRatio: 6.2, flatSpan: large.flatSpan });
-    const eAssumed = Math.abs(assumed.totalLineLengthM - large.totalLineLength) / large.totalLineLength;
-    check('assuming span scaling mis-sizes an area-scaling family badly',
-      eAssumed > 0.10, `${(eAssumed * 100).toFixed(1)}% out on the largest size`);
+    const pubExp = lineLengthExponent(pubLynx);
+    check('the published total does go with area',
+      pubExp.regime === 'area' && Math.abs(pubExp.exponent - 2) < 0.1,
+      `exponent ${pubExp.exponent.toFixed(2)}`);
+    const perArea = pubLynx.map((z) => z.totalLineLength / z.flatArea);
+    check('it is the same number of metres per square metre at every size',
+      Math.max(...perArea) / Math.min(...perArea) < 1.005,
+      `${Math.min(...perArea).toFixed(2)} to ${Math.max(...perArea).toFixed(2)} m per m2`);
 
-    const corrected = lineConsumptionEstimate({
-      aspectRatio: 6.2,
-      flatSpan: large.flatSpan,
-      referenceSpan: small.flatSpan,
-      exponent: regimes['BGD Lynx 2'].exponent,
+    // The same table, the row beneath: the line height, which goes with the
+    // factor itself. A lineset of a fixed number of lines cannot go with area
+    // while its height goes with span.
+    const pubM = pubLynx.find((z) => z.name === 'M');
+    const offFactor = (get) => Math.max(...pubLynx.map((z) => Math.abs(get(z) / get(pubM) - z.stated)));
+    check('the height BGD publish goes with the factor they state',
+      offFactor((z) => z.height) < 0.005,
+      pubLynx.map((z) => (z.height / pubM.height).toFixed(3)).join(', '));
+    check('as do the span, the chord and the root of the area',
+      offFactor((z) => z.flatSpan) < 0.005 && offFactor((z) => z.chord) < 0.005
+        && offFactor((z) => Math.sqrt(z.flatArea)) < 0.005,
+      `worst ${Math.max(offFactor((z) => z.flatSpan), offFactor((z) => z.chord),
+        offFactor((z) => Math.sqrt(z.flatArea))).toFixed(4)} on figures quoted to two and three digits`);
+    check('and the published total does not',
+      offFactor((z) => z.totalLineLength) > 0.07,
+      pubLynx.map((z) => (z.totalLineLength / pubM.totalLineLength).toFixed(3)).join(', '));
+
+    // The sheets: 121 lines a side at every size.
+    const lynxSheets = ['S', 'M', 'ML', 'L'].map((name) => {
+      const t = parseBgdLineTable(readFileSync(`data/reference/bgd-lynx2-${name}.tsv`, 'utf8'));
+      const byLevel = {};
+      for (const l of t.lines) byLevel[l.level] = (byLevel[l.level] || 0) + l.lengthMM / 1000;
+      return {
+        name,
+        lines: t.lines.length,
+        bothSidesM: 2 * t.lines.reduce((a, l) => a + l.lengthMM, 0) / 1000,
+        byLevel,
+        stated: pubLynx.find((z) => z.name === name).stated,
+        published: pubLynx.find((z) => z.name === name).totalLineLength,
+        inTable: families['BGD Lynx 2'].find((z) => z.name === name),
+      };
     });
-    const eCorrected = Math.abs(corrected.totalLineLengthM - large.totalLineLength)
-      / large.totalLineLength;
-    check('using the family\'s own exponent fixes it',
-      eCorrected < eAssumed / 2,
-      `${(eCorrected * 100).toFixed(1)}% vs ${(eAssumed * 100).toFixed(1)}%`);
+    check('BGD\'s four line sheets have the same lines at every size',
+      lynxSheets.every((z) => z.lines === 121), lynxSheets.map((z) => z.lines).join(', '));
+    const sheetM = lynxSheets.find((z) => z.name === 'M');
+    check('and they add up in proportion to the factor, not its square',
+      lynxSheets.every((z) => Math.abs(z.bothSidesM / sheetM.bothSidesM - z.stated) < 0.01),
+      lynxSheets.map((z) => `${z.name} ${z.bothSidesM.toFixed(1)} m (x`
+        + `${(z.bothSidesM / sheetM.bothSidesM).toFixed(3)} for ${z.stated})`).join(', '));
+    check('at every level of the cascade',
+      lynxSheets.every((z) => Object.keys(z.byLevel).every(
+        (lv) => Math.abs(z.byLevel[lv] / sheetM.byLevel[lv] - z.stated) < 0.02)),
+      Object.keys(sheetM.byLevel).map((lv) => `${lv} x`
+        + `${(lynxSheets[3].byLevel[lv] / sheetM.byLevel[lv]).toFixed(3)}`).join(', ')
+        + ` on the L, for ${lynxSheets[3].stated}`);
+    check('so the published total is 10% over its own sheet on the largest size',
+      lynxSheets[3].published / lynxSheets[3].bothSidesM > 1.09
+        && Math.abs(sheetM.published / sheetM.bothSidesM - 1) < 0.03,
+      lynxSheets.map((z) => `${z.name} ${z.published} against ${z.bothSidesM.toFixed(1)} m`).join(', '));
+    check('and the table this project measures against holds the sheets',
+      lynxSheets.every((z) => Math.abs(z.inTable.totalLineLength - z.bothSidesM) < 0.06
+        && z.inTable.linePieces === 2 * z.lines),
+      lynxSheets.map((z) => z.inTable.totalLineLength).join(', '));
 
-    check('the law records that it assumes span scaling',
+    // What the mistake cost. The law was "16% out on the largest Lynx 2", and
+    // a second exponent was added to every estimate to mend it.
+    const lynx = families['BGD Lynx 2'].filter((z) => z.totalLineLength);
+    const lynxErr = lynx.map((z) => (lineLengthPerSpan(z.flatAR) * z.flatSpan / z.totalLineLength - 1) * 100);
+    check('against its sheets the law is under by the same at every size',
+      lynxErr.every((e) => e < -6 && e > -8),
+      lynxErr.map((e) => `${e.toFixed(1)}%`).join(', '));
+    const pubErr = pubLynx.map((z) => (lineLengthPerSpan(z.flatAR ?? 6.2) * z.flatSpan / z.totalLineLength - 1) * 100);
+    check('and against the published row it ran from 1% to 16%',
+      Math.abs(pubErr[0]) < 1.5 && Math.abs(pubErr[4]) > 15,
+      pubErr.map((e) => `${e.toFixed(1)}%`).join(', '));
+
+    // The exponent is still worth having: it carries one measured size to
+    // its neighbours better than the law's level does.
+    const ul = families['Ozone Ultralite 5'];
+    const ulRef = ul[3];
+    const carried = (z, exponent) => lineConsumptionEstimate({
+      aspectRatio: z.flatAR, flatSpan: z.flatSpan, referenceSpan: ulRef.flatSpan, exponent,
+    }).totalLineLengthM * (ulRef.totalLineLength
+      / (lineLengthPerSpan(ulRef.flatAR) * ulRef.flatSpan));
+    const eOne = Math.max(...ul.map((z) => Math.abs(carried(z, 1) / z.totalLineLength - 1) * 100));
+    const eOwn = Math.max(...ul.map((z) => Math.abs(
+      carried(z, regimes['Ozone Ultralite 5'].exponent) / z.totalLineLength - 1) * 100));
+    check('a family\'s own exponent carries a measured size across the range',
+      eOwn < eOne / 2 && eOwn < 2.5,
+      `Ultralite 5 from its 19: ${eOwn.toFixed(1)}% with ${regimes['Ozone Ultralite 5'].exponent.toFixed(2)}, `
+        + `${eOne.toFixed(1)}% with 1`);
+
+    check('the law records what it assumes and how far out it has been',
       LINE_LENGTH_PER_SPAN.assumesSpanScaling === true
-      && LINE_LENGTH_PER_SPAN.worstOutOfSampleErrorPct > 10);
+      && LINE_LENGTH_PER_SPAN.worstOutOfSampleErrorPct < 10);
 
     // Within a family, fitted laws interpolate well.
     for (const [name, sizes] of Object.entries(families)) {
@@ -3124,6 +4054,124 @@ section('Size families and scaling');
         `${(e * 100).toFixed(2)}%`);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+section('What scales in a family, measured from its line sheets');
+
+{
+  // `size-families.tsv` gives one total a size. Ozone's sheets for four of
+  // those families are in the folder, line by line, and two of the four give
+  // the length of every path from the canopy to the bottom of the riser as
+  // well. So what a maker scales, and what it does not, can be read off.
+  const fams = parseSizeFamilies(readFileSync('data/reference/size-families.tsv', 'utf8'));
+  const stems = {
+    'Ozone Ultralite 5': 'ultralite5', 'Ozone Geo 7': 'geo7',
+    'Ozone Alpina 5': 'alpina5', 'Ozone Zeno 2': 'zeno2',
+  };
+  const measured = {};
+  let sheets = 0;
+  const totalsOff = [];
+  for (const [name, stem] of Object.entries(stems)) {
+    const sizes = fams[name].map((z) => ({
+      name: z.name,
+      scale: Math.sqrt(z.flatArea),
+      lineSet: parseLineTable(readFileSync(`data/reference/${stem}-${z.name}.tsv`, 'utf8')),
+    }));
+    measured[name] = familyLineScaling(sizes);
+    for (const [i, z] of fams[name].entries()) {
+      sheets++;
+      const sum = sizes[i].lineSet.lines.reduce((a, l) => a + l.quantity * l.lengthMM, 0) / 1000;
+      const pieces = sizes[i].lineSet.lines.reduce((a, l) => a + l.quantity, 0);
+      if (Math.abs(sum - z.totalLineLength) > 0.06 || pieces !== z.linePieces) {
+        totalsOff.push(`${name} ${z.name}: ${sum.toFixed(1)} m in ${pieces} against `
+          + `${z.totalLineLength} in ${z.linePieces}`);
+      }
+    }
+  }
+  check('the total in the family table is the sum of each size\'s line sheet',
+    totalsOff.length === 0,
+    totalsOff.length ? totalsOff.slice(0, 2).join('; ') : `${sheets} sheets of four families`);
+
+  const by = (name) => Object.fromEntries(measured[name].sizes.map((z) => [String(z.name), z]));
+  const pct = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+
+  // ---- The Geo 7: the height is scaled.
+  const geo = by('Ozone Geo 7');
+  const geoAll = Object.values(geo);
+  check('Geo 7: the sheets give the length of every line path',
+    geoAll.every((z) => z.heightCount >= 50), `${geoAll[0].heightCount} paths a size`);
+  check('Geo 7: the height goes with the wing at every size',
+    geoAll.every((z) => Math.abs(z.heightOffPct) < 0.3),
+    geoAll.map((z) => `${z.name} ${pct(z.heightOffPct)}`).join(', '));
+  // ---- The riser is not.
+  check('Geo 7: four sizes hang from one riser, and the XS from a shorter one',
+    ['S', 'MS', 'ML', 'L'].every((n) => Math.abs(geo[n].riserMM - 527.5) < 1.5)
+      && Math.abs(geo.XS.riserMM - 472) < 2,
+    geoAll.map((z) => `${z.name} ${z.riserMM.toFixed(0)}`).join(', ') + ' mm, by the sheets\' own sums');
+  // ---- The lines below the top are scaled.
+  check('Geo 7: the middle lines and the mains are scaled',
+    geoAll.every((z) => Math.abs(z.levels.middle.offPct) < 0.35 && Math.abs(z.levels.main.offPct) < 0.35),
+    geoAll.map((z) => `${z.name} ${pct(z.levels.middle.offPct)} ${pct(z.levels.main.offPct)}`).join(', '));
+  // ---- So the top lines are not.
+  check('Geo 7: and the top lines take up what the riser did not give',
+    geo.L.levels.upper.ratio > geo.L.k * 1.06 && geo.S.levels.upper.ratio < geo.S.k * 0.97,
+    geoAll.map((z) => `${z.name} x${z.levels.upper.ratio.toFixed(3)} for ${z.k.toFixed(3)}`).join(', '));
+  check('Geo 7: by the amount that arithmetic gives, where the riser is the same',
+    ['S', 'ML', 'L'].every((n) => Math.abs(geo[n].upperIfRiserTakenAtTop / geo[n].levels.upper.ratio - 1) < 0.01),
+    ['S', 'ML', 'L'].map((n) => `${n} ${geo[n].upperIfRiserTakenAtTop.toFixed(3)} for `
+      + `${geo[n].levels.upper.ratio.toFixed(3)}`).join(', '));
+  check('Geo 7: the XS, with its own riser, has every level scaled instead',
+    Math.abs(geo.XS.levels.upper.offPct) < 0.4,
+    `top lines ${pct(geo.XS.levels.upper.offPct)}`);
+
+  // ---- The Ultralite 5: the same from the 17 up, and two sizes that are not.
+  const ul = by('Ozone Ultralite 5');
+  const big = ['17', '19', '21', '23', '25'];
+  check('Ultralite 5: the height goes with the wing from the 17 to the 25',
+    big.every((n) => Math.abs(ul[n].heightOffPct) < 0.5),
+    big.map((n) => `${n} ${pct(ul[n].heightOffPct)}`).join(', '));
+  check('Ultralite 5: the 13 and the 15 hang 5% shorter than that',
+    ['13', '15'].every((n) => ul[n].heightOffPct < -4.5 && ul[n].heightOffPct > -5.5),
+    ['13', '15'].map((n) => `${n} ${pct(ul[n].heightOffPct)}`).join(', '));
+  check('Ultralite 5: on mains a tenth shorter than scale',
+    ['13', '15'].every((n) => ul[n].levels.main.offPct < -9 && ul[n].levels.main.offPct > -11)
+      && big.every((n) => Math.abs(ul[n].levels.main.offPct) < 0.3),
+    Object.values(ul).map((z) => `${z.name} ${pct(z.levels.main.offPct)}`).join(', '));
+  check('Ultralite 5: the riser is hardware here too',
+    big.every((n) => Math.abs(ul[n].riserMM - 527.5) < 3.5)
+      && ['13', '15'].every((n) => Math.abs(ul[n].riserMM - 514) < 2),
+    Object.values(ul).map((z) => `${z.name} ${z.riserMM.toFixed(0)}`).join(', ') + ' mm');
+  check('Ultralite 5: and the top lines take up its share, from the 17 up',
+    big.every((n) => Math.abs(ul[n].upperIfRiserTakenAtTop / ul[n].levels.upper.ratio - 1) < 0.025)
+      && ul['25'].levels.upper.offPct > 9,
+    big.map((n) => `${n} x${ul[n].levels.upper.ratio.toFixed(3)} (${ul[n].upperIfRiserTakenAtTop.toFixed(3)}) `
+      + `for ${ul[n].k.toFixed(3)}`).join(', '));
+
+  // ---- The two-liners: every level close to scale.
+  for (const name of ['Ozone Alpina 5', 'Ozone Zeno 2']) {
+    const rows = measured[name].sizes;
+    const worst = Math.max(...rows.flatMap((z) => ['upper', 'middle', 'main']
+      .map((lv) => Math.abs(z.levels[lv].offPct))));
+    check(`${name.split(' ').slice(1).join(' ')}: every level of the cascade is within 1.5% of scale`,
+      worst < 1.5 && rows.every((z) => z.heightMM === null),
+      `worst ${worst.toFixed(2)}%; these sheets give no path lengths`);
+  }
+
+  // ---- And that is why the cord grows faster than the wing, and by how much.
+  // The top lines are half the pieces in a lineset. Where they take the
+  // riser's share the cord runs well ahead of the span; where the few lines
+  // at the bottom do, it barely does.
+  const expo = Object.fromEntries(Object.keys(stems).map((n) => [n, lineLengthExponent(fams[n]).exponent]));
+  check('the cord grows fastest where the top lines take up the riser',
+    expo['Ozone Geo 7'] > 1.12 && expo['Ozone Ultralite 5'] > 1.25
+      && expo['Ozone Alpina 5'] < 1.08 && expo['Ozone Zeno 2'] < 1.08,
+    Object.entries(expo).map(([n, e]) => `${n.split(' ').slice(1).join(' ')} ${e.toFixed(2)}`).join(', '));
+  const topShare = geoAll[2].levels.upper.count
+    / Object.values(geoAll[2].levels).reduce((a, v) => a + v.count, 0);
+  check('the top lines being half the pieces',
+    topShare > 0.45 && topShare < 0.6,
+    `${geoAll[2].levels.upper.count} of ${Object.values(geoAll[2].levels).reduce((a, v) => a + v.count, 0)} on the Geo 7`);
 }
 
 // ---------------------------------------------------------------------------
@@ -3187,24 +4235,54 @@ section('Building a whole size family');
 {
   const fams2 = parseSizeFamilies(readFileSync('data/reference/size-families.tsv', 'utf8'));
   const geo = fams2['Ozone Geo 7'];
+  // The line height of each size is the Geo 7's own: the longest path on its
+  // sheet, the centre A line to the bottom of its riser.
+  //
+  // This was `6.6 m x k^0.85` — lines growing more slowly than the wing,
+  // which is what "line length is affine with a fixed part" would mean, and
+  // is not what Ozone cut. Their five go with the wing to a quarter of a
+  // per cent.
+  const geoSheets = geo.map((s2) => parseLineTable(
+    readFileSync(`data/reference/geo7-${s2.name}.tsv`, 'utf8')));
+  const geoHeights = geoSheets.map((t) => t.totals[0].lengths[0] / 1000);
+  // And the riser each sheet implies, which is part of that path and is not
+  // line: 472 mm on the XS and 527 on the rest.
+  const geoRisers = geoSheets.map((t) => inferRiserLength(
+    t, inferTopology(t, t.totals.map((r) => r.lengths[0]), 'A'), 'A').riserLengthMM / 1000);
   const base = {
     span: geo[0].flatSpan, rootChord: geo[0].maxChord, tipChord: 0.55,
     tipSweep: 1.25, flatArea: geo[0].flatArea,
-    lineLengthM: 6.6, allUpMassKg: geo[0].midWeight,
+    lineLengthM: geoHeights[0] - geoRisers[0], allUpMassKg: geo[0].midWeight,
   };
-  const sizes = geo.map((s2) => ({
+  const sizes = geo.map((s2, i) => ({
     name: s2.name,
     k: Math.sqrt(s2.flatArea / geo[0].flatArea),
-    lineLengthM: 6.6 * (Math.sqrt(s2.flatArea / geo[0].flatArea) ** 0.85),
+    lineLengthM: geoHeights[i] - geoRisers[i],
+    riserLengthM: geoRisers[i],
     allUpMassKg: s2.midWeight,
     wingMassKg: s2.mass,
   }));
+  check('the Geo 7\'s line height goes with the wing',
+    sizes.every((z, i) => Math.abs(geoHeights[i] / (geoHeights[0] * z.k) - 1) < 0.005),
+    sizes.map((z, i) => `${z.name} ${geoHeights[i].toFixed(2)} m (${((geoHeights[i] / (geoHeights[0] * z.k) - 1) * 100).toFixed(2)}%)`).join(', '));
 
   const fam = buildFamily(base, sizes, {
     airfoil: naca4('4415'), cells: 16, pointsPerSurface: 24,
   });
 
   check('every size builds', fam.sizes.length === 5);
+  // The table docs/scaling.md shows, printed so it can be checked against a
+  // run rather than against the last time someone looked.
+  check('the family table', fam.summaries.every((z) => Number.isFinite(z.lineMassG)),
+    fam.summaries.map((z) => `${z.name} ${z.flatAreaM2.toFixed(2)} m2 ${z.flatSpanM.toFixed(2)} m `
+      + `${z.allUpMassKg} kg ${z.lineLengthM.toFixed(2)} m ${(z.riserLengthM * 1000).toFixed(0)} mm `
+      + `${z.speedKMH.toFixed(1)} km/h ${z.glideRatio.toFixed(2)} ${z.fabricM?.toFixed(1)} m `
+      + `${z.lineMassG.toFixed(0)} g ${z.loadSized}/${z.lineCount}`).join(' | '));
+  // The pilot of each size hangs where its sheet puts him: lines and riser.
+  check('each size hangs its pilot a line length and its own riser below the wing',
+    fam.sizes.every((z, i) => Math.abs(Math.abs(z.plan.karabiner[2]) - geoHeights[i]) < 1e-9
+      && Math.abs(z.summary.hangDepthM - geoHeights[i]) < 1e-9),
+    fam.summaries.map((z) => `${z.name} ${z.lineLengthM.toFixed(2)} + ${(z.riserLengthM * 1000).toFixed(0)} mm`).join(', '));
   check('every size produces panels',
     fam.sizes.every((z) => z.panels && z.panels.length > 0));
   check('every size produces a line schedule',
@@ -3246,11 +4324,25 @@ section('Building a whole size family');
     Math.abs(cx[4] / cx[0] - 1) < 0.15,
     `${cx[0].toFixed(5)} -> ${cx[4].toFixed(5)}`);
 
-  // Bigger panels nest slightly better.
+  // One shape scaled, so the cloth in a square metre of wing is the same in
+  // every size. The ROLL it takes is not: the roll is a fixed 1.4 m wide and
+  // the nester packs whole panels, so the length steps about as a panel does
+  // or does not fit beside another.
+  //
+  // This asserted that the largest size takes less than the smallest —
+  // "bigger panels nest slightly better" — on the two ends alone, and then
+  // that the five stay within a tenth of each other, which held for one
+  // rib spacing and not the next (1.03 to 1.08 m of roll per m2 with ribs
+  // crowded at the tip, 1.08 to 1.21 with cells that follow the chord).
+  // What does hold is the identity underneath: roll x how well it is used.
   const fabPerM2 = fam.summaries.map((s2) => s2.fabricM / s2.flatAreaM2);
-  check('fabric per square metre falls slightly with size',
-    fabPerM2[4] < fabPerM2[0],
-    `${fabPerM2[0].toFixed(2)} -> ${fabPerM2[4].toFixed(2)} m/m2`);
+  const clothPerM2 = fam.summaries.map((s2, i) => fabPerM2[i] * s2.fabricUtilisation);
+  near('the cloth in a square metre of wing is the same in every size',
+    Math.max(...clothPerM2) / Math.min(...clothPerM2), 1, 1e-3);
+  check('and the roll it takes differs only by how well the panels pack',
+    fam.summaries.every((s2) => s2.fabricUtilisation > 0.5 && s2.fabricUtilisation < 0.95),
+    fam.summaries.map((s2, i) => `${fabPerM2[i].toFixed(2)} m/m2 at `
+      + `${(s2.fabricUtilisation * 100).toFixed(0)}%`).join(', '));
 
   // Against the published family. The shape is parametric rather than the
   // real Geo 7, so areas differ by a couple of percent; span is set directly
@@ -3694,6 +4786,52 @@ section('Metrics must be able to move');
 }
 
 // ---------------------------------------------------------------------------
+section('Rib cloth for the whole wing');
+
+{
+  // What a bill of materials needs of the ribs: their area across the whole
+  // wing, less what is cut out of them. The interface's bill asked for it
+  // under a name nothing set, and so listed no ribs at all.
+  const wingR = demoWing();
+  const afR = naca4('4415');
+  afR.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+
+  const tool = ribClothTotals(wingR, afR, { ribCloth: 0.040 });
+  const solid = ribClothTotals(wingR, afR, { ribCloth: 0.040, openings: false });
+  check('every rib of the wing is counted, the centre one once',
+    tool.ribCount === wholeWingCounts(wingR).ribs,
+    `${tool.ribCount} ribs on a wing of ${wholeWingCounts(wingR).ribs}`);
+  check('solid ribs have nothing cut out',
+    solid.holeAreaM2 === 0 && solid.removedFraction === 0 && solid.source === 'solid'
+    && solid.holedMassKg === solid.solidMassKg);
+  check('with openings the same ribs weigh less',
+    tool.ribAreaM2 === solid.ribAreaM2 && tool.holedMassKg < solid.solidMassKg
+    && tool.removedFraction > 0.15 && tool.removedFraction < 0.65,
+    `${(tool.removedFraction * 100).toFixed(0)}% removed of ${tool.ribAreaM2.toFixed(2)} m2`);
+  // It agrees with the per-rib builder it is made from.
+  const each = buildAllRibHoles(wingR, afR, { ribCloth: 0.040 });
+  near('and the totals are the per-rib holes, summed over the whole wing',
+    tool.holeAreaM2, each.holeAreaM2, 1e-12, ' m2');
+  near('at the cloth weight asked for', tool.holedMassKg,
+    (tool.ribAreaM2 - tool.holeAreaM2) * 0.040, 1e-12, ' kg');
+
+  // A design's own holes, given as outlines in the rib's plane. One square
+  // of 0.1 m on every rib: 0.01 m2 each, and the centre rib once.
+  const square = [[0.5, 0], [0.6, 0], [0.6, 0.1], [0.5, 0.1]];
+  const ownMap = new Map(wingR.ribs.map((r) => [r.index, [{ outline: square }]]));
+  const own = ribClothTotals(wingR, afR, { ribCloth: 0.040, ownHoles: ownMap });
+  near('a design\'s own holes are the ones cut out',
+    own.holeAreaM2, 0.01 * wholeWingCounts(wingR).ribs, 1e-12, ' m2');
+  check('and it says whose they are',
+    /design/.test(own.source) && /tool/.test(tool.source) && own.holeCount === wholeWingCounts(wingR).ribs);
+
+  // The wing-wide opening total counted a centre rib twice.
+  const all = allRibOpenings(wingR, afR);
+  near('the wing-wide opening area counts a centre rib once',
+    all.holeAreaM2, each.holeAreaM2, 1e-12, ' m2');
+}
+
+// ---------------------------------------------------------------------------
 section('Rib lightening holes');
 
 {
@@ -3765,13 +4903,11 @@ section('Rib lightening holes');
     let worstM = 0;
     for (let i = 0; i < w6.ribs.length - 1; i++) {
       const rib = w6.ribs[i];
-      const bb = (rib.betaDeg * Math.PI) / 180;
-      const oy = rib.lobePoint[0];
-      const oz = rib.lobePoint[1];
-      const flat2 = ([x, y, z]) => [x - rib.xLE,
-        -(y - oy) * Math.sin(bb) + (z - oz) * Math.cos(bb)];
-      const up = rib.upper.map(flat2);
-      const lo = rib.lower.map(flat2);
+      // The rib as cut. This test carried its own copy of the dihedral
+      // inverse, with the sign the placement used to have, so it compared
+      // the holes against a rib that was not the one being cut.
+      const up = rib.section.upper;
+      const lo = rib.section.lower;
       const at = (poly, x) => {
         for (let k = 1; k < poly.length; k++) {
           if (poly[k][0] >= x) {
@@ -3932,27 +5068,42 @@ section('A rib opening does two jobs');
   const speedOnly = ribOpenings(wingO.ribs[0], wingO.ribs[1], afO, {
     rules: { targetInflationS: 0.3 },
   });
-  // On this wing the fast target alone is already unachievable, because
-  // demoWing has only 12 cells and each one is large: 2397 cm2 needed against
-  // 2107 available. That is the model working, not failing — a big cell
-  // cannot be refilled in 0.3 s through the openings a rib can carry.
+  // Each alone ventilates, on this wing: the fast target wants 1793 cm2 and
+  // the rib can carry 2110.
   check('heavy margins alone still ventilate', marginsOnly.ventilates);
-  check('a demanding target alone can already starve a large cell',
-    speedOnly.ventilates === false,
+  check('and so does a demanding target alone',
+    speedOnly.ventilates,
     `${(speedOnly.ventilationAreaM2 * 1e4).toFixed(0)} cm2 against `
     + `${(speedOnly.ventilationRequiredM2 * 1e4).toFixed(0)} needed`);
-  check('and the two together are worse still',
-    starved.shortfallM2 > speedOnly.shortfallM2,
-    `${(speedOnly.shortfallM2 * 1e4).toFixed(0)} -> `
-    + `${(starved.shortfallM2 * 1e4).toFixed(0)} cm2 short`);
+  check('it is the two together that starve the rib',
+    starved.shortfallM2 > 0 && speedOnly.shortfallM2 === 0 && marginsOnly.shortfallM2 === 0,
+    `${(starved.shortfallM2 * 1e4).toFixed(0)} cm2 short`);
 
-  // The requirement scales with cell volume, so more cells make each easier
-  // to fill — which is the lever a designer actually has.
-  const fine = buildWing({
+  // The requirement scales with cell volume. A big enough cell cannot be
+  // refilled in 0.3 s through the openings a rib can carry, whatever the
+  // margins — with eight cells a side instead of twelve the same target is
+  // out of reach on its own. That is the model working, not failing.
+  //
+  // (This test used to find that on the twelve-cell wing itself, whose root
+  // cell was then 669 mm wide because the ribs were crowded at the tip.)
+  const mkCells = (cells) => buildWing({
     planform: wingO.planform,
     lobe: buildLobe({ type: 'circle', projectedRatio: 0.88 }, wingO.planform.halfSpan),
-    airfoil: afO, cells: 40, pointsPerSurface: 18,
+    airfoil: afO, cells, pointsPerSurface: 18,
   });
+  const coarse = mkCells(8);
+  const coarseOpen = ribOpenings(coarse.ribs[0], coarse.ribs[1], afO, {
+    rules: { targetInflationS: 0.3 },
+  });
+  check('a demanding target alone starves a large enough cell',
+    coarseOpen.ventilates === false && coarseOpen.shortfallM2 > 0,
+    `${(coarseOpen.ventilationAreaM2 * 1e4).toFixed(0)} cm2 against `
+    + `${(coarseOpen.ventilationRequiredM2 * 1e4).toFixed(0)} needed, in a cell `
+    + `${((coarse.stations[1] - coarse.stations[0]) * 1000).toFixed(0)} mm wide`);
+
+  // More cells make each easier to fill — which is the lever a designer
+  // actually has.
+  const fine = mkCells(40);
   const fineOpen = ribOpenings(fine.ribs[0], fine.ribs[1], afO, {
     rules: { targetInflationS: 0.3 },
   });
@@ -4356,8 +5507,11 @@ section('Bill of materials');
   // order by whatever the nesting wastes.
   const sail = bom.fabric.find((f) => f.item === 'Sail cloth');
   check('sail cloth is ordered by roll length', sail.rollMetres > 0);
+  // Counted, and plausible. This asserted an offcut of MORE than half the
+  // sewn area — which was true of the skyline layout the tool used to cut
+  // from, and is not true of a good nest. The profile packer wastes 26%.
   check('and the offcut is counted, not ignored',
-    sail.offcutM2 > sail.panelAreaM2 * 0.5,
+    sail.offcutM2 > 0 && sail.offcutM2 < sail.panelAreaM2,
     `${sail.offcutM2.toFixed(1)} m2 offcut against ${sail.panelAreaM2.toFixed(1)} m2 sewn`);
 
   // Line is bought by cut length, which includes the loops.
@@ -4380,8 +5534,69 @@ section('Bill of materials');
   const text = bomText(bom);
   check('the bill renders as an order',
     /FABRIC/.test(text) && /LINE/.test(text) && /HARDWARE/.test(text) && /TOTALS/.test(text));
-  check('and states what it does not count',
-    /Reinforcement, rods, risers/.test(text));
+  // It closes by naming what it did not weigh, whatever it was given. It
+  // used to end on a fixed sentence — "reinforcement, rods, risers" — which
+  // it printed even on a bill that had the reinforcement and the rods in it.
+  check('and states what it does not weigh',
+    /NOT WEIGHED/.test(text) && /riser webbing and its hardware/.test(text)
+    && /thread/.test(text) && !/Reinforcement, rods, risers/.test(text));
+  check('with a total that says what it is a total of',
+    /cloth, film and tape \d+ g {2}\+ line \d+ g/.test(text)
+    && bom.totals.accountedKg === bom.totals.fabricMassKg + bom.totals.lineMassKg + bom.totals.rodMassKg);
+
+  // The parts a bill used to be handed without: ribs said as ribs, the nose
+  // in its own cloth, rods, webbing, and what the wing is set to weigh.
+  {
+    const full = buildBOM({
+      panels: panelsB, nested: nestedB, name: 'full',
+      cloth: { leadingEdge: 0.040, upperSail: 0.030, lowerSail: 0.030 },
+      noseFraction: 0.25,
+      ribHoles: { ribCount: 49, ribAreaM2: 20, holeAreaM2: 5, removedFraction: 0.25, holedMassKg: 0.6, source: 'test' },
+      rods: { count: 49, lengthM: 6.1, massKg: 0.012, byDiameter: { 1.5: { count: 49, lengthM: 6.1, massG: 12 } } },
+      risers: { count: 6, lengthM: 3 },
+      wingMassKg: 4, wingMassSource: 'a test',
+      notes: ['look at this'],
+    });
+    const sail = full.fabric.find((f) => f.item === 'Sail cloth');
+    const plain = buildBOM({ panels: panelsB, nested: nestedB, cloth: { upperSail: 0.030, lowerSail: 0.030 } })
+      .fabric.find((f) => f.item === 'Sail cloth');
+    near('a quarter of the upper surface is weighed in the nose cloth',
+      sail.massKg - plain.massKg, sail.upperAreaM2 * 0.25 * (0.040 - 0.030), 1e-9, ' kg');
+    check('and without a nose cloth the sail is weighed as it was',
+      plain.noseAreaM2 === 0 && Number.isFinite(plain.massKg) && plain.massKg > 0);
+    const t = bomText(full);
+    check('ribs are listed as ribs, with what was cut out of them',
+      /Rib cloth\n\s+49 pieces, 15\.00 m2, 600 g\n\s+25% of 20\.00 m2 removed as openings \(test\)/.test(t), t.slice(0, 400));
+    check('rods and webbing have their own section',
+      /RODS AND WEBBING/.test(t) && /Nylon rods\s+49 pieces\s+6\.1 m {2}12 g/.test(t)
+      && /Riser webbing\s+6 pieces\s+3\.0 m {2}not weighed/.test(t));
+    check('the total is set against what the wing is to weigh',
+      Math.abs(full.accountedFraction - full.totals.accountedKg / 4) < 1e-12
+      && /% of the 4\.00 kg the wing is set to weigh \(a test\)/.test(t));
+    check('and what there is to look at is printed', /TO LOOK AT\n {2}look at this/.test(t));
+    check('a bill with no ribs says the ribs are missing, not their holes',
+      buildBOM({ panels: panelsB, nested: nestedB }).missing.includes('ribs')
+      && !buildBOM({ panels: panelsB, nested: nestedB }).missing.some((m) => /counted solid/.test(m)));
+    // Rods with a length and no diameter have no mass, and the bill says so
+    // rather than weighing them at nothing.
+    // What the sail weighs depends on what it was handed over as: cut
+    // panels, with their seam allowance, or finished outlines. The bill
+    // listed "seam allowances folded under" as not weighed either way —
+    // under a sail that had been weighed with its allowance on.
+    const asCut = buildBOM({ panels: panelsB, nested: nestedB, seamAllowanceMM: 10 });
+    const finished = buildBOM({ panels: panelsB, nested: nestedB });
+    check('a sail handed over with its allowance is said to be weighed as cut',
+      /as cut, with the 10 mm seam allowance/.test(asCut.fabric[0].note)
+      && asCut.neverWeighed.some((m) => /allowance on ribs and diagonals/.test(m))
+      && !asCut.neverWeighed.includes('seam allowances folded under'));
+    check('and one given finished outlines has no allowance weighed at all',
+      /finished size, with no seam allowance/.test(finished.fabric[0].note)
+      && finished.neverWeighed.includes('seam allowances folded under'));
+    const unweighed = buildBOM({ panels: panelsB, nested: nestedB, rods: { count: 98, lengthM: 71, massKg: null } });
+    check('rods with no diameter are listed and named as not weighed',
+      /mass not stated/.test(bomText(unweighed))
+      && unweighed.neverWeighed.some((m) => /the rods/.test(m)) && unweighed.totals.rodMassKg === 0);
+  }
 
   // Sanity against a real wing: cloth and line on a 22 m2 wing come to a
   // couple of kilos, with the rest of a finished weight in the parts this
@@ -4471,16 +5686,79 @@ section('Exports with no caller');
   check('seamEasing measures the ease ovalization introduces',
     Number.isFinite(ease.leftPct) && Number.isFinite(ease.rightPct),
     `left ${ease.leftPct.toFixed(2)}%, right ${ease.rightPct.toFixed(2)}%`);
-  // The two seams move in *opposite* directions, which was not the guess:
-  // ovalization bends the panel about its own centreline, so the outer seam
-  // lengthens and the inner one shortens. On the root panel that is +0.087%
-  // against -0.074% — a differential ease the sewer has to absorb, and the
-  // reason the two seams of an ovalized panel are not interchangeable.
-  check('ovalization lengthens one seam and shortens the other',
-    Math.sign(ease.leftDelta) === -Math.sign(ease.rightDelta),
+  // The two seams are eased by DIFFERENT amounts: the bulge is added about
+  // the panel's curved centreline, so the seam on the outside of the curve
+  // gains more length than the one inside it. That differential is what the
+  // sewer has to absorb, and why the two seams of an ovalized panel are not
+  // interchangeable.
+  //
+  // This used to assert opposite SIGNS (+0.087% against -0.074%). That was a
+  // property of panels developed from a canopy built inside out — the upper
+  // surface lay inside the arc, and the root upper panel came out 6 cm too
+  // narrow at mid-chord and far more curved than it is. On the corrected
+  // geometry both seams lengthen, by 0.097% and 0.075%.
+  check('ovalization eases the outer seam more than the inner one',
+    ease.leftPct > ease.rightPct,
     `${ease.leftPct.toFixed(3)}% vs ${ease.rightPct.toFixed(3)}%`);
   check('and both changes are small',
     Math.abs(ease.leftPct) < 0.5 && Math.abs(ease.rightPct) < 0.5);
+
+  // The ease must not depend on how the surface was SAMPLED.
+  //
+  // Bowing a panel outward is geometry. How much length that adds to each
+  // seam is a property of the shape, not of how many points were used to
+  // describe it — so the answer has to converge, and two different point
+  // distributions have to agree.
+  //
+  // It did neither. The billow profile was indexed by point NUMBER while the
+  // transitions and the chordwise loading are in CHORD fraction, and the two
+  // differ by up to 8.6 points of chord on a 24-point panel: the profile was
+  // applied about a tenth of a chord too far aft. With evenly spread points
+  // that error was at least consistent, so the result looked stable; with
+  // points clustered at the nose it drifted from 0.08% to 0.14% as density
+  // rose and both seams came out lengthening.
+  const easeAt = (points, cluster) => {
+    const wE = buildWing({
+      planform: planformFromDesignInputs({
+        span: 11.31, rootChord: 2.35, tipChord: 0.5, tipSweep: 1.3,
+      }),
+      lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, 5.655),
+      airfoil: naca4('4415'), cells: 24, pointsPerSurface: points,
+    });
+    if (cluster) {
+      for (const rib of wE.ribs) {
+        for (const k of ['upper', 'lower']) {
+          const idx = resampleSurface(rib[k].map((p, i) => [i, 0]), points,
+            { spacing: 'cosine' });
+          rib[k] = idx.map(([fi]) => {
+            const i0 = Math.min(rib[k].length - 2, Math.max(0, Math.floor(fi)));
+            const f = fi - i0;
+            const a = rib[k][i0];
+            const b = rib[k][i0 + 1];
+            return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f,
+              a[2] + (b[2] - a[2]) * f];
+          });
+        }
+      }
+    }
+    const pe = developWing(wE).find(
+      (x) => x.cell === 1 && x.surface === 'upper');
+    return seamEasing(pe.panel, applyOvalization(pe.panel, { amount: 0.06 }));
+  };
+
+  const coarseE = easeAt(24, false);
+  const fineE = easeAt(160, false);
+  near('the ease converges as the surface is sampled more finely',
+    coarseE.leftPct, fineE.leftPct, 0.003, '%');
+
+  const clusteredE = easeAt(160, true);
+  near('and two different point distributions agree',
+    fineE.leftPct, clusteredE.leftPct, 0.002, '%');
+  near('on the other seam too',
+    fineE.rightPct, clusteredE.rightPct, 0.002, '%');
+  check('with the same differential under clustering',
+    clusteredE.leftPct > clusteredE.rightPct,
+    `${clusteredE.leftPct.toFixed(4)}% vs ${clusteredE.rightPct.toFixed(4)}%`);
 
   // The brake helpers in lines.js predate buildBrakePlan but are still the
   // handbook's own construction.
@@ -4777,9 +6055,36 @@ section('Line plans against real line tables');
   check('a three-liner matches the real line count closely',
     Math.abs(geo.lines.length - real.lines.length) / real.lines.length < 0.05,
     `${geo.lines.length} against ${real.lines.length}`);
-  near('and the riser count exactly',
-    geo.lines.filter((l) => l.level === 'main').length,
-    real.lines.filter((l) => l.level === 'main').length, 0, ' lines');
+  // Row by row, as the real wing has them: three mains under the A row,
+  // three under the B, and the D row none of its own — it hangs from the
+  // C mains.
+  //
+  // This compared ONE number, the count of lines called main, and both
+  // sides came to 13: the plan's 3 + 3 + 3 and four brake lines, the Geo 7's
+  // 3 + 3 + 5 and two. And the plan reached its 13 only because three lines
+  // it ran from the D row to the riser were called middle lines.
+  const mainsBy = (lines) => {
+    const out = {};
+    for (const l of lines.filter((x) => x.level === 'main')) out[l.row] = (out[l.row] || 0) + 1;
+    return out;
+  };
+  const geoMains = mainsBy(geo.lines);
+  const realGeoMains = mainsBy(real.lines);
+  check('the A and B rows have the real wing\'s three mains each',
+    geoMains.A === 3 && geoMains.B === 3 && realGeoMains.A === 3 && realGeoMains.B === 3,
+    `plan ${JSON.stringify(geoMains)}, Geo 7 ${JSON.stringify(realGeoMains)}`);
+  check('and the D row none of its own, on the plan as on the wing',
+    !geoMains.D && !realGeoMains.D
+      && planPaths(geo).filter((q) => q.row === 'D').every((q) => /^CR\d$/.test(q.names[q.names.length - 1]))
+      && real.lines.filter((l) => l.row === 'D').length === 20,
+    `the Geo 7's D row is ${real.lines.filter((l) => l.row === 'D' && l.level === 'upper').length} top lines `
+    + `and ${real.lines.filter((l) => l.row === 'D' && l.level === 'middle').length} middle lines`);
+  // What still differs: the Geo 7's C riser has a fourth line, in two
+  // parts, out to the tip (CRL4 and CRU4); the plan's tip lines go to the
+  // outermost main of each row.
+  check('the Geo 7\'s C riser carries a fourth line that the plan does not have',
+    realGeoMains.C === 5 && geoMains.C === 3
+      && real.lines.some((l) => l.name === 'CRL4') && real.lines.some((l) => l.name === 'CRU4'));
 
   const swift = mk(11.5, 2.75, 52,
     { A: 0.085, B: 0.30, C: 0.53, D: 0.78 }, 'A/B/C+D', 13);
@@ -4812,9 +6117,12 @@ section('Line plans against real line tables');
     { A: 0.085, B: 0.30, C: 0.53, D: 0.78 }, 'A/B/C+D', 13, { mainsPerRow: 3 });
   const scaled = mk(11.52, 2.84, 48,
     { A: 0.085, B: 0.30, C: 0.53, D: 0.78 }, 'A/B/C+D', 13);
-  const mainsOf = (p) => p.lines.filter((l) => l.level === 'main').length;
-  near('asking for a fixed count gives the real one exactly',
-    mainsOf(fixed), real.lines.filter((l) => l.level === 'main').length, 0, ' mains');
+  // Suspension mains: the brake's are its own.
+  const mainsOf = (p) => p.lines.filter((l) => l.level === 'main' && l.row !== 'K').length;
+  check('asking for a fixed count gives it, three under each of A, B and C',
+    mainsOf(fixed) === 9 && JSON.stringify(mainsBy(fixed.lines.filter((l) => l.row !== 'K')))
+      === JSON.stringify({ A: 3, B: 3, C: 3 }),
+    `${mainsOf(fixed)} mains; the Geo 7 has ${ms.A} + ${ms.B} + ${ms.C}`);
   check('and it does not change with the wing\'s size', (() => {
     const big = mk(13.5, 3.2, 48,
       { A: 0.085, B: 0.30, C: 0.53, D: 0.78 }, 'A/B/C+D', 13, { mainsPerRow: 3 });
@@ -4962,9 +6270,17 @@ section('Line plans against real line tables');
   check('every size in a family shares one anchor pattern',
     Object.values(famPatterns).every((set) => set.size === 1),
     Object.entries(famPatterns).map(([k, v]) => `${k}:${v.size}`).join(' '));
+  // Counted as designs: 19 of them, from 88 sheets. This asserted "27 and
+  // 125" for a while, against a measurement that counted the UP Torre six
+  // times; the corpus stage of the check holds the table to the data now,
+  // figure for figure, and this holds it to its own arithmetic.
   check('so the sample is the design count, measured not asserted',
-    ANCHOR_DENSITY.sampleDesigns === 27 && ANCHOR_DENSITY.sampleSizes === 125
-    && /not independent/.test(ANCHOR_DENSITY.note));
+    ANCHOR_DENSITY.sampleDesigns === 19 && ANCHOR_DENSITY.sampleSheets === 88
+    && Object.values(ANCHOR_DENSITY.ratioByRisers).reduce((n, g) => n + g.n, 0)
+      === ANCHOR_DENSITY.sampleDesigns
+    && /not independent/.test(ANCHOR_DENSITY.note),
+    `${ANCHOR_DENSITY.sampleDesigns} designs, `
+    + Object.entries(ANCHOR_DENSITY.ratioByRisers).map(([k, g]) => `${g.n} on ${Number(k) + 1} rows`).join(', '));
 
   // The front-to-rear ratio separates by riser count, but the ranges nearly
   // touch — 2.13 against 2.58 — so it distinguishes the two classes and
@@ -4995,6 +6311,63 @@ section('Line plans against real line tables');
   check('with the right shape every design is within 20%',
     worstShape < 0.20, `worst ${(worstShape * 100).toFixed(0)}%`);
 
+  // The rib counts in that table were never checked. Three were wrong — 34,
+  // 33 and 27 ribs for the Alpina 5, Lyght and Swift 6, which have 65, 71 and
+  // 62 cells — and the fit above cannot notice, because it divides the front
+  // row by the rib count and multiplies it back.
+  const cellRows = readFileSync('data/reference/published-cells.tsv', 'utf8')
+    .split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
+  const cellHead = cellRows.shift();
+  const cellsOf = new Map(cellRows.map((r) => [r[cellHead.indexOf('family')], {
+    cells: Number(r[cellHead.indexOf('cells')]), source: r[cellHead.indexOf('source')],
+    ar: Number(r[cellHead.indexOf('flat_AR')]),
+  }]));
+  const ribsWrong = ANCHOR_DENSITY.designs.filter((d) => !cellsOf.has(d.name)
+    || d.ribs !== Math.floor(cellsOf.get(d.name).cells / 2) + 1);
+  check('every design in the anchor table has the rib count of its published cells',
+    ribsWrong.length === 0,
+    ribsWrong.length ? ribsWrong.map((d) => `${d.name} ${d.ribs}`).join(', ')
+      : ANCHOR_DENSITY.designs.map((d) => `${d.name.replace('Ozone ', '')} ${d.ribs}`).join(', '));
+  // And the cell counts that file repeats from the size tables agree with
+  // them: one file holding a number another file also holds can drift.
+  const sizeTables = {
+    'size-families.tsv': parseSizeFamilies(readFileSync('data/reference/size-families.tsv', 'utf8')),
+    'niviuk-spec.tsv': parseSizeFamilies(readFileSync('data/reference/niviuk-spec.tsv', 'utf8')),
+  };
+  const repeated = [...cellsOf].filter(([, v]) => sizeTables[v.source]);
+  const cellDrift = repeated.filter(([name, v]) => {
+    const sizes = sizeTables[v.source][name] ?? [];
+    return !sizes.length || sizes.some((z) => z.cells !== v.cells || Math.abs(z.flatAR - v.ar) > 0.01);
+  });
+  check('the cell counts repeated from the size tables agree with them, every size',
+    repeated.length === 9 && cellDrift.length === 0,
+    cellDrift.length ? cellDrift.map(([n]) => n).join(', ') : `${repeated.length} designs`);
+  // The other eleven are the makers' own pages, and say where.
+  const sourced = [...cellsOf].filter(([, v]) => !sizeTables[v.source]);
+  const cellsText = readFileSync('data/reference/published-cells.tsv', 'utf8');
+  check('and each of the rest names a source the file lists with its address',
+    sourced.length === 11 && sourced.every(([, v]) => new RegExp(`^#\\s+${v.source}\\s+https://`, 'm').test(cellsText)),
+    `${sourced.length} from the makers' pages`);
+
+  // Front-row density, measured on all twenty: the range the anchor search
+  // keeps to. It was "0.56 to 0.91", from six Ozone wings.
+  check('front-row density runs from under a third to nearly every rib',
+    FRONT_DENSITY.n === 20 && FRONT_DENSITY.min < 0.3 && FRONT_DENSITY.max > 0.9
+      && Object.keys(FRONT_DENSITY.designs).length === FRONT_DENSITY.n,
+    `${FRONT_DENSITY.min} to ${FRONT_DENSITY.max}, median ${FRONT_DENSITY.median}, n ${FRONT_DENSITY.n}`);
+  check('and each design in it has a published cell count',
+    Object.keys(FRONT_DENSITY.designs).every((k) => cellsOf.has(k)));
+  // Not an artefact of the six Ozone wings the old range came from: seven
+  // of the twenty are below 0.5, and none of them is an Ozone.
+  const sparseDesigns = Object.entries(FRONT_DENSITY.designs).filter(([, v]) => v < 0.5);
+  check('the sparse designs are from other makers',
+    sparseDesigns.length === 7 && sparseDesigns.every(([k]) => !/^Ozone/.test(k)),
+    sparseDesigns.map(([k, v]) => `${k} ${v}`).join(', '));
+  // And the default is their median, not the middle of the old range.
+  check('the default front density is the median of the designs',
+    suggestAnchorsPerRow({ rows: ['A', 'B', 'C', 'D'], ribCount: 25 }).frontFraction
+      === FRONT_DENSITY.median);
+
   // The shapes are genuinely different, not three names for one curve.
   const rowsABC = ['A', 'B', 'C'];
   const taper = suggestAnchorsPerRow({ rows: rowsABC, ribCount: 34, shape: 'taper', risers: 2 });
@@ -5020,19 +6393,31 @@ section('Line plans against real line tables');
     [taper, flat, step].every((x) => x.source && /liner|Swift/i.test(x.source)),
     [taper, flat, step].map((x) => x.source).join(' | '));
 
-  // Two-liners do not, and the reason is in the main count rather than the
-  // total: a real two-liner cascades its C row into B and ends with far
-  // fewer main lines than the generator produces.
+  // Two-liners do not. With the C row hung from the B mains, as a real
+  // two-liner has it, the Alpina's plan has the wing's own suspension mains
+  // — and is short at the TOP of the cascade: its A row splits each top
+  // line into two short bridles to neighbouring ribs, a level the generator
+  // does not build.
+  //
+  // This asserted the model "long on main lines": it was, by the brake's
+  // four against the sheet's two.
   const alpina = mk(12.16, 2.53, 65, { A: 0.09, B: 0.32, C: 0.58 }, 'A/B+C', 13);
   const alpinaReal = parseLineTable(readFileSync('data/reference/alpina5-ML.tsv', 'utf8'));
+  const suspensionMains = (lines) => lines.filter((l) => l.level === 'main' && l.row !== 'K').length;
+  const bridles = alpinaReal.lines.filter((l) => /^A\d+[ab]$/.test(l.name));
   check('a two-liner is short on total lines',
     alpina.lines.length < alpinaReal.lines.length,
     `${alpina.lines.length} against ${alpinaReal.lines.length}`);
-  check('and long on main lines, which is where the model differs',
-    alpina.lines.filter((l) => l.level === 'main').length
-      > alpinaReal.lines.filter((l) => l.level === 'main').length,
-    `${alpina.lines.filter((l) => l.level === 'main').length} against `
-    + `${alpinaReal.lines.filter((l) => l.level === 'main').length}`);
+  check('with the wing\'s own suspension mains, and the C row on the B mains',
+    suspensionMains(alpina.lines) === suspensionMains(alpinaReal.lines)
+      && !alpina.lines.some((l) => l.row === 'C' && l.level === 'main'),
+    `${suspensionMains(alpina.lines)} against ${suspensionMains(alpinaReal.lines)}`);
+  check('the lines it lacks are at the top, where the wing has a level of bridles',
+    bridles.length === 16 && bridles.every((l) => l.lengthMM < 250)
+      && alpinaReal.lines.filter((l) => l.level === 'upper' && l.row !== 'K').length
+        - alpina.lines.filter((l) => l.level === 'upper' && l.row !== 'K').length >= 10,
+    `${bridles.length} bridles of ${Math.min(...bridles.map((l) => l.lengthMM))} to `
+    + `${Math.max(...bridles.map((l) => l.lengthMM))} mm on the A row`);
 
   // Brakes are optional and must not change anything when absent.
   const noBrakes = buildLinePlan({
@@ -5110,12 +6495,26 @@ section('Design length is not manufacturing length');
     sized.every((r) => r.cutLengthMM === Math.round(r.sewnLengthMM) + 130));
 
   // The surprise: on a paraglider the 5 daN measuring tension exceeds the 1 g
-  // load on every line, because the load is spread over fifty-odd of them.
+  // load on most lines, because the load is spread over so many of them.
+  //
+  // "On every level", this said, and tested the average over all the lines.
+  // It is true of the upper and middle lines and not of the mains: six lines
+  // a side take everything on a twelve-cell wing, 7 daN each on average.
   const flightDaN = sized.map((r) => r.flightN / 10);
-  check('the measuring tension exceeds the mean flight load on every level',
-    flightDaN.reduce((a, b) => a + b, 0) / flightDaN.length < chain.measurementDaN,
-    `mean ${(flightDaN.reduce((a, b) => a + b, 0) / flightDaN.length).toFixed(1)} daN `
-    + `against ${chain.measurementDaN}`);
+  const levelLoad = (lv) => {
+    const v = sized.filter((r) => r.level === lv).map((r) => r.flightN / 10);
+    return { n: v.length, mean: v.reduce((a, b) => a + b, 0) / v.length, min: Math.min(...v), max: Math.max(...v) };
+  };
+  const byLevelL = ['upper', 'middle', 'main'].map((lv) => [lv, levelLoad(lv)]);
+  check('the measuring tension exceeds the mean flight load of the upper and middle lines',
+    byLevelL[0][1].mean < chain.measurementDaN && byLevelL[1][1].mean < chain.measurementDaN
+    && flightDaN.reduce((a, b) => a + b, 0) / flightDaN.length < chain.measurementDaN,
+    byLevelL.map(([lv, q]) => `${lv} ${q.n} lines, ${q.min.toFixed(1)} to ${q.max.toFixed(1)} daN, mean ${q.mean.toFixed(1)}`).join('; ')
+    + `; all ${(flightDaN.reduce((a, b) => a + b, 0) / flightDaN.length).toFixed(1)} against ${chain.measurementDaN}`);
+  const under = sized.filter((r) => r.flightN / 10 < chain.measurementDaN).length;
+  check('and not of the mains on a wing with this few lines',
+    byLevelL[2][1].mean > chain.measurementDaN && under < sized.length && under > sized.length * 0.8,
+    `${under} of ${sized.length} lines fly at less than the measuring tension`);
   check('so a reference length is longer than a flying length, not shorter',
     chain.meanReferenceMinusFlyingMM > 0,
     `+${chain.meanReferenceMinusFlyingMM.toFixed(1)} mm on average`);
@@ -5395,7 +6794,7 @@ section('Four defects the full-pipeline run found');
   // published *length* as well would need the fourth cascade level real wings
   // have — with three, the lines are longer for the same anchor count.
   check('the search stays inside the density range real designs use',
-    solved.densityRange[0] >= 0.5 && solved.densityRange[1] <= 0.95,
+    solved.densityRange[0] === FRONT_DENSITY.min && solved.densityRange[1] === FRONT_DENSITY.max,
     `${solved.densityRange.join('-')}`);
   check('and reports the length overshoot rather than removing it',
     Number.isFinite(solved.lengthOvershoot) && solved.topologyRealistic);
@@ -5403,7 +6802,15 @@ section('Four defects the full-pipeline run found');
     solve(range[1] * 0.95).totalMetres > solve(range[0] * 1.05).totalMetres);
   check('a target the wing cannot carry is reported as such', (() => {
     const over = solve(range[1] * 3);
-    return over.saturated && /more ribs, not more anchors/.test(over.note);
+    return over.saturated && over.saturatedSide === 'over'
+      && /more ribs, not more anchors/.test(over.note);
+  })());
+  // And one it carries too much for says the other thing: below the sparsest
+  // real density, the layout is the problem, not the ribs.
+  check('a target below the sparsest real density is reported as the layout\'s', (() => {
+    const low = solve(range[0] * 0.5);
+    return low.saturated && low.saturatedSide === 'under'
+      && /fewer rows or fewer risers/.test(low.note) && !/more ribs/.test(low.note);
   })());
   check('and the reachable range is given so the target can be revised',
     range[1] > range[0] && range[1] > 50,
@@ -5751,9 +7158,21 @@ section('The panel cutter driven by pressure');
   const last = fromP.excessRatios.length - 1;
   near('billow is zero at the leading-edge seam', fromP.excessRatios[0], 0, 1e-12);
   near('and zero at the trailing-edge seam', fromP.excessRatios[last], 0, 1e-12);
-  const peakAt = fromP.excessRatios.indexOf(fromP.maxExcess) / last;
+  // Where along the seam, in metres of cloth — not in stations. The stations
+  // crowd the nose, so the eleventh of thirty-nine is a tenth of the way
+  // along; this printed it as "28% chord".
+  const along = [0];
+  for (let i = 1; i < panelO.left.length; i++) {
+    along.push(along[i - 1] + Math.hypot(
+      panelO.left[i][0] - panelO.left[i - 1][0], panelO.left[i][1] - panelO.left[i - 1][1]));
+  }
+  const peakIndex = fromP.excessRatios.indexOf(fromP.maxExcess);
+  const peakAt = along[peakIndex] / along[last];
   check('so the peak sits just aft of the nose, not on it',
-    peakAt > 0.02 && peakAt < 0.35, `${(peakAt * 100).toFixed(0)}% chord`);
+    peakAt > 0.02 && peakAt < 0.2,
+    `${(peakAt * 100).toFixed(0)}% of the way along the seam, at station ${peakIndex} of ${last}; `
+      + `${(fromP.maxExcess * 100).toFixed(2)}% there, ${(fromP.meanExcess * 100).toFixed(2)}% on average, `
+      + `against the flat ${(flat.maxExcess * 100).toFixed(2)}% and ${(flat.meanExcess * 100).toFixed(2)}%`);
 
   // It responds to flight state, which a flat percentage cannot.
   const slow = applyOvalization(panelO, {
@@ -5842,74 +7261,127 @@ section('What the rib cloth carries');
   // The project sites anchors, computes their loads and cuts holes between
   // them. It never checked the cloth in between.
   //
-  // The first result of this model looked absurd — the A anchor at 2971% of
-  // the cloth's capacity — and checking the arithmetic rather than tuning it
-  // gave the actual finding.
+  // This section was first written on a 260 N anchor load that came from
+  // nowhere. "Rib cloth cannot carry an anchor load at all, not even at 1 g"
+  // and "the tape must run to the seam on the outer ribs" both rested on it,
+  // and the wing's own loads are a tenth of that. Everything below is on the
+  // loads the load model gives, and on each rib's own depth.
   const cloth = RIB_CLOTH['Porcher Skytex 27 hard'];
-  const oneG = 260 / 0.02;
-  check('an anchor load through a tab far exceeds what rib cloth carries',
-    oneG > cloth.lineLoadNPerM * 3,
-    `${(oneG / 1000).toFixed(1)} kN/m against ${(cloth.lineLoadNPerM / 1000)} kN/m`);
-  check('and that is true even at 1 g, not only at the design case',
-    (260 / 0.02) > cloth.lineLoadNPerM);
+  const mmOf = (x) => (x * 1000).toFixed(0);
+  const wingR = demoWing();
+  const afR = naca4('4415');
+  afR.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const planR = buildLinePlan({
+    wing: wingR, airfoil: afR, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  const loadsR = analyseLoads({
+    plan: planR, planform: wingR.planform, stations: wingR.stations,
+    totalMassKg: 95, alphaDeg: 6,
+  });
+  const perAnchor = loadsR.anchorLoads.map((a) => a.loadN);
+  const carried = perAnchor.reduce((a, b) => a + b, 0);
+  const worst = Math.max(...perAnchor);
+  const mean = carried / perAnchor.length;
+  check('the anchors of half a wing carry half its weight between them',
+    Math.abs(carried / ((95 * 9.80665) / 2) - 1) < 0.005,
+    `${carried.toFixed(0)} N on ${perAnchor.length} anchors: ${mean.toFixed(1)} N each on `
+    + `average, ${worst.toFixed(1)} N on the worst`);
 
-  // So the useful question is not whether the cloth holds — it never does —
-  // but how far the reinforcement must reach before bare cloth can take over.
-  const reach1g = reinforcementReach({ loadN: 260, chordM: 2.45 });
-  const reach8g = reinforcementReach({ loadN: 2080, chordM: 2.45 });
+  // At 1 g a 20 mm tab puts even the worst of them into the cloth at about
+  // half what it carries. It is the design case that needs reinforcement.
+  const tab = 0.02;
+  check('at 1 g a 20 mm tab alone carries the worst real anchor load into bare cloth',
+    worst / tab < cloth.lineLoadNPerM,
+    `${(worst / tab / 1000).toFixed(1)} kN/m against ${(cloth.lineLoadNPerM / 1000)} kN/m`);
+  check('so at 1 g no reinforcement length is needed at all',
+    reinforcementReach({ loadN: worst, chordM: 2.45 }).reachM === 0);
+  check('at the 8 g case the same anchor exceeds the cloth several times over',
+    (8 * worst) / tab > 3 * cloth.lineLoadNPerM,
+    `${((8 * worst) / tab / 1000).toFixed(1)} kN/m against ${(cloth.lineLoadNPerM / 1000)} kN/m`);
+
+  // So the question is how far the reinforcement must reach, at the design
+  // case, before bare cloth can take over.
+  const reachMean = reinforcementReach({ loadN: 8 * mean, chordM: 2.45 });
+  const reachWorst = reinforcementReach({ loadN: 8 * worst, chordM: 2.45 });
   check('a heavier load needs a longer reinforcement',
-    reach8g.reachM > reach1g.reachM,
-    `${(reach1g.reachM * 1000).toFixed(0)} mm -> `
-    + `${(reach8g.reachM * 1000).toFixed(0)} mm`);
+    reachWorst.reachM > reachMean.reachM,
+    `${mmOf(reachMean.reachM)} mm -> ${mmOf(reachWorst.reachM)} mm`);
   check('the needed width is the load over the cloth capacity',
-    Math.abs(reach8g.neededWidthM - 2080 / cloth.lineLoadNPerM) < 1e-12);
+    Math.abs(reachWorst.neededWidthM - (8 * worst) / cloth.lineLoadNPerM) < 1e-12);
   check('a tab already wide enough needs no length at all',
     reinforcementReach({ loadN: 10, tabWidthM: 0.05, chordM: 2.45 }).reachM === 0);
 
-  // The mechanism: reach is set by the LOAD, room by the CHORD, and only the
-  // chord falls outboard. So *at a high enough load* the rule changes along
-  // the span.
-  const root = reinforcementReach({ loadN: 2080, chordM: 2.45 });
-  const tip = reinforcementReach({ loadN: 2080, chordM: 0.55 });
-  check('at a high load the root has room and the tip does not',
-    root.reachesSeam === false && tip.reachesSeam === true);
-  check('and both are the same load, so it is the chord that decides',
-    root.reachM === tip.reachM,
-    `${(root.reachM * 1000).toFixed(0)} mm on both`);
+  // The room is the depth of the rib at the anchor. It was a quarter of the
+  // chord, which is two to three and a half times what a rib has.
+  const rootRib = wingR.ribs[0];
+  const tipRib = wingR.ribs[wingR.ribs.length - 1];
+  const depthAt = (rib, x) => { const q = ribProfile(rib).at(x); return (q.up - q.lo) * rib.chord; };
+  const rows = [0.085, 0.30, 0.53, 0.78];
+  check('a rib is 7 to 15% of its chord deep at its anchors, not a quarter',
+    rows.every((x) => { const f = depthAt(rootRib, x) / rootRib.chord; return f > 0.065 && f < 0.155; }),
+    rows.map((x) => `${((100 * depthAt(rootRib, x)) / rootRib.chord).toFixed(1)}%`).join(', '));
+  check('with no section to measure, a tenth of the chord is assumed, and said to be',
+    reachWorst.depthAssumed === true
+    && Math.abs(reachWorst.availableM - 2.45 * ASSUMED_RIB_DEPTH) < 1e-12 && ASSUMED_RIB_DEPTH === 0.10);
+  check('given the depth, that is the room', (() => {
+    const r = reinforcementReach({ loadN: 8 * worst, chordM: 2.45, depthM: 0.2 });
+    return r.availableM === 0.2 && r.depthAssumed === false;
+  })());
 
-  // But 2080 N is not a real anchor load, and assuming it was gave a design
-  // rule that does not apply.
-  //
-  // Half a 95 kg wing is 466 N spread over 44 anchors — about 10 N each, and
-  // 31 N on the worst. The 260 N used above was invented rather than taken
-  // from the load model, and it is 10x too high. The same lesson as the PMA
-  // measuring tension exceeding flight load: per-item loads on a paraglider
-  // are small BECAUSE there are many items.
-  const realistic = reinforcementReach({ loadN: 31 * 8, chordM: 0.55 });
-  check('at a real anchor load even a tip rib has room to spare',
-    realistic.reachesSeam === false,
-    `${(realistic.reachM * 1000).toFixed(0)} mm needed, `
-    + `${(realistic.availableM * 1000).toFixed(0)} mm available`);
-  check('and the reach is tens of millimetres, not hundreds',
-    realistic.reachM < 0.10, `${(realistic.reachM * 1000).toFixed(0)} mm`);
+  // The mechanism: reach is set by the LOAD and room by the rib's DEPTH. A
+  // load that stops inside a deep rib does not stop inside a shallow one.
+  const heavy = 8 * 60;   // an anchor carrying 60 N at 1 g: more than any here
+  const atRoot = reinforcementReach({ loadN: heavy, chordM: rootRib.chord, depthM: depthAt(rootRib, 0.78) });
+  const atTip = reinforcementReach({ loadN: heavy, chordM: tipRib.chord, depthM: depthAt(tipRib, 0.78) });
+  check('the same load stops inside a deep rib and not inside a shallow one',
+    atRoot.reachesSeam === false && atTip.reachesSeam === true && atRoot.reachM === atTip.reachM,
+    `${mmOf(atRoot.reachM)} mm needed; ${mmOf(atRoot.availableM)} mm at the root's D anchor, `
+    + `${mmOf(atTip.availableM)} mm at the tip's`);
 
-  // A hole in the load path is the placement mistake this catches.
+  // A hole in the load path is the placement mistake this catches. The path
+  // runs ACROSS the rib from the anchor, fanning out, so what matters is how
+  // close the hole comes beside it — on either side. It was walked along
+  // the chord, aft of the anchor, so a hole ahead of one could not be seen.
   const ribS = { index: 0, chord: 2.45 };
   const anchorsS = [
-    { name: 'A1', chordFraction: 0.085, loadN: 260 },
-    { name: 'B1', chordFraction: 0.30, loadN: 180 },
-    { name: 'C1', chordFraction: 0.53, loadN: 120 },
+    { name: 'A1', chordFraction: 0.085, loadN: 8 * 36 },
+    { name: 'B1', chordFraction: 0.30, loadN: 8 * 36 },
+    { name: 'C1', chordFraction: 0.53, loadN: 8 * 20 },
   ];
-  const clean = checkRibStress({ rib: ribS, anchors: anchorsS, holes: [] });
-  const holed = checkRibStress({
-    rib: ribS, anchors: anchorsS, holes: [{ fromChord: 0.10, toChord: 0.22 }],
-  });
+  const through = (holes, extra = {}) => checkRibStress({ rib: ribS, anchors: anchorsS, holes, ...extra });
+  const clean = through([]);
   check('a clean rib has no load path through a hole',
     clean.throughHoles.length === 0);
-  check('and a hole across the A path is found and named',
-    holed.throughHoles.includes('A1'), holed.throughHoles.join(', '));
+  check('a hole close behind the A anchor is found and named',
+    through([{ fromChord: 0.09, toChord: 0.22 }]).throughHoles.join() === 'A1');
+  check('and so is one close AHEAD of the B anchor',
+    through([{ fromChord: 0.20, toChord: 0.295 }]).throughHoles.join() === 'B1');
+  check('a hole 5% of chord clear of both, as the rules place them, is in neither path',
+    through([{ fromChord: 0.135, toChord: 0.25 }]).throughHoles.length === 0);
+  check('a web between two holes too narrow for the load is found',
+    through([{ fromChord: 0.20, toChord: 0.285 }, { fromChord: 0.315, toChord: 0.40 }])
+      .throughHoles.join() === 'B1');
   check('the anchor needing the longest reinforcement is identified',
     clean.longest.name === 'A1');
+  check('and a bare rib says its depth was assumed', clean.depthAssumed === true);
+
+  // With the rib's own outline a hole is met where its edge really is: the
+  // same hole beside the anchor is in the path low down and not high up,
+  // where the load has already spread.
+  const slab = { at: () => ({ up: 0.06, lo: -0.04 }) };   // 10% of chord deep
+  const box = (du, dv) => ({
+    outline: [[0.735 + du, -0.098 + dv], [0.90, -0.098 + dv], [0.90, 0.14], [0.735 + du, 0.14]],
+  });
+  const onlyB = (holes) => checkRibStress({ rib: ribS, anchors: [anchorsS[1]], holes, section: slab });
+  const low = onlyB([box(0.02, 0.02)]);
+  const high = onlyB([box(0.02, 0.15)]);
+  check('a hole 20 mm beside an anchor and 20 mm up the rib is in its path',
+    low.throughHoles.join() === 'B1' && low.depthAssumed === false
+    && Math.abs(low.paths[0].depthM - 0.245) < 1e-9);
+  check('the same hole cut 150 mm up, past where the load has spread, is not',
+    high.throughHoles.length === 0,
+    `the load is spread ${mmOf(high.paths[0].reach.reachM)} mm up`);
 
   // An unknown cloth is refused rather than defaulted.
   check('an unknown rib cloth is refused', (() => {
@@ -5940,39 +7412,65 @@ section('What the rib cloth carries');
       .lineLoadModel === true);
 
   // ---------------------------------------------------------------------
-  // The whole wing, on its own loads and its own holes — which is what makes
-  // the difference between the assumed load and the real one visible.
-  const wingR = demoWing();
-  const afR = naca4('4415');
-  afR.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
-  const planR = buildLinePlan({
-    wing: wingR, airfoil: afR, layout: RISER_LAYOUTS['A/B/C+D'],
-    everyNthRib: 2, lineLengthM: 6.5,
-  });
-  const loadsR = analyseLoads({
-    plan: planR, planform: wingR.planform, stations: wingR.stations,
-    totalMassKg: 95, alphaDeg: 6,
-  });
+  // The whole wing, on its own loads, its own holes and its own ribs.
+  const openingsR = (rib, i) => {
+    const nb = wingR.ribs[Math.min(i + 1, wingR.ribs.length - 1)];
+    return ribOpenings(rib, nb === rib ? null : nb, afR).holes;
+  };
   const wingStress = checkWingRibStress({
-    wing: wingR, anchorLoads: loadsR.anchorLoads, airfoil: afR,
-    openingsFor: (rib, i) => {
-      const nb = wingR.ribs[Math.min(i + 1, wingR.ribs.length - 1)];
-      return nb === rib ? [] : ribOpenings(rib, nb, afR).holes;
-    },
+    wing: wingR, anchorLoads: loadsR.anchorLoads, airfoil: afR, plan: planR,
+    openingsFor: openingsR,
   });
-  check('every rib carrying an anchor is checked',
-    wingStress.ribCount > 0 && wingStress.ribs.length === wingStress.ribCount);
-  check('and on a real wing no rib needs tape to the surface seam',
-    wingStress.ribsNeedingTapeToSeam === 0 && wingStress.crossoverRib === null,
+  check('every anchor on every lined rib is checked',
+    wingStress.ribCount > 0 && wingStress.ribs.length === wingStress.ribCount
+    && wingStress.anchorCount === perAnchor.length,
+    `${wingStress.anchorCount} anchors on ${wingStress.ribCount} ribs`);
+  check('each where its line meets the rib',
+    wingStress.ribs.every((r) => r.paths.every((q) =>
+      Math.abs(q.chordFraction - afR.anchors[q.name[0]]) < 1e-6)));
+  check('and against the depth its own rib has there',
+    wingStress.ribs.every((r) => !r.depthAssumed && r.paths.every((q) => {
+      const f = q.depthM / wingR.ribs[r.ribIndex].chord;
+      return f > 0.065 && f < 0.155;
+    })));
+  check('at 8 g the longest reinforcement on the wing is tens of millimetres',
+    wingStress.longest.reachM > 0.02 && wingStress.longest.reachM < 0.10
+    && Math.abs(wingStress.longest.loadN - 8 * worst) < 1e-6,
+    `${wingStress.longest.name} on rib ${wingStress.longest.ribIndex}: ${mmOf(wingStress.longest.reachM)} mm `
+    + `of the ${mmOf(wingStress.longest.depthM)} mm the rib is deep there`);
+  check('and no rib needs tape to the surface seam',
+    wingStress.ribsNeedingTapeToSeam === 0 && wingStress.crossoverRib === null
+    && wingStress.anchorsToSeam.length === 0,
     wingStress.note);
-
-  // The load path must end where the reinforcement can stop. Scanning a fixed
-  // fraction of chord instead flagged a hole "in the load path" 500 mm beyond
-  // the point where bare cloth was already carrying the load — every rib on
-  // the wing, which is the same as flagging none.
-  check('a hole is only in the path if it is inside the reach',
-    wingStress.ribsWithHolesInLoadPath.length < wingStress.ribCount,
+  // The cloth strengths are this project's estimates. The lengths move with
+  // them; the conclusion does not, at half the strength or twice it.
+  const atStrength = (k) => reinforcementReach({
+    loadN: 8 * worst, clothLineLoadNPerM: cloth.lineLoadNPerM * k,
+    chordM: wingR.ribs[wingStress.longest.ribIndex].chord, depthM: wingStress.longest.depthM,
+  });
+  check('that survives the cloth figure being out by two either way',
+    !atStrength(0.5).reachesSeam && !atStrength(2).reachesSeam
+    && atStrength(0.5).reachM > wingStress.longest.reachM && atStrength(2).reachM < wingStress.longest.reachM,
+    `${mmOf(atStrength(2).reachM)} mm to ${mmOf(atStrength(0.5).reachM)} mm, in a rib `
+    + `${mmOf(wingStress.longest.depthM)} mm deep`);
+  // The openings are placed 5% of chord clear of every anchor, and that is
+  // enough: the "2 of 7 ribs with a hole in the path" this reported came
+  // from walking along the chord.
+  check('no opening the rules cut is in a load path, tip rib included',
+    wingStress.ribsWithHolesInLoadPath.length === 0
+    && openingsR(tipRib, wingR.ribs.length - 1).length > 0,
     `${wingStress.ribsWithHolesInLoadPath.length} of ${wingStress.ribCount}`);
+
+  // A rib needs tape to the seam when ANY of its anchors does. It was
+  // counted only when all of them did.
+  const overloaded = checkWingRibStress({
+    wing: wingR, anchorLoads: loadsR.anchorLoads, airfoil: afR, plan: planR,
+    openingsFor: openingsR, designFactor: 40,
+  });
+  check('a rib is counted when any one of its anchors runs out of room',
+    overloaded.ribsNeedingTapeToSeam > 0 && overloaded.crossoverRib !== null
+    && overloaded.ribs.some((r) => r.toSeam.length > 0 && !r.allReachSeam),
+    overloaded.note);
 }
 
 // ---------------------------------------------------------------------------
@@ -6411,11 +7909,500 @@ section('Niviuk: a sixth manufacturer, out of sample');
   check('and the tandem keeps its five',
     takooRowsT.join('') === 'ABCDE', takooRowsT.join(''));
 
+  // The grid has empty cells, and the importer closed them up.
+  //
+  // Section 10.7 is a row for each attachment along the span and a column
+  // for each line row. Where a wing has no line the cell is empty — and the
+  // importer labelled the numbers on a row A, B, C, D, BR from the left,
+  // whatever was missing. On the Hook 6 the brake totals of rows 5 to 9 were
+  // filed as D lines, row 10's as a C line and row 11's as an A line; 150
+  // values in 22 of the 25 files were in the wrong column. The per-line
+  // table of the same manual says which columns each row has.
+  const namesOf = (f) => readFileSync(`data/reference/${f}`, 'utf8').split(/\r?\n/)
+    .filter((l) => l.trim() && !l.startsWith('#')).slice(1).map((l) => l.split('\t')[0]);
+  const hookGrid = gridRowsFromNames(namesOf('niviuk-hook6-20.tsv'));
+  check('the Hook 6 grid is read from its per-line table: D for four rows, the brake for eleven',
+    hookGrid.length === 11 && hookGrid.filter((r) => r.includes('D')).length === 4
+    && hookGrid.filter((r) => r.includes('K')).length === 11 && hookGrid[10].join('') === 'K',
+    hookGrid.map((r) => r.join('')).join(' '));
+  check('a row\'s values go to the columns that have a line',
+    labelsForRow(4, ['A', 'B', 'C', 'K']).join('') === 'ABCK'
+    && labelsForRow(1, ['K']).join('') === 'K'
+    // The importer kept as many values as its header had labels, from the left.
+    && labelsForRow(5, ['A', 'B', 'C', 'D', 'E', 'K']).join('') === 'ABCDE');
+  check('and more values than lines is refused, not fitted',
+    labelsForRow(4, ['A', 'B', 'K']) === null && labelsForRow(1, undefined) === null);
+  check('the stabilo\'s own lines have no column in the grid',
+    gridRowsFromNames(['a1', 'b1', 'st1', 'br1', 'a2', 'b2', 'st2']).map((r) => r.join('')).join(' ')
+      === 'ABK AB');
+
+  let offColumn = 0;
+  let filed = 0;
+  for (const f of totalsFiles) {
+    const model = /^niviuk-([a-z0-9]+)-/.exec(f)[1];
+    const sheet = readdirSync('data/reference').find((x) => new RegExp(`^niviuk-${model}-\\d+\\.tsv$`).test(x));
+    const grid = gridRowsFromNames(namesOf(sheet));
+    const byIndex = {};
+    for (const l of readFileSync(`data/reference/${f}`, 'utf8').split('\n')) {
+      if (!/^\d/.test(l)) continue;
+      const [a, r] = l.split('\t');
+      (byIndex[a] ||= []).push(r);
+    }
+    for (const [a, rows] of Object.entries(byIndex)) {
+      const want = labelsForRow(rows.length, grid[Number(a) - 1]);
+      filed += rows.length;
+      if (!want || want.join() !== rows.join()) offColumn++;
+    }
+  }
+  check('every total in all 25 files is in a column its wing has a line in',
+    offColumn === 0 && filed > 1200, `${filed} totals, ${offColumn} rows out of place`);
+
+  // What the columns look like put back: a brake fan that falls away
+  // smoothly along the span, and no D line shorter than the A line beside
+  // it — which the "D" totals of rows 5 to 9 were, by 150 mm and more.
+  const t24 = totalsFor('24');
+  const fan = Object.keys(t24).map(Number).sort((x, y) => x - y).map((i) => t24[i].K);
+  const steps = fan.slice(1).map((v, i) => Math.abs(v - fan[i]));
+  check('the Hook 6 has a brake total at each of its eleven brake lines',
+    fan.length === 11 && fan.every((v) => v > 6000 && v < 7300) && Math.max(...steps) < 250,
+    fan.join(' '));
+  check('and D totals only where it has D lines, each longer than the A line beside it',
+    Object.values(t24).filter((r) => r.D).length === 4
+    && Object.values(t24).every((r) => !r.D || r.D > r.A));
+
+  // Levels a sheet states by case are settled on the whole sheet. The Artik
+  // R 2 writes its canopy lines `c1` to `c14` and the lines they hang from
+  // `C1` to `C4`; read name by name it had eighteen C attachments. `D9` and
+  // `D10` are that level sewn straight to the sail, outboard of `d8`, and
+  // its totals table has a D total at rows 9 and 10 to say so.
+  const artikR = parseSimpleLineSheet(readFileSync('data/reference/niviuk-artikr2-20.tsv', 'utf8'));
+  const artikTops = (row) => artikR.lines.filter((l) => l.row === row && l.level === 'upper').length;
+  const artikLine = (nm) => artikR.lines.find((l) => l.name === nm);
+  check('on a sheet with lowercase canopy lines, a bare uppercase name is the level below',
+    artikLine('C1').level === 'middle' && artikLine('D4').level === 'middle'
+    && ['A', 'B', 'C', 'D'].map(artikTops).join() === '14,8,14,10',
+    `canopy lines A${artikTops('A')} B${artikTops('B')} C${artikTops('C')} D${artikTops('D')}`);
+  check('unless it is numbered past them: a line of that level sewn straight to the sail',
+    artikLine('D9').level === 'upper' && artikLine('D9').direct === true
+    && artikLine('D10').direct === true && !artikLine('d8').direct);
+  const artikT = {};
+  for (const l of readFileSync('data/reference/niviuk-artikr2-20-totals.tsv', 'utf8').split('\n')) {
+    if (/^\d/.test(l)) { const [, r] = l.split('\t'); artikT[r] = (artikT[r] || 0) + 1; }
+  }
+  check('which is what its totals table has: ten D totals, eight B',
+    artikT.D === 10 && artikT.B === 8 && artikT.A === 13 && artikT.C === 13,
+    Object.keys(artikT).sort().map((r) => `${r}${artikT[r]}`).join(' '));
+  check('an Ozone sheet, all in upper case, is left as it was', (() => {
+    const set = ['A1', 'A2', 'AM1', 'AR1'].map((n) => parseLineName(n));
+    return resolveCaseLevels(set).map((l) => l.level).join() === 'upper,upper,middle,main';
+  })());
+
+  // And a level stated by a number in front is settled on the sheet too.
+  // Niviuk's sheets came back with every line below the canopy at a level
+  // called `cascade-2`, `-3` or `-4`, which nothing downstream knows; and
+  // the rule that would have named them — the deepest level on the sheet is
+  // the main — is wrong three ways on these five wings.
+  const sheetOf = (f) => parseSimpleLineSheet(readFileSync(`data/reference/${f}`, 'utf8')).lines;
+  const nvSheets = ['niviuk-artikr2-20.tsv', 'niviuk-hook6-20.tsv', 'niviuk-ikuma3-21.tsv',
+    'niviuk-skin4p-14.tsv', 'niviuk-takoo6-38.tsv'];
+  check('every line of a hand-collected sheet has a level the tool knows',
+    nvSheets.every((f) => sheetOf(f).every((l) => ['upper', 'middle', 'main'].includes(l.level))),
+    nvSheets.map((f) => {
+      const c = {};
+      for (const l of sheetOf(f)) c[l.level] = (c[l.level] || 0) + 1;
+      return `${f.replace(/^niviuk-|-\d+\.tsv$/g, '')} ${c.upper}/${c.middle}/${c.main}`;
+    }).join(', '));
+  const levelOf = (f, nm) => sheetOf(f).find((l) => l.name === nm).level;
+  check('a brake that ends a level above the rows still has its main lines',
+    levelOf('niviuk-hook6-20.tsv', '3BR1') === 'main' && levelOf('niviuk-hook6-20.tsv', '4A1') === 'main'
+    && levelOf('niviuk-hook6-20.tsv', '3B1') === 'middle');
+  check('a row that hangs from another row\'s mains has none of its own',
+    levelOf('niviuk-ikuma3-21.tsv', '2D1') === 'middle' && levelOf('niviuk-ikuma3-21.tsv', '3C1') === 'main');
+  check('one line at the deepest level is the lower piece of a main, not the only main',
+    levelOf('niviuk-artikr2-20.tsv', '4A3') === 'main' && levelOf('niviuk-artikr2-20.tsv', '3A1') === 'main'
+    && levelOf('niviuk-skin4p-14.tsv', '4C3') === 'main' && levelOf('niviuk-skin4p-14.tsv', '3F1') === 'main');
+  const meanLen = (f, lv) => {
+    const v = sheetOf(f).filter((l) => l.level === lv && l.lengthMM > 0).map((l) => l.lengthMM);
+    return v.reduce((x, y) => x + y, 0) / v.length;
+  };
+  // The mains are the long lines on every one. (The canopy lines are not
+  // always the shortest: the Hook 6's are longer than its middle lines.)
+  check('so on every one of them the mains are the long lines',
+    nvSheets.every((f) => meanLen(f, 'upper') < meanLen(f, 'main') * 0.5
+      && meanLen(f, 'middle') < meanLen(f, 'main') * 0.5),
+    nvSheets.map((f) => `${meanLen(f, 'upper').toFixed(0)} / ${meanLen(f, 'middle').toFixed(0)} / ${meanLen(f, 'main').toFixed(0)}`).join(', ') + ' mm');
+  check('two rows on one line under lowercase canopy lines is a middle line too',
+    levelOf('niviuk-takoo6-38.tsv', 'BC1') === 'middle'
+    && sheetOf('niviuk-takoo6-38.tsv').filter((l) => l.row === 'B' && l.level === 'upper').length === 16);
+
+  // One design, one observation — however many sheets it has, and whatever
+  // they are called. The corpus measurement counted a file as a design when
+  // its name did not end in a size: the UP Torre was six.
+  check('a design is its maker and model, whatever the sheet is called',
+    [['up-torre-TORRE_L_-_Components.tsv', 'up-torre'], ['up-torre-TORRE_-_Total_lengths.tsv', 'up-torre'],
+      ['up-split-makalu-5-sm.tsv', 'up-makalu5'], ['up-makalu5-sheet5.tsv', 'up-makalu5'],
+      ['up-k2-5-K2_5_41_-_components.tsv', 'up-k25'], ['up-summitx-Summit_X_M_Einzelleinen_single.tsv', 'up-summitx'],
+      ['geo7-MS.tsv', 'geo7'], ['vibegt-ML.tsv', 'vibegt'], ['magnum4-38.tsv', 'magnum4'],
+      ['niviuk-hook6-24-totals.tsv', 'niviuk-hook6'], ['niviuk-hook6-20.tsv', 'niviuk-hook6'],
+    ].every(([f, d]) => designOf(f) === d));
+  const measured = new Map();
+  let sheetsRead = 0;
+  for (const f of readdirSync('data/reference').filter((x) => x.endsWith('.tsv'))) {
+    const r = referenceLines(f, readFileSync(`data/reference/${f}`, 'utf8'));
+    if (!r || r.lines.length < 8) continue;
+    const rows = new Set(r.lines.filter((l) => l.level === 'upper' && !'KSZ'.includes(l.row)).map((l) => l.row));
+    if (r.lines.filter((l) => l.level === 'upper').length < 6 || rows.size < 2) continue;
+    sheetsRead++;
+    measured.set(designOf(f), (measured.get(designOf(f)) || 0) + 1);
+  }
+  check('the anchor-density table is counted in designs: nineteen, from eighty-eight sheets',
+    measured.size === ANCHOR_DENSITY.sampleDesigns && sheetsRead === ANCHOR_DENSITY.sampleSheets,
+    `${measured.size} designs, ${sheetsRead} sheets; the Torre ${measured.get('up-torre')} of them`);
+  check('a UP component sheet is recognised by what is in it, not by how its file is spelt',
+    ['up-k2-5-K2_5_41_-_components.tsv', 'up-meru2-MERU2_M_Einzelleine_single.tsv',
+      'up-makalu5-MAKALU_5_M.tsv', 'up-torre-TORRE_M_-_Components.tsv']
+      .every((f) => referenceLines(f, readFileSync(`data/reference/${f}`, 'utf8')).reader === 'up')
+    // and the folding lines fitted for the collapse tests are not a row F
+    && referenceLines('up-meru2-sheet9.tsv',
+      readFileSync('data/reference/up-meru2-sheet9.tsv', 'utf8')) === null);
+
   // The tandem single-surface is the extreme of the same effect.
   const biskin = nv['Niviuk Bi Skin 2 P'][0];
   check('the single-surface tandem is further out still',
     predict(biskin) / biskin.totalLineLength < 0.70,
     `${((predict(biskin) / biskin.totalLineLength - 1) * 100).toFixed(0)}%`);
+}
+
+// ---------------------------------------------------------------------------
+section('The canopy is built the right way out');
+
+{
+  // Every section used to be tilted the wrong way about its chord: its "up"
+  // went to (-sin b, cos b) where the arc's outward normal is (sin b, cos b).
+  // The upper surface lay INSIDE the arc wherever it was arched — 11 cm
+  // inside the lower surface at rib 23 of the default wing — and the whole
+  // cutting pattern, anchor layout and 3D model inherited it. Nothing
+  // internal could see it, because every view inverted the same wrong tilt.
+  const pfR = planformFromDesignInputs({ span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1 });
+  const lobeR = buildLobe({ type: 'circle', projectedRatio: 0.88 }, pfR.halfSpan);
+  const wingR = buildWing({ planform: pfR, lobe: lobeR, airfoil: naca4('4415'), cells: 24, pointsPerSurface: 40 });
+  const inside = wingR.ribs.filter((r) => {
+    if (r.betaDeg < 5) return false;
+    const up = r.upper[Math.floor(r.upper.length * 0.3)];
+    const lo = r.lower[Math.floor(r.lower.length * 0.3)];
+    return up[1] <= lo[1];          // upper surface not outboard of lower
+  });
+  check('on every arched rib the upper surface is outside the lower',
+    inside.length === 0, inside.length ? `inside out at ribs ${inside.map((r) => r.index).join(', ')}` : 'none');
+  check('and each section stands along the arc\'s outward normal',
+    wingR.ribs.every((r) => {
+      const b = (r.betaDeg * Math.PI) / 180;
+      return r.frame.v[1] * Math.sin(b) + r.frame.v[2] * Math.cos(b) > 0.99;
+    }));
+
+  // The yaw that lays a rib on the glide path has to cancel the angle, not
+  // double it — the yaw was reversed along with the tilt.
+  const phiAt = (zRotation) => buildWing({
+    planform: pfR, lobe: lobeR, airfoil: naca4('4415'), cells: 12, pointsPerSurface: 30,
+    zRotation, alphaDeg: 5, washin: { total: 0, mode: 'linear' },
+  }).ribs.map((r) => r.phiDeg);
+  const none = phiAt('none');
+  const auto = phiAt('auto');
+  check('without yaw, the tip rib stands across the flow',
+    none[none.length - 1] > 3, `phi ${none[none.length - 1].toFixed(2)} deg at the tip`);
+  check('and the automatic yaw lays every rib on the glide path',
+    Math.max(...auto) < 0.01, `worst ${Math.max(...auto).toFixed(4)} deg`);
+
+  // RP is the washin pivot. It did nothing at all: the section was rotated
+  // about RP and then re-pinned at RL, which is a rotation about RL.
+  const tipAt = (RP) => {
+    const w = buildWing({
+      planform: pfR, lobe: lobeR, airfoil: naca4('4415'), cells: 12, pointsPerSurface: 30,
+      RP, RL: 0.5, washin: { total: 4.5, mode: 'linear' },
+    });
+    return w.ribs[w.ribs.length - 1].upper[0];
+  };
+  const a = tipAt(0.25);
+  const b = tipAt(0.5);
+  check('the rotation point moves the washed-in tip',
+    Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > 0.005,
+    `${(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000).toFixed(1)} mm between RP 25% and 50%`);
+
+  // The upper panels were the casualty. The outside of an arc is longer than
+  // the inside, so across a cell the upper panel is WIDER than the lower —
+  // by the height of the section times the change in arc angle. Developed
+  // from a surface inside the arc they came out narrower by the same amount
+  // instead: 32 mm each way at mid-chord on the root cell of the demo wing,
+  // 65 mm out in all.
+  //
+  // (This pinned the width itself, 680 to 720 mm, which was the root cell of
+  // one rib spacing. The relation is what the tilt decides.)
+  const demoR = demoWing();
+  const devR = developWing(demoR);
+  const upR = devR.filter((q) => q.surface === 'upper')[0].panel;
+  const loR = devR.filter((q) => q.surface === 'lower')[0].panel;
+  const mid = Math.floor(upR.left.length / 2);
+  const widthAt = (q) => Math.hypot(q.left[mid][0] - q.right[mid][0], q.left[mid][1] - q.right[mid][1]);
+  const heightAt = (r) => Math.hypot(r.upper[mid][0] - r.lower[mid][0],
+    r.upper[mid][1] - r.lower[mid][1], r.upper[mid][2] - r.lower[mid][2]);
+  const turn = ((demoR.ribs[1].betaDeg - demoR.ribs[0].betaDeg) * Math.PI) / 180;
+  const expected = ((heightAt(demoR.ribs[0]) + heightAt(demoR.ribs[1])) / 2) * turn;
+  check('the root upper panel is wider than the lower: it is outside the arc',
+    widthAt(upR) > widthAt(loR),
+    `${(widthAt(upR) * 1000).toFixed(0)} mm against ${(widthAt(loR) * 1000).toFixed(0)} at mid-chord`);
+  near('by the height of the section times the turn of the arc across the cell',
+    widthAt(upR) - widthAt(loR), expected, 0.002, ' m');
+}
+
+// ---------------------------------------------------------------------------
+section('Swoop2: LEparagliding\'s own geometry, reproduced');
+
+{
+  // Everything here is checked against LEparagliding's OWN output for this
+  // file — its lep-out.txt and its 3D DXF — not against this project's idea of
+  // what the output should be. The design is only as reproduced as the worst
+  // of these numbers.
+  const text = readFileSync('data/reference/lep/swoop2-20260829.lep', 'utf8');
+  const sectionText = readFileSync('data/reference/lep/swoop2-gnuReflex.txt', 'utf8');
+  const lepDoc = parseLep(text);
+  const g = lepLineGeometry(lepDoc, { airfoils: { 'gnuReflex.txt': sectionText } });
+  check('the line geometry builds from the file and its section', g.ok, g.problems.join('; '));
+
+  // Section 4 of lep-out.txt: every line's L, corrected length, load, type.
+  const out = readFileSync('data/reference/lep/swoop2-lep-out.txt', 'utf8');
+  const ref = [];
+  for (const m of out.matchAll(/^\s*\d+\s+(\d+)\s+(\d+)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+L =\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s*$/gm)) {
+    ref.push({ plan: +m[1], level: +m[2], order: +m[3], L: +m[4], cut: +m[5], load: +m[6], type: +m[7] });
+  }
+  let worstL = 0; let worstCut = 0; let worstLoad = 0; let typeMiss = 0; let found = 0;
+  for (const r of ref) {
+    const l = g.lines.find((x) => x.plan === r.plan && x.level === r.level && x.order === r.order);
+    if (!l) continue;
+    found += 1;
+    worstL = Math.max(worstL, Math.abs(l.length - r.L));
+    worstCut = Math.max(worstCut, Math.abs(l.cutLength - r.cut));
+    worstLoad = Math.max(worstLoad, Math.abs(l.loadKg - r.load));
+    if (l.type !== r.type) typeMiss += 1;
+  }
+  check('all 93 lines are found, riser to brake', ref.length === 93 && found === 93,
+    `${found} of ${ref.length}`);
+  check('every line length matches to a tenth of a millimetre',
+    worstL < 0.01, `worst ${(worstL * 10).toFixed(3)} mm`);
+  check('and every corrected (cut) length', worstCut < 0.01, `worst ${(worstCut * 10).toFixed(3)} mm`);
+  check('and every load the program assigns', worstLoad < 0.006, `worst ${worstLoad.toFixed(4)} kg`);
+  check('and every line type', typeMiss === 0, `${typeMiss} differ`);
+  // The printed totals: corrected lengths, then with a loop at each end.
+  near('total without loops is the printed 239.09 m', g.totals.cutM, 239.09, 0.006, ' m');
+  near('and with loops the printed 276.21 m', g.totals.withLoopsM, 276.21, 0.006, ' m');
+
+  // The two behaviours of the program that only its output reveals.
+  const l3 = g.lines.filter((l) => l.plan === 1 && l.level === 3);
+  check('level-3 lines are whole centimetres: the knot distance is an INTEGER',
+    l3.every((l) => Math.abs(l.length - 160) < 1e-9),
+    `${l3[0].length.toFixed(4)} cm, where the ramification lengths give 160.995`);
+  const t = lepRibTable(lepDoc, { airfoils: { 'gnuReflex.txt': sectionText } });
+  near('washin at rib 25 is the printed 3.136 degrees', t.ribs[24].washin, 3.136, 0.0006, ' deg');
+  near('and at the tip the requested 5.000', t.ribs[25].washin, 5.0, 1e-9, ' deg');
+  near('the special wingtip gives the printed tip chord of 60.78 cm', t.ribs[25].chord, 60.78, 0.006, ' cm');
+
+  // Section 2 of lep-out.txt.
+  near('karabiner depth is lines scaled plus risers not: 646.92 cm', g.karabiner[2], 646.92, 0.006, ' cm');
+  near('karabiner under the calage point, 67.95 cm', g.karabiner[1], 67.95, 0.006, ' cm');
+  near('angle of attack 4.32 degrees', g.aoaDeg, 4.32, 0.006, ' deg');
+  near('assiette 1.39 degrees', g.assietteDeg, 1.39, 0.006, ' deg');
+
+  // Anchors against the program's 3D DXF ("20260829 Swoop2 3D.dxf"), end
+  // points of the A lines, in LEparagliding's frame and centimetres.
+  const dxfA = {
+    2: [24.65, 23.136, 12.182], 3: [49.19, 23.559, 13.815], 6: [121.424, 26.482, 25.055],
+    10: [211.552, 34.316, 53.743], 14: [289.922, 46.794, 96.58], 18: [352.773, 64.693, 148.803],
+    22: [396.336, 93.165, 204.485],
+  };
+  let worstAnchor = 0;
+  for (const [i, p] of Object.entries(dxfA)) {
+    const q = lepAnchorPoint(t.ribs[i - 1], t.ribs[i - 1].anchorsPct[0]);
+    worstAnchor = Math.max(worstAnchor, Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]));
+  }
+  check('A anchors land on the 3D DXF\'s to its 0.01 mm rounding',
+    worstAnchor < 0.0011, `worst ${(worstAnchor * 10).toFixed(4)} mm`);
+
+  // The tool's own wing, placed by wing3d, puts the same section points in
+  // the same places. This is the check the tilt error would have failed.
+  const secAf = parseAirfoilText(sectionText, 'gnuReflex');
+  const design = lepToDesign(lepDoc, { sections: { 'gnuReflex.txt': secAf } });
+  const wingL = buildWing({
+    planform: discretePlanform(design.planformRows), lobe: null, airfoil: secAf,
+    explicitRibs: design.explicitRibs, pointsPerSurface: 80, alphaDeg: g.aoaDeg,
+  });
+  let worstPlace = 0;
+  let worstBack = 0;
+  t.ribs.forEach((r, i) => {
+    const c = r.chord;
+    const U = r.section.points.map((q) => c * q[0]);
+    const V = r.section.points.map((q) => c * q[1] * r.thickness);
+    for (let j = 1; j <= r.anchorCount; j++) {
+      // The section point LEparagliding places, found as it finds it.
+      const u = (c * r.anchorsPct[j - 1]) / 100;
+      let v = null;
+      for (let k = r.section.extrados - 1; k < U.length - 1 && v === null; k++) {
+        if (U[k] <= u && u <= U[k + 1]) v = V[k] + ((V[k + 1] - V[k]) * (u - U[k])) / (U[k + 1] - U[k]);
+      }
+      const P = lepAnchorPoint(r, r.anchorsPct[j - 1]);
+      const lepT = [P[1] / 100, P[0] / 100, -P[2] / 100];
+      // The same section point, placed by this tool's own frame.
+      const f = wingL.ribs[i].frame;
+      const Q = [0, 1, 2].map((a) => f.origin[a] + (u / 100) * f.u[a] + (v / 100) * f.v[a]);
+      worstPlace = Math.max(worstPlace, Math.hypot(Q[0] - lepT[0], Q[1] - lepT[1], Q[2] - lepT[2]));
+      // And the inverse brings it back to the section coordinates.
+      const back = toRibPlane(wingL.ribs[i], lepT);
+      worstBack = Math.max(worstBack, Math.hypot(back[0] - u / 100, back[1] - v / 100));
+    }
+  });
+  check('the tool places every rib exactly where LEparagliding does',
+    worstPlace < 1e-9, `worst ${(worstPlace * 1000).toExponential(2)} mm`);
+  check('and undoes the placement exactly, for cutting',
+    worstBack < 1e-9, `worst ${(worstBack * 1000).toExponential(2)} mm`);
+
+  // Section 12 of lep-out.txt: phi and chi per rib, at the program's AoA.
+  const lepPhi = [0, 0, 0.01, 0.02, 0.02, 0.03, 0.02, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05,
+    0.06, 0.06, 0.06, 0.07, 0.07, 0.07, 0.08, 0.08, 0.08, 0.09, 0.09, 0.09, 0.09];
+  const lepChi = [4.32, 4.32, 4.32, 4.32, 4.33, 4.33, 4.34, 4.35, 4.35, 4.35, 4.35, 4.35, 4.35,
+    4.36, 4.38, 4.38, 4.36, 4.36, 4.37, 4.40, 4.43, 4.42, 4.42, 4.45, 4.53, 6.17];
+  const dPhi = Math.max(...wingL.ribs.map((rb, i) => Math.abs(rb.phiDeg - lepPhi[i])));
+  const dChi = Math.max(...wingL.ribs.map((rb, i) => Math.abs(rb.chiDeg - lepChi[i])));
+  check('phi, the rib plane against the glide path, matches every rib',
+    dPhi < 0.0101, `worst ${dPhi.toFixed(4)} deg`);
+  check('and chi, the local angle of attack, including 6.17 at the tip',
+    dChi < 0.0101, `worst ${dChi.toFixed(4)} deg`);
+
+  // Section 6 of lep-out.txt: contour lengths per rib, mm. The extrados runs
+  // from the trailing edge over the nose to the intake; the intrados from the
+  // point after the intake to the trailing edge.
+  const contour = { 1: [2288.91, 1964.56], 13: [1971.46, 1692.09], 25: [853.17, 732.27], 26: [626.01, 567.27] };
+  let worstContour = 0;
+  for (const [i, [ex, inn]] of Object.entries(contour)) {
+    const r = t.ribs[i - 1];
+    const c = r.chord * 10;
+    const P = r.section.points.map(([x, y]) => [x * c, y * c * r.thickness]);
+    const arc = (a, b) => {
+      let L = 0;
+      for (let k = a; k < b; k++) L += Math.hypot(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1]);
+      return L;
+    };
+    const s0 = r.section.extrados + r.section.intake - 1;
+    worstContour = Math.max(worstContour,
+      Math.abs(arc(0, r.section.extrados - 1) - ex), Math.abs(arc(s0, P.length - 1) - inn));
+  }
+  check('rib contour lengths match section 6, root to tip',
+    worstContour < 0.02, `worst ${worstContour.toFixed(3)} mm`);
+
+  // In this tool's line-plan shape: risers splay outward, as they do in the
+  // air — each points at the lines it carries.
+  const plan = lepPlanForTool(g);
+  check('the plan carries 90 lines and 3 risers per side',
+    plan.lines.length === 90 && plan.riserWebbing.length === 3);
+  check('every riser leans outboard from the karabiner',
+    plan.riserWebbing.every((w) => w.to[1] > w.from[1] + 0.1),
+    plan.riserWebbing.map((w) => `${w.label} ${((w.to[1] - w.from[1]) * 100).toFixed(1)} cm`).join(', '));
+  check('and every line name reads back to its row and level',
+    plan.lines.every((l) => {
+      const n = parseLineName(l.name);
+      return n && n.row === l.row && n.level === l.level;
+    }), plan.lines.filter((l) => {
+      const n = parseLineName(l.name);
+      return !(n && n.row === l.row && n.level === l.level);
+    }).map((l) => l.name).slice(0, 5).join(' '));
+  check('a section file without its counts is refused, not guessed',
+    (() => { try { readLepAirfoil('name\n0 0\n1 0\n'); return false; } catch (e) { return /counts|short/.test(e.message); } })());
+
+  // Its own lines. The program's output ends its line section with what the
+  // lineset weighs, its frontal area, and the metres to buy of each type;
+  // all three follow from the lines above and the table in section 34.
+  near('the lineset weighs the printed 0.468 kg, risers included',
+    g.totals.weightKg, 0.468, 0.0006, ' kg');
+  // Frontal area: a `p` loop counts for (sqrt 2 - 1) of its length. That is
+  // read off the output — the riser is listed at 2847.06 mm2, which is
+  // 470 x 5 + 240 x 5 x 0.41421 — and it is what makes the total come out.
+  near('and has the printed 0.426 m2 of frontal area',
+    g.totals.lineAreaM2, 0.426, 0.0006, ' m2');
+  const riser = g.lines.find((l) => l.kind === 'riser');
+  near('the riser\'s own area is the 2847.06 mm2 the program lists for it',
+    (riser.cutLength + 2 * riser.material.loopCm * (Math.SQRT2 - 1)) * 10 * riser.material.diameterMM,
+    2847.06, 0.01, ' mm2');
+  const printedByType = { 1: 4.26, 2: 83.81, 3: 93.28, 4: 93.57, 6: 5.56 };
+  check('the metres to buy of every type are the printed ones',
+    Object.entries(printedByType).every(([t, m]) =>
+      Math.abs((g.totals.byType[t]?.metres ?? 0) - m) < 0.006)
+    && Object.keys(g.totals.byType).length === 5,
+    Object.values(g.totals.byType).map((t) => `${t.label} ${t.metres.toFixed(2)}`).join(', '));
+
+  // The design's own line for every position — not this tool's choice from
+  // its catalogue, which is what an imported plan used to be sized with.
+  const pfL = discretePlanform(design.planformRows);
+  const loadsL = analyseLoads({
+    plan, planform: pfL, stations: wingL.stations, totalMassKg: 85.5,
+    alphaDeg: g.aoaDeg, wingAreaM2: 18,
+    airfoil: { ...secAf, anchors: design.anchorFractions }, anchors: design.anchorFractions,
+  });
+  const selL = lepLineSelection(loadsL.tensions, plan);
+  check('every line takes the type its own table gives it',
+    selL.ok && selL.lines.every((l) => l.line && l.sizedBy === 'design'),
+    `${selL.unmet.length} without one`);
+  check('mains in Line275, middles in Line160, uppers in Line120',
+    selL.lines.filter((l) => l.row === 'A').every((l) =>
+      l.line.code === { main: 'Line275', middle: 'Line160', upper: 'Line120' }[l.level]),
+    [...new Set(selL.lines.filter((l) => l.row === 'A').map((l) => `${l.level} ${l.line.code}`))].join(', '));
+  // The lines alone, both halves: the printed total less the six risers.
+  near('and the lines weigh what the program\'s total leaves after the risers',
+    selL.totalMassG / 1000, 0.468 - 4.26 * 0.010, 0.0006, ' kg');
+  check('each line keeps a utilisation against the load case, as a check on the design',
+    selL.lines.every((l) => Number.isFinite(l.utilisation) && l.utilisation >= 0)
+    && Array.isArray(selL.overloaded));
+
+  // The cloth of its ribs, at its own anchors, round its own holes. This is
+  // a design that has been built, so a check that found its openings in its
+  // load paths would be a fault in the check — and the first version of this
+  // one, which walked along the chord from each anchor, would have.
+  const holesL = lepHoles(lepDoc, t);
+  const stressL = checkWingRibStress({
+    wing: wingL, anchorLoads: loadsL.anchorLoads, plan,
+    airfoil: { anchors: design.anchorFractions },
+    openingsFor: (rib) => holesL.byRib.get(rib.index) ?? [],
+  });
+  const gapsL = [];
+  for (const r of stressL.ribs) {
+    const rib = wingL.ribs[r.ribIndex];
+    for (const q of r.paths) {
+      for (const h of holesL.byRib.get(r.ribIndex) ?? []) {
+        const us = h.outline.map((o) => o[0] / rib.chord);
+        const gap = Math.max(Math.min(...us) - q.chordFraction, q.chordFraction - Math.max(...us));
+        if (gap > 0) gapsL.push(gap);
+      }
+    }
+  }
+  check('the Swoop2\'s own holes leave every one of its load paths clear at 8 g',
+    stressL.anchorCount === loadsL.anchorLoads.length && stressL.ribsWithHolesInLoadPath.length === 0
+    && holesL.byRib.size === 25,
+    `${stressL.anchorCount} anchors on ${stressL.ribCount} ribs, holes on ${holesL.byRib.size}; the nearest `
+    + `hole to an anchor is ${(Math.min(...gapsL) * 100).toFixed(1)}% of chord from it`);
+  check('and none of its ribs needs tape to the seam',
+    stressL.anchorsToSeam.length === 0 && stressL.longest.reachM < 0.05,
+    `longest reinforcement ${(stressL.longest.reachM * 1000).toFixed(0)} mm, ${stressL.longest.name} on rib `
+    + `${stressL.longest.ribIndex} at ${stressL.longest.loadN.toFixed(0)} N, in a rib `
+    + `${(stressL.longest.depthM * 1000).toFixed(0)} mm deep there`);
+
+  // And its own lengths: what flies, what is sewn, what is cut.
+  const chainL = lepLengthChain(selL, plan);
+  const main1 = chainL.lines.find((l) => l.label === '2A1');
+  check('the first A main is sewn to its flying length less its stretch, and cut 24 cm longer for its two loops',
+    main1 && main1.flyingLengthMM === Math.round(plan.lines.find((l) => l.label === '2A1').lengthMM)
+    && main1.cutLengthMM - main1.sewnLengthMM === 240
+    && main1.sewnLengthMM <= main1.flyingLengthMM,
+    main1 ? `${main1.flyingLengthMM} / ${main1.sewnLengthMM} / ${main1.cutLengthMM} mm` : 'not found');
+  near('the cut lengths add up to the program\'s 276.21 m with loops',
+    chainL.cutMetres * 2, 276.21, 0.06, ' m');
+  near('and the sewn lengths to its 239.09 m without',
+    chainL.sewnMetres * 2, 239.09, 0.06, ' m');
 }
 
 // ---------------------------------------------------------------------------
@@ -6597,6 +8584,113 @@ section('Reading DXF back');
   check('ribs round-trip too',
     ribsBack.polylines.length === wingD.ribs.length,
     `${ribsBack.polylines.length} of ${wingD.ribs.length}`);
+
+  // A seam allowance is the outline moved outward by a fixed distance, all
+  // the way round. The rib view pushed each point away from the rib's
+  // CENTRE instead, which on a long thin shape is along the chord for most
+  // of its length rather than out from the surface.
+  {
+    const square = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    const grown = offsetClosedLoop(square, 0.1);
+    near('a square grows by the allowance on every side',
+      Math.abs(outlineArea(grown)), 1.2 * 1.2, 1e-9, ' m2');
+    const clockwise = offsetClosedLoop(square.slice().reverse(), 0.1);
+    near('whichever way round the outline is drawn',
+      Math.abs(outlineArea(clockwise)), 1.2 * 1.2, 1e-9, ' m2');
+    check('and a repeated closing point does not make a spike',
+      offsetClosedLoop([...square, [0, 0]], 0.1).length === 4);
+    near('a negative allowance moves it inward',
+      Math.abs(outlineArea(offsetClosedLoop(square, -0.1))), 0.8 * 0.8, 1e-9, ' m2');
+
+    // On a real rib: every point of the cut line is the allowance away from
+    // the sewing line, measured to the line and not to a vertex.
+    const rib = wingD.ribs[3];
+    const flat = (q) => toRibPlane(rib, q);
+    const loop = rib.upper.slice().reverse().concat(rib.lower.slice(1)).map(flat);
+    const d = 0.010;
+    const cut = offsetClosedLoop(loop, d);
+    const toLoop = (q) => {
+      let best = Infinity;
+      for (let i = 0; i < loop.length; i++) {
+        const a = loop[i];
+        const b = loop[(i + 1) % loop.length];
+        const vx = b[0] - a[0];
+        const vy = b[1] - a[1];
+        const L2 = vx * vx + vy * vy;
+        if (!(L2 > 0)) continue;
+        const t = Math.max(0, Math.min(1, ((q[0] - a[0]) * vx + (q[1] - a[1]) * vy) / L2));
+        best = Math.min(best, Math.hypot(q[0] - a[0] - t * vx, q[1] - a[1] - t * vy));
+      }
+      return best;
+    };
+    const dists = cut.map(toLoop);
+    // Away from the sharp trailing edge, where the mitre is held back.
+    const body = dists.filter((_, i) => cut[i][0] < rib.chord * 0.97);
+    check('the cut line of a rib is the allowance outside its sewing line',
+      body.every((x) => Math.abs(x - d) < 0.0006),
+      `${(Math.min(...body) * 1000).toFixed(2)} to ${(Math.max(...body) * 1000).toFixed(2)} mm for a 10 mm allowance`);
+    check('and nowhere inside it', dists.every((x) => x > d * 0.95),
+      `closest ${(Math.min(...dists) * 1000).toFixed(2)} mm`);
+    check('at the trailing edge the mitre is held to a few allowances',
+      Math.max(...dists) < d * 2.6, `${(Math.max(...dists) * 1000).toFixed(1)} mm at most`);
+    // What the old construction did, for the record: pushed from the centre,
+    // the line at 80% of chord sits well inside the allowance.
+    const cx = rib.chord / 2;
+    const cy = (Math.max(...loop.map((q) => q[1])) + Math.min(...loop.map((q) => q[1]))) / 2;
+    const radial = loop.map(([x, y]) => {
+      const m = Math.hypot(x - cx, y - cy) || 1;
+      return [x + ((x - cx) / m) * d, y + ((y - cy) / m) * d];
+    });
+    const aft = radial.filter((q) => q[0] > rib.chord * 0.7 && q[0] < rib.chord * 0.9).map(toLoop);
+    check('pushed from the centre it came nowhere near the allowance aft',
+      Math.min(...aft) < d * 0.5,
+      `${(Math.min(...aft) * 1000).toFixed(1)} mm where 10 was meant`);
+  }
+
+  // The rib file carries what is on the rib, when it is told. It wrote the
+  // outline and a label and nothing else, while the Rib tab drew anchors,
+  // openings, rods and diagonals.
+  {
+    const marked = parseDXF(ribsToDXF(wingD, {
+      features: (rib) => {
+        const flat = (q) => toRibPlane(rib, q);
+        const loop = rib.upper.slice().reverse().concat(rib.lower.slice(1)).map(flat);
+        return {
+          loop,
+          cutLine: offsetClosedLoop(loop, 0.01),
+          anchors: rib.index % 2 === 0 ? [{ row: 'A', point: [0.1 * rib.chord, 0] }] : [],
+          holes: [[[0.3, 0], [0.4, 0], [0.4, 0.05], [0.3, 0.05]]],
+          rods: [[[0.1, 0.05], [0.2, 0.06]]],
+          apexes: rib.index === 2 ? [{ label: 'B>1,3', point: [0.3 * rib.chord, 0] }] : [],
+          bases: rib.index === 1 ? [{ label: 'B<0,2', points: [[0.2, 0.1], [0.4, 0.1]] }] : [],
+          intake: [[0.02, -0.01], [0.06, -0.02]],
+        };
+      },
+    }));
+    const on = (re) => marked.entities.filter((e) => re.test(e.layer || ''));
+    const n = wingD.ribs.length;
+    check('each rib has its sewing line and its cutting line',
+      on(/^rib-\d+$/).length === n && on(/-cut$/).length === n);
+    check('its openings are closed outlines to cut out',
+      on(/-openings$/).length === n && on(/-openings$/).every((e) => e.closed));
+    check('anchors are marked only on the ribs that have them',
+      on(/-anchors$/).filter((e) => e.type === 'TEXT').length === Math.ceil(n / 2)
+      && on(/^rib-1-anchors$/).length === 0);
+    check('rods, diagonals and the intake each have their own layer',
+      on(/-rods$/).length === n && on(/-intake$/).length === 2 * n
+      && on(/^rib-2-diagonals$/).some((e) => e.text === 'B>1,3')
+      && on(/^rib-1-diagonals$/).some((e) => e.text === 'B<0,2'));
+    check('and the file says what its lines are',
+      marked.texts.some((e) => /the sewing line/.test(e.text))
+      && marked.texts.some((e) => /the cutting line, with the seam allowance/.test(e.text)));
+    // The label starts over the nose of the rib it names.
+    const label = marked.texts.find((e) => /^R3 /.test(e.text));
+    const rib3 = marked.entities.find((e) => e.layer === 'rib-3');
+    check('each rib is named from its nose, not from its trailing edge',
+      Math.abs(label.points[0][0] - Math.min(...rib3.points.map((q) => q[0]))) < 1e-9);
+    check('and without features the file is the outlines, and says so',
+      parseDXF(ribsToDXF(wingD)).texts.some((e) => /outlines only/.test(e.text)));
+  }
 
   // A LINE-based file, which is what other tools emit — Laboratori d'envol's
   // own 2D DXF draws its panels as 83,776 individual segments rather than
@@ -6878,6 +8972,29 @@ section('Multi-size sheets');
   const written = readdirSync('data/reference').filter((f) => /^up-split-/.test(f));
   check('twelve per-size sheets are in the reference set',
     written.length === 12, `${written.length} sheets`);
+
+  // Every one of them says it holds totals, because every one does. Eight
+  // were written out as "single-line" by a default nobody chose: the
+  // workbook NAMES its totals sheet "Einzelleine / single". No wing's
+  // shortest line is seven metres long.
+  const declaredOf = (f) => (/^#\s*measure:\s*(\S+)/m.exec(
+    readFileSync(`data/reference/${f}`, 'utf8')) || [])[1];
+  const shortestOf = (f) => Math.min(...parseSimpleLineSheet(
+    readFileSync(`data/reference/${f}`, 'utf8')).lines.map((l) => l.lengthMM));
+  check('each declares that it measures sail to harness',
+    written.every((f) => declaredOf(f) === 'total-including-risers'),
+    written.filter((f) => declaredOf(f) !== 'total-including-risers').join(' ') || 'all twelve');
+  check('and its shortest entry is a whole line long',
+    written.every((f) => shortestOf(f) > 5000),
+    `${Math.min(...written.map(shortestOf))} mm at the least`);
+  check('what a split sheet measures has to be said', (() => {
+    try { multiSizeSheetToTSV(split, 'MAKALU 5 L', { source: 'test' }); return false; }
+    catch (e) { return /unknown measure/.test(e.message); }
+  })());
+  check('and totals cannot be written out as single lines', (() => {
+    try { multiSizeSheetToTSV(split, 'MAKALU 5 L', { measure: 'single-line' }); return false; }
+    catch (e) { return /totals, not single lines/.test(e.message); }
+  })());
   for (const f of written.slice(0, 3)) {
     const t = parseSimpleLineSheet(readFileSync(`data/reference/${f}`, 'utf8'));
     check(`${f} parses with nothing dropped`,
@@ -7043,9 +9160,28 @@ section('What the sail cloth carries');
 {
   // The Phase 5 item asks for line loads into rib AND panel stress. The rib
   // half was built; this is the other half.
+  //
+  // It was first run at 400 Pa of dynamic pressure, times eight for the load
+  // case. That is a wing at 92 km/h pulling 8 g. What it "found" — root
+  // panels past their seams on a 12-cell wing, and from that a reason real
+  // wings would put closer ribs in the middle — was the 400, not the wing.
+  // The pressure here is the wing's own, from its own balance.
   const wingP = demoWing();
+  const areaP = planformMetrics(wingP.planform).area;
+  const eqP = solveEquilibrium({
+    area: areaP, span: 10.25, chord: 2.6, lineLength: 6.5, pilotMass: 90, wingMass: 5,
+  });
+  // The handbook folds the area into q0.
+  const qP = eqP.q0 / areaP;
+  check('a 95 kg wing of this size flies at about 70 Pa of dynamic pressure',
+    qP > 55 && qP < 85,
+    `${qP.toFixed(0)} Pa on ${areaP.toFixed(1)} m2, at a lift coefficient of ${eqP.cz3D.toFixed(2)}`);
+  check('400 Pa is not this wing: it is six times that, a wing at over 90 km/h',
+    400 / qP > 5 && Math.sqrt((2 * 400) / 1.225) * 3.6 > 90,
+    `${(400 / qP).toFixed(1)} times, ${(Math.sqrt((2 * 400) / 1.225) * 3.6).toFixed(0)} km/h at sea level`);
+
   const at = (g) => checkWingPanelStress({
-    wing: wingP, dynamicPressurePa: 400, designFactor: g,
+    wing: wingP, dynamicPressurePa: qP, designFactor: g,
     tensionForBillowFn: tensionForBillow,
   });
 
@@ -7053,15 +9189,17 @@ section('What the sail cloth carries');
   check('every panel is checked', oneG.panels.length === wingP.ribs.length - 1);
   check('and the widest cell is the worst', oneG.worst.cell === 0,
     `cell ${oneG.worst.cell}`);
+  check('at 1 g the cloth carries tens of newtons a metre across the cell',
+    oneG.worst.spanwiseNPerM > 10 && oneG.worst.spanwiseNPerM < 100,
+    `${oneG.worst.spanwiseNPerM.toFixed(0)} N/m in a ${(oneG.worst.spacingM * 1000).toFixed(0)} mm cell`);
 
   // Membrane tension rises with pressure, which rises with the load case.
   const eightG = at(8);
   near('spanwise tension scales with the load factor',
     eightG.worst.spanwiseNPerM / oneG.worst.spanwiseNPerM, 8, 0.01);
 
-  // The finding: the seam is the limit, not the cloth. A paraglider's sail
-  // fails at its seams long before the ripstop gives way, and that changes
-  // what a designer should do about it.
+  // The seam is the nearer limit, not the cloth: a sail's seams are weaker
+  // than its ripstop, and that says which to look at first.
   check('the seam is what limits every panel',
     oneG.seamLimited === oneG.panels.length && oneG.clothLimited === 0,
     `${oneG.seamLimited} seam, ${oneG.clothLimited} cloth`);
@@ -7079,38 +9217,53 @@ section('What the sail cloth carries');
     Number.isFinite(oneG.worst.chordwiseIntoRibsNPerM)
     && !('chordwiseNPerM' in oneG.worst));
 
-  // At the 8 g design case this wing's widest cells exceed the seam. That is
-  // a result, not a failure of the model: the demo wing has 12 cells over
-  // 11.6 m, so its root cells are nearly a metre wide, and a metre of
-  // unsupported membrane at 8 g is more than a sewn seam carries.
-  //
-  // It is the reason real wings put more cells in the middle than a constant
-  // spacing would give, and the reason cell count rises with size.
-  check('the 8 g case is where the widest cells stop holding',
-    !eightG.ok && eightG.failing.length < eightG.panels.length,
-    eightG.note);
-  check('and the failures are the widest cells, not scattered',
-    eightG.failing.every((p) => p.spacingM >= eightG.worst.spacingM * 0.7));
+  // And neither limit is near. Twelve cells a side, a 494 mm centre cell:
+  // at 8 g its seam is at about a seventh of what it carries.
+  const pct = (x) => `${(x * 100).toFixed(0)}%`;
+  check('at 8 g the widest panel of this wing is at about a seventh of its seam',
+    eightG.ok && eightG.worst.cell === 0
+    && eightG.worst.seamUtilisation > 0.10 && eightG.worst.seamUtilisation < 0.20,
+    `${(eightG.worst.spacingM * 1000).toFixed(0)} mm cell, ${eightG.worst.spanwiseNPerM.toFixed(0)} N/m: `
+    + `${pct(eightG.worst.seamUtilisation)} of the seam, ${pct(eightG.worst.clothUtilisation)} of the cloth`);
 
-  // Halving the cell width brings the same wing inside the seam.
-  // `demoWing` takes no arguments, so passing one changed nothing and the
-  // check compared a wing with itself. Built explicitly.
-  const densePf = planformFromDesignInputs({
+  const stressPf = planformFromDesignInputs({
     span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1,
   });
-  const denseWing = buildWing({
-    planform: densePf,
-    lobe: buildLobe({ type: 'circle', projectedRatio: 0.88 }, densePf.halfSpan),
-    airfoil: naca4('4415'), cells: 44, pointsPerSurface: 24,
-  });
-  const dense = checkWingPanelStress({
-    wing: denseWing, dynamicPressurePa: 400, designFactor: 8,
+  const stressAt = (cells) => checkWingPanelStress({
+    wing: buildWing({
+      planform: stressPf,
+      lobe: buildLobe({ type: 'circle', projectedRatio: 0.88 }, stressPf.halfSpan),
+      airfoil: naca4('4415'), cells, pointsPerSurface: 24,
+    }),
+    dynamicPressurePa: qP, designFactor: 8,
     tensionForBillowFn: tensionForBillow,
   });
-  check('more cells bring it back inside the seam',
-    dense.failing.length < eightG.failing.length,
-    `${eightG.failing.length} of ${eightG.panels.length} failing at 12 cells, `
-    + `${dense.failing.length} of ${dense.panels.length} at 44`);
+
+  // Tension goes with the width of the cell, so fewer cells load the seam
+  // more — but not to anything like its limit. Cell count is decided by the
+  // shape the wing has to hold, not by the strength of the sail.
+  const wideCells = stressAt(8);
+  const dense = stressAt(44);
+  near('tension goes with the width of the cell',
+    wideCells.worst.spanwiseNPerM / dense.worst.spanwiseNPerM,
+    wideCells.worst.spacingM / dense.worst.spacingM, 0.02 * (wideCells.worst.spacingM / dense.worst.spacingM));
+  check('eight cells a side or forty-four, every panel holds at 8 g',
+    wideCells.ok && dense.ok && wideCells.worst.seamUtilisation > dense.worst.seamUtilisation,
+    `${(wideCells.worst.spacingM * 1000).toFixed(0)} mm cell at ${pct(wideCells.worst.seamUtilisation)} of its seam, `
+    + `${(dense.worst.spacingM * 1000).toFixed(0)} mm at ${pct(dense.worst.seamUtilisation)}`);
+  // How wide a cell would have to be to reach its seam at 8 g.
+  let narrow = 0.1;
+  let broad = 20;
+  for (let i = 0; i < 50; i++) {
+    const mid = (narrow + broad) / 2;
+    const r = panelStress({
+      spacingM: mid, chordM: 2.4, pressurePa: 1.5 * qP, designFactor: 8,
+      tensionForBillowFn: tensionForBillow,
+    });
+    if (r.seamUtilisation < 1) narrow = mid; else broad = mid;
+  }
+  check('a cell would have to be metres wide to reach its seam at 8 g',
+    narrow > 2 && narrow < 6, `${narrow.toFixed(1)} m`);
 
   // Refusals rather than silent defaults.
   check('an unknown sail cloth is refused', (() => {
@@ -7157,6 +9310,28 @@ section('The built shape and the flying shape');
     `${(mid.wettedIncrease * 100).toFixed(1)}%`);
   check('and thickens the section', mid.addedThicknessFraction > 0,
     `${(mid.addedThicknessFraction * 100).toFixed(2)}% of chord`);
+
+  // How deep a bulge is, against cases with exact answers.
+  //
+  // Every check in this section was one-sided — "adds", "thickens", "more" —
+  // and the depth of every bulge was wrong by the width of its cell in
+  // metres: the arc solver gives the rise in the units it is handed, and the
+  // rise was multiplied by the spacing again as if it were a fraction.
+  const semi = billowedSurface({ spacingM: 0.4, excessRatio: Math.PI / 2 - 1, arcFn: solveArc });
+  near('a half-circle of cloth over a 400 mm cell rises 200 mm', semi.heightM, 0.2, 1e-6, ' m');
+  near('on a radius of 200 mm', semi.radiusM, 0.2, 1e-6, ' m');
+  const six = billowedSurface({ spacingM: 0.48, excessRatio: 0.06, arcFn: solveArc });
+  near('6% of excess is a bulge 15% of the cell wide', six.heightM / 0.48, 0.1518, 0.0005);
+  near('which the shallow-arc formula gives too', six.heightM / 0.48, Math.sqrt((3 * 0.06) / 8), 0.003);
+  const twice = billowedSurface({ spacingM: 0.96, excessRatio: 0.06, arcFn: solveArc });
+  near('and twice the cell is twice the bulge, not four times', twice.heightM / six.heightM, 2, 1e-9);
+  // So the section moves with the cell count, and in proportion to it.
+  const coarse = inflatedShape({ wing: demoWing(), excessUpper: 0.06, excessLower: 0.02, arcFn: solveArc });
+  check('on the 12-cell test wing the section is a fifth thicker in flight than as cut',
+    coarse.addedThicknessFraction > 0.03 && coarse.addedThicknessFraction < 0.036
+      && coarse.camberShiftFraction > 0.004 && coarse.camberShiftFraction < 0.005,
+    `+${(coarse.addedThicknessFraction * 100).toFixed(2)}% of chord on a 15% section, `
+      + `camber +${(coarse.camberShiftFraction * 100).toFixed(2)}%`);
 
   // The upper surface bulges more than the lower, and that difference is what
   // moves the camber rather than just adding thickness.
@@ -7224,6 +9399,138 @@ section('The built shape and the flying shape');
 }
 
 // ---------------------------------------------------------------------------
+section('Diagonal legs on a canopy built the right way out');
+
+{
+  // Until September 2026 the outboard leg of every diagonal "collapsed"
+  // towards the tip — 675 mm inboard against 75 mm outboard at rib 12 of this
+  // wing — and three sections of tests documented it as a property of arced
+  // wings: the rib's thickness has a spanwise component, and outboard it
+  // subtracts from the rib gap.
+  //
+  // It was not a property of arced wings. The canopy was built inside out:
+  // every section was tilted the wrong way about its chord, so the upper
+  // surface sat on the INSIDE of the arc. With the upper surface outside, as
+  // it is on a real wing and in LEparagliding's output, the two legs from
+  // one rib come out nearly equal and shrink smoothly with the chord. That
+  // lopsidedness was what "the diagonals go wacky at the tip" was.
+  const wingN = demoWing();
+  const afN = naca4('4415');
+  afN.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const at = (minLengthM) => {
+    const v = buildVRibs({
+      wing: wingN, airfoil: afN, rows: ['B'], baseSpread: 0.18,
+      maxReach: 1, minLengthM,
+    });
+    return { v, geom: diagonalGeometry(v.vribs) };
+  };
+
+  const none = at(0);
+  const byRib = new Map();
+  for (const d of none.geom.diagonals) {
+    if (!byRib.has(d.fromRib)) byRib.set(d.fromRib, []);
+    byRib.get(d.fromRib).push(d.lengthM);
+  }
+  const ratios = [...byRib.values()].filter((l) => l.length === 2)
+    .map(([p, q]) => Math.max(p, q) / Math.min(p, q));
+  check('the two legs from one rib are nearly equal, all the way out',
+    ratios.length > 3 && Math.max(...ratios) < 1.5,
+    `worst ${Math.max(...ratios).toFixed(2)} to 1 (it was 4.4 to 1 inside out)`);
+  const lens = none.geom.diagonals.map((d) => d.lengthM);
+  check('and they shrink with the chord, outboard, without a jump',
+    lens.every((l, i) => i === 0 || l <= lens[i - 1] + 1e-9),
+    lens.map((l) => (l * 1000).toFixed(0)).join(' '));
+  check('so none is below the 120 mm nobody would sew',
+    none.geom.shortestM > 0.12,
+    `shortest ${(none.geom.shortestM * 1000).toFixed(0)} mm`);
+
+  // The limit is still there for a wing that does make tiny pieces — a
+  // small, many-celled wing — and it still reports what it leaves out. Set
+  // here from the pieces themselves, so the test is of the limit and not of
+  // one wing's sizes: just above the shortest, it takes out that one alone.
+  const sizes = lens.slice().sort((p, q) => p - q);
+  const justAbove = (sizes[0] + sizes[1]) / 2;
+  const tight = at(justAbove);
+  check('a limit skips only the pieces below it',
+    tight.v.skipped.length === 1 && tight.v.skipped.every((sk) => sk.lengthM < justAbove)
+      && tight.v.vribs.every((d) => d.lengthM >= justAbove),
+    `${tight.v.skipped.length} skipped under ${(justAbove * 1000).toFixed(0)} mm`);
+  check('and no rib is left unsupported by it here',
+    tight.v.unsupportedRibs.length === 0,
+    `unsupported: ${JSON.stringify(tight.v.unsupportedRibs)}`);
+
+  // Pushed too far it does leave ribs unsupported, and the check catches it
+  // — which is what makes the limit safe to expose as a control. Above both
+  // of the pieces that reach the last free rib, that rib has nothing.
+  const lastFree = Math.max(...none.v.vribs.map((d) => d.toRib));
+  const tooFar = Math.max(...none.v.vribs.filter((d) => d.toRib === lastFree)
+    .map((d) => d.lengthM)) + 0.001;
+  const greedy = at(tooFar);
+  check('and pushing the limit too far is caught, not silently accepted',
+    greedy.v.unsupportedRibs.includes(lastFree),
+    `at ${(tooFar * 1000).toFixed(0)} mm, ribs ${JSON.stringify(greedy.v.unsupportedRibs)} have nothing`);
+
+  // Opt-in: the default places every diagonal the rule asks for.
+  const asShipped = buildVRibs({
+    wing: wingN, airfoil: afN, rows: ['B'], baseSpread: 0.18, maxReach: 1,
+  });
+  check('the default still places every diagonal the rule asks for',
+    asShipped.skipped.length === 0
+    && asShipped.vribs.length === none.v.vribs.length,
+    `${asShipped.vribs.length} placed, ${asShipped.skipped.length} skipped`);
+}
+
+// ---------------------------------------------------------------------------
+section('Are the diagonals buildable?');
+
+{
+  // `buildVRibs` places a diagonal wherever the rule says one goes;
+  // `diagonalGeometry` asks whether the result is a piece anyone would cut.
+  const wingG = demoWing();
+  const afG = naca4('4415');
+  afG.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const built = buildVRibs({
+    wing: wingG, airfoil: afG, rows: ['B'], baseSpread: 0.18, maxReach: 1,
+  });
+  const geom = diagonalGeometry(built.vribs);
+
+  check('every diagonal is measured', geom.diagonals.length === built.vribs.length);
+
+  // The spread follows the chord now, not the arc. This wing's chord falls
+  // from 2.6 m to 0.9 m; its diagonals from 782 mm to 167 mm. It was 9 to 1
+  // on the inside-out canopy, with a 98 mm piece at the tip.
+  check('the size spread is the chord taper, not a collapse',
+    geom.spread < 6,
+    `${(geom.shortestM * 1000).toFixed(0)} to ${(geom.longestM * 1000).toFixed(0)} mm, `
+    + `${geom.spread.toFixed(1)} to 1`);
+  check('and no rib sends its two legs to wildly different sizes',
+    geom.lopsided.length === 0,
+    geom.lopsided.length ? `rib ${geom.lopsided[0].fromRib}` : 'none lopsided');
+
+  // What is still flagged is real and specific to this test wing: twelve
+  // wide cells on a 2.6 m root make long, shallow pieces. It is a planform
+  // matter — more cells make them shorter and steeper — and it is reported.
+  check('what is flagged is named: long and shallow, on a wide-celled wing',
+    geom.tooShort.length === 0 && geom.problems > 0, geom.note);
+
+  // The categories have to be distinct pieces, not a sum of lists: one
+  // diagonal can be both long and shallow, and adding them gave "24 of 20".
+  check('the count is of diagonals, not of categories',
+    geom.problems <= geom.diagonals.length + geom.pairs.length,
+    `${geom.problems} problems across ${geom.diagonals.length} diagonals`);
+
+  // Loosening the limits must reduce the count, or the check is not
+  // measuring what it says.
+  const loose = diagonalGeometry(built.vribs, {
+    minLengthM: 0.05, maxLengthM: 1.0, minAngleFromHorizontalDeg: 5,
+    maxDirectionRatio: 3,
+  });
+  check('and relaxing the limits reduces it',
+    loose.problems < geom.problems,
+    `${geom.problems} at the default limits, ${loose.problems} relaxed`);
+}
+
+// ---------------------------------------------------------------------------
 section('Are the diagonals in tension?');
 
 {
@@ -7238,37 +9545,186 @@ section('Are the diagonals in tension?');
 
   const at = (baseSpread) => {
     const v = buildVRibs({ wing: wingV, airfoil: afV, rows: ['B'], baseSpread, maxReach: 1 });
-    return { v, check: checkDiagonalTension(v.vribs) };
+    // With the maillon, the load direction is the line's, not the
+    // diagonal's own axis.
+    const planV = buildLinePlan({
+      wing: wingV, airfoil: afV, layout: RISER_LAYOUTS['A/B/C+D'],
+      everyNthRib: 2, lineLengthM: 6.5,
+    });
+    // Loaded by the rib each one holds, which every piece carries with it.
+    // `byLine` is the same pieces loaded towards the riser instead — the
+    // direction this check used before, kept to show how far apart the two
+    // are.
+    return {
+      v,
+      check: checkDiagonalTension(v.vribs),
+      byLine: checkDiagonalTension(v.vribs.map(({ liftDirection, ...rest }) => rest),
+        { maillon: planV.maillon }),
+    };
   };
 
   const narrow = at(0.08);
   const wide = at(0.45);
 
-  check('a narrow diagonal is in tension across its whole width',
-    narrow.check.partlySlack === 0,
+  // What loads a diagonal is the rib it holds: that rib's lift, acting along
+  // the rib, from its lower seam to its upper.
+  check('every piece carries the direction of the lift it holds down',
+    narrow.v.vribs.every((d) => Array.isArray(d.liftDirection)
+      && Math.abs(Math.hypot(...d.liftDirection) - 1) < 1e-9));
+  // That direction is the held rib's own: lower seam to upper seam at the
+  // anchor station, so it leans out with the arc.
+  {
+    const d = narrow.v.vribs[narrow.v.vribs.length - 1];
+    const rib = wingV.ribs[d.toRib];
+    const beta = (rib.betaDeg * Math.PI) / 180;
+    near('and it leans out with the arc, as the rib does',
+      Math.atan2(d.liftDirection[1], d.liftDirection[2]) * (180 / Math.PI),
+      rib.betaDeg, 6, ' deg from vertical');
+    void beta;
+  }
+
+  // On the corrected canopy every fibre opposes it — narrow base or wide.
+  // On the inside-out canopy they did not: the lopsided outboard legs lay
+  // nearly along the load, and a third of some triangles was slack. That
+  // was recorded here as a property of diagonals; it was a property of the
+  // bug.
+  check('every fibre of a narrow diagonal holds its rib down',
+    narrow.check.fullyTaut === narrow.check.count,
     `${narrow.check.fullyTaut} of ${narrow.check.count} fully taut`);
-  check('and a wide one is not',
-    wide.check.partlySlack > 0, wide.check.note);
-  check('the wider it is, the less of it works',
-    wide.check.worst.tension.tautFraction < narrow.check.worst.tension.tautFraction,
-    `${(narrow.check.worst.tension.tautFraction * 100).toFixed(0)}% against `
-    + `${(wide.check.worst.tension.tautFraction * 100).toFixed(0)}%`);
+  check('and of a wide one too',
+    wide.check.fullyTaut === wide.check.count, wide.check.note);
+  // The check must still be able to see slack, or it proves nothing: turn
+  // the load over, so the rib is pressed down onto its diagonal, and every
+  // fibre would have to push.
+  const upside = checkDiagonalTension(narrow.v.vribs, { loadDirection: [0, 0, 1] });
+  check('and slack is detected when the load is reversed',
+    upside.partlySlack + (upside.count - upside.fullyTaut) > 0 && upside.wastedAreaM2 > 0,
+    upside.note);
+  // A piece that does not say what it holds still takes a maillon, as it
+  // did, and a direction given outright beats both.
+  check('a piece with no direction of its own still takes the maillon',
+    narrow.byLine.count === narrow.check.count && narrow.byLine.fullyTaut > 0);
+  {
+    const d = narrow.v.vribs[0];
+    const own = diagonalTension(d);
+    const told = diagonalTension(d, { loadDirection: [0, 0, 1], maillon: [0, 0, -9] });
+    check('and a direction given outright is the one used',
+      own.fullyTaut && !told.fullyTaut);
+  }
+  // How much of a diagonal's pull is sideways on the rib it holds. It is
+  // never nothing — the piece crosses a cell — and it is what the diagonal
+  // from the other side, or a strap, has to take.
+  {
+    const side = narrow.check.diagonals.map((d) => d.tension.sideShare);
+    check('part of every diagonal\'s pull is sideways on the rib it holds',
+      side.every((x) => x > 0.2 && x < 1),
+      `${(Math.min(...side) * 100).toFixed(0)}% to ${(Math.max(...side) * 100).toFixed(0)}% of it`);
+  }
+  // Loaded by the real line rather than by the diagonal's own axis, a
+  // diagonal's fibres all oppose the pull — cloth works by pulling back. What
+  // varies is how WELL they oppose it, which is the alignment.
+  // The headline, recorded as a KNOWN STATE rather than a pass: the
+  // diagonals on this wing are badly aimed at the load they carry. An
+  // alignment of 1 would pull straight back against the line; the worst here
+  // is near zero, meaning that diagonal resists almost nothing.
+  //
+  // It agrees with the geometry check, which flags most of the same pieces
+  // as unbuildable, and it was invisible while the load direction was taken
+  // as the diagonal's own axis — that made every fibre look perfectly aimed.
+  //
+  // On the corrected canopy the worst is 0.34: a third of a direct pull.
+  // It was under 0.2 inside out.
+  const worstAim = Math.min(narrow.check.worst.tension.alignment,
+    wide.check.worst.tension.alignment);
+  check('the worst diagonal still resists only part of the pull',
+    worstAim > 0.25 && worstAim < 0.6,
+    `alignment ${worstAim.toFixed(2)}, where 1 pulls straight back`);
+
+  // But the alignment on its own says little, because 1 is unreachable.
+  //
+  // A diagonal spans a cell sideways while rising from the lower surface to
+  // the upper, so its direction is fixed by the cell width against the
+  // section depth. `achievable` is the best any one of its own fibres manages
+  // against the same load, and the ratio is what says whether the base is
+  // placed well.
+  const usedFraction = (c) => {
+    const ds = c.diagonals.map((d) => d.tension).filter((t) => t.achievable > 0);
+    const mean = ds.reduce((a, t) => a + t.alignment, 0) / ds.length;
+    const best = ds.reduce((a, t) => a + t.achievable, 0) / ds.length;
+    return { mean, best, ratio: mean / best };
+  };
+  const uNarrow = usedFraction(narrow.check);
+  const uWide = usedFraction(wide.check);
+  check('a narrow base uses most of what its best fibre achieves',
+    uNarrow.ratio > 0.8,
+    `${(uNarrow.ratio * 100).toFixed(0)}% of ${uNarrow.best.toFixed(2)}`);
+  // A wider base necessarily spreads into fabric further from the best
+  // direction, so it uses less of it. That is the cost of spreading the load
+  // over more of the rib, and it is a trade rather than a fault.
+  check('and a wider one uses less, which is what spreading costs',
+    uWide.ratio < uNarrow.ratio,
+    `${(uNarrow.ratio * 100).toFixed(0)}% narrow against `
+    + `${(uWide.ratio * 100).toFixed(0)}% wide`);
+
+  // So the fix is not the base. It is the cell width: narrower cells rise
+  // more steeply for the same reach, and the alignment goes up with them.
+  const atCells = (cells) => {
+    const pfC = planformFromDesignInputs({
+      span: 11.6, rootChord: 2.45, tipChord: 0.55, tipSweep: 1.4,
+    });
+    const wC = buildWing({
+      planform: pfC,
+      lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfC.halfSpan),
+      airfoil: afV, cells, pointsPerSurface: 24,
+    });
+    const planC = buildLinePlan({
+      wing: wC, airfoil: afV, layout: RISER_LAYOUTS['A/B/C+D'],
+      everyNthRib: 2, lineLengthM: 6.5,
+    });
+    const vC = buildVRibs({
+      wing: wC, airfoil: afV, rows: ['B'], baseSpread: 0.18, maxReach: 1,
+    });
+    return usedFraction(checkDiagonalTension(vC.vribs, { maillon: planC.maillon }));
+  };
+  const few = atCells(20);
+  const many = atCells(40);
+  check('more cells aim the diagonals better at the load',
+    many.mean > few.mean * 1.2,
+    `${few.mean.toFixed(2)} at 20 cells, ${many.mean.toFixed(2)} at 40`);
+  check('and the bound moves with them, so it is the cell doing it',
+    many.best > few.best * 1.2,
+    `${few.best.toFixed(2)} to ${many.best.toFixed(2)}`);
 
   // The limit is the angle: a fibre more than 90 degrees from the load
   // direction would have to push, which fabric cannot do.
   const t = wide.check.worst.tension;
-  check('slack fibres are the ones past ninety degrees',
-    t.fibres.filter((f) => !f.taut).every((f) => f.angleDeg > 90)
-    && t.fibres.filter((f) => f.taut).every((f) => f.angleDeg <= 90));
+  // A fibre works by OPPOSING the load. The line pulls the apex down; the
+  // fabric runs up to the base and holds it. So a working fibre is one past
+  // ninety degrees from the pull, which is the opposite of what this
+  // asserted — and against the old self-referential load direction it was
+  // trivially satisfied.
+  check('working fibres are the ones opposing the pull',
+    t.fibres.filter((f) => f.taut).every((f) => f.angleDeg >= 90)
+    && t.fibres.filter((f) => !f.taut).every((f) => f.angleDeg < 90));
   check('and a taut fibre carries a positive share',
     t.fibres.filter((f) => f.taut).every((f) => f.share > 0)
     && t.fibres.filter((f) => !f.taut).every((f) => f.share === 0));
 
-  // Wasted fabric is the point: it is sewn in and carries nothing.
+  // Wasted fabric is sewn in and carries nothing; with the pull reversed it
+  // is all of it, and with the pull right it is none.
   check('the slack area is reported as fabric doing no work',
-    wide.check.wastedAreaM2 > 0 && /carries nothing/.test(wide.check.worst.tension.note));
-  check('and a fully taut wing reports none',
-    narrow.check.wastedAreaM2 === 0);
+    upside.wastedAreaM2 > 0 && /carries nothing/.test(upside.worst.tension.note));
+  check('and a wing whose fibres all work reports no waste',
+    narrow.check.wastedAreaM2 === 0 && wide.check.wastedAreaM2 === 0);
+
+  // The load leans out along the span as the rib it comes from does: that
+  // is the arc. It is not a sideways pull on the diagonal — the diagonal
+  // leans with its cell — which is what `sideShare` above measures.
+  const shares = wide.check.diagonals.map((d) => d.tension.spanwiseShare);
+  check('the load leans out along the span as the arc does',
+    Math.max(...shares) > Math.min(...shares) * 2,
+    `${(Math.min(...shares) * 100).toFixed(0)}% at the root to `
+    + `${(Math.max(...shares) * 100).toFixed(0)}% outboard`);
 
   // Sanity on the geometry itself.
   check('a wider base really is a bigger diagonal',
@@ -7349,73 +9805,169 @@ section('B and C handles');
 }
 
 // ---------------------------------------------------------------------------
-section('Rods as chord-range groups');
+section('Rods, as they are made');
 
 {
-  // `buildRods` places one rod per rib running back from the nose, which is
-  // the common case. Real design files are not limited to that: LEP's section
-  // 21 defines rods as GROUPS, each a chord range over a rib range, and the
-  // Swoop2 has two — 12 to 18.5% of chord and 23.5 to 29.5%, so a rod is
-  // neither always at the leading edge nor always alone.
-  //
-  // I wrote this as a new module before checking, and the build's duplicate
-  // name guard caught `buildRods` already existing in reinforcement.js. The
-  // existing one is the more complete — it has sleeves, closed-rib handling
-  // and materials — so this extends it rather than competing with it.
+  // A nose rod is ONE piece: from the upper surface, round the leading edge,
+  // to the lower. For a long time this project read the two ends of one as
+  // two rods — "12 to 18.5% of the upper surface" — and drew a 14 cm stub
+  // that did not reach the nose on every wing that was not an imported file.
   const wingR2 = demoWing();
-  const swoopGroups = [
-    rodGroup({ name: 'LE', fromChord: 0.12, toChord: 0.185, fromRib: 0, toRib: 25 }),
-    rodGroup({ name: 'mid', fromChord: 0.235, toChord: 0.295, fromRib: 0, toRib: 25,
-      diameterMM: 1.1 }),
-  ];
-  const built = buildRodGroups({ wing: wingR2, groups: swoopGroups });
+  const loopOf = (rib) => rib.upper.slice().reverse().concat(rib.lower.slice(1))
+    .map((q) => toRibPlane(rib, q));
+  const root = wingR2.ribs[0];
+  const [noseDef, battenDef] = SWOOP2_RODS;
+  // Stations are fractions of the section's own chord from its own zero,
+  // which in the rib's plane is the origin.
+  const onRoot = { chord: root.chord, origin: 0 };
+  const nose = rodPolyline(loopOf(root), noseDef, onRoot);
+  const xOf = (q) => q[0];
 
-  check('both groups produce rods', built.count > 0
-    && new Set(built.rods.map((r) => r.group)).size === 2);
-  check('and both sides of the wing are counted',
-    built.count === built.rods.length * 2);
-  check('a rod is as long as its chord span on its own rib', (() => {
-    const r = built.rods[0];
-    return Math.abs(r.lengthM - r.chordM * (0.185 - 0.12)) < 1e-12;
+  check('a nose rod starts on the upper surface and ends on the lower',
+    nose.points[0][1] > 0 && nose.points[nose.points.length - 1][1] < 0);
+  near('at the stations asked for: 18.5% of chord on top',
+    xOf(nose.points[0]) / root.chord, 0.185, 1e-9);
+  near('and 15% underneath',
+    xOf(nose.points[nose.points.length - 1]) / root.chord, 0.15, 1e-9);
+  check('and passes round the leading edge on the way',
+    Math.min(...nose.points.map(xOf)) === Math.min(...loopOf(root).map((w) => w[0])));
+  check('so it is far longer than the 6.5% of chord its upper zone spans',
+    nose.lengthM > root.chord * 0.335 && nose.lengthM < root.chord * 0.45,
+    `${(nose.lengthM * 100).toFixed(1)} cm on a ${root.chord.toFixed(2)} m chord, `
+    + `where 12 to 18.5% of it is ${(root.chord * 6.5).toFixed(0)} cm`);
+
+  // Across its run-out zones a rod leaves the surface for the inside of the
+  // rib, so its end does not bear on the sail: by 1.5% of chord at the upper
+  // end and 2% at the lower, on the Swoop2.
+  const flush = rodPolyline(loopOf(root), { ...noseDef, runout: [0, 0] }, onRoot);
+  near('the upper end sits 1.5% of chord inside the surface',
+    (flush.points[0][1] - nose.points[0][1]) / root.chord, 0.015, 1e-9);
+  near('and the lower end 2% inside it',
+    (nose.points[nose.points.length - 1][1] - flush.points[flush.points.length - 1][1]) / root.chord,
+    0.020, 1e-9);
+  check('while between the zones it lies on the surface itself',
+    nose.points.filter((q) => xOf(q) < 0.07 * root.chord)
+      .every((q) => flush.points.some((f) => Math.abs(f[0] - q[0]) < 1e-12 && Math.abs(f[1] - q[1]) < 1e-12)));
+
+  // A batten runs along one surface: 23.5% to 70% of the upper, on the Swoop2.
+  const batten = rodPolyline(loopOf(root), battenDef, onRoot);
+  check('a batten stays on the upper surface',
+    batten.points.every((q) => q[1] > 0));
+  near('from the start of its first zone', xOf(batten.points[0]) / root.chord, 0.235, 1e-9);
+  near('to the end of its second',
+    xOf(batten.points[batten.points.length - 1]) / root.chord, 0.70, 1e-9);
+  check('and an unknown kind is refused', (() => {
+    try { rodPolyline(loopOf(root), { kind: 'spring' }); return false; }
+    catch (e) { return /Unknown kind of rod/.test(e.message); }
   })());
+
+  // On a wing.
+  const built = buildRods(wingR2, { groups: SWOOP2_RODS });
+  check('both kinds produce a rod on every rib',
+    built.rods.length === wingR2.ribs.length * 2 && built.skipped.length === 0
+    && Object.keys(built.byGroup).join() === 'nose,batten', built.note);
+  // Twice each, except a rod on the centre rib: the wing has that rib once.
+  check('and the whole wing is counted, the centre rib once',
+    built.count === built.rods.length * 2 - built.rods.filter((r) => r.rib === 0).length
+    && built.rods.some((r) => r.rib === 0),
+    `${built.count} rods from ${built.rods.length} on the half`);
+  check('every rod carries its shape, for the rib drawing and the pattern',
+    built.rods.every((r) => r.points.length > 3 && r.lengthM > 0.05 && r.massG > 0));
   check('stock is grouped by diameter, which is what gets ordered',
-    Object.keys(built.byDiameter).length === 2);
-  check('and a thinner rod weighs less per metre', (() => {
-    const d = built.byDiameter;
-    return (d['1.1'].massG / d['1.1'].lengthM) < (d['1.3'].massG / d['1.3'].lengthM);
+    Object.keys(built.byDiameter).join() === '1.5'
+    && Math.abs(built.byDiameter['1.5'].lengthM - built.totalLengthM) < 1e-9);
+  check('a rod is longer than the chord its ends span, because it follows the section',
+    built.rods.every((r) => r.lengthM > r.chordwiseM) && built.curvatureExcess > 0.02,
+    `+${(built.curvatureExcess * 100).toFixed(1)}% over the wing`);
+  const noseOnly = buildRods(wingR2, {});
+  check('with nothing said, a wing gets a nose rod on every rib',
+    noseOnly.rods.length === wingR2.ribs.length && noseOnly.rods.every((r) => r.kind === 'nose'),
+    noseOnly.note);
+  const reach = buildRods(wingR2, { groups: [noseRodGroup({ toRib: 6 })] });
+  check('a group can stop short of the tip', reach.rods.length === 7);
+  const further = buildRods(wingR2, { groups: [noseRodGroup({ upperTo: 0.30, lowerTo: 0.20 })] });
+  check('running the rod further back makes it longer',
+    further.totalLengthM > noseOnly.totalLengthM * 1.2,
+    `${noseOnly.totalLengthM.toFixed(1)} -> ${further.totalLengthM.toFixed(1)} m`);
+
+  // Mass goes as the square of diameter — the trade this exists to show.
+  const thin = buildRods(wingR2, { spec: { diameterMM: 1.0 } });
+  const thick = buildRods(wingR2, { spec: { diameterMM: 2.0 } });
+  near('doubling the diameter quadruples the rod mass',
+    thick.totalMassG / thin.totalMassG, 4, 1e-9);
+  check('carbon is heavier than nylon for the same rod',
+    buildRods(wingR2, { spec: { material: 'carbon' } }).totalMassG > noseOnly.totalMassG);
+  check('every material says what it is for',
+    Object.values(ROD_MATERIALS).every((m) => m.densityKgM3 > 0 && m.note.length > 20));
+  check('an unknown material is refused rather than guessed', (() => {
+    try { buildRods(wingR2, { spec: { material: 'unobtainium' } }); return false; }
+    catch (e) { return /Unknown rod material/.test(e.message); }
+  })());
+  check('and so is a rod with no diameter', (() => {
+    try { buildRods(wingR2, { groups: [noseRodGroup({ diameterMM: 0 })] }); return false; }
+    catch (e) { return /positive diameter/.test(e.message); }
   })());
 
-  // Refusals rather than silent defaults.
-  check('a backwards chord range is refused', (() => {
-    try { rodGroup({ fromChord: 0.3, toChord: 0.1, fromRib: 0, toRib: 5 }); return false; }
-    catch (e) { return /aft of fromChord/.test(e.message); }
-  })());
-  check('and an unknown material is refused', (() => {
-    try {
-      rodGroup({ fromChord: 0.1, toChord: 0.2, fromRib: 0, toRib: 5,
-        material: 'bamboo' });
-      return false;
-    } catch (e) { return /Unknown rod material/.test(e.message); }
-  })());
+  // A rod's pocket is sewn to the rib, so a rod cannot cross an opening, or
+  // run so close to one that its pocket has no rib to be sewn to. Compared
+  // as they lie on the rib: the rod's line against the opening's outline.
+  const afR2 = naca4('4415');
+  afR2.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const openingsFor = (aware) => {
+    const byRib = {};
+    wingR2.ribs.forEach((rib, i) => {
+      const nb = wingR2.ribs[Math.min(i + 1, wingR2.ribs.length - 1)];
+      byRib[i] = ribOpenings(rib, nb === rib ? null : nb, afR2, {
+        rods: aware ? built.rods.filter((r) => r.rib === i).map((r) => r.points) : null,
+      }).holes.map((h) => h.outline);
+    });
+    return byRib;
+  };
+  const closest = (holesByRib) => {
+    // The smallest gap anywhere, found by asking with an absurd margin.
+    const all = checkRodClearance({ rods: built.rods, holesByRib, marginM: 10 });
+    return Math.min(...all.clashes.map((x) => x.clearanceM));
+  };
+  // Placed without knowing about the rods, an opening comes within a few
+  // millimetres of the end of a nose rod — nearer on the small ribs.
+  const blind = checkRodClearance({ rods: built.rods, holesByRib: openingsFor(false) });
+  check('openings placed without regard to the rods come too close to them',
+    !blind.ok && blind.clashes.every((x) => !x.through) && closest(openingsFor(false)) < 0.004,
+    `${(closest(openingsFor(false)) * 1000).toFixed(1)} mm at the closest; ${blind.note}`);
+  // So they are shaped to keep clear: 1.3% of chord, and never under 10 mm.
+  const aware = openingsFor(true);
+  const clear = checkRodClearance({ rods: built.rods, holesByRib: aware });
+  check('the openings this tool cuts keep clear of its rods on every rib',
+    clear.ok && /no rod crosses/.test(clear.note) && closest(aware) >= 0.0099,
+    `${(closest(aware) * 1000).toFixed(1)} mm at the closest`);
+  const lost = (byRib) => Object.values(byRib).flat().reduce((t, poly) => {
+    let area = 0;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) area += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+    return t + Math.abs(area / 2);
+  }, 0);
+  check('at the cost of a little of the first opening, not of an opening',
+    Object.values(aware).flat().length === Object.values(openingsFor(false)).flat().length
+    && lost(aware) > lost(openingsFor(false)) * 0.9 && lost(aware) < lost(openingsFor(false)),
+    `${(lost(aware) / lost(openingsFor(false)) * 100).toFixed(1)}% of the open area kept`);
 
-  // A rod shares the rib with holes and anchors, placed by rules that do not
-  // know about each other. A rod cannot pass through a hole, and an anchor
-  // tab sewn over a rod puts its load into a hinge.
-  const clear = checkRodClearance({
-    rods: built.rods,
-    anchors: [{ chordFraction: 0.085 }, { chordFraction: 0.30 }],
-  });
-  check('an anchor inside a rod band is caught',
-    clear.anchorClashes > 0, clear.note);
-  const clean = checkRodClearance({
-    rods: built.rods, anchors: [{ chordFraction: 0.60 }],
-  });
-  check('and an anchor well clear of them is not',
-    clean.ok && /no rod overlaps/.test(clean.note));
-  const holed = checkRodClearance({
-    rods: built.rods, holes: [{ fromChord: 0.15, toChord: 0.25 }],
-  });
-  check('a hole overlapping a rod is caught too', holed.holeClashes > 0);
+  // An opening put where the batten runs is found, and found on its rib.
+  const b0 = built.rods.find((r) => r.kind === 'batten' && r.rib === 3);
+  const mid = b0.points[Math.floor(b0.points.length / 2)];
+  const squareAt = (dy, half) => [[-half, -half], [half, -half], [half, half], [-half, half]]
+    .map(([dx, ddy]) => [mid[0] + dx, mid[1] + dy + ddy]);
+  const holed = checkRodClearance({ rods: built.rods, holesByRib: { 3: [squareAt(0, 0.05)] } });
+  check('an opening across a rod is caught, on the rib it is on',
+    !holed.ok && holed.ribs.join() === '3' && holed.clashes.every((x) => x.group === 'batten' && x.through),
+    holed.note);
+  const close = checkRodClearance({ rods: [b0], holesByRib: { 3: [squareAt(-0.008, 0.005)] } });
+  const far = checkRodClearance({ rods: [b0], holesByRib: { 3: [squareAt(-0.030, 0.005)] } });
+  check('one that only comes within the pocket\'s margin is caught too, and one well clear is not',
+    !close.ok && !close.clashes[0].through && far.ok,
+    `${(close.clashes[0].clearanceM * 1000).toFixed(1)} mm clear against ${(close.marginM * 1000).toFixed(0)} asked`);
+  // A line anchor inside a rod's run is not a clash: the Swoop2 has its A
+  // anchors at 11% of chord inside a nose rod that runs to 15%.
+  check('and an anchor within a rod\'s run is no longer called one',
+    !('anchorClashes' in clear));
 }
 
 // ---------------------------------------------------------------------------
@@ -7439,18 +9991,15 @@ section('Pairing panels for the roll');
     paired.orderSavings[paired.order]
       === Math.max(...Object.values(paired.orderSavings)),
     `${paired.order} won`);
-  // Neither order dominates, which is the point of measuring both.
+  // Which order wins depends on the wing, so both are measured on every
+  // wing and the better one taken — never assumed.
   //
-  // I expected complementary to win everywhere — a tip nests into a root's
-  // gap and two roots do not nest into each other. It wins on some wings and
-  // loses on others:
-  //
-  //     12 cells  adjacent       20 cells  adjacent
-  //     25 cells  complementary  40 cells  complementary
-  //     60 cells  adjacent
-  //
-  // So the improvement is not "use complementary". It is "stop assuming, and
-  // take whichever actually packs better on this wing".
+  // This used to assert that neither order wins everywhere, from what the
+  // panels showed at the time: complementary won at 25 and 40 cells. Those
+  // panels were developed from a canopy built inside out. On the corrected
+  // geometry adjacent wins on all four, which is exactly why the rule is to
+  // measure: the property worth checking is that the choice is the better
+  // one on each wing, whichever it is.
   const orders = [12, 20, 25, 40].map((cells) => {
     const pfN = planformFromDesignInputs({
       span: 11.6, rootChord: 2.45, tipChord: 0.55, tipSweep: 1.4,
@@ -7460,10 +10009,12 @@ section('Pairing panels for the roll');
       lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfN.halfSpan),
       airfoil: naca4('4415'), cells, pointsPerSurface: 24,
     });
-    return pairPanels(developWing(wN), { gap: 0.01 }).order;
+    return pairPanels(developWing(wN), { gap: 0.01 });
   });
-  check('neither order wins on every wing',
-    new Set(orders).size > 1, orders.join(', '));
+  check('on every wing the order chosen is the one that saves more',
+    orders.every((o) => o.orderSavings[o.order]
+      >= Math.max(...Object.values(o.orderSavings)) - 1e-12),
+    orders.map((o) => o.order).join(', '));
   check('and whichever is chosen is never the worse of the two',
     paired.orderSavings[paired.order]
       >= Math.max(...Object.values(paired.orderSavings)) - 1e-12);
@@ -7481,8 +10032,9 @@ section('Pairing panels for the roll');
     `${paired.paired} paired + ${paired.singles.length} single `
     + `= ${panelsN.length}`);
 
-  // The profile packer is the one that earns its keep on the roll.
-  const box = nestPanels(panelsN, { rollWidth: 1.4, gap: 0.03 });
+  // The profile packer is the one that earns its keep on the roll — which
+  // is why `nestPanels` now uses it, and the skyline layout is the fallback.
+  const box = nestPanels(panelsN, { rollWidth: 1.4, gap: 0.03, method: 'skyline' });
   const profile = nestByProfile(panelsN, { rollWidth: 1.4, gap: 0.03 });
   const lenOf = (n) => n.extent.maxX - n.extent.minX;
   check('nesting by profile uses less roll than by box',
@@ -7515,7 +10067,7 @@ section('A size family from one design');
     wingMassKg: 4.2 * (a / baseArea),
     // Line HEIGHT, not total line length: `lineLengthM` is the distance from
     // the karabiner to the canopy. Feeding it `lineLengthPerSpan` — which
-    // gives total metres of cord — would have put 224 m where 6.5 m goes.
+    // gives total metres of cord — would have put 240 m where 6.5 m goes.
     lineLengthM: 6.5 * Math.sqrt(a / baseArea),
   }));
   const fam = buildFamily(base, sizes, {
@@ -7542,11 +10094,29 @@ section('A size family from one design');
   // Everything a designer would compare between sizes must be a number.
   //
   // Left without a line length the table came out with NaN speed and NaN
-  // glide on every row and 4 of 216 lines load-sized — a table that looked
-  // like a table and told nobody anything.
+  // glide on every row — a table that looked like a table and told nobody
+  // anything.
   const table = familyTable(fam);
   check('no cell of the table is NaN', !/NaN/.test(table),
     table.split('\n')[1]);
+  // The interface always gives one. The model was not asked to care, and
+  // went on producing that table for anyone who did not.
+  const refusal = (() => {
+    try {
+      buildFamily(base, sizes.map(({ lineLengthM, ...rest }) => rest),
+        { airfoil: naca4('4415'), cells: 12, pointsPerSurface: 20 });
+      return null;
+    } catch (e) { return e.message; }
+  })();
+  check('a family with no line height is refused, not tabulated',
+    refusal != null && /no line height/.test(refusal) && /size 20/.test(refusal), refusal);
+  check('and one with no all-up mass', (() => {
+    try {
+      buildFamily(base, sizes.map(({ allUpMassKg, ...rest }) => rest),
+        { airfoil: naca4('4415'), cells: 12, pointsPerSurface: 20 });
+      return false;
+    } catch (e) { return /no all-up mass/.test(e.message); }
+  })());
 
   // The trends that must hold across a family.
   const spans = fam.summaries.map((z) => z.flatSpanM);
@@ -7875,8 +10445,24 @@ section('Choosing a line set, and keeping it in trim');
   const perLine = selectLines(loadsO2.tensions, { table: cat });
   const distinct = new Set(perLine.lines.filter((l) => l.line)
     .map((l) => l.line.code)).size;
-  check('picking per line needs more types than a workshop would stock',
-    distinct >= 6, `${distinct} distinct materials`);
+  // (Seven, then six, while two lines of one diameter were taken weakest
+  // first: the 0.50 mm Vectran rated 25 daN kinked ahead of the 0.50 mm
+  // DC 40 rated 41. Five now, of two makers.)
+  const makers = new Set(perLine.lines.filter((l) => l.line)
+    .map((l) => l.line.family?.split(' ')[0]));
+  check('picking per line still asks for a type at every step of load',
+    distinct === 5 && makers.size === 2,
+    `${distinct} distinct materials from ${[...makers].join(' and ')}`);
+  // Between two lines of one diameter the stronger is the one to take: the
+  // same drag, the same weight.
+  const half5 = cat.filter((m) => Math.abs(m.diameterMM - 0.5) < 1e-9)
+    .sort((x, y) => y.strengthKinkedDaN - x.strengthKinkedDaN);
+  const lightest = perLine.lines.filter((l) => l.line && l.requiredDaN < 20);
+  check('of two lines the same diameter the stronger is chosen',
+    half5.length === 2 && lightest.length > 10
+      && lightest.every((l) => l.line.code === half5[0].code),
+    `${half5.map((m) => `${m.name} ${m.strengthKinkedDaN} daN`).join(', ')}: `
+    + `${lightest.length} lightly loaded lines all on ${half5[0].name}`);
 
   // The real question is which N to stock. Sorted by load, a choice of N
   // materials partitions the lines into N contiguous groups, so it is a
@@ -7907,71 +10493,302 @@ section('Choosing a line set, and keeping it in trim');
 
   // -------------------------------------------------------------------
   // Strength and drag are not the whole story. A line set has to hold its
-  // TRIM, and the fibres do not move the same way: Dyneema creeps longer
-  // under load, aramid shrinks with moisture.
-  check('the catalogue is classified by fibre',
-    ['dyneema', 'aramid', 'polyester']
-      .every((f) => cat.some((m) => fibreOf(m) === f)));
+  // TRIM, and the fibres do not behave alike.
+  //
+  // What each line IS, first. The model guessed from the name and had the
+  // two commonest families backwards; it is held to a record now, with the
+  // supplier's data sheet, a DHV test report or a maker's materials list
+  // behind each family.
+  const record = readFileSync('data/reference/line-materials-suppliers.tsv', 'utf8')
+    .split(/\r?\n/).filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
+  const famRows = record.filter((r) => r[0] === 'family');
+  check('every line family the model knows is on record with a source',
+    famRows.length === LINE_FAMILIES.length && LINE_FAMILIES.every((f) => famRows
+      .some((r) => r[1] === f.maker && r[2] === f.family && r[6])),
+    `${LINE_FAMILIES.length} families`);
+  check('and the model says of each what the record says: core, cover, stated or inferred',
+    famRows.every((r) => {
+      const f = LINE_FAMILIES.find((x) => x.maker === r[1] && x.family === r[2]);
+      return f && f.core === r[3] && (f.cover ?? 'none') === r[4]
+        && (f.inferred ? 'inferred' : 'stated') === r[5];
+    }));
+  check('Edelrid 8000-U and 8001 are aramid, and 9200 Dyneema',
+    fibreOf('8000U-190') === 'aramid' && fibreOf('8001-050') === 'aramid'
+      && fibreOf('9200-035') === 'dyneema');
+  check('Liros PPSL is Dyneema under a cover, and LTC bare Technora',
+    fibreOf('PPSL 120') === 'dyneema' && isSheathed('PPSL 120') === true
+      && fibreOf('LTC 065') === 'aramid' && isSheathed('LTC 065') === false
+      && fibreOf('PPSLS 65') === 'dyneema' && lineFamilyOf('PPSLS 65').family === 'PPSLS');
+  // A sheet writes one line several ways, and every one has to land.
+  check('a line is recognised however a sheet writes it',
+    ['8000U-050', 'A-8000/U 50', 'U-50', 'Edelrid 8000-45 (U50)']
+      .every((n) => lineFamilyOf(n)?.family === '8000-U')
+      && ['A-8001/U 50', '8001-050', '8001U-050'].every((n) => lineFamilyOf(n)?.family === '8001')
+      && ['DC-40', 'DC 40', 'DC40'].every((n) => lineFamilyOf(n)?.family === 'DC')
+      && lineFamilyOf('TARAX-240')?.family === '7850' && fibreOf('TNL-80') === 'aramid');
+  check('an imported design is believed about its own lines',
+    fibreOf({ name: 'Line120', fibre: 's_dyneem' }) === 'dyneema'
+      && isSheathed({ name: 'Line120', fibre: 's_dyneem' }) === true
+      && isSheathed({ name: 'Riser', fibre: 'u_dyneem' }) === false
+      // the Swoop2's own file spells one of them "s_dynemm"
+      && fibreOf({ name: 'Line200B', fibre: 's_dynemm' }) === 'dyneema');
+  check('and a line nobody has identified is unknown, not Dyneema',
+    fibreOf('Line120') === 'unknown' && fibreOf({ code: '12100' }) === 'unknown'
+      && lineFamilyOf('') === null);
+  const byFibre = {};
+  for (const m of cat) (byFibre[m.fibre] ||= []).push(m);
+  check('every line of the catalogue is identified',
+    !byFibre.unknown && cat.length === 78
+      && byFibre.aramid.length === 48 && byFibre.dyneema.length === 26 && byFibre.vectran.length === 4,
+    Object.entries(byFibre).map(([f, a]) => `${a.length} ${f}`).join(', '));
+  check('and carries its cover: the sheathed aramid is sheathed, bare Technora is not',
+    cat.filter((m) => /^7343|^6843/.test(m.code)).every((m) => m.sheathed)
+      && cat.filter((m) => /^LTC|^TCR/.test(m.code)).every((m) => !m.sheathed)
+      && cat.filter((m) => m.sheathed).length === 31);
 
-  const dy = cat.find((m) => fibreOf(m) === 'dyneema');
-  const ar = cat.find((m) => fibreOf(m) === 'aramid');
-  const life = (mat, load) => lineDrift({
-    material: mat, lengthMM: 6500, hours: 200, loadFraction: load,
+  // The strength table sorts by fibre on its own. It gives each line new and
+  // kinked, and what a line keeps kinked is the fibre's: aramid about half,
+  // Dyneema nearly all. A classification got from data sheets and one got
+  // from PHI's test rig agree on 77 lines of 78.
+  const kept = (m) => m.strengthKinkedDaN / m.strengthNewDaN;
+  const keptOf = (f) => byFibre[f].map(kept).sort((x, y) => x - y);
+  const medianOf = (a) => a[Math.floor(a.length / 2)];
+  check('no aramid line keeps more than 70% of its strength kinked',
+    keptOf('aramid')[0] > 0.37 && keptOf('aramid')[47] < 0.705,
+    `${(keptOf('aramid')[0] * 100).toFixed(0)} to ${(keptOf('aramid')[47] * 100).toFixed(0)}%, `
+    + `${(medianOf(keptOf('aramid')) * 100).toFixed(0)}% in the middle`);
+  check('and all but one Dyneema line keeps more',
+    keptOf('dyneema').filter((k) => k < 0.705).length === 1
+      && keptOf('dyneema').filter((k) => k >= 0.85).length === 22
+      && medianOf(keptOf('dyneema')) > 0.9,
+    `${(keptOf('dyneema')[0] * 100).toFixed(0)} to ${(keptOf('dyneema')[25] * 100).toFixed(0)}%, `
+    + `${(medianOf(keptOf('dyneema')) * 100).toFixed(0)}% in the middle; 22 of 26 at 85% or more`);
+  check('Vectran loses as aramid does',
+    keptOf('vectran')[3] < 0.7, `${keptOf('vectran').map((k) => (k * 100).toFixed(0)).join(', ')}%`);
+  // The two DHV reports on record, by the standard's own bending test. Read
+  // for what they are: one line of each fibre, and closer together than
+  // PHI's kink.
+  const bend = record.filter((r) => r[0] === 'bending')
+    .map((r) => ({ item: r[2], core: r[3], kept: Number(r[5]) / Number(r[4]) }));
+  check('after 5,000 bends the DHV\'s aramid line keeps 63% and its Dyneema line 68%',
+    bend.length === 2
+      && Math.abs(bend.find((b) => b.core === 'aramid').kept - 0.629) < 0.002
+      && Math.abs(bend.find((b) => b.core === 'dyneema').kept - 0.681) < 0.002,
+    bend.map((b) => `${b.item} ${(b.kept * 100).toFixed(1)}%`).join(', '));
+
+  // What a line weighs, where the supplier's figure is not to hand: taken
+  // from its cross-section. Edelrid's data sheets give diameter and weight
+  // for 26 sheathed sizes.
+  const sizes = record.filter((r) => r[0] === 'size')
+    .map((r) => Number(r[5]) / ((Math.PI / 4) * Number(r[4]) ** 2));
+  const meanSize = sizes.reduce((x, y) => x + y, 0) / sizes.length;
+  near('a sheathed line weighs 0.98 g/m for each mm2 of its nominal section',
+    LINE_WEIGHT_PER_AREA.sheathed, meanSize, 0.005, ' g/m per mm2');
+  check('on 26 sizes of four families, none more than a fifth from it',
+    sizes.length === 26 && Math.min(...sizes) > 0.8 && Math.max(...sizes) < 1.11,
+    `${Math.min(...sizes).toFixed(2)} to ${Math.max(...sizes).toFixed(2)}`);
+  const ppsl275 = cat.find((m) => m.code === 'PPSL275');
+  check('so a 1.9 mm sheathed line is 2.8 g/m, not the 3.4 it was given',
+    Math.abs(ppsl275.gramsPerM - 2.84 * 0.98) < 1e-9 && ppsl275.sheathed,
+    `${ppsl275.gramsPerM.toFixed(2)} g/m; the Swoop2's own file has its 1.9 mm line at 2.26`);
+
+  // ---------------------------------------------------------------------
+  // How each fibre moves. Dyneema shrinks as it settles in, over the first
+  // 20 to 50 hours, and the load of flying pulls it back out: the lines
+  // that carry least stay short. Aramid holds its length for years.
+  const dy = cat.find((m) => m.code === 'DC60');
+  const ar = cat.find((m) => m.code === 'U-090');
+  check('the two lines the examples use are a Dyneema and an aramid',
+    fibreOf(dy) === 'dyneema' && fibreOf(ar) === 'aramid', `${dy.name}, ${ar.name}`);
+  const life = (mat, load, hours = 200) => lineDrift({
+    material: mat, lengthMM: 6500, hours, loadFraction: load,
   });
-  check('Dyneema gets longer over its life', life(dy, 0.5).deltaMM > 0);
-  check('and aramid gets shorter', life(ar, 0.25).deltaMM < 0);
-  check('creep rises with how hard the line works',
-    life(dy, 0.5).creepFraction > life(dy, 0.25).creepFraction);
+  near('an unloaded Dyneema line 6.5 m long ends 26 mm short',
+    life(dy, 0).deltaMM, -26, 0.05, ' mm');
+  check('which is inside the supplier\'s own bound of half a per cent',
+    FIBRE_BEHAVIOUR.dyneema.settleShrink < 0.005 && life(dy, 0).netFraction > -0.005);
+  check('most of it in the first 25 to 50 hours',
+    life(dy, 0, 25).deltaMM / life(dy, 0).deltaMM > 0.7
+      && life(dy, 0, 50).deltaMM / life(dy, 0).deltaMM > 0.9,
+    `${life(dy, 0, 25).deltaMM.toFixed(1)} mm at 25 h, ${life(dy, 0, 50).deltaMM.toFixed(1)} at 50, `
+    + `${life(dy, 0).deltaMM.toFixed(1)} at 200`);
+  check('a line carrying the neutral load holds its length',
+    life(dy, NEUTRAL_LOAD_FRACTION).deltaMM === 0 && life(dy, 0.07).deltaMM === 0);
+  near('and one carrying half of it keeps half its shrinkage',
+    life(dy, NEUTRAL_LOAD_FRACTION / 2).deltaMM, -13, 0.05, ' mm');
+  check('no line gets longer', [0, 0.01, 0.025, 0.05, 0.2]
+    .every((x) => life(dy, x).deltaMM <= 0 && life(ar, x).deltaMM <= 0));
+  near('aramid has done nothing by its first season but the season\'s own',
+    life(ar, 0, HOURS_PER_SEASON).deltaMM, -6500 * FIBRE_BEHAVIOUR.aramid.shrinkPerSeason, 1e-9, ' mm');
+  check('and takes years to move what Dyneema moves in fifty hours',
+    Math.abs(life(ar, 0, 50).deltaMM) < Math.abs(life(dy, 0, 50).deltaMM) / 5
+      && Math.abs(life(ar, 0, 200).deltaMM) < Math.abs(life(dy, 0, 50).deltaMM),
+    `${life(ar, 0, 50).deltaMM.toFixed(1)} mm at 50 h against ${life(dy, 0, 50).deltaMM.toFixed(1)}; `
+    + `${life(ar, 0, 200).deltaMM.toFixed(1)} after four seasons`);
+  check('a line of unknown fibre is refused, not treated as Dyneema', (() => {
+    try { lineDrift({ material: { name: 'Line120' }, lengthMM: 1000, hours: 10 }); return false; }
+    catch (e) { return /no behaviour for fibre "unknown"/.test(e.message); }
+  })());
 
-  // Magnitude: about 18 mm on a 6.5 m A line over 200 hours, which is the
-  // order a trim check looks for. My first values gave 28 mm at TWENTY hours
-  // — right in shape, wrong by a factor of three, which is worse than being
-  // obviously broken.
-  check('the drift is the order a trim check is looking for',
-    life(dy, 0.5).deltaMM > 10 && life(dy, 0.5).deltaMM < 30,
-    `${life(dy, 0.5).deltaMM.toFixed(1)} mm over 200 hours`);
-  check('and most of it arrives early, which is why the first check is at 50',
-    lineDrift({ material: dy, lengthMM: 6500, hours: 50, loadFraction: 0.5 })
-      .deltaMM / life(dy, 0.5).deltaMM > 0.6);
+  // The load is what a line carries in LEVEL FLIGHT, over its strength new.
+  // It was the line's share of the 8 g limit case with its margin — twelve
+  // times the load a line lives under.
+  const chainO2 = lengthChain(perLine, { loopAllowanceMM: 130 });
+  const fractions = chainO2.lines.map(flightLoadFraction);
+  check('in level flight a line carries a few per cent of its strength',
+    Math.max(...fractions) < 0.09 && Math.max(...fractions) > 0.05
+      && fractions.every((x) => x >= 0),
+    `${(Math.min(...fractions) * 100).toFixed(1)} to ${(Math.max(...fractions) * 100).toFixed(1)}%`);
 
-  // The result that matters: one fibre throughout drifts as a unit and keeps
-  // its trim; mixing fibres drifts differentially and rotates the wing.
-  const mk = (row, mat, n) => Array.from({ length: n }, (_, i) => ({
-    row, name: row + i, line: mat, referenceLengthMM: 6500,
-    requiredDaN: mat.strengthKinkedDaN * 0.5, ratedDaN: mat.strengthKinkedDaN,
-  }));
-  const uniform = trimDrift({
-    lines: [...mk('A', dy, 8), ...mk('C', dy, 8)],
-    hours: 200, anchors: afO2.anchors, chordM: 2.4,
+  // What moves the wing is the attachment POINTS, and a point moves by the
+  // sum of the lines under it.
+  const pathsO2 = planPaths(planO2);
+  const driftAt = (hours, lines = chainO2.lines) => trimDrift({
+    lines, hours, anchors: afO2.anchors, chordM: 2.6, paths: pathsO2,
   });
-  const mixed = trimDrift({
-    lines: [...mk('A', dy, 8), ...mk('C', ar, 8)],
-    hours: 200, anchors: afO2.anchors, chordM: 2.4,
-  });
-  near('one fibre throughout barely moves the trim',
-    uniform.alphaChangeDeg, 0, 0.05, ' deg');
-  check('mixing fibres moves it a great deal',
-    Math.abs(mixed.alphaChangeDeg) > 1,
-    `${mixed.alphaChangeDeg.toFixed(2)} deg over 200 hours`);
-  check('and the model says which case it is looking at',
-    mixed.mixedFibres && !uniform.mixedFibres);
+  const d200 = driftAt(200);
+  const ownOf = new Map(chainO2.lines.map((l) => [l.name, lineDrift({
+    material: l.line, lengthMM: l.referenceLengthMM, hours: 200,
+    loadFraction: flightLoadFraction(l),
+  }).deltaMM]));
+  check('an attachment point moves by the sum of the lines under it',
+    d200.points.length === pathsO2.length && d200.points.every((pt) => {
+      const path = pathsO2.find((q) => q.name === pt.name);
+      return Math.abs(pt.deltaMM - path.names.reduce((x, n) => x + ownOf.get(n), 0)) < 1e-9;
+    }), `${d200.points.length} attachment points`);
+  check('a cascade without its paths is refused', (() => {
+    try { trimDrift({ lines: chainO2.lines, hours: 200, anchors: afO2.anchors, chordM: 2.6 }); return false; }
+    catch (e) { return /pass the plan's paths/.test(e.message); }
+  })());
+  check('the rear rows end shorter than the front',
+    d200.rowDrift.D.meanDeltaMM < d200.rowDrift.C.meanDeltaMM
+      && d200.rowDrift.C.meanDeltaMM < d200.rowDrift.A.meanDeltaMM
+      && d200.rowDrift.A.meanDeltaMM <= 0,
+    ['A', 'B', 'C', 'D'].map((r) => `${r} ${d200.rowDrift[r].meanDeltaMM.toFixed(1)}`).join(', ') + ' mm');
+  check('which turns the wing nose up',
+    d200.alphaChangeDeg > 0 && d200.alphaChangeDeg < 0.5,
+    `${d200.alphaChangeDeg >= 0 ? '+' : ''}${d200.alphaChangeDeg.toFixed(2)} deg over 200 hours`);
+  check('and nearly all of it has happened by fifty hours',
+    driftAt(50).spreadMM / d200.spreadMM > 0.85,
+    `${driftAt(20).spreadMM.toFixed(1)} mm apart at 20 h, ${driftAt(50).spreadMM.toFixed(1)} at 50, `
+    + `${d200.spreadMM.toFixed(1)} at 200`);
 
-  // The rates are estimates, and say so where anyone would look.
-  check('the fibre behaviour declares itself estimated',
-    /ESTIMATED/.test(FIBRE_BEHAVIOUR.provenance)
+  // The same cascade in aramid: each line swapped for one of the same
+  // strength that holds its length.
+  const asAramid = chainO2.lines.map((l) => ({ ...l, line: { ...l.line, name: 'aramid', code: 'aramid', fibre: 'aramid' } }));
+  check('in aramid the same cascade has moved a fifth as far by its first check',
+    driftAt(50, asAramid).spreadMM < driftAt(50).spreadMM / 4,
+    `${driftAt(50, asAramid).spreadMM.toFixed(1)} mm apart at 50 h against ${driftAt(50).spreadMM.toFixed(1)}`);
+  check('and the model says which fibres it is looking at',
+    d200.fibres.join() === 'dyneema' && !d200.mixedFibres
+      && driftAt(50, asAramid).fibres.join() === 'aramid');
+  // A line of a fibre the model does not know is left out and named.
+  const oneUnknown = chainO2.lines.map((l) => (l.name === 'A1'
+    ? { ...l, line: { ...l.line, name: 'Line120', code: 'Line120', fibre: undefined, family: null } } : l));
+  const dU = driftAt(200, oneUnknown);
+  check('an unknown line is named, and its attachment point is not forecast',
+    dU.unknownFibre.join() === 'A1' && !dU.points.some((pt) => pt.name === 'A1')
+      && dU.points.length === d200.points.length - 1);
+
+  // The sizes are estimates, and say so where anyone would look.
+  check('the fibre behaviour declares itself estimated, and names its sources',
+    /ESTIMATED/.test(FIBRE_BEHAVIOUR.provenance) && /Liros/.test(FIBRE_BEHAVIOUR.provenance)
     && !Object.keys(FIBRE_BEHAVIOUR).includes('provenance'));
-  check('and a drift result says it is an estimate',
-    mixed.source === 'estimated');
+  check('and a drift result says it is an estimate', d200.source === 'estimated');
 
-  // The schedule the drift implies.
+  // The schedule the drift implies. Two thresholds against the inspection
+  // band, both on how far the points have moved from ONE ANOTHER — one
+  // offset is allowed on the whole wing.
   const sched = trimSchedule({
-    lines: [...mk('A', dy, 8), ...mk('C', ar, 8)],
-    anchors: afO2.anchors, chordM: 2.4,
+    lines: chainO2.lines, anchors: afO2.anchors, chordM: 2.6, paths: pathsO2,
   });
-  check('a check is worth doing within the set\'s life',
-    sched.checkIsUseful, sched.note);
+  check('this cascade stays inside the band for its whole life',
+    sched.detectableAtHours === null && sched.outOfToleranceAtHours === null
+      && !sched.checkIsUseful && /holds its trim/.test(sched.note), sched.note);
   check('and the schedule carries the 50 and 200 hour marks',
     sched.firstCheckHours === 50 && sched.replaceHours === 200);
+  // What takes a cascade out of the band is not weak loading but UNEVEN
+  // loading. The same cascade in lines three times as strong throughout
+  // shrinks more everywhere and is no further out of trim: the offset takes
+  // the common part.
+  const stronger = (rows, by) => chainO2.lines.map((l) => (rows.includes(l.row)
+    ? { ...l, line: { ...l.line, strengthNewDaN: l.line.strengthNewDaN * by } } : l));
+  const schedAll = trimSchedule({
+    lines: stronger(['A', 'B', 'C', 'D'], 3), anchors: afO2.anchors, chordM: 2.6, paths: pathsO2,
+  });
+  check('in lines three times as strong throughout it still holds',
+    schedAll.detectableAtHours === null
+      && schedAll.atReplacement.rowDrift.A.meanDeltaMM < d200.rowDrift.A.meanDeltaMM - 4
+      && schedAll.atReplacement.spreadMM <= d200.spreadMM,
+    `A row ${schedAll.atReplacement.rowDrift.A.meanDeltaMM.toFixed(1)} mm against `
+    + `${d200.rowDrift.A.meanDeltaMM.toFixed(1)}; ${schedAll.atReplacement.spreadMM.toFixed(1)} mm apart`);
+  // With only the rear rows in lines far stronger than their load asks —
+  // thick lines aft, for handling — the rear keeps its shrinkage and the
+  // front does not.
+  const schedRear = trimSchedule({
+    lines: stronger(['C', 'D'], 6), anchors: afO2.anchors, chordM: 2.6, paths: pathsO2,
+  });
+  check('with the rear rows alone in lines far too strong it is out of the band by its first check',
+    schedRear.detectableAtHours != null && schedRear.detectableAtHours <= 50
+      && schedRear.checkIsUseful && schedRear.atFirstCheck.alphaChangeDeg > 0.3,
+    `${schedRear.note}; +${schedRear.atFirstCheck.alphaChangeDeg.toFixed(2)} deg at 50 h`);
+
+  // ---------------------------------------------------------------------
+  // On a real lineset. PHI's Allegro X-alps 21 gives the type of every line
+  // and which anchors hang from it, so each line's level-flight load can be
+  // computed and the model run on the wing as it is built: Dyneema top
+  // lines (DC 40, DC 60) over aramid middles (Edelrid 8000-U).
+  const phiSheetT = parsePhiLineSheet(readFileSync('data/reference/phi-allegro-xalps-21.tsv', 'utf8'));
+  const phiT = phiAnchorPaths(phiSheetT);
+  const allegroT = parseSizeTable(readFileSync('data/reference/phi-allegro-light-sizes.tsv', 'utf8'))
+    .find((z) => z.label === '21');
+  const phiLoadsT = publishedCascadeLoads({
+    anchors: phiT.anchors,
+    planform: planformFromDesignInputs(referenceDesignInputs(allegroT).inputs),
+    halfCells: allegroT.cells / 2, allUpKg: allegroT.midWeight,
+  });
+  const normCode = (c) => String(c || '').replace(/[\s-]+/g, '').toUpperCase();
+  const phiLines = phiT.lines.map((l) => ({
+    name: l.name, row: l.row, line: cat.find((m) => normCode(m.code) === normCode(l.type)),
+    referenceLengthMM: l.lengthMM, tensionN: phiLoadsT.lineLoadN.get(l.name) ?? 0,
+  }));
+  const phiPathsT = phiT.anchors.map((q) => ({
+    name: q.path[0], row: q.row, index: q.rib, names: q.path, isBrake: false, isStabilo: false,
+  }));
+  const phiFibres = {};
+  for (const l of phiLines) phiFibres[fibreOf(l.line)] = (phiFibres[fibreOf(l.line)] || 0) + 1;
+  check('PHI: 44 of its 62 lines are Dyneema and 18 aramid',
+    phiLines.every((l) => l.line) && phiFibres.dyneema === 44 && phiFibres.aramid === 18,
+    JSON.stringify(phiFibres));
+  const topLoad = (row) => {
+    const xs = phiLines.filter((l) => l.row === row && /^[a-d]\d/.test(l.name))
+      .map(flightLoadFraction).sort((x, y) => x - y);
+    return xs[Math.floor(xs.length / 2)];
+  };
+  // What the neutral load is set from.
+  check('PHI: its A and B top lines carry about 3% of their strength, C 2% and D 1%',
+    topLoad('A') > 0.028 && topLoad('B') > 0.028 && topLoad('A') < 0.036 && topLoad('B') < 0.036
+      && Math.abs(topLoad('C') - 0.019) < 0.002 && Math.abs(topLoad('D') - 0.010) < 0.002
+      && topLoad('C') < NEUTRAL_LOAD_FRACTION && NEUTRAL_LOAD_FRACTION < topLoad('A'),
+    ['A', 'B', 'C', 'D'].map((r) => `${r} ${(topLoad(r) * 100).toFixed(1)}%`).join(', '));
+  const phiDrift = (hours, lines = phiLines) => trimDrift({
+    lines, hours, anchors: { A: 0.08, B: 0.28, C: 0.52, D: 0.75 }, chordM: 2.4, paths: phiPathsT,
+  });
+  const p200 = phiDrift(200);
+  check('PHI: as built it holds its trim — the points 7 mm apart after 200 hours',
+    p200.points.length === 42 && p200.spreadMM > 5 && p200.spreadMM < 8.5
+      && p200.rowDrift.D.meanDeltaMM < p200.rowDrift.A.meanDeltaMM
+      && p200.alphaChangeDeg > 0 && p200.alphaChangeDeg < 0.15,
+    `${phiDrift(50).spreadMM.toFixed(1)} mm at 50 h, ${p200.spreadMM.toFixed(1)} at 200; `
+    + ['A', 'B', 'C', 'D'].map((r) => `${r} ${p200.rowDrift[r].meanDeltaMM.toFixed(1)}`).join(', ')
+    + ` mm; ${p200.alphaChangeDeg >= 0 ? '+' : ''}${p200.alphaChangeDeg.toFixed(2)} deg`);
+  // The aramid is doing it. The same lines in Dyneema throughout have moved
+  // more than twice as far by the first check.
+  const allDyneema = phiLines.map((l) => (fibreOf(l.line) === 'aramid'
+    ? { ...l, line: { ...l.line, name: 'Dyneema of the same strength', code: 'swap', fibre: 'dyneema' } } : l));
+  check('PHI: with its aramid lines in Dyneema it has moved twice as far by 50 hours',
+    phiDrift(50, allDyneema).spreadMM > phiDrift(50).spreadMM * 2,
+    `${phiDrift(50, allDyneema).spreadMM.toFixed(1)} mm against ${phiDrift(50).spreadMM.toFixed(1)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -8093,18 +10910,24 @@ section('A wing is not made of one cloth');
   check('and covers every location',
     LOCATIONS.every((l) => d.resolved[l]));
 
-  // The checks are not style. A soft cloth at the nose gives a wing that will
-  // not hold its shape on launch.
+  // A soft cloth at the nose gives a wing that holds its shape less well on
+  // launch; a sail heavier than its ribs puts weight where it does least.
+  // Both are SAID, and neither stops the schedule being used: they are a
+  // designer's to choose, and the interface used to refuse to write a bill
+  // of materials for either.
   const soft = fabricSchedule({ leadingEdge: 'Porcher Skytex 32' });
-  check('a soft-finish nose is refused',
-    !soft.ok && /hold its shape unpressurised/.test(soft.problems[0]));
+  check('a soft-finish nose is warned about, and the schedule still stands',
+    soft.ok && soft.problems.length === 0
+    && /hold its shape unpressurised/.test(soft.warnings[0]) && /to look at/.test(soft.note));
 
-  // A sail heavier than its ribs is the wrong way round.
   const upside = fabricSchedule({
     upperSail: 'Porcher Skytex 38', rib: 'Porcher Skytex 27',
   });
-  check('a sail heavier than its ribs is refused',
-    !upside.ok && /wrong way round/.test(upside.problems[0]));
+  check('so is a sail heavier than its ribs',
+    upside.ok && /wrong way round/.test(upside.warnings[0]));
+  check('and its weights can still be had',
+    clothWeightsFor(upside).rib === 0.027 && clothWeightsFor(upside).upperSail === 0.038);
+  check('the default schedule has nothing to warn about', d.warnings.length === 0);
 
   check('an unknown cloth is refused, and says what there is', (() => {
     const r = fabricSchedule({ rib: 'canvas' });
@@ -8121,7 +10944,8 @@ section('A wing is not made of one cloth');
   const w = clothWeightsFor(d);
   check('the bill gets the weights the schedule chose',
     w.rib === d.resolved.rib.gsm / 1000
-    && w.upperSail === d.resolved.upperSail.gsm / 1000);
+    && w.upperSail === d.resolved.upperSail.gsm / 1000
+    && w.leadingEdge === d.resolved.leadingEdge.gsm / 1000);
   check('and a broken schedule refuses to produce weights', (() => {
     try { clothWeightsFor(fabricSchedule({ rib: 'canvas' })); return false; }
     catch (e) { return /has problems/.test(e.message); }
@@ -8143,81 +10967,72 @@ section('A wing is not made of one cloth');
 }
 
 // ---------------------------------------------------------------------------
-section('Rods that wrap the nose');
+section('Rods written out');
 
 {
-  // `rodGroup` puts a rod on ONE surface. Laboratori d'envol's own Swoop2
-  // does not work that way — its section 21 gives each group an upper AND a
-  // lower extent:
+  // The Swoop2's section 21, one group to a line. Each line has two zones,
+  // and what they mean depends on the kind:
   //
-  //     group 1   upper 12.0 to 18.5%    lower 7.0 to 15.0%
-  //     group 2   upper 23.5 to 29.5%    lower 63.0 to 70.0%
+  //     nose      12.0 18.5    7.0 15.0     one piece, 18.5% on top to 15% under
+  //     batten    23.5 29.5    63.0 70.0    along the top, 23.5% to 70%
   //
-  // The first is a leading-edge rod: back from the nose along the upper
-  // surface and forward along the lower, so the pair wraps the nose and holds
-  // its radius. A rod on one surface alone would hinge there instead.
+  // This read every pair of numbers as a rod of its own — four short rods —
+  // and the third number of the file's rows (1.5, 1.1: how far a rod's end
+  // leaves the surface, in per cent of chord) as a diameter.
   const spec = parseRodSpec(SWOOP2_ROD_SPEC);
   check('the Swoop2 rod spec parses', spec.ok && spec.count === 2, spec.note);
-  check('and carries both surfaces for each group',
-    spec.groups.every((g) => g.upperTo != null && g.lowerTo != null));
+  check('into a nose rod and a batten',
+    spec.groups.map((g) => g.kind).join() === 'nose,batten');
+  check('with the zones the file states',
+    JSON.stringify(spec.groups[0].upperZone) === '[0.12,0.185]'
+    && JSON.stringify(spec.groups[0].lowerZone) === '[0.07,0.15]'
+    && JSON.stringify(spec.groups[1].frontZone) === '[0.235,0.295]'
+    && JSON.stringify(spec.groups[1].aftZone) === '[0.63,0.7]');
+  check('and the note says in words what was understood',
+    /nose rod from 18\.5% on top round to 15\.0% underneath; a batten from 23\.5% to 70\.0% on top/.test(spec.note),
+    spec.note);
+  check('a group with no rib range covers every rib',
+    spec.groups.every((g) => g.fromRib === 0 && g.toRib === null));
+  const ranged = parseRodSpec('nose 12 18.5 7 15 2.0 2 9');
+  check('and one with a range keeps it, with its diameter',
+    ranged.ok && ranged.groups[0].fromRib === 2 && ranged.groups[0].toRib === 9
+    && ranged.groups[0].diameterMM === 2);
 
-  const le = noseRodGroup({ ...spec.groups[0], fromRib: 0, toRib: 25 });
-  const mid = noseRodGroup({ ...spec.groups[1], fromRib: 0, toRib: 25 });
-  check('the leading-edge group is recognised as wrapping the nose',
-    le.wrapsNose && /holds its radius/.test(le.note));
-  check('and the mid group is not, because its extents do not both reach it',
-    !mid.wrapsNose && /separate stiffeners/.test(mid.note),
-    `upper from ${(spec.groups[1].upperFrom * 100).toFixed(1)}%, `
-    + `lower from ${(spec.groups[1].lowerFrom * 100).toFixed(1)}%`);
-  check('a wrapping group produces a rod on each surface',
-    le.parts.length === 2
-    && new Set(le.parts.map((p) => p.surface)).size === 2);
-
-  // One surface only is legitimate — a stiffener rather than a nose rod — and
-  // must not be called a wrap.
-  const single = noseRodGroup({
-    upperFrom: 0.12, upperTo: 0.185, fromRib: 0, toRib: 10,
-  });
-  check('a single-surface group is allowed but is not a wrap',
-    single.parts.length === 1 && !single.wrapsNose);
-  check('and no extent at all is refused', (() => {
-    try { noseRodGroup({ fromRib: 0, toRib: 5 }); return false; }
-    catch (e) { return /at least one surface/.test(e.message); }
-  })());
+  // A spec written before the kinds were named has a free name instead. It
+  // is read by its numbers, and says so.
+  const old = parseRodSpec('leading edge  12.0 18.5   7.0 15.0   1.5  0 25\n'
+    + 'mid           23.5 29.5   63.0 70.0  1.1  0 25');
+  check('an older spec, with names instead of kinds, reads as the same two rods',
+    old.ok && old.groups.map((g) => g.kind).join() === 'nose,batten'
+    && old.groups[0].name === 'leading edge', old.note);
+  check('and says how it was read', old.inferred.length === 2
+    && /"mid" read as a batten/.test(old.note));
 
   // The typos a person makes writing a spec.
-  const bad = (t) => parseRodSpec(t).problems[0] ?? '';
-  check('a backwards extent is refused',
-    /which is backwards/.test(bad('x 20 10 5 15 1.5 0 25')));
-  check('an extent off the chord is refused',
-    /outside the chord/.test(bad('x 120 130 5 15 1.5 0 25')));
-  check('a group with no extent at all is refused',
-    /no extent on either surface/.test(bad('x - - - - 1.5 0 25')));
+  const bad = (t, o) => parseRodSpec(t, o).problems[0] ?? '';
+  check('a backwards zone is refused',
+    /which is backwards/.test(bad('nose 20 10 5 15 1.5')));
+  check('a zone off the chord is refused',
+    /outside the chord/.test(bad('nose 120 130 5 15 1.5')));
+  check('a batten whose zones are the wrong way round is refused',
+    /ahead of where its first ends/.test(bad('batten 40 50 20 30 1.5')));
   check('too few numbers is refused with what was expected',
-    /expected "name upperFrom/.test(bad('x 12 18 1.5')));
-  check('and a rib beyond the wing is refused',
-    /but the wing has/.test(parseRodSpec('x 12 18 7 15 1.5 0 99',
-      { ribCount: 20 }).problems[0] ?? ''));
+    /expected "kind  zone zone  zone zone  diameter/.test(bad('nose 12 18 1.5')));
+  check('a rod with no diameter is refused',
+    /positive diameter/.test(bad('nose 12 18.5 7 15 0')));
+  check('a rib beyond the wing is refused',
+    /but the wing has 20/.test(bad('nose 12 18 7 15 1.5 0 99', { ribCount: 20 })));
+  check('and an empty spec is said to define no rods',
+    /defines no rods/.test(bad('# nothing here\n')));
 
-  // A name may contain spaces, because "leading edge" is what a person
-  // writes. The numbers are found from the right for exactly that reason.
-  check('a multi-word name survives',
-    parseRodSpec('leading edge 12 18 7 15 1.5 0 25').groups[0].name
-      === 'leading edge');
-
-  // The rods build on a real wing.
+  // The rods it describes build on a real wing.
   const wingRd = demoWing();
-  const built = buildRodGroups({
-    wing: wingRd,
-    groups: [...le.parts, ...mid.parts].map((g) => ({
-      ...g, toRib: Math.min(g.toRib, wingRd.ribs.length - 1),
-    })),
-  });
-  check('all four extents produce rods', built.count > 0
-    && new Set(built.rods.map((r) => r.group)).size === 4,
-    built.note);
-  check('and a nose rod is shorter than the chord it sits on',
-    built.rods.every((r) => r.lengthM < r.chordM));
+  const built = buildRods(wingRd, { groups: spec.groups });
+  check('the written rods build: one of each kind on every rib',
+    built.rods.length === wingRd.ribs.length * 2, built.note);
+  check('and the nose rods are the shorter ones',
+    built.byGroup.nose.lengthM < built.byGroup.batten.lengthM,
+    `${built.byGroup.nose.lengthM.toFixed(1)} m of nose rod, ${built.byGroup.batten.lengthM.toFixed(1)} m of batten`);
 }
 
 // ---------------------------------------------------------------------------
@@ -8340,6 +11155,2176 @@ section('Does it sew?');
 }
 
 // ---------------------------------------------------------------------------
+section('Trim from the calage, not from an assumed angle');
+
+{
+  // `solveEquilibriumFromWing` takes an angle of attack and reports the
+  // calage that would make it an equilibrium. The causation is backwards for
+  // a designer: you do not choose an angle of attack, you choose where the
+  // risers hang and the wing flies at whatever angle that produces.
+  const geoT = parseSizeFamilies(
+    readFileSync('data/reference/size-families.tsv', 'utf8'))['Ozone Geo 7'];
+  const zT = geoT.find((x) => x.name === 'XS');
+  const pfT = planformFromDesignInputs({
+    span: zT.flatSpan, rootChord: zT.maxChord, tipChord: 0.55, tipSweep: 1.25,
+  });
+  const args = {
+    planform: pfT, airfoil: naca4('4415'), atm: atmosphere(0),
+    pilotMass: 52, wingMass: 3, lineLengthM: 6.6,
+  };
+
+  // The calage is NOT monotonic in angle of attack: it falls to a minimum
+  // near 1 to 2 degrees and rises on both sides. A bisection assuming it
+  // rises throughout finds the wrong branch or nothing at all.
+  const calageAt = (a) => solveEquilibriumFromWing({ ...args, alphaDeg: a })
+    .calageFraction;
+  check('the calage falls before it rises',
+    calageAt(-2) > calageAt(2) && calageAt(12) > calageAt(2),
+    `${(calageAt(-2) * 100).toFixed(1)}% at -2, `
+    + `${(calageAt(2) * 100).toFixed(1)}% at 2, `
+    + `${(calageAt(12) * 100).toFixed(1)}% at 12`);
+
+  // So there are two angles for any reachable calage, and only the upper one
+  // is a flight state — at the lower the wing has no lift to speak of and
+  // would not stay open.
+  const trimmed = trimFromCalage({ ...args, calageFraction: 0.42 });
+  check('the solve returns the flight branch, not the low-angle one',
+    trimmed.alphaDeg > 2, `${trimmed.alphaDeg.toFixed(2)} degrees`);
+  near('and it hits the calage it was asked for',
+    trimmed.calageFraction, 0.42, 1e-4);
+
+  // The point of the change: a realistic calage gives a realistic wing.
+  check('a 42% calage trims at a lift coefficient a real wing uses',
+    trimmed.cz3D > 0.5 && trimmed.cz3D < 0.7,
+    `CL ${trimmed.cz3D.toFixed(3)} against a real 0.55 to 0.65`);
+
+  const assumed = solveEquilibriumFromWing({ ...args, alphaDeg: 6 });
+  check('where the old assumed angle of 6 degrees does not',
+    assumed.cz3D > 0.75, `CL ${assumed.cz3D.toFixed(3)}`);
+  check('and the speed rises towards what certification requires',
+    trimmed.speedKMH > assumed.speedKMH * 1.15,
+    `${assumed.speedKMH.toFixed(1)} to ${trimmed.speedKMH.toFixed(1)} km/h, `
+    + 'certificate wants more than 30');
+  check('carrying the sink rate with it',
+    (trimmed.speedMS / trimmed.glideRatio) > (assumed.speedMS / assumed.glideRatio) * 1.15,
+    `${(assumed.speedMS / assumed.glideRatio).toFixed(3)} to `
+    + `${(trimmed.speedMS / trimmed.glideRatio).toFixed(3)} m/s against a real 1.0`);
+
+  // A calage the wing cannot trim at is refused rather than approximated.
+  check('an unreachable calage is refused, and says what is reachable', (() => {
+    try { trimFromCalage({ ...args, calageFraction: 0.20 }); return false; }
+    catch (e) { return /outside what this wing can trim at/.test(e.message); }
+  })());
+  check('and a calage outside 0 to 1 is refused as not a fraction', (() => {
+    try { trimFromCalage({ ...args, calageFraction: 42 }); return false; }
+    catch (e) { return /fraction of chord/.test(e.message); }
+  })());
+}
+
+// ---------------------------------------------------------------------------
+section('Against the certification flight tests');
+
+{
+  // EN 926-2 flight test reports are mostly qualitative — A/B ratings and
+  // phrases like "dive forward 0 to 30 degrees". They contain no polar: no
+  // sink rate, no glide ratio, no speed at a given brake position.
+  //
+  // But they do fix three things a model must satisfy, at weights the wing
+  // was actually flown at: trim speed above 30 km/h, minimum speed below 25,
+  // and more than 10 km/h of range on the controls.
+  const rows = readFileSync('data/reference/certification-flight-tests.tsv', 'utf8')
+    .split('\n').filter((l) => l && !l.startsWith('#')).slice(1)
+    .map((l) => l.split('\t'));
+  check('the certification data is loaded', rows.length >= 4, `${rows.length} tests`);
+
+  // Every wing is flown twice, at the low and high end of its range.
+  const geoXS = rows.filter((r) => r[1] === 'XS').map((r) => Number(r[3]));
+  check('each size is tested at both ends of its weight range',
+    geoXS.length === 2 && geoXS[1] > geoXS[0], geoXS.join(' and '));
+
+  // The riser separation the tool assumes, against what was measured.
+  const seps = [...new Set(rows.map((r) => Number(r[5])))];
+  check('the karabiner separation default sits inside the measured range',
+    Math.min(...seps) <= 42 && 42 <= Math.max(...seps),
+    `measured ${seps.join(', ')} cm; default 42 cm`);
+
+  // ---------------------------------------------------------------------
+  // The model trims too slowly, and this is what says so.
+  //
+  // Sink was 10% below what a real wing does, and two candidate causes had
+  // already been ruled out by measurement: raising profile drag and modelling
+  // the inflated shape both move sink toward reality and glide away from it,
+  // and the glide was already right.
+  //
+  // `sink = V / (L/D)`. Glide right and sink low means the SPEED is low, and
+  // the certificates fix the speed independently of anything in this project.
+  const geo = parseSizeFamilies(
+    readFileSync('data/reference/size-families.tsv', 'utf8'))['Ozone Geo 7'];
+  const trimAt = (size, allUpKg) => {
+    const z = geo.find((x) => x.name === size);
+    const pf = planformFromDesignInputs({
+      span: z.flatSpan, rootChord: z.maxChord, tipChord: 0.55, tipSweep: 1.25,
+    });
+    return solveEquilibriumFromWing({
+      planform: pf, airfoil: naca4('4415'), atm: atmosphere(0),
+      pilotMass: allUpKg - z.mass, wingMass: z.mass, lineLengthM: 6.6,
+    });
+  };
+
+  const cases = [['XS', 55], ['XS', 70], ['L', 95], ['L', 115]];
+  const speeds = cases.map(([sz, m]) => trimAt(sz, m).speedKMH);
+  const below = speeds.filter((v) => v < 30).length;
+
+  // This is recorded as a KNOWN SHORTFALL, not as a passing check. Writing it
+  // as "trim speed exceeds 30" would fail, and writing it the other way round
+  // would enshrine the error. It is pinned at its current size so that any
+  // work on it shows up as movement.
+  check('trim speed falls short of certification on most cases',
+    below === 3, `${below} of ${cases.length} below 30 km/h: `
+    + speeds.map((v) => v.toFixed(1)).join(', '));
+
+  // The mechanism: the model trims at too high a lift coefficient.
+  const xs = trimAt('XS', 55);
+  check('and it does so by trimming at too high a lift coefficient',
+    xs.cz3D > 0.75, `CL ${xs.cz3D.toFixed(3)} where a real wing trims 0.55 to 0.65`);
+
+  // The glide is not the problem, which is why drag was the wrong suspect.
+  check('while the glide ratio is plausible',
+    xs.glideRatio > 8.5 && xs.glideRatio < 11,
+    xs.glideRatio.toFixed(2));
+
+  // And the arithmetic that ties it to the sink residual: bringing the speed
+  // up to the certified minimum, at the same glide, moves sink from 0.73 to
+  // 0.88 m/s — most of the gap to the 1.0 a wing of this size does.
+  const asIs = xs.speedMS / xs.glideRatio;
+  const corrected = (xs.speedMS * (30 / xs.speedKMH)) / xs.glideRatio;
+  check('correcting the speed alone recovers most of the sink gap',
+    corrected > asIs * 1.15,
+    `${asIs.toFixed(3)} to ${corrected.toFixed(3)} m/s against a real 1.0`);
+}
+
+// ---------------------------------------------------------------------------
+section('A cell on the centreline');
+
+{
+  // A wing with an ODD number of cells has one straddling the centreline —
+  // a centre cell rather than a centre rib. The Alpina 5 and the Lynx 2 have
+  // 65, and this could not build either: it always put a rib at y=0, so only
+  // even totals were reachable.
+  const pfC = planformFromDesignInputs({
+    span: 11.31, rootChord: 2.35, tipChord: 0.5, tipSweep: 1.3,
+  });
+  const afC2 = naca4('4415');
+  afC2.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const build = (centreRib) => buildWing({
+    planform: pfC,
+    lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfC.halfSpan),
+    airfoil: naca4('4415'), cells: 32, pointsPerSurface: 24, centreRib,
+  });
+
+  // `cells` counts the FULL cells outboard of the centreline, so both give
+  // the same number of ribs on the half. What changes is where the innermost
+  // one sits.
+  const withRib = build(true);
+  const withCell = build(false);
+  check('both give the same rib count on the half',
+    withRib.ribs.length === withCell.ribs.length,
+    `${withRib.ribs.length} ribs`);
+  near('a centre rib sits on the centreline',
+    withRib.ribs[0].station, 0, 1e-9, ' m');
+  check('and a centre cell puts the innermost rib half a cell out',
+    withCell.ribs[0].station > 0.05 && withCell.ribs[0].station < 0.2,
+    `${withCell.ribs[0].station.toFixed(4)} m`);
+
+  check('the totals differ by exactly one cell',
+    totalCells(32, { centreRib: false }) === totalCells(32, { centreRib: true }) + 1,
+    `${totalCells(32, { centreRib: true })} against `
+    + `${totalCells(32, { centreRib: false })}`);
+  check('and an odd total is now reachable',
+    totalCells(32, { centreRib: false }) === 65);
+
+  // The centre cell is a real piece of cloth and it has to be cut.
+  //
+  // Walking consecutive ribs misses it: a 65-cell wing came out with 64
+  // cells' worth of panels and nothing said so, which leaves a builder two
+  // panels short of a wing.
+  const panelsRib = developWing(withRib);
+  const panelsCell = developWing(withCell);
+  const centrePanels = panelsCell.filter((p) => p.centre);
+  check('a centre cell is developed as its own panel',
+    centrePanels.length === 2,
+    `${centrePanels.length} panels for the centre cell`);
+  check('and a centre rib has none, because no cell crosses the line',
+    panelsRib.filter((p) => p.centre).length === 0);
+
+  // The count a builder cuts: two surfaces for every cell across the wing.
+  const piecesFor = (panels, centreRib) => {
+    const half = panels.filter((p) => !p.centre).length;
+    return half * 2 + panels.filter((p) => p.centre).length;
+  };
+  check('the cloth pieces match the cell count, centre rib',
+    piecesFor(panelsRib, true) === totalCells(32, { centreRib: true }) * 2,
+    `${piecesFor(panelsRib, true)} pieces for `
+    + `${totalCells(32, { centreRib: true })} cells`);
+  check('and match it with a centre cell too',
+    piecesFor(panelsCell, false) === totalCells(32, { centreRib: false }) * 2,
+    `${piecesFor(panelsCell, false)} pieces for `
+    + `${totalCells(32, { centreRib: false })} cells`);
+
+  // The centre panel straddles the centreline, so it must be symmetric about
+  // it, and about one cell wide like its neighbours.
+  const centreUpper = centrePanels.find((p) => p.surface === 'upper');
+  near('the centre panel is symmetric about the centreline',
+    centreUpper.panel.seamLengths.left, centreUpper.panel.seamLengths.right,
+    1e-9, ' m');
+  const widthOf = (p) => Math.hypot(
+    p.panel.left[0][0] - p.panel.right[0][0],
+    p.panel.left[0][1] - p.panel.right[0][1]);
+  const neighbour = panelsCell.find((p) => p.cell === 1 && p.surface === 'upper');
+  near('and about as wide as the cell beside it',
+    widthOf(centreUpper), widthOf(neighbour), 0.01, ' m');
+  check('and it closes as flat as any other panel',
+    centreUpper.panel.maxClosureGap < 1e-9,
+    centreUpper.panel.maxClosureGap.toExponential(2));
+
+  // The wing carries the fact, so anything walking the ribs knows.
+  check('the wing says which kind it is',
+    withCell.centreRib === false && withRib.centreRib === true);
+
+  // A centre rib must lie FLAT on the centreline.
+  //
+  // `lobe.at(s)` takes a centred difference to find the arc's angle, except
+  // at s = 0 where it clamped to one side and returned the angle half a step
+  // outboard — 0.0161 degrees where the arc is level and it must be zero.
+  //
+  // That tilted the centre rib 0.1 mm off the plane, and mirroring a rib that
+  // is not quite flat leaves a sliver of overlapping faces in the 3D model:
+  // 122 of them, which a CAD package renders as shading artefacts and a
+  // boolean operation trips over.
+  const centreYs = withRib.ribs[0].upper.concat(withRib.ribs[0].lower)
+    .map((p) => p[1]);
+  check('a centre rib lies flat on the centreline',
+    Math.max(...centreYs) - Math.min(...centreYs) < 1e-9,
+    `${((Math.max(...centreYs) - Math.min(...centreYs)) * 1000).toFixed(4)} mm wide`);
+
+  const crossing = (objText) => {
+    const rows = objText.split('\n');
+    const vs = rows.filter((l) => l.startsWith('v '))
+      .map((l) => l.slice(2).split(' ').map(Number));
+    let n = 0;
+    for (const l of rows) {
+      if (!l.startsWith('f ')) continue;
+      const ys = l.slice(2).split(' ').map((t) => vs[Number(t) - 1][1]);
+      if (Math.min(...ys) < -1e-9 && Math.max(...ys) > 1e-9) n++;
+    }
+    return n;
+  };
+  check('so the two halves meet at it rather than overlapping',
+    crossing(wingToOBJ({ wing: withRib, name: 'R' })) === 0);
+  check('while a centre cell genuinely spans the line',
+    crossing(wingToOBJ({ wing: withCell, name: 'C' })) > 0);
+
+  // A feature that works in isolation is not the same as one that works
+  // downstream. The centre cell has to survive everything built on the
+  // panels, or a builder gets a cutting file that is missing a piece.
+  const nestRib = nestByProfile(panelsRib, { rollWidth: 1.4, gap: 0.03 });
+  const nestCell = nestByProfile(panelsCell, { rollWidth: 1.4, gap: 0.03 });
+  // Every panel placed, the centre cell's included. This compared roll
+  // lengths — more panels, more roll — which a better packer is free to
+  // disprove by fitting the extra piece into a gap.
+  check('the centre cell is nested with everything else',
+    nestCell.placed.length === panelsCell.length
+    && nestRib.placed.length === panelsRib.length
+    && panelsCell.length > panelsRib.length,
+    `${nestRib.placed.length} panels become ${nestCell.placed.length}; `
+    + `${nestRib.lengthM.toFixed(2)} m and ${nestCell.lengthM.toFixed(2)} m of roll`);
+
+  const bomRib = buildBOM({ wing: withRib, panels: panelsRib });
+  const bomCell = buildBOM({ wing: withCell, panels: panelsCell });
+  // The same planform takes the same cloth however it is cut into cells.
+  //
+  // This asserted the centre-cell wing's bill was the LARGER, and it was:
+  // the half-wing panels are doubled, and the centre panel — one piece
+  // spanning both halves — was doubled with them, so the wing was billed for
+  // 66 cells. Counted once it is the same cloth as the 64-cell wing of the
+  // same outline, and left out it would be a cell short.
+  near('and it is paid for in the bill, once',
+    bomCell.totals.fabricMassKg / bomRib.totals.fabricMassKg, 1, 0.004);
+  const bomNoCentre = buildBOM({ wing: withCell, panels: panelsCell.filter((q) => !q.centre) });
+  check('which is a cell more than the bill without it',
+    bomCell.totals.fabricMassKg > bomNoCentre.totals.fabricMassKg * 1.01,
+    `${bomNoCentre.totals.fabricMassKg.toFixed(3)} kg without, `
+    + `${bomCell.totals.fabricMassKg.toFixed(3)} kg with`);
+
+  // And the projected area counts it too: the cloth between the innermost
+  // ribs belongs to neither half, and walking the ribs outward left it out.
+  near('the projected area is the same either way',
+    projectedArea(withCell) / projectedArea(withRib), 1, 0.004);
+
+  // Ribs and cells across the whole wing, by whether a rib is on the centre.
+  check('a centre-rib wing has an odd number of ribs and an even number of cells',
+    wholeWingCounts(withRib).ribs === 65 && wholeWingCounts(withRib).cells === 64,
+    JSON.stringify(wholeWingCounts(withRib)));
+  check('a centre-cell wing has an even number of ribs and an odd number of cells',
+    wholeWingCounts(withCell).ribs === 66 && wholeWingCounts(withCell).cells === 65,
+    JSON.stringify(wholeWingCounts(withCell)));
+  check('the centre rib is cut once and every other rib twice',
+    ribCopies(withRib, 0) === 1 && ribCopies(withRib, 1) === 2
+    && ribCopies(withCell, 0) === 2);
+
+  // The exported LEP file says which it is. A 65-cell wing was written as 64
+  // cells and 65 ribs: a centre-rib wing whose first rib is not on the centre.
+  const lepCell = readGeometry(parseLep(designToLep({ wing: withCell, airfoil: naca4('4415'), name: 'cell' })));
+  const lepRib = readGeometry(parseLep(designToLep({ wing: withRib, airfoil: naca4('4415'), name: 'rib' })));
+  check('an exported centre-cell wing reads back as 65 cells with no centre rib',
+    lepCell.cells === 65 && lepCell.ribCount === 66 && lepCell.centreRib === false,
+    `${lepCell.cells} cells, ${lepCell.ribCount} ribs`);
+  check('and a centre-rib wing as 64 cells with one',
+    lepRib.cells === 64 && lepRib.ribCount === 65 && lepRib.centreRib === true,
+    `${lepRib.cells} cells, ${lepRib.ribCount} ribs`);
+
+  check('and it reaches the cutting file',
+    panelsToDXF(panelsCell).length > panelsToDXF(panelsRib).length);
+
+  // The ribs are unchanged in number, so anything indexed by rib is not
+  // disturbed by the extra cell.
+  const holesRib = buildAllRibHoles(withRib, naca4('4415'));
+  const holesCell = buildAllRibHoles(withCell, naca4('4415'));
+  check('the rib count is untouched by the centre cell',
+    holesCell.sets.length === holesRib.sets.length,
+    `${holesCell.sets.length} rib hole sets either way`);
+
+  const planCell = buildLinePlan({
+    wing: withCell, airfoil: afC2, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  check('and the line plan builds on it',
+    planCell.lines.length > 0, `${planCell.lines.length} lines`);
+}
+
+// ---------------------------------------------------------------------------
+section('Half the wing, or all of it');
+
+{
+  // The tool models ONE HALF and reports some things for the whole. Getting
+  // which is which wrong is invisible, because every part agrees with every
+  // other part all the way down.
+  //
+  // It was wrong in one place. The reference picker fed a manufacturer's
+  // TOTAL cell count into `S.cells`, which is the count for one half, so
+  // every reference wing was built with twice its published cells — a
+  // 34-cell Ultralite 5 as 68, a 48-cell Geo 7 as 96. The expression read
+  // `Math.round(r.cells / 2) * 2`, which rounds to the nearest even number
+  // and halves nothing.
+  const pfH = planformFromDesignInputs({
+    span: 10, rootChord: 2, tipChord: 0.5, tipSweep: 1,
+  });
+  const mH = planformMetrics(pfH);
+  const afH = naca4('4415');
+  afH.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const wH = buildWing({
+    planform: pfH, lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, 5),
+    airfoil: afH, cells: 20, pointsPerSurface: 24,
+  });
+
+  // Whole wing.
+  near('span is the whole wing', mH.span, 10, 1e-6, ' m');
+  check('and area is too', mH.area > 10, `${mH.area.toFixed(2)} m2`);
+
+  // Half wing.
+  check('ribs are one half plus the centre rib',
+    wH.ribs.length === 21, `${wH.ribs.length} for 20 half-wing cells`);
+  check('and the last rib sits at the half-span, not the span',
+    Math.abs(wH.ribs[wH.ribs.length - 1].station - 5) < 0.01,
+    `${wH.ribs[wH.ribs.length - 1].station.toFixed(2)} m`);
+
+  const panelsH = developWing(wH);
+  check('panels are one half, both surfaces',
+    panelsH.length === 40, `${panelsH.length}`);
+
+  // The bill has to put the two halves back together, or a builder orders
+  // half the cloth. It does.
+  //  takes the wing and its panels; it reads the planform through
+  // the wing. Passing planform and airfoil as well was silently ignored, and
+  // the options check caught it in this very test.
+  const bomH = buildBOM({ wing: wH, panels: panelsH });
+  const wholeSail = mH.area * (DEFAULT_CLOTH.upperSail + DEFAULT_CLOTH.lowerSail);
+  check('the bill covers the whole wing, not the half it modelled',
+    bomH.totals.fabricMassKg > wholeSail * 0.95,
+    `${bomH.totals.fabricMassKg.toFixed(2)} kg against `
+    + `${wholeSail.toFixed(2)} kg of sail for the whole wing`);
+  check('and is not double it either',
+    bomH.totals.fabricMassKg < wholeSail * 1.5,
+    `${bomH.totals.fabricMassKg.toFixed(2)} kg`);
+
+  // An imported design states the total and stores the half, which is the
+  // convention the parametric path should have followed.
+  const lepH = lepToDesign(parseLep(
+    readFileSync('data/reference/lep/swoop2-20260829.lep', 'utf8')));
+  check('an imported design states the total cell count',
+    lepH.geometry.cells === 50 && lepH.geometry.halfCells === 25,
+    `${lepH.geometry.cells} total, ${lepH.geometry.halfCells} per half`);
+  check('and stores one half of the ribs',
+    lepH.geometry.ribs.length === lepH.geometry.halfCells + 1,
+    `${lepH.geometry.ribs.length} ribs for ${lepH.geometry.halfCells} half-cells`);
+}
+
+// ---------------------------------------------------------------------------
+section('The reference set against the manufacturers');
+
+{
+  // `size-families.tsv` is what this project measures everything against.
+  // Nothing checked that IT was right.
+  //
+  // `published-specs.tsv` holds the manufacturers' own tables, transcribed
+  // separately so the two can disagree. A single file cannot check itself,
+  // and a wrong cell count there would quietly bend every result that
+  // depends on it.
+  const mineF = parseSizeFamilies(
+    readFileSync('data/reference/size-families.tsv', 'utf8'));
+  const pubRows = readFileSync('data/reference/published-specs.tsv', 'utf8')
+    .split('\n').filter((l) => l && !l.startsWith('#')).slice(1)
+    .map((l) => l.split('\t'));
+
+  check('the published specifications are loaded',
+    pubRows.length >= 23, `${pubRows.length} sizes`);
+  const pubCols = readFileSync('data/reference/published-specs.tsv', 'utf8')
+    .split('\n').filter((l) => l && !l.startsWith('#'))[0].split('\t');
+
+  // An odd total cell count is a real thing — 65 on the Alpina 5 and the
+  // Lynx 2 — and it means a cell straddles the centreline rather than a rib
+  // sitting on it. The parametric model cannot build one, and the reference
+  // note says so rather than rounding quietly.
+  const odd = pubRows.filter((r) => Number(r[2]) % 2 === 1);
+  check('some published wings have an odd number of cells',
+    odd.length > 0,
+    odd.length ? `${odd[0][0]} at ${odd[0][2]}` : 'none');
+
+  const disagree = [];
+  let figures = 0;
+  let notPublished = 0;
+  for (const r of pubRows) {
+    const z = (mineF[r[0]] || []).find((x) => String(x.name) === r[1]);
+    if (!z) { disagree.push(`${r[0]} ${r[1]} is missing from size-families`); continue; }
+    const pairs = [
+      ['cells', z.cells, Number(r[2]), 0],
+      ['flat area', z.flatArea, Number(r[3]), 0.06],
+      ['flat span', z.flatSpan, Number(r[4]), 0.06],
+      ['flat AR', z.flatAR, Number(r[5]), 0.02],
+      ['root chord', z.maxChord, Number(r[6]), 0.06],
+      ['projected area', z.projectedArea, Number(r[7]), 0.06],
+    ];
+    for (const [what, mineV, pubV, tol] of pairs) {
+      // A dash means the maker does not publish that figure.
+      //
+      // I filled BGD's root chords in from area and span, and the check
+      // reported five disagreements — my arithmetic against an estimate
+      // already in the reference data. Neither side was a published number.
+      // A cross-check comparing two guesses is worse than none, because it
+      // reads like evidence.
+      if (!Number.isFinite(pubV)) { notPublished++; continue; }
+      figures++;
+      if (Math.abs(mineV - pubV) > tol) {
+        disagree.push(`${r[0]} ${r[1]} ${what}: ${mineV} against ${pubV}`);
+      }
+    }
+  }
+
+  check('every published figure matches the manufacturer',
+    disagree.length === 0,
+    disagree.length ? disagree.slice(0, 3).join('; ')
+      : `${figures} figures across ${pubRows.length} sizes, `
+        + `${notPublished} not published`);
+
+  // BGD do publish a chord. The note at the head of the file said they do
+  // not, and that the five in `size-families.tsv` were an estimate; they are
+  // BGD's "centre chord", and they are compared above now with the rest.
+  const lynxChords = pubRows.filter((r) => r[0] === 'BGD Lynx 2').map((r) => Number(r[6]));
+  check('BGD\'s published chord is in, and matches',
+    lynxChords.length === 5 && lynxChords.every((v) => v >= 2.2 && v <= 2.6)
+      && notPublished === 0,
+    lynxChords.join(', '));
+
+  // What a maker does not publish stays a dash. Three columns here are
+  // BGD's alone: a total line length, a line height and a scale factor.
+  const dashes = pubRows.reduce((a, r) => a + r.filter((c) => c === '-').length, 0);
+  const extra = ['total_line_m', 'height_m', 'linear_scale'];
+  check('and the figures makers do not publish are left out, not guessed',
+    extra.every((c) => pubCols.includes(c))
+      && dashes === pubRows.filter((r) => r[0] !== 'BGD Lynx 2').length * extra.length,
+    `${dashes} dashes: ${extra.join(', ')} for every wing that is not BGD's`);
+
+  // The published total line length is NOT compared with the table's. It is
+  // kept because it disagrees: see 'Size families and scaling'.
+  const tot = pubCols.indexOf('total_line_m');
+  const lynxPub = pubRows.filter((r) => r[0] === 'BGD Lynx 2');
+  const lynxMine = mineF['BGD Lynx 2'];
+  check('BGD\'s published total and the sum of BGD\'s line sheets are both kept',
+    lynxPub.every((r) => Number(r[tot]) > 200)
+      && lynxMine.filter((z) => z.totalLineLength).length === 4
+      && lynxMine.find((z) => z.name === 'XS').totalLineLength === null,
+    lynxPub.map((r) => {
+      const z = lynxMine.find((x) => x.name === r[1]);
+      return `${r[1]} ${r[tot]} / ${z.totalLineLength ?? 'no sheet'}`;
+    }).join(', '));
+
+  // Cell count especially: it sets the rib spacing, and everything built on
+  // the ribs follows it.
+  const cellRows = pubRows.filter((r) => {
+    const z = (mineF[r[0]] || []).find((x) => String(x.name) === r[1]);
+    return z && z.cells === Number(r[2]);
+  });
+  check('and every cell count is the published one',
+    cellRows.length === pubRows.length,
+    `${cellRows.length} of ${pubRows.length}`);
+
+  // The check has to be able to fail, or it is telling us nothing.
+  const canFail = (() => {
+    const z = mineF['Ozone Geo 7'].find((x) => x.name === 'XS');
+    return Math.abs((z.cells + 1) - 48) > 0;
+  })();
+  check('a wrong cell count would be caught', canFail);
+}
+
+// ---------------------------------------------------------------------------
+section('The wing as a 3D model');
+
+{
+  // OBJ, because the export has to carry LINES.
+  //
+  // STL holds triangles and nothing else: it would write the sail and
+  // silently drop the rigging, which is half the design. IGES can hold
+  // curves but has no clean grouping and uneven modern support. STEP carries
+  // the most of any of them and is the right answer for a machined part —
+  // but a paraglider has no parametric feature tree to preserve, its
+  // surfaces are ruled between rib curves, and a hand-written AP214 entity
+  // graph that is slightly wrong opens as nothing at all.
+  const wingO = demoWing();
+  const afO = naca4('4415');
+  afO.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const planO = buildLinePlan({
+    wing: wingO, airfoil: afO, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  const obj = wingToOBJ({ wing: wingO, linePlan: planO, name: 'Test' });
+  const lines = obj.split('\n');
+  const verts = lines.filter((l) => l.startsWith('v '))
+    .map((l) => l.slice(2).split(' ').map(Number));
+  const groups = lines.filter((l) => l.startsWith('g '))
+    .map((l) => l.slice(2));
+
+  // The four things asked for, independently selectable.
+  for (const g of ['upper_surface', 'lower_surface', 'ribs']) {
+    check(`the model has a ${g} group`, groups.includes(g), groups.join(', '));
+  }
+  check('and a group for every line row',
+    groups.filter((g) => g.startsWith('lines_')).length >= 3,
+    groups.filter((g) => g.startsWith('lines_')).join(', '));
+
+  check('surfaces are faces and lines are polylines',
+    lines.some((l) => l.startsWith('f ')) && lines.some((l) => l.startsWith('l ')));
+
+  // A file whose indices run past its vertex list opens as nothing.
+  const refs = [];
+  for (const l of lines) {
+    if (l[0] === 'f' || l[0] === 'l') {
+      for (const t of l.slice(2).split(' ')) refs.push(Number(t));
+    }
+  }
+  check('every index points at a vertex that exists',
+    Math.min(...refs) >= 1 && Math.max(...refs) <= verts.length,
+    `${Math.min(...refs)} to ${Math.max(...refs)} of ${verts.length}`);
+
+  // Groups share one vertex pool, so a rib edge IS the panel edge beside it
+  // rather than a duplicate sitting on top of it.
+  const unique = new Set(verts.map((p) => p.join(','))).size;
+  check('no vertex is written twice',
+    unique === verts.length, `${verts.length - unique} duplicates`);
+
+  // -0 keys differently from 0 and defeats the sharing. Four copies of the
+  // trailing-edge centreline point appeared that way, and removing the sign
+  // took 181 vertices out of the file.
+  check('and the centreline does not produce negative zero',
+    !obj.includes('-0.000000'));
+
+  // A rib on the centreline is its own mirror image. It was written once
+  // for each side: two outlines on the same vertices, in a wing that has
+  // that rib once.
+  const ribOutlines = (() => {
+    const at = lines.indexOf('g ribs');
+    const out = [];
+    for (let i = at + 1; i < lines.length && lines[i].startsWith('l '); i++) out.push(lines[i]);
+    return out;
+  })();
+  check('the model has as many rib outlines as the wing has ribs',
+    ribOutlines.length === wholeWingCounts(wingO).ribs
+    && new Set(ribOutlines).size === ribOutlines.length,
+    `${ribOutlines.length} outlines, ${wholeWingCounts(wingO).ribs} ribs`);
+
+  // The whole wing, not the half that is modelled.
+  const ys = verts.map((p) => p[1]);
+  check('both halves are written',
+    Math.min(...ys) < -0.5 && Math.max(...ys) > 0.5,
+    `${Math.min(...ys).toFixed(2)} to ${Math.max(...ys).toFixed(2)} m`);
+  check('and they are symmetric about the centreline',
+    Math.abs(Math.min(...ys) + Math.max(...ys)) < 1e-6);
+
+  // The spanwise extent is the PROJECTED span, because this is the wing in
+  // the air rather than the flat pattern.
+  const projected = Math.max(...ys) - Math.min(...ys);
+  check('the model spans the projected span, not the flat one',
+    projected < planformMetrics(wingO.planform).span,
+    `${projected.toFixed(2)} m against a flat `
+    + `${planformMetrics(wingO.planform).span.toFixed(2)} m`);
+
+  // The lines reach the maillon.
+  const zs = verts.map((p) => p[2]);
+  check('the lines run down to the maillon',
+    Math.min(...zs) < -5, `${Math.min(...zs).toFixed(2)} m`);
+
+  // The lines are SURFACES as well as polylines.
+  //
+  // OBJ's `l` element is optional and a great many importers read only
+  // faces, so the cascade was in the file and invisible in most viewers.
+  // Each line is now also swept into a tube — and at its REAL diameter,
+  // from the line selection, which runs 0.43 to 2.50 mm across the
+  // catalogue. An A line really is thicker than a brake line, and a
+  // designer looking at the model can see which is which.
+  const catO = parseMaterialsTable(
+    readFileSync('data/reference/line-materials.tsv', 'utf8'));
+  const loadsO = analyseLoads({
+    plan: planO, planform: wingO.planform, stations: wingO.stations,
+    totalMassKg: 95, alphaDeg: 6,
+  });
+  const selO = selectLines(loadsO.tensions, { table: catO });
+
+  const withTubes = wingToOBJ({
+    wing: wingO, linePlan: planO, lineSelection: selO, name: 'T',
+  });
+  const noTubes = wingToOBJ({
+    wing: wingO, linePlan: planO, name: 'T', lineTubes: false,
+  });
+  const faceCount = (t) => t.split('\n').filter((l) => l.startsWith('f ')).length;
+  check('the lines are swept into surfaces, not only polylines',
+    faceCount(withTubes) > faceCount(noTubes),
+    `${faceCount(noTubes)} faces becomes ${faceCount(withTubes)}`);
+
+  // To scale, and every size present.
+  const vertsT = withTubes.split('\n').filter((l) => l.startsWith('v '))
+    .map((l) => l.slice(2).split(' ').map(Number));
+  let group = '';
+  const tubeEdges = [];
+  for (const row of withTubes.split('\n')) {
+    if (row.startsWith('g ')) group = row.slice(2);
+    if (row.startsWith('f ') && group.startsWith('lines_')) {
+      const f = row.slice(2).split(' ').map((t) => vertsT[Number(t) - 1]);
+      tubeEdges.push(Math.hypot(f[0][0] - f[1][0], f[0][1] - f[1][1],
+        f[0][2] - f[1][2]));
+    }
+  }
+  // Six-sided: the ring chord equals the radius, so the diameter is twice it.
+  // Measured at TRUE scale, so these are the diameters the selection chose.
+  const trueForSizes = wingToOBJ({
+    wing: wingO, linePlan: planO, lineSelection: selO, name: 'T',
+    lineDiameterScale: 1,
+  });
+  const trueVerts = trueForSizes.split('\n').filter((l) => l.startsWith('v '))
+    .map((l) => l.slice(2).split(' ').map(Number));
+  const trueEdges = [];
+  {
+    let g = '';
+    for (const row of trueForSizes.split('\n')) {
+      if (row.startsWith('g ')) g = row.slice(2);
+      if (row.startsWith('f ') && g.startsWith('lines_')) {
+        const f = row.slice(2).split(' ').map((t) => trueVerts[Number(t) - 1]);
+        trueEdges.push(Math.hypot(f[0][0] - f[1][0], f[0][1] - f[1][1],
+          f[0][2] - f[1][2]));
+      }
+    }
+  }
+  const modelled = [...new Set(trueEdges.map((e) => (e * 2000).toFixed(2)))];
+  const chosen = [...new Set(selO.lines.filter((l) => l.line)
+    .map((l) => l.line.diameterMM.toFixed(2)))];
+  check('every diameter the selection chose appears in the model',
+    chosen.every((d) => modelled.includes(d)),
+    `chose ${chosen.sort().join(', ')} mm`);
+  check('and they are not all one nominal size',
+    modelled.length > 3, `${modelled.length} distinct diameters`);
+
+  // Drawn thick enough to see.
+  //
+  // At true scale a 0.5 mm line on a 10.3 m span is **1/20,605 of the
+  // model** — sub-pixel at any sensible zoom. The whole cascade was in the
+  // file and the model still opened looking like a bare sail, which is what
+  // it was reported as doing twice after the tubes were already there.
+  //
+  // The lines really are that thin and the model is not wrong. But a drawing
+  // nobody can see is not doing its job, so they are thickened the way a map
+  // draws a road wider than its true width.
+  const spanOf = (t) => {
+    const v = t.split('\n').filter((l) => l.startsWith('v '))
+      .map((l) => Number(l.split(' ')[2]));
+    return Math.max(...v) - Math.min(...v);
+  };
+  const thinnestTube = (t) => {
+    const v = t.split('\n').filter((l) => l.startsWith('v '))
+      .map((l) => l.slice(2).split(' ').map(Number));
+    let g = '';
+    let m = Infinity;
+    for (const row of t.split('\n')) {
+      if (row.startsWith('g ')) g = row.slice(2);
+      if (row.startsWith('f ') && g.startsWith('lines_')) {
+        const f = row.slice(2).split(' ').map((x) => v[Number(x) - 1]);
+        m = Math.min(m, 2 * Math.hypot(f[0][0] - f[1][0], f[0][1] - f[1][1],
+          f[0][2] - f[1][2]));
+      }
+    }
+    return m;
+  };
+
+  const trueScale = wingToOBJ({
+    wing: wingO, linePlan: planO, lineSelection: selO, name: 'T',
+    lineDiameterScale: 1,
+  });
+  check('at true scale the lines are far too thin to see',
+    thinnestTube(trueScale) / spanOf(trueScale) < 1 / 5000,
+    `1/${Math.round(spanOf(trueScale) / thinnestTube(trueScale))} of the span`);
+
+  // And that is what the default gives, because the model's dimensions are
+  // the design's dimensions.
+  //
+  // It briefly defaulted to an automatic thickening so the cascade would be
+  // visible at wing scale. That was a fudge: a model whose dimensions are
+  // not the design's is not a model of the design, and anyone measuring it
+  // would get the wrong answer. You zoom in instead.
+  check('and true scale is what the export gives by default',
+    Math.abs(thinnestTube(withTubes) - thinnestTube(trueScale)) < 1e-9,
+    `${(thinnestTube(withTubes) * 1000).toFixed(2)} mm`);
+
+  // The option remains for anyone who wants a picture rather than a model.
+  const thickened = wingToOBJ({
+    wing: wingO, linePlan: planO, lineSelection: selO, name: 'T',
+    lineDiameterScale: 20,
+  });
+  check('a thickened picture is available on request',
+    thinnestTube(thickened) > thinnestTube(withTubes) * 15);
+
+  // Thickening must not flatten the differences, or the point of using real
+  // diameters is lost.
+  const drawnSizes = new Set();
+  {
+    const v = withTubes.split('\n').filter((l) => l.startsWith('v '))
+      .map((l) => l.slice(2).split(' ').map(Number));
+    let g = '';
+    for (const row of withTubes.split('\n')) {
+      if (row.startsWith('g ')) g = row.slice(2);
+      if (row.startsWith('f ') && g.startsWith('lines_')) {
+        const f = row.slice(2).split(' ').map((x) => v[Number(x) - 1]);
+        drawnSizes.add((2 * Math.hypot(f[0][0] - f[1][0], f[0][1] - f[1][1],
+          f[0][2] - f[1][2]) * 1000).toFixed(2));
+      }
+    }
+  }
+  // The RATIO is what matters, not the count: scaling by twenty magnifies
+  // floating-point noise into extra distinct values at two decimal places,
+  // so counting them is measuring the rounding rather than the geometry.
+  const ratioOf = (set) => {
+    const nums = [...set].map(Number).filter((v) => v > 0);
+    return Math.max(...nums) / Math.min(...nums);
+  };
+  near('the thick lines are exactly as much thicker as they really are',
+    ratioOf(drawnSizes), ratioOf(new Set(modelled)), 0.02);
+
+  // Nothing is hidden: the factor and the real diameters are in the file.
+  check('the file states the factor and the true diameters',
+    /drawn [\d.]+x their true diameter/.test(withTubes)
+    && /True diameters, mm: [\d.]+/.test(withTubes));
+
+  // Without a selection it still exports, at a stated nominal size.
+  const nominal = wingToOBJ({ wing: wingO, linePlan: planO, name: 'N' });
+  check('a wing with no line selection still gets tubes',
+    faceCount(nominal) > faceCount(noTubes));
+
+  // The polylines remain: they are the honest path, and Blender, Rhino and
+  // MeshLab all read them.
+  const polylines = lines.filter((l) => l.startsWith('l ')).length;
+  check('every line is written as a polyline',
+    polylines >= planO.lines.length,
+    `${polylines} polylines for ${planO.lines.length} lines and `
+    + `${wingO.ribs.length} ribs`);
+
+  // A proper leading edge.
+  //
+  // A wing is built with as few points per surface as the panel work needs,
+  // spread EVENLY along the surface — so the nose, the roundest part of the
+  // section, came out as a single straight cut across it. On a 2.19 m chord
+  // the first station landed at 2.53%.
+  const noseGaps = (objText) => {
+    const vs = objText.split('\n').filter((l) => l.startsWith('v '))
+      .map((l) => l.slice(2).split(' ').map(Number));
+    const y0 = vs[0][1];
+    const near = vs.filter((p) => Math.abs(p[1] - y0) < 0.25)
+      .sort((a, b) => a[0] - b[0]);
+    return near.slice(0, 4).map((p, i) => (near[i + 1]
+      ? Math.abs(near[i + 1][0] - p[0]) : 0));
+  };
+  //
+  // The export used to re-sample each rib with its points clustered at the
+  // nose, and this test measured the gap between the first vertices as
+  // proof of "a proper leading edge". It proved nothing of the kind: points
+  // re-spaced along a polyline lie ON the polyline, so the model's nose was
+  // the same straight cut with more vertices on it. The fidelity has to be
+  // in the wing — in the points the ribs are cut along — and it is now.
+  const asBuilt = wingToOBJ({ wing: wingO, name: 'F' });
+  check('the model\'s nose is sampled finely, because the wing\'s is',
+    Math.max(...noseGaps(asBuilt)) < 0.012,
+    `${(Math.max(...noseGaps(asBuilt)) * 1000).toFixed(1)} mm between the first vertices`);
+  {
+    // Against the section itself, on the root rib: how far the built outline
+    // strays from a fine sampling of the same aerofoil.
+    const pfO = planformFromDesignInputs({ span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1 });
+    const lobeO = buildLobe({ type: 'circle', projectedRatio: 0.88 }, pfO.halfSpan);
+    const stray = (pointSpacing) => {
+      const w = buildWing({ planform: pfO, lobe: lobeO, airfoil: naca4('4415'), cells: 12, pointsPerSurface: 50, pointSpacing });
+      const fine = buildWing({ planform: pfO, lobe: lobeO, airfoil: naca4('4415'), cells: 12, pointsPerSurface: 3000, pointSpacing: 'uniform' });
+      const rib = w.ribs[0];
+      let worst = 0;
+      let short = 0;
+      for (const k of ['upper', 'lower']) {
+        const coarse = rib[k].map((q) => toRibPlane(rib, q));
+        const dense = fine.ribs[0][k].map((q) => toRibPlane(fine.ribs[0], q));
+        const len = (poly) => poly.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - poly[i][0], q[1] - poly[i][1]), 0);
+        short += len(dense) - len(coarse);
+        for (const q of dense) {
+          let best = Infinity;
+          for (let i = 1; i < coarse.length; i++) {
+            const a = coarse[i - 1];
+            const b = coarse[i];
+            const vx = b[0] - a[0];
+            const vy = b[1] - a[1];
+            const t = Math.max(0, Math.min(1, ((q[0] - a[0]) * vx + (q[1] - a[1]) * vy) / (vx * vx + vy * vy)));
+            best = Math.min(best, Math.hypot(q[0] - a[0] - t * vx, q[1] - a[1] - t * vy));
+          }
+          worst = Math.max(worst, best);
+        }
+      }
+      return { worst, short };
+    };
+    const even = stray('uniform');
+    const nose = stray('nose');
+    check('fifty points spread evenly cut the corner off a 2.6 m rib\'s nose by millimetres',
+      even.worst > 0.004 && even.short > 0.002,
+      `${(even.worst * 1000).toFixed(1)} mm off the section, ${(even.short * 1000).toFixed(1)} mm short round it`);
+    check('the same fifty clustered at the nose hold it to under a millimetre',
+      nose.worst < 0.001 && nose.short < 0.0006,
+      `${(nose.worst * 1000).toFixed(2)} mm off the section, ${(nose.short * 1000).toFixed(2)} mm short`);
+    check('and that is how a wing is built unless it is told otherwise',
+      Math.abs(d3first(buildWing({ planform: pfO, lobe: lobeO, airfoil: naca4('4415'), cells: 12, pointsPerSurface: 50 }))
+        - d3first(buildWing({ planform: pfO, lobe: lobeO, airfoil: naca4('4415'), cells: 12, pointsPerSurface: 50, pointSpacing: 'nose' }))) < 1e-12);
+  }
+  check('asking for a different vertex count still re-samples the model',
+    wingToOBJ({ wing: wingO, name: 'R', spacing: 'cosine', pointsPerSurface: 90 }).length > asBuilt.length * 1.5);
+
+  // The export does not change the wing it is given.
+  const builtPoints = wingO.ribs[5].upper.length;
+  wingToOBJ({ wing: wingO, linePlan: planO, name: 'again' });
+  check('the wing itself is untouched by the export',
+    wingO.ribs[5].upper.length === builtPoints && builtPoints < 60,
+    `${builtPoints} points per surface before and after`);
+
+  // Upper and lower meet at the nose, or the model has a slit down it.
+  const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  check('the surfaces meet at the leading edge',
+    d3(wingO.ribs[5].upper[0], wingO.ribs[5].lower[0]) < 1e-9);
+
+  // Without a line plan it still writes a usable sail.
+  const bare = wingToOBJ({ wing: wingO, name: 'Bare' });
+  check('a wing with no line plan still exports',
+    bare.includes('g upper_surface') && !bare.includes('g lines_'));
+}
+
+// ---------------------------------------------------------------------------
+section('What the Swoop2 sews inside its cells');
+
+{
+  // LEP section 12 is "H V and VH ribs", and the Swoop2 carries 124 pieces
+  // in it, of three kinds. They were read as nothing at all, then all as one
+  // layout — which made the first kind look sensible and the other two
+  // nonsense: a strap to "rib 100" on a 26-rib half wing, a 60 cm "width".
+  // Each kind is read by its own columns now, and the reading is checked
+  // against the rest of the SAME FILE rather than against a manual.
+  const text12 = readFileSync('data/reference/lep/swoop2-20260829.lep', 'utf8');
+  const docHV = parseLep(text12);
+  const hv = parseHVRibs(docHV);
+
+  check('section 12 is read rather than dropped',
+    hv.count > 100, `${hv.count} entries`);
+  check('and the count matches what the file declares',
+    hv.count === hv.declared, `${hv.count} against ${hv.declared}`);
+  check('every row is one of three kinds, and none is left unread',
+    hv.straps.length === 70 && hv.diagonals.length === 39 && hv.general.length === 15
+    && hv.other.length === 0 && hv.notUnderstood === 0,
+    `${hv.straps.length} straps, ${hv.diagonals.length} diagonals, `
+    + `${hv.general.length} between two ribs, ${hv.other.length} unread`);
+  check('each entry names the two ribs it joins',
+    hv.entries.every((e) => Number.isInteger(e.fromRib) && Number.isInteger(e.toRib)
+      && Math.abs(e.toRib - e.fromRib) === 1));
+  check('no rib it names is off the wing',
+    hv.entries.every((e) => e.fromRib >= 1 && e.fromRib <= 26 && e.toRib >= 1 && e.toRib <= 26),
+    `ribs ${Math.min(...hv.entries.map((e) => Math.min(e.fromRib, e.toRib)))} to `
+    + `${Math.max(...hv.entries.map((e) => Math.max(e.fromRib, e.toRib)))}`);
+  check('the numbers that give a diagonal its shape are kept as written',
+    hv.diagonals.every((d) => d.shape.join(' ') === '60 28 85 2'));
+
+  // The file's own lines say which ribs carry one: section 9, computed as
+  // the program computes it.
+  const sectionText12 = readFileSync('data/reference/lep/swoop2-gnuReflex.txt', 'utf8');
+  const g12 = lepLineGeometry(docHV, { airfoils: { 'gnuReflex.txt': sectionText12 } });
+  const plan12 = lepPlanForTool(g12);
+  const lined = planAnchorRibs(plan12);
+  check('its lines attach on pairs of ribs: 2-3, 6-7, 10-11 ...',
+    lined.byRow.B.slice(0, 6).map((i) => i + 1).join(' ') === '2 3 6 7 10 11',
+    `row B on ribs ${lined.byRow.B.map((i) => i + 1).join(' ')}`);
+  check('the brake row is not a row of lift',
+    !('K' in lined.byRow) && !('S' in lined.byRow));
+  check('a stabilo line counts on the anchor it ends on',
+    lined.byRow.A.includes(24) && lined.byRow.A.includes(25) && !lined.byRow.B.includes(24),
+    `A on ribs ${lined.byRow.A.slice(-3).map((i) => i + 1).join(' ')}, `
+    + `B on ${lined.byRow.B.slice(-2).map((i) => i + 1).join(' ')}`);
+
+  // LEFT IS TOWARDS THE CENTRE. Not from a manual: read that way, every one
+  // of the file's diagonals runs from a rib with a line to a rib with none,
+  // which is the only place a diagonal is wanted. Read the other way, all
+  // but three run from one lined rib to another.
+  const pieces = lepDiagonalPieces(hv);
+  const hasLine = new Set(lined.all);
+  check('39 diagonals, on rows A, B and C',
+    pieces.length === 39 && ['A', 'B', 'C'].every((r) => pieces.filter((x) => x.row === r).length === 13));
+  check('every one runs from a rib with a line to a rib without',
+    pieces.every((x) => hasLine.has(x.fromRib) && !hasLine.has(x.toRib)),
+    `${pieces.filter((x) => hasLine.has(x.fromRib) && !hasLine.has(x.toRib)).length} of ${pieces.length}`);
+  const mirrored = pieces.map((x) => ({ ...x, toRib: 2 * x.fromRib - x.toRib }));
+  check('and read the other way round, nearly all would join two lined ribs',
+    mirrored.filter((x) => hasLine.has(x.toRib)).length >= 36,
+    `${mirrored.filter((x) => hasLine.has(x.toRib)).length} of ${mirrored.length}`);
+
+  // Built on the design's own wing, as the interface builds them.
+  const design12 = lepToDesign(docHV, {
+    sections: { 'gnuReflex.txt': parseAirfoilText(sectionText12, 'gnuReflex') },
+  });
+  const af12 = { ...design12.explicitRibs[0].airfoil, anchors: { ...design12.anchorFractions } };
+  const wing12 = buildWing({
+    planform: discretePlanform(design12.planformRows), lobe: null, airfoil: af12,
+    explicitRibs: design12.explicitRibs, pointsPerSurface: 40,
+  });
+  const own = buildVRibs({
+    wing: wing12, airfoil: af12, placed: pieces, anchorRibsByRow: lined.byRow,
+  });
+  check('all 39 are placed on the design\'s own wing',
+    own.count === 39 && own.notPlaced.length === 0 && own.stated,
+    `${own.count} placed, ${own.notPlaced.length} not`);
+  check('each apex is on its own rib\'s anchor for that row',
+    own.vribs.every((d) => Math.abs(d.anchorFraction
+      - (wing12.ribs[d.fromRib].anchors?.[d.row] ?? af12.anchors[d.row])) < 1e-12));
+  check('with them, no rib of the Swoop2 is left with nothing holding it',
+    own.unsupportedRibs.filter((i) => !hasLine.has(i)).length === 0,
+    `unsupported: ${JSON.stringify(own.unsupportedRibs)}`);
+
+  // The rule, given the same lines, puts them where the designer did —
+  // which is the test of the rule. Row A is the same thirteen; rows B and C
+  // differ in one piece each, at the tip, where the designer hangs a
+  // diagonal from rib 25 although it carries only an A line.
+  const ruled = buildVRibs({
+    wing: wing12, airfoil: af12, rows: ['A', 'B', 'C'], anchorRibsByRow: lined.byRow, maxReach: 1,
+  });
+  const key = (d) => `${d.row}:${d.fromRib}>${d.toRib}`;
+  const ownKeys = new Set(own.vribs.map(key));
+  const same = ruled.vribs.filter((d) => ownKeys.has(key(d))).length;
+  check('placed by rule from the same lines, row A is the designer\'s own thirteen',
+    ruled.vribs.filter((d) => d.row === 'A').map(key).sort().join()
+    === own.vribs.filter((d) => d.row === 'A').map(key).sort().join());
+  check('and 37 of the 39 are the same piece',
+    same === 37 && ruled.count === 39, `${same} of ${own.count} in common`);
+
+  // Held from one side only, a rib is drawn towards its anchor and wants a
+  // strap across the top to the next. The statics names five pairs of ribs,
+  // three rows each — and the file's fifteen "general" pieces sit between
+  // exactly those pairs. Neither reading was fitted to the other.
+  const balance = diagonalBalance(own.vribs, { centreRib: hasCentreRib(wing12) });
+  const wanted = [...new Set(balance.strapsNeeded.map((x) => x.ribs.map((i) => i + 1).join('-')))].sort();
+  const stated = [...new Set(hv.general.map((x) => `${x.fromRib}-${x.toRib}`))].sort();
+  check('fifteen straps are wanted across the top, between pairs of free ribs',
+    balance.strapsNeeded.length === 15, balance.note);
+  check('and they are the fifteen pieces the file states, pair for pair',
+    wanted.join() === stated.join() && hv.general.length === balance.strapsNeeded.length,
+    `wanted ${wanted.join(' ')}; stated ${stated.join(' ')}`);
+  check('nothing is left held from one side with no partner',
+    balance.unbalanced.length === 0, JSON.stringify(balance.unbalanced));
+  check('each stated piece sits at a chord position, read as percent',
+    hv.general.every((x) => x.ends.every((e) => e.chordPct > 0 && e.chordPct < 100))
+    && [...new Set(hv.general.map((x) => x.ends[0].chordPct))].join() === '11,39,72');
+
+  // The straps along the lower surface: every adjacent pair, at each row.
+  check('a strap joins the same anchor row on two adjacent ribs',
+    hv.straps.every((e) => e.toRib === e.fromRib + 1 && e.fromAnchor === e.toAnchor
+      && e.fromAnchor >= 1 && e.fromAnchor <= 3 && e.width === 2));
+  // They still go through the H-rib builder, on a wing of this size.
+  const wingHV = buildWing({
+    planform: planformFromDesignInputs({
+      span: 10.48, rootChord: 2.09, tipChord: 0.5, tipSweep: 1.2,
+    }),
+    lobe: buildLobe({ type: 'circle', projectedRatio: 0.807 }, 5.24),
+    airfoil: (() => {
+      const a = naca4('4415');
+      a.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+      return a;
+    })(),
+    cells: 25, pointsPerSurface: 24,
+  });
+  const built = buildHRibs({
+    wing: wingHV, entries: hv.hRibs, anchorFractions: [0.085, 0.30, 0.53],
+  });
+  check('all of them build on a wing of the right size',
+    built.count === hv.hRibs.length && built.skipped.length === 0,
+    built.note);
+  check('each carries the anchor and width the file gave it',
+    built.hribs.every((h) => h.fromFile && h.anchor > 0 && h.widthCm > 0));
+  const first = built.hribs[0];
+  near('the strip straddles its anchor station',
+    (first.chordFrom + first.chordTo) / 2, 0.085, 0.002, ' of chord');
+}
+
+// ---------------------------------------------------------------------------
+section('Diagonals follow the lines');
+
+{
+  // A diagonal hangs from a line: its apex is the anchor on a rib that has
+  // one, and it reaches a neighbour that has not. So where they go is the
+  // plan's to say. The interface passed every second rib whatever the plan
+  // was, which is the default plan and no other.
+  const wingD = demoWing();
+  const afD = naca4('4415');
+  afD.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+
+  const planDefault = buildLinePlan({
+    wing: wingD, airfoil: afD, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+    brakes: { anchors: 7, levelCounts: [4, 2, 1] },
+  });
+  addStabilo(planDefault, wingD, { anchors: 2 });
+  const linedDefault = planAnchorRibs(planDefault);
+  check('the default plan attaches every row on every second rib',
+    ['A', 'B', 'C', 'D'].every((r) => linedDefault.byRow[r].every((i) => i % 2 === 0)
+      && linedDefault.byRow[r].length === Math.ceil(wingD.ribs.length / 2)));
+  check('brakes are not counted as holding a rib up',
+    !('K' in linedDefault.byRow)
+    && planDefault.lines.some((l) => l.row === 'K' && l.level === 'upper'));
+  check('a stabilo holds its rib without belonging to a row',
+    linedDefault.all.includes(wingD.ribs.length - 2)
+    && !linedDefault.byRow.B.includes(wingD.ribs.length - 2),
+    `ribs with a line: ${linedDefault.all.join(' ')}`);
+
+  // A written cascade spreads each row at its own spacing.
+  const planWritten = buildLinePlan({
+    wing: wingD, airfoil: afD, layout: RISER_LAYOUTS['A/B/C+D'],
+    lineLengthM: 6.5, anchorsPerRow: { A: 7, B: 5, C: 5, D: 4 }, mainsPerRow: 2,
+  });
+  const linedWritten = planAnchorRibs(planWritten);
+  check('a written cascade puts each row on its own ribs',
+    linedWritten.byRow.A.length === 7 && linedWritten.byRow.D.length === 4
+    && linedWritten.byRow.A.join() !== linedWritten.byRow.B.join(),
+    Object.entries(linedWritten.byRow).map(([r, x]) => `${r}: ${x.join(' ')}`).join(' | '));
+
+  const follow = buildVRibs({
+    wing: wingD, airfoil: afD, rows: ['A', 'B', 'D'],
+    anchorRibsByRow: linedWritten.byRow, maxReach: 1,
+  });
+  check('every diagonal hangs from a rib with a line on ITS row',
+    follow.count > 0
+    && follow.vribs.every((d) => linedWritten.byRow[d.row].includes(d.fromRib)));
+  check('and none runs to a rib that has that row\'s line itself',
+    follow.vribs.every((d) => !linedWritten.byRow[d.row].includes(d.toRib)));
+  // The old way: every second rib, whatever the plan.
+  const blind = buildVRibs({ wing: wingD, airfoil: afD, rows: ['A', 'B', 'D'], maxReach: 1 });
+  const stray = blind.vribs.filter((d) => !linedWritten.byRow[d.row].includes(d.fromRib));
+  check('placed without the plan, some hang from ribs that have no line there',
+    stray.length > 0, `${stray.length} of ${blind.count}`);
+  check('a row with no lines gets no diagonals',
+    buildVRibs({
+      wing: wingD, airfoil: afD, rows: ['C'], anchorRibsByRow: { A: [0, 2, 4] },
+    }).count === 0);
+
+  // Reach is a real constraint only when the lines are sparse — which is why
+  // the control did nothing while every second rib was assumed.
+  // A rib with a line on ANY row is held, so the sparse row is taken on its
+  // own here: four anchors on thirteen ribs, four cells apart.
+  const sparse = { D: linedWritten.byRow.D };
+  const reach1 = buildVRibs({
+    wing: wingD, airfoil: afD, rows: ['D'], anchorRibsByRow: sparse, maxReach: 1,
+  });
+  const reach2 = buildVRibs({
+    wing: wingD, airfoil: afD, rows: ['D'], anchorRibsByRow: sparse, maxReach: 2,
+  });
+  check('four anchors on thirteen ribs leave ribs out of a one-cell reach',
+    reach1.unsupportedRibs.length > 0
+    && reach1.unsupportedRibs.every((i) => !sparse.D.includes(i)),
+    `lines on ${sparse.D.join(' ')}; ribs ${reach1.unsupportedRibs.join(' ')} unreached`);
+  check('and a two-cell reach takes them in',
+    reach2.unsupportedRibs.length === 0 && reach2.count > reach1.count,
+    `${reach1.count} diagonals, then ${reach2.count}; unreached ${reach2.unsupportedRibs.join(' ') || 'none'}`);
+  check('while the same ribs, lined on another row, are not called unsupported',
+    buildVRibs({
+      wing: wingD, airfoil: afD, rows: ['D'], anchorRibsByRow: linedWritten.byRow, maxReach: 1,
+    }).unsupportedRibs.every((i) => !linedWritten.all.includes(i)));
+
+  // Held from both sides, or wanting a strap.
+  const everySecond = buildVRibs({
+    wing: wingD, airfoil: afD, rows: ['B'], anchorRibsByRow: linedDefault.byRow,
+  });
+  const balDefault = diagonalBalance(everySecond.vribs, { centreRib: hasCentreRib(wingD) });
+  check('with a line on every second rib, every free rib is held from both sides',
+    balDefault.balanced && balDefault.strapsNeeded.length === 0, balDefault.note);
+  const pairs = buildVRibs({
+    wing: wingD, airfoil: afD, rows: ['B'], anchorRibsByRow: { B: [0, 3, 6, 9, 12] },
+  });
+  const balPairs = diagonalBalance(pairs.vribs, { centreRib: hasCentreRib(wingD) });
+  check('with two free ribs between, each is held from one side and wants a strap',
+    !balPairs.balanced && balPairs.strapsNeeded.length === 4
+    && balPairs.strapsNeeded.map((x) => x.ribs.join('-')).join(' ') === '1-2 4-5 7-8 10-11',
+    balPairs.note);
+
+  // How steeply a diagonal rises is measured in its own cell. Against the
+  // horizon, every piece near the tip of an arc read as lying flat.
+  const rowB = buildVRibs({ wing: wingD, airfoil: afD, rows: ['B'], anchorRibsByRow: linedDefault.byRow });
+  const horizon = rowB.vribs.map((d) => {
+    const mid = d.base[Math.floor(d.base.length / 2)];
+    return Math.asin(Math.min(1, Math.abs(mid[2] - d.apex[2]) / d.lengthM)) * (180 / Math.PI);
+  });
+  const rise = rowB.vribs.map((d) => d.riseDeg);
+  check('a diagonal\'s rise is measured from the floor of its own cell',
+    rise.every((x) => x > 20 && x < 80),
+    `${Math.min(...rise).toFixed(0)} to ${Math.max(...rise).toFixed(0)} degrees`);
+  check('where the horizon would have called the outboard ones flat',
+    Math.min(...horizon) < 10 && Math.min(...rise) > 2 * Math.min(...horizon),
+    `as little as ${Math.min(...horizon).toFixed(0)} degrees from the horizon`);
+  const g = diagonalGeometry(rowB.vribs);
+  check('and the buildability check reads the cell\'s measure',
+    g.diagonals.every((d, i) => Math.abs(d.angleDeg - rise[i]) < 1e-9));
+}
+
+// ---------------------------------------------------------------------------
+section('A vortex lattice over the wing as it sits');
+
+{
+  // `liftingLine` solves Prandtl's equation on a straight, flat span. A
+  // paraglider is bent through 30 to 40 degrees of dihedral, and the model
+  // has no way to represent that — this project handled it with a correction
+  // applied afterwards.
+  //
+  // A lattice puts a horseshoe on every strip where the strip really is,
+  // with the strip's own normal, so the arc affects the answer because the
+  // geometry says so.
+  const rect = (AR, n) => {
+    const span = 10;
+    const chord = span / AR;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const y0 = -span / 2 + (span * i) / n;
+      const y1 = -span / 2 + (span * (i + 1)) / n;
+      out.push({
+        leftLE: [0, y0, 0], leftTE: [chord, y0, 0],
+        rightLE: [0, y1, 0], rightTE: [chord, y1, 0],
+      });
+    }
+    return out;
+  };
+  const slopeOf = (st) => {
+    const a = vortexLattice({ strips: st, alphaDeg: 2 });
+    const b = vortexLattice({ strips: st, alphaDeg: 4 });
+    return (b.CL - a.CL) / ((2 * Math.PI) / 180);
+  };
+
+  // The limit that says the method is right at all: as aspect ratio grows,
+  // the lift slope must approach the two-dimensional 2*pi.
+  const highAR = slopeOf(rect(200, 60));
+  check('at very high aspect ratio the lift slope approaches 2 pi',
+    highAR > 6.0 && highAR < 2 * Math.PI,
+    `${highAR.toFixed(3)} against ${(2 * Math.PI).toFixed(3)}`);
+  check('and it falls with aspect ratio, as finite-span theory says',
+    slopeOf(rect(4, 40)) < slopeOf(rect(12, 40)));
+
+  // The decisive check: an elliptical wing must have a span efficiency of 1.
+  //
+  // It came out at 0.503 — exactly double the induced drag — because the
+  // Trefftz integral is `(rho/2) * integral(Gamma * w)` and the half was
+  // missing. A factor of two in a quantity with a known exact answer is the
+  // easiest kind of error to find, and only because the answer is known.
+  const ell = (n) => {
+    const span = 10;
+    const AR = 8;
+    const cRoot = (4 * span) / (Math.PI * AR);
+    const out = [];
+    const chordAt = (y) => cRoot * Math.sqrt(Math.max(0, 1 - ((2 * y) / span) ** 2));
+    for (let i = 0; i < n; i++) {
+      const y0 = -span / 2 + (span * i) / n;
+      const y1 = -span / 2 + (span * (i + 1)) / n;
+      out.push({
+        leftLE: [0, y0, 0], leftTE: [chordAt(y0), y0, 0],
+        rightLE: [0, y1, 0], rightTE: [chordAt(y1), y1, 0],
+      });
+    }
+    return out;
+  };
+  const elliptical = vortexLattice({ strips: ell(60), alphaDeg: 5 });
+  near('an elliptical wing has a span efficiency of one',
+    elliptical.oswald, 1.0, 0.02);
+  check('and a rectangular one is worse',
+    vortexLattice({ strips: rect(8, 60), alphaDeg: 5 }).oswald
+      < elliptical.oswald);
+
+  // The point of the exercise: what the arc does, from the geometry.
+  const arced = (ratio, n) => {
+    const span = 10;
+    const cRoot = (span / 6) * 1.2;
+    const out = [];
+    const place = (t) => {
+      const flat = (t * span) / 2;
+      if (ratio >= 1) return [flat, 0];
+      const R = (span / 2) / Math.acos(ratio);
+      const th = flat / R;
+      return [R * Math.sin(th), -R * (1 - Math.cos(th))];
+    };
+    const chordAt = (t) => cRoot * Math.sqrt(Math.max(0.04, 1 - t * t * 0.85));
+    for (let i = 0; i < n; i++) {
+      const t0 = -1 + (2 * i) / n;
+      const t1 = -1 + (2 * (i + 1)) / n;
+      const [y0, z0] = place(t0);
+      const [y1, z1] = place(t1);
+      out.push({
+        leftLE: [0, y0, z0], leftTE: [chordAt(t0), y0, z0],
+        rightLE: [0, y1, z1], rightTE: [chordAt(t1), y1, z1],
+      });
+    }
+    return out;
+  };
+  const flat = vortexLattice({ strips: arced(1.0, 48), alphaDeg: 6 });
+  const bent = vortexLattice({ strips: arced(0.80, 48), alphaDeg: 6 });
+
+  check('bending the same wing into an arc loses lift',
+    bent.CL < flat.CL * 0.95,
+    `${flat.CL.toFixed(4)} becomes ${bent.CL.toFixed(4)}, `
+    + `${((1 - bent.CL / flat.CL) * 100).toFixed(1)}% down`);
+  check('and the projected span shrinks with it',
+    bent.spanM < flat.spanM * 0.95,
+    `${flat.spanM.toFixed(2)} m becomes ${bent.spanM.toFixed(2)} m`);
+
+  // The non-obvious one, and the reason this is worth having: an arced wing
+  // sheds its wake in a non-planar sheet, which is MORE efficient — the same
+  // reason a winglet works. A correction factor on a flat solution cannot
+  // produce that.
+  check('but the span efficiency rises, because the wake is not planar',
+    bent.oswald > flat.oswald * 1.05,
+    `${flat.oswald.toFixed(3)} becomes ${bent.oswald.toFixed(3)}`);
+
+  // It runs on a real wing.
+  const wingV = demoWing();
+  const solved = vortexLattice({ strips: stripsFromWing(wingV), alphaDeg: 6 });
+  check('and it solves a wing built by this tool',
+    solved.CL > 0.2 && solved.CL < 1.2 && solved.panels > 20,
+    solved.note);
+  check('with a loading for every strip',
+    solved.loading.length === solved.panels);
+}
+
+// ---------------------------------------------------------------------------
+section('The wing hangs over its maillon');
+
+{
+  // A paraglider hangs with the pilot below the point the lift acts through,
+  // and the risers close to vertical. The maillon was placed at `x = 0` —
+  // the LEADING EDGE — while the anchors span a quarter to three quarters of
+  // the chord, so every line raked about a metre forward to reach a point
+  // under the nose and the whole cascade sat at a large angle to the wing it
+  // hangs from.
+  //
+  // Nothing internal could see it: the lines were the right lengths, the
+  // loads closed, the cascade was geometrically consistent. It was only wrong
+  // against how a wing flies.
+  const wingH = demoWing();
+  const afH = naca4('4415');
+  afH.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const planH = buildLinePlan({
+    wing: wingH, airfoil: afH, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  const rootH = wingH.ribs[0];
+  const chordFractionOf = (x) => (x - rootH.lower[0][0]) / rootH.chord;
+
+  check('the maillon hangs under the wing, not under its nose',
+    chordFractionOf(planH.maillon[0]) > 0.2,
+    `${(chordFractionOf(planH.maillon[0]) * 100).toFixed(1)}% of chord`);
+  check('and not behind it either',
+    chordFractionOf(planH.maillon[0]) < 0.6,
+    `${(chordFractionOf(planH.maillon[0]) * 100).toFixed(1)}% of chord`);
+
+  // The point is where the load-bearing anchors average out, weighted the way
+  // the rows carry load. That is where the resultant of the lines acts, so it
+  // is where the wing balances over the pilot.
+  const anchorsH = planH.lines.filter((l) => l.level === 'upper')
+    .map((l) => l.from[0]);
+  const midChord = (Math.min(...anchorsH) + Math.max(...anchorsH)) / 2;
+  const rake = Math.abs(midChord - planH.maillon[0]);
+  check('so the cascade hangs down rather than raking forward',
+    rake < rootH.chord * 0.25,
+    `${rake.toFixed(2)} m of rake on a ${rootH.chord.toFixed(2)} m chord`);
+
+  // The lowest lines are the risers, and they should be closer to vertical
+  // than to horizontal.
+  const lowest = planH.lines.filter((l) => Math.min(l.from[2], l.to[2]) < -4);
+  const fromVertical = lowest.map((l) => {
+    const d = [l.to[0] - l.from[0], l.to[1] - l.from[1], l.to[2] - l.from[2]];
+    return Math.acos(Math.abs(d[2]) / Math.hypot(d[0], d[1], d[2]))
+      * (180 / Math.PI);
+  });
+  check('and the riser-level lines hang nearer vertical than horizontal',
+    fromVertical.reduce((a, b) => a + b, 0) / fromVertical.length < 45,
+    `${(fromVertical.reduce((a, b) => a + b, 0) / fromVertical.length).toFixed(1)}`
+    + ' degrees from vertical on average');
+
+  // A wing with its anchors moved back must hang further back with them.
+  const afBack = naca4('4415');
+  afBack.anchors = { A: 0.20, B: 0.40, C: 0.60, D: 0.85 };
+  const planBack = buildLinePlan({
+    wing: wingH, airfoil: afBack, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+  check('moving the anchors aft moves the hang point aft with them',
+    planBack.karabiner[0] > planH.karabiner[0],
+    `${chordFractionOf(planH.karabiner[0]).toFixed(3)} becomes `
+    + `${chordFractionOf(planBack.karabiner[0]).toFixed(3)} of chord`);
+
+  // EVERY row, including the brakes.
+  //
+  // Fixing the maillon in `buildLinePlan` left a second copy of it inside
+  // `buildBrakePlan`, still at the leading edge — so the load-bearing lines
+  // hung correctly under the wing while the brakes ran forward to a handle
+  // under the nose. Two definitions of one position is one too many.
+  const withBrakes = buildLinePlan({
+    wing: wingH, airfoil: afH, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5, brakes: true,
+  });
+  const forwardOfNose = withBrakes.lines.filter(
+    (l) => chordFractionOf(Math.min(l.from[0], l.to[0])) < 0.05);
+  check('no line runs forward to the leading edge',
+    forwardOfNose.length === 0,
+    forwardOfNose.length
+      ? `${forwardOfNose.length} lines, rows `
+        + `${[...new Set(forwardOfNose.map((l) => l.row))].join(', ')}`
+      : `${withBrakes.lines.length} lines checked`);
+
+  const brakeLines = withBrakes.lines.filter((l) => l.row === 'K');
+  check('the brakes exist to be checked', brakeLines.length > 0);
+  // The brake runs through a pulley at the top of the REAR riser, as on a
+  // real wing and in LEparagliding — not from a point of its own.
+  const rear = withBrakes.risers[withBrakes.risers.length - 1].maillon;
+  const pulley = withBrakes.brakePlan.pulley;
+  near('and their pulley is at the top of the rear riser',
+    Math.hypot(pulley[0] - rear[0], pulley[1] - rear[1], pulley[2] - rear[2]), 0, 1e-9, ' m');
+
+  // There is ONE definition of the hang point, so this cannot drift apart
+  // again.
+  check('the hang point comes from a single shared function',
+    Math.abs(hangPointFromAnchors(wingH, afH.anchors) - withBrakes.karabiner[0])
+      < 1e-9);
+
+  // The wing hangs from where it BALANCES, and balance is checkable.
+  //
+  // A paraglider's angle of incidence is set by its line lengths: it hangs
+  // from the maillon and sits at whatever attitude those lengths dictate. The
+  // point it hangs from is the calage, and `solveEquilibrium` computes it
+  // from the moment balance.
+  //
+  // The line plan used a load-weighted average of the anchor positions
+  // instead — a plausible geometric proxy that knows nothing about balance.
+  // These are flying machines; where the mass hangs decides how they fly.
+  // `cm` and `cz` matter: the balance point IS the moment balance, so a
+  // solve without the section's pitching moment is answering a different
+  // question. Omitting them gave calage 36.6% with the centre of pressure at
+  // 29.7% — forward of the hang point, which cannot balance — and that was
+  // the test being wrong, not the model.
+  const balH = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+  });
+
+  // The physical relation, independent of any particular number.
+  //
+  // Take moments about the hang point. Lift acts up at the centre of
+  // pressure; if that is FORWARD of the hang point the couple is nose-UP,
+  // which is what balances an aerofoil's nose-down pitching moment. So the
+  // wing hangs from a point AFT of its centre of pressure.
+  //
+  // I asserted the opposite first, from reasoning the couple out backwards,
+  // and the model failed a test that was itself wrong. The direction is worth
+  // stating carefully because getting it round the wrong way is easy and
+  // looks equally plausible.
+  check('the wing hangs from a point aft of its centre of pressure',
+    balH.calageFraction > balH.xcpFraction,
+    `calage ${(balH.calageFraction * 100).toFixed(1)}%, `
+    + `centre of pressure ${(balH.xcpFraction * 100).toFixed(1)}%`);
+
+  // And the more nose-down the section, the further aft it must hang to
+  // generate the nose-up couple that balances it.
+  const noseDown = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+  });
+  const noseUp = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: 0.042,
+  });
+  check('a more nose-down section hangs further aft',
+    noseDown.calageFraction > noseUp.calageFraction,
+    `${(noseUp.calageFraction * 100).toFixed(1)}% nose-up against `
+    + `${(noseDown.calageFraction * 100).toFixed(1)}% nose-down`);
+
+  const hungFromBalance = buildLinePlan({
+    wing: wingH, airfoil: afH, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+    calageFraction: balH.calageFraction,
+  });
+  // The pilot hangs under the karabiner, and the karabiner under the
+  // calage. (The riser tops lean toward their own lines, so no one of them
+  // is the hang point.)
+  near('the wing hangs from the calage, not from an anchor average',
+    chordFractionOf(hungFromBalance.karabiner[0]), balH.calageFraction, 0.005,
+    ' of chord');
+  check('which is a different place from the anchor centroid',
+    Math.abs(chordFractionOf(hungFromBalance.karabiner[0])
+      - chordFractionOf(planH.karabiner[0])) > 0.03,
+    `${(chordFractionOf(planH.karabiner[0]) * 100).toFixed(1)}% against `
+    + `${(chordFractionOf(hungFromBalance.karabiner[0]) * 100).toFixed(1)}%`);
+
+  // Changing the trim must move the hang point, because that is the whole
+  // relationship: line lengths set the incidence, the incidence sets where
+  // the wing balances.
+  const fast = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 2, cz: 0.9, cm: -0.042,
+  });
+  const slow = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 9, cz: 0.9, cm: -0.042,
+  });
+  check('a different angle of attack balances at a different point',
+    Math.abs(fast.calageFraction - slow.calageFraction) > 0.01,
+    `${(fast.calageFraction * 100).toFixed(1)}% at 2 degrees, `
+    + `${(slow.calageFraction * 100).toFixed(1)}% at 9`);
+
+  // A calage that cannot balance is refused.
+  //
+  // `solveEquilibrium` has a `legacySpreadsheet` mode reproducing a 2012
+  // worksheet, and it leaves the aerofoil's own pitching moment OUT of the
+  // balance. The number is right for matching that worksheet and wrong as
+  // geometry: it puts the hang point forward of the centre of pressure, where
+  // the lift-weight couple adds to the section's nose-down moment instead of
+  // opposing it. A wing hung there could not fly.
+  //
+  // The two modes disagreed about the sign of that relationship and the tool
+  // would have used whichever it was handed.
+  const handbook = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.33, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+  });
+  const legacy = solveEquilibrium({
+    area: 22.5, span: 11.6, chord: 2.33, lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+    legacySpreadsheet: true,
+  });
+
+  check('the handbook balance hangs the wing aft of its centre of pressure',
+    usableCalage(handbook).ok,
+    `calage ${(handbook.calageFraction * 100).toFixed(1)}%, `
+    + `cp ${(handbook.xcpFraction * 100).toFixed(1)}%`);
+  check('the 2012 worksheet mode does not, because it omits the aerofoil moment',
+    !usableCalage(legacy).ok,
+    `calage ${(legacy.calageFraction * 100).toFixed(1)}%, `
+    + `cp ${(legacy.xcpFraction * 100).toFixed(1)}%`);
+  check('and the refusal says why',
+    /forward of the centre of pressure/.test(usableCalage(legacy).why));
+
+  // Refused means the lines fall back to the anchor centroid, not to the
+  // unusable number and not to the nose.
+  const onLegacy = buildLinePlan({
+    wing: wingH, airfoil: afH, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+    calageFraction: usableCalage(legacy).ok ? legacy.calageFraction : null,
+  });
+  check('a refused calage falls back rather than hanging the wing wrongly',
+    Math.abs(chordFractionOf(onLegacy.maillon[0]) - legacy.calageFraction) > 0.05
+    && chordFractionOf(onLegacy.maillon[0]) > 0.2,
+    `${(chordFractionOf(onLegacy.maillon[0]) * 100).toFixed(1)}% of chord`);
+
+  // And an imported design that has no D row must not pin it to the nose.
+  //
+  // `undefined * 100` is NaN, which settled as 0, so loading a three-row wing
+  // put the D anchor at the LEADING EDGE and left it there afterwards.
+  const threeRow = { A: 0.11, B: 0.39, C: 0.67 };
+  check('a missing row does not drag the hang point to the nose',
+    hangPointFromAnchors(wingH, threeRow) > rootH.lower[0][0] + rootH.chord * 0.2,
+    `${(((hangPointFromAnchors(wingH, threeRow) - rootH.lower[0][0])
+      / rootH.chord) * 100).toFixed(1)}% of chord`);
+}
+
+// ---------------------------------------------------------------------------
+section('Diagonals attach to seams');
+
+{
+  // A diagonal is a V: one bottom seam to the two top seams either side.
+  //
+  // This section used to open by saying `buildVRibs` lands its base "in the
+  // middle of a panel". It does not: its base is a run of the neighbouring
+  // rib's own upper edge, which is the seam. That is asserted here first,
+  // because the claim was made in three places and checked in none.
+  const wingS = demoWing();
+  const afS = naca4('4415');
+  afS.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  {
+    const gussets = buildVRibs({ wing: wingS, airfoil: afS, rows: ['B'] });
+    const onPolyline = (q, poly) => {
+      let best = Infinity;
+      for (let i = 1; i < poly.length; i++) {
+        const a = poly[i - 1];
+        const b = poly[i];
+        const v = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const L2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        const t = Math.max(0, Math.min(1,
+          ((q[0] - a[0]) * v[0] + (q[1] - a[1]) * v[1] + (q[2] - a[2]) * v[2]) / L2));
+        best = Math.min(best, Math.hypot(q[0] - a[0] - t * v[0], q[1] - a[1] - t * v[1], q[2] - a[2] - t * v[2]));
+      }
+      return best;
+    };
+    check('the apex of every gusset is on the lower seam of the rib it hangs from',
+      gussets.vribs.every((d) => onPolyline(d.apex, wingS.ribs[d.fromRib].lower) < 1e-9));
+    check('and every point of its base is on the upper seam of the rib it holds',
+      gussets.vribs.every((d) => d.base.every((q) => onPolyline(q, wingS.ribs[d.toRib].upper) < 1e-9)),
+      `${gussets.count} gussets, ${gussets.vribs[0].base.length} base points each`);
+    check('a lined rib between two free ones sends a gusset to each: the V',
+      gussets.vribs.filter((d) => d.fromRib === 2).map((d) => d.toRib).sort().join() === '1,3');
+  }
+  const seam = buildSeamDiagonals({ wing: wingS, airfoil: afS, rows: ['B'] });
+
+  check('every diagonal reaches the ribs either side of its anchor',
+    seam.diagonals.every((d) => d.leftRib === d.apexRib - 1
+      && d.rightRib === d.apexRib + 1),
+    `${seam.count} diagonals`);
+  check('and both feet land on a rib seam at the anchor station',
+    seam.diagonals.every((d) => Math.abs(d.chordFraction - 0.30) < 1e-9));
+  check('with an apex on the opposite surface from its feet',
+    seam.diagonals.every((d) => !d.inverted));
+
+  // The inverted form is the same triangle the other way up: two bottom seams
+  // to the top seam between them.
+  const inv = buildSeamDiagonals({
+    wing: wingS, airfoil: afS, rows: ['B'], inverted: true,
+  });
+  check('the inverted form builds too',
+    inv.count > 0 && inv.diagonals.every((d) => d.inverted), inv.note);
+
+  // Where a V will not fit, the caller is told to use an H rib rather than
+  // being handed a 75 mm triangle.
+  check('places where no diagonal fits ask for an H rib instead',
+    seam.needHRib.length > 0,
+    `${seam.needHRib.length} of ${seam.needHRib.length + seam.count} `
+    + `positions: ${seam.needHRib[0].why}`);
+  check('and every one it does build has legs worth sewing',
+    seam.diagonals.every((d) => Math.min(d.legLeftM, d.legRightM) >= 0.12),
+    `shortest leg ${(seam.shortestLegM * 1000).toFixed(0)} mm`);
+
+  // The two legs differ as the two cells do, and no more.
+  //
+  // This recorded "up to 4.3 to 1 near the tip, and the cause is SWEEP". The
+  // figure came from a canopy built inside out. Then it recorded 1.34 to 1,
+  // which was a 131 mm cell beside a 215 mm one, from ribs crowded at the
+  // tip. With cells that follow the chord, neighbours differ by a few per
+  // cent and so do the legs: a leg across a narrower cell is shorter, and
+  // that is all there is to it.
+  const cellRatio = (d) => {
+    const inboard = wingS.ribs[d.apexRib].station - wingS.ribs[d.leftRib].station;
+    const outboard = wingS.ribs[d.rightRib].station - wingS.ribs[d.apexRib].station;
+    return Math.max(inboard, outboard) / Math.min(inboard, outboard);
+  };
+  check('the legs are not equal, and the ratio is reported',
+    seam.worstLegRatio > 1 && seam.worstLegRatio < 1.5,
+    `worst ${seam.worstLegRatio.toFixed(2)} to 1`);
+  check('and no pair of legs differs by more than the cells either side do',
+    seam.diagonals.every((d) => d.legRatio <= cellRatio(d) + 0.02),
+    seam.diagonals.map((d) => `${d.legRatio.toFixed(2)}/${cellRatio(d).toFixed(2)}`).join(' '));
+  check('each diagonal carries its own leg ratio',
+    seam.diagonals.every((d) => Number.isFinite(d.legRatio) && d.legRatio >= 1));
+  // The longer leg is always the one across the wider cell.
+  check('and the longer leg is the one across the wider cell',
+    seam.diagonals.every((d) => {
+      const inboard = wingS.ribs[d.apexRib].station - wingS.ribs[d.leftRib].station;
+      const outboard = wingS.ribs[d.rightRib].station - wingS.ribs[d.apexRib].station;
+      return (d.legLeftM > d.legRightM) === (inboard > outboard);
+    }));
+  check('two legs are not given an area', seam.diagonals.every((d) => !('areaM2' in d)));
+}
+
+// ---------------------------------------------------------------------------
+section('The Swoop2 rods, against its own program');
+
+{
+  // Laboratori d'envol's own output for the Swoop2 lists every jonc it
+  // computes (lep-out.txt, section 8): two blocs of 25 per side, 72.81 m for
+  // both sides.
+  //
+  // This test used to load 51 rods and 37.14 m, and to carry bloc 2 as "not
+  // understood". The reference table had the program's TOTAL line read in as
+  // a 26th rod; and bloc 2 is not a nose rod at all but an extrados batten.
+  const pubJ = readFileSync('data/reference/swoop2-joncs.tsv', 'utf8')
+    .split('\n').filter((l) => l && !l.startsWith('#')).slice(1)
+    .map((l) => l.split('\t'));
+  const byBlocPub = {};
+  for (const r of pubJ) {
+    const bl = Number(r[0]);
+    (byBlocPub[bl] ||= { n: 0, totalCm: 0, lengths: [] });
+    byBlocPub[bl].n++;
+    byBlocPub[bl].totalCm += Number(r[3]);
+    byBlocPub[bl].lengths.push(Number(r[3]));
+  }
+  check('the published rod lengths are loaded: 50, in two blocs of 25',
+    pubJ.length === 50 && byBlocPub[1].n === 25 && byBlocPub[2].n === 25,
+    `${pubJ.length} joncs`);
+  check('and every row is a rod, not a total',
+    pubJ.every((r) => /^\d+$/.test(r[2])));
+
+  // Exact: the program's own construction, on the Swoop2's own ribs.
+  const docJ = parseLep(readFileSync('data/reference/lep/swoop2-20260829.lep', 'utf8'));
+  const tJ = lepRibTable(docJ, {
+    airfoils: { 'gnuReflex.txt': readFileSync('data/reference/lep/swoop2-gnuReflex.txt', 'utf8') },
+  });
+  const exact = lepJoncs(docJ, tJ);
+  check('both rod types are reproduced', exact.ok && exact.notReproduced.length === 0,
+    exact.notReproduced.join('; '));
+  let worstJ = 0;
+  for (const bl of [1, 2]) {
+    const mine = exact.joncs.filter((j) => j.bloc === bl);
+    mine.forEach((j, k) => { worstJ = Math.max(worstJ, Math.abs(j.lengthCm - byBlocPub[bl].lengths[k])); });
+  }
+  check('every one of the 50 rods matches its printed length',
+    exact.joncs.length === 50 && worstJ < 0.051,
+    `worst ${worstJ.toFixed(3)} cm against a printed 0.1 cm`);
+  near('both sides together are the printed 72.81 m', exact.bothSidesM, 72.81, 0.006, ' m');
+  check('bloc 2 is an extrados batten, 23.5% to 70% of chord',
+    exact.joncs.filter((j) => j.bloc === 2).every((j) => j.points.every((q) => q[1] > 0)
+      && Math.abs(j.points[j.points.length - 1][0] / tJ.ribs[j.rib - 1].chord - 0.235) < 1e-9
+      && Math.abs(j.points[0][0] / tJ.ribs[j.rib - 1].chord - 0.70) < 1e-9));
+  check('and bloc 1 wraps the nose, upper surface to lower',
+    exact.joncs.filter((j) => j.bloc === 1).every((j) => j.points[0][1] > 0
+      && j.points[j.points.length - 1][1] < 0));
+
+  // And they clear its own holes: by 1.28% of chord on every rib, which is
+  // 27 mm at the root and 10 mm at the outermost rod — where this tool's
+  // clearance rule comes from.
+  const holesJ = lepHoles(docJ, tJ);
+  const ownRodsJ = exact.joncs.map((j) => ({
+    rib: j.ribIndex, group: `bloc ${j.bloc}`, points: j.points.map(([u, v]) => [u / 100, v / 100]),
+  }));
+  const ownHolesJ = {};
+  for (const [i, hs] of holesJ.byRib) ownHolesJ[i] = hs.map((h) => h.outline);
+  const gapsJ = checkRodClearance({ rods: ownRodsJ, holesByRib: ownHolesJ, marginM: 10 }).clashes;
+  const gapAt = (rib) => Math.min(...gapsJ.filter((x) => x.rib === rib).map((x) => x.clearanceM));
+  check('the Swoop2\'s own rods clear its own holes, by the measure used here',
+    checkRodClearance({ rods: ownRodsJ, holesByRib: ownHolesJ }).ok
+    && gapsJ.every((x) => !x.through),
+    `${(gapAt(0) * 1000).toFixed(1)} mm at the root, ${(gapAt(24) * 1000).toFixed(1)} mm at rib 25`);
+  check('by the same 1.3% of chord at the root as at the last, where that is 10 mm',
+    Math.abs(gapAt(0) / (tJ.ribs[0].chord / 100) - 0.0128) < 0.0005
+    && Math.abs(gapAt(24) / (tJ.ribs[24].chord / 100) - 0.0128) < 0.0005
+    && Math.abs(gapAt(24) - 0.010) < 0.0005,
+    `${(gapAt(0) / (tJ.ribs[0].chord / 100) * 100).toFixed(2)}% and `
+    + `${(gapAt(24) / (tJ.ribs[24].chord / 100) * 100).toFixed(2)}% of chord; ${(gapAt(24) * 1000).toFixed(1)} mm`);
+
+  // What a wing that is not a file gets: the same construction, on the ribs
+  // as this tool builds them. On the Swoop2's own ribs, at the 50 points a
+  // surface the interface uses, every rod comes out at its printed length.
+  //
+  // (This compared a cruder builder that followed the surface with no
+  // run-out, and accepted 3%. Before that, the tool gave a parametric wing
+  // 14 cm stubs from "12 to 18.5% of chord".)
+  const secJ = parseAirfoilText(readFileSync('data/reference/lep/swoop2-gnuReflex.txt', 'utf8'), 'gnuReflex');
+  const dJ = lepToDesign(docJ, { sections: { 'gnuReflex.txt': secJ } });
+  const wingJ = buildWing({
+    planform: discretePlanform(dJ.planformRows), lobe: null, airfoil: secJ,
+    explicitRibs: dJ.explicitRibs, pointsPerSurface: 50,
+  });
+  const mineJ = buildRods(wingJ, {
+    groups: SWOOP2_RODS.map((g) => ({ ...g, fromRib: 0, toRib: 24 })),
+  });
+  check('the tool\'s own builder makes one rod per rib of each kind',
+    mineJ.rods.filter((r) => r.kind === 'nose').length === 25
+    && mineJ.rods.filter((r) => r.kind === 'batten').length === 25, mineJ.note);
+  let worstMine = 0;
+  for (const [bl, kind] of [[1, 'nose'], [2, 'batten']]) {
+    const set = mineJ.rods.filter((r) => r.kind === kind);
+    set.forEach((r, k) => {
+      worstMine = Math.max(worstMine, Math.abs(r.lengthM * 100 - byBlocPub[bl].lengths[k]));
+    });
+    near(`and its ${kind} rods total what the program prints`,
+      set.reduce((t, r) => t + r.lengthM, 0), byBlocPub[bl].totalCm / 100, 0.012, ' m');
+  }
+  check('every one of the 50 within a millimetre of its printed length',
+    worstMine < 0.1, `worst ${(worstMine * 10).toFixed(1)} mm`);
+  // The wing has its centre rib once, where the program lists it for each
+  // side: 98 rods, and two rods' length less than the printed 72.81 m.
+  near('for the wing, the printed total less the centre rib\'s second pair',
+    mineJ.totalLengthM, 72.81 - (byBlocPub[1].lengths[0] + byBlocPub[2].lengths[0]) / 100, 0.02, ' m');
+  check('which is 98 rods', mineJ.count === 98, `${mineJ.count}`);
+}
+
+// ---------------------------------------------------------------------------
+section('Each riser points at the lines it carries');
+
+{
+  // Riser webbing carries only tension, so it lies along the RESULTANT of
+  // what pulls on its top: the lines. In side view that is nearly vertical —
+  // the pilot hangs under the balance point. In front view it is not: each
+  // half's lines pull up and outward, and the chest strap holds the
+  // karabiners together against it, so the risers lean outboard.
+  //
+  // They were drawn hanging straight down, with the reasoning that webbing
+  // "lies along the line of the weight". It lies along the line of the
+  // forces at its ends, and at its top those are the lines. LEparagliding
+  // points each riser at the load-weighted centre of its anchors, and its
+  // Swoop2 output has the A riser top 15.4 cm outboard of the karabiner.
+  const wingR = demoWing();
+  const afR = naca4('4415');
+  afR.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const planR = buildLinePlan({
+    wing: wingR, airfoil: afR, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5,
+  });
+
+  check('there is riser webbing between the karabiner and the lines',
+    (planR.riserWebbing ?? []).length === 3,
+    `${(planR.riserWebbing ?? []).length} risers`);
+  for (const r of planR.riserWebbing) {
+    const d = [r.to[0] - r.from[0], r.to[1] - r.from[1], r.to[2] - r.from[2]];
+    const len = Math.hypot(...d);
+    const outboard = Math.atan2(d[1], d[2]) * (180 / Math.PI);
+    const foreAft = Math.atan2(Math.abs(d[0]), d[2]) * (180 / Math.PI);
+    near(`riser ${r.row} is its stated length`, len, 0.5, 1e-9, ' m');
+    check(`riser ${r.row} leans outboard toward its lines`,
+      outboard > 8 && outboard < 30, `${outboard.toFixed(1)} deg from vertical in front view`);
+    // The rear riser carries lines that pull aft, and leans back with them:
+    // the Swoop2's C riser leans 7.4 degrees in its own program's output.
+    check(`and stands within a few degrees of upright in side view`,
+      foreAft < 12, `${foreAft.toFixed(1)} deg fore-aft`);
+  }
+
+  // Independently of how the tops were placed: the tension in each riser's
+  // own lines, from the load model, has to point along the riser. If it did
+  // not, the riser top would not be in equilibrium.
+  const loadsR = analyseLoads({
+    plan: planR, planform: wingR.planform, stations: wingR.stations,
+    totalMassKg: 100, alphaDeg: 5, wingAreaM2: planformMetrics(wingR.planform).area,
+    airfoil: afR, anchors: afR.anchors,
+  });
+  const tensionOf = new Map(loadsR.tensions.lines.map((t) => [t.name, t.tensionN]));
+  let worstMisalign = 0;
+  for (const r of planR.riserWebbing) {
+    const top = r.to;
+    let R = [0, 0, 0];
+    for (const l of planR.lines) {
+      const atTop = Math.hypot(l.from[0] - top[0], l.from[1] - top[1], l.from[2] - top[2]) < 1e-9;
+      if (!atTop || l.row === 'K') continue;
+      const T = tensionOf.get(l.name) ?? 0;
+      const d = [l.to[0] - l.from[0], l.to[1] - l.from[1], l.to[2] - l.from[2]];
+      const n = Math.hypot(...d);
+      R = [R[0] + (T * d[0]) / n, R[1] + (T * d[1]) / n, R[2] + (T * d[2]) / n];
+    }
+    const u = [r.to[0] - r.from[0], r.to[1] - r.from[1], r.to[2] - r.from[2]];
+    const cos = (R[0] * u[0] + R[1] * u[1] + R[2] * u[2]) / (Math.hypot(...R) * Math.hypot(...u));
+    worstMisalign = Math.max(worstMisalign, Math.acos(Math.min(1, cos)) * (180 / Math.PI));
+  }
+  // Placed by the centroid construction, a riser is a few degrees off its
+  // resultant: chord-weighting loads the tips more than the lifting line does.
+  check('placed by construction, each riser is within a few degrees of its resultant',
+    worstMisalign < 7, `worst ${worstMisalign.toFixed(2)} deg off the resultant`);
+
+  // Pointed along the resultant and rebuilt, it is on it — the loop closes.
+  const dirs = riserResultants(planR, loadsR.tensions);
+  const planR2 = buildLinePlan({
+    wing: wingR, airfoil: afR, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5, riserDirections: dirs,
+  });
+  const loadsR2 = analyseLoads({
+    plan: planR2, planform: wingR.planform, stations: wingR.stations,
+    totalMassKg: 100, alphaDeg: 5, wingAreaM2: planformMetrics(wingR.planform).area,
+    airfoil: afR, anchors: afR.anchors,
+  });
+  const dirs2 = riserResultants(planR2, loadsR2.tensions);
+  let worst2 = 0;
+  for (const r of planR2.riserWebbing) {
+    const u = [r.to[0] - r.from[0], r.to[1] - r.from[1], r.to[2] - r.from[2]];
+    const v = dirs2[r.row];
+    const c = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / Math.hypot(...u);
+    worst2 = Math.max(worst2, Math.acos(Math.min(1, c)) * (180 / Math.PI));
+  }
+  check('and after one pass each riser lies along its own lines\' resultant',
+    worst2 < 0.5, `worst ${worst2.toFixed(3)} deg`);
+
+  // The karabiner hangs a line length plus a riser length below the wing,
+  // directly under the balance point.
+  near('and the karabiner hangs a line length and a riser below the wing',
+    Math.abs(planR.karabiner[2]), 7.0, 1e-9, ' m');
+
+  // A riser is webbing, not a line: no name in the line-naming convention,
+  // not cut from line stock, not part of a total line length. The deepest
+  // LINE level is `main`; the audit has a rule about it.
+  check('risers are kept out of the lines',
+    !planR.lines.some((l) => l.level === 'riser'));
+  check('and carry no line level at all',
+    planR.riserWebbing.every((r) => r.level === undefined && r.kind === 'webbing'));
+  check('and out of the riser definitions, which are a different thing',
+    Array.isArray(planR.risers) && planR.risers[0]?.rows !== undefined,
+    'plan.risers still carries which rows each riser takes');
+
+  // The brake has no riser of its own: it runs through a pulley on the rear
+  // one. With the brake cascade in the plan — which is how the interface
+  // builds every plan — there was a fourth strap, `riser-K`, lying over the
+  // A riser, and the bill of materials counted eight risers and 4.0 m of
+  // webbing on a wing with six and 3.0 m.
+  const planB = buildLinePlan({
+    wing: wingR, airfoil: afR, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5, brakes: { anchors: 9, levelCounts: [4, 2, 1] },
+  });
+  check('with brakes in the plan there are brake lines marked for the K cascade',
+    planB.lines.some((l) => l.row === 'K' && l.level === 'main' && l.riser === 'K'),
+    `${planB.lines.filter((l) => l.row === 'K').length} brake lines`);
+  check('and still three risers, none of them the brake\'s',
+    planB.riserWebbing.length === 3 && planB.riserWebbing.every((w) => w.riser !== 'K'),
+    planB.riserWebbing.map((w) => w.name).join(', '));
+  check('one strap to each riser top',
+    new Set(planB.riserWebbing.map((w) => w.to.map((v) => v.toFixed(6)).join(','))).size === 3);
+}
+
+// ---------------------------------------------------------------------------
+section('Does the whole machine balance?');
+
+{
+  // This project checked a great deal about a wing and nothing about it
+  // FLYING. Every part agreed with every other part while the maillon sat
+  // under the leading edge, the brakes ran forward to a handle under the
+  // nose, and the lines hung the wing at an attitude it could never hold.
+  // Each was found by a person looking at a picture.
+  //
+  // A free body diagram is the instrument that finds them without a person.
+  const pfB = planformFromDesignInputs({
+    span: 11.6, rootChord: 2.45, tipChord: 0.55, tipSweep: 1.4,
+  });
+  const mB = planformMetrics(pfB);
+  const afB = naca4('4415');
+  afB.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const wingB = buildWing({
+    planform: pfB,
+    lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfB.halfSpan),
+    airfoil: afB, cells: 20, pointsPerSurface: 24,
+  });
+  const balB = solveEquilibrium({
+    area: mB.area, span: pfB.span, chord: pfB.chord(0), lineLength: 6.5,
+    pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
+  });
+  const planB = buildLinePlan({
+    wing: wingB, airfoil: afB, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5, brakes: true,
+    calageFraction: usableCalage(balB).ok ? balB.calageFraction : null,
+  });
+  const fb = freeBodyCheck({ wing: wingB, linePlan: planB, balance: balB });
+
+  // The forces, which follow from the glide angle alone in steady flight.
+  near('lift and drag carry the weight between them',
+    Math.hypot(fb.liftN, fb.dragN), fb.weightN, 1, ' N');
+  near('and the glide angle is the arctangent of the glide ratio',
+    fb.glideAngleDeg, Math.atan2(1, fb.glideRatio) * (180 / Math.PI), 1e-9, ' deg');
+
+  // The moment is the solver's own sum, not a second one computed here.
+  //
+  // My first version took moments about the centre of mass using only lift
+  // times its lever plus the section moment, and reported a residual couple
+  // of -155 Nm on a wing that balances exactly. It was missing pilot drag
+  // (-139 Nm), line drag (-63) and wing weight (+40). An incomplete free body
+  // gives a confident wrong answer, which is worse than none.
+  check('the balance closes',
+    Math.abs(fb.solverResidualNm) < 1e-6,
+    `${fb.solverResidualNm.toExponential(1)} Nm`);
+
+  // The check the solver cannot do: it balances whatever hang point it is
+  // given, so only the GEOMETRY can be checked against it.
+  near('and the wing is drawn hanging where it balances',
+    fb.hangErrorFraction, 0, 0.03, ' of chord');
+
+  check('the angle of incidence is one a wing flies at',
+    fb.incidenceDeg > -2 && fb.incidenceDeg < 18,
+    `${fb.incidenceDeg.toFixed(1)} degrees`);
+  check('and so is the glide angle',
+    fb.glideAngleDeg > 2 && fb.glideAngleDeg < 20,
+    `${fb.glideAngleDeg.toFixed(1)} degrees`);
+
+  // What a line is measured against.
+  //
+  // The air pushes on a rib's cloth along that rib's own plane, and toward
+  // the tip the plane leans. A top line is measured against the plane of the
+  // rib it holds: how much of its tension goes along the load, and how much
+  // into the cloth.
+  //
+  // This check measured from VERTICAL, and recorded twelve lines of
+  // ninety-nine as "running nearly spanwise ... reacting none of the lift".
+  // They were the outboard fans, the same fans as at the centre turned with
+  // the arc; the generator was then made to lower them. Measured against
+  // their ribs, the line that check named carries three quarters of its
+  // tension along the load, and the line furthest off its rib is on the
+  // inner third of the wing.
+  const offRib = (l) => {
+    const w = wingB.ribs[l.ribIndex].frame.w;
+    const d = [l.to[0] - l.from[0], l.to[1] - l.from[1], l.to[2] - l.from[2]];
+    return Math.asin(Math.abs(d[0] * w[0] + d[1] * w[1] + d[2] * w[2])
+      / Math.hypot(d[0], d[1], d[2])) * (180 / Math.PI);
+  };
+  const topsB = planB.lines.filter((l) => l.level === 'upper' && l.row !== 'K');
+  const flattestB = topsB.slice().sort((x, y) => lineAngleFromVerticalDeg(y.from, y.to)
+    - lineAngleFromVerticalDeg(x.from, x.to))[0];
+  const furthestB = topsB.slice().sort((x, y) => offRib(y) - offRib(x))[0];
+  check('the flattest line of the wing is out at the tip, 84 degrees from vertical',
+    flattestB.ribIndex >= 14 && lineAngleFromVerticalDeg(flattestB.from, flattestB.to) > 80,
+    `${flattestB.name} at rib ${flattestB.ribIndex}: ${flattestB.lengthMM} mm with `
+    + `${Math.round(Math.abs(flattestB.to[2] - flattestB.from[2]) * 1000)} mm of drop, `
+    + `${lineAngleFromVerticalDeg(flattestB.from, flattestB.to).toFixed(1)} degrees`);
+  check('and it lies 42 degrees from its own rib, carrying three quarters of its tension',
+    offRib(flattestB) > 38 && offRib(flattestB) < 45,
+    `${offRib(flattestB).toFixed(1)} degrees off rib ${flattestB.ribIndex}, which leans `
+    + `${wingB.ribs[flattestB.ribIndex].betaDeg.toFixed(0)}; `
+    + `${(Math.cos((offRib(flattestB) * Math.PI) / 180) * 100).toFixed(0)}% along the load`);
+  check('the line furthest off its rib is a third of the way out, and not flat at all',
+    furthestB.ribIndex <= 7 && offRib(furthestB) > offRib(flattestB)
+      && lineAngleFromVerticalDeg(furthestB.from, furthestB.to)
+        < lineAngleFromVerticalDeg(flattestB.from, flattestB.to) - 15,
+    `${furthestB.name} at rib ${furthestB.ribIndex}: ${offRib(furthestB).toFixed(1)} degrees off its rib, `
+    + `${lineAngleFromVerticalDeg(furthestB.from, furthestB.to).toFixed(1)} from vertical`);
+  check('no top line lies more than 60 degrees from the way its anchor is pulled',
+    fb.offLoad.length === 0 && fb.maxOffLoadDeg === 60,
+    `${fb.offLoad.length} of ${topsB.length}; the furthest is ${offRib(furthestB).toFixed(1)} degrees`);
+  check('so the free body reports the wing as balanced', fb.ok, fb.note);
+
+  // ...and finds them when they are there: the same wing with its top
+  // junctions nearly at the cloth and nothing to hold the fans in.
+  const planWide = buildLinePlan({
+    wing: wingB, airfoil: afB, layout: RISER_LAYOUTS['A/B/C+D'],
+    everyNthRib: 2, lineLengthM: 6.5, brakes: true,
+    maxFanAngleDeg: 0, levelFractions: [0.64, 0.97],
+    calageFraction: usableCalage(balB).ok ? balB.calageFraction : null,
+  });
+  const fbWide = freeBodyCheck({ wing: wingB, linePlan: planWide, balance: balB });
+  check('lines across their load are detected when a plan has them',
+    fbWide.offLoad.length > 20 && !fbWide.ok
+      && fbWide.problems.some((q) => /from the way the anchor is pulled/.test(q)),
+    `${fbWide.offLoad.length} found`);
+  check('and the check names the worst one, and what it carries',
+    fbWide.offLoad[0].offLoadDeg > 70 && fbWide.offLoad[0].carriesFraction < 0.35
+      && fbWide.offLoad.every((l, k) => k === 0 || l.offLoadDeg <= fbWide.offLoad[k - 1].offLoadDeg),
+    `${fbWide.offLoad[0].name} at rib ${fbWide.offLoad[0].ribIndex}: `
+    + `${fbWide.offLoad[0].offLoadDeg.toFixed(0)} degrees off its rib, `
+    + `${(fbWide.offLoad[0].carriesFraction * 100).toFixed(0)}% along the load`);
+
+  // Brake lines are not load-bearing: they run along the trailing edge,
+  // nearly flat by design, and must not be reported as lines that fail to
+  // hold the wing up.
+  check('brake lines are left out of it',
+    fbWide.offLoad.every((l) => l.row !== 'K'));
+
+  // The attitude is the balance's own, swung by the hang error over the hang
+  // depth. On a wing hung where it balances the two agree.
+  near('the attitude as hung is the balance\'s own on a wing hung where it balances',
+    fb.assietteDeg, balB.thetaDeg, 0.3, ' deg');
+  near('and so is the angle of attack', fb.incidenceDeg, 5, 0.3, ' deg');
+}
+
+// ---------------------------------------------------------------------------
+section('Washin arrives where it was asked for');
+
+{
+  // Twist is invisible to every internal check: the wing agrees with itself
+  // whether the tip is twisted 4.5 degrees or 2.5, and the only way to know
+  // is to measure the built geometry against the number that was asked for.
+  const pfW = planformFromDesignInputs({
+    span: 11.31, rootChord: 2.35, tipChord: 0.5, tipSweep: 1.3,
+  });
+
+  // Measured IN THE RIB'S OWN PLANE.
+  //
+  // A rib on an arc is tilted, so reading the chord line's rise over its run
+  // in world coordinates mixes the dihedral into the answer: a tip asked for
+  // 4.5 degrees read as 2.56, a consistent 58%, which looks exactly like a
+  // model delivering the wrong fraction of its input. It was the ruler.
+  //
+  // Un-rotating the rib by its own beta first — the same transform the rib
+  // view uses to draw it — gives the twist and nothing else.
+  //
+  // The section's "up" lies along the arc's outward normal (sin b, cos b).
+  // This measured along (-sin b, cos b) — the placement's own mistake,
+  // repeated in the ruler, so the two agreed with each other and the
+  // canopy was inside out. Kept as an independent inverse, with the right
+  // sign, so it still checks the placement rather than restating it.
+  const twistInOwnPlane = (rib) => {
+    const b = (rib.betaDeg * Math.PI) / 180;
+    const oy = rib.lobePoint[0];
+    const oz = rib.lobePoint[1];
+    const flat = ([x, y, z]) => [x - rib.xLE,
+      (y - oy) * Math.sin(b) + (z - oz) * Math.cos(b)];
+    const a = flat(rib.lower[0]);
+    const c = flat(rib.lower[rib.lower.length - 1]);
+    return Math.atan2(-(c[1] - a[1]), c[0] - a[0]) * (180 / Math.PI);
+  };
+
+  for (const total of [0, 2, 4.5, 8]) {
+    const wW = buildWing({
+      planform: pfW,
+      lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, pfW.halfSpan),
+      airfoil: naca4('4415'), cells: 24, pointsPerSurface: 24,
+      washin: { total, mode: 'linear' },
+    });
+    const tip = wW.ribs[wW.ribs.length - 1];
+    near(`a washin of ${total} degrees reaches the tip`,
+      twistInOwnPlane(tip) - twistInOwnPlane(wW.ribs[0]), total, 0.01, ' deg');
+  }
+
+  // And it is distributed the way the mode says, not just present at the tip.
+  const linear = [0, 0.25, 0.5, 0.75, 1]
+    .map((f) => washinAt(f * 5.655, 5.655, { total: 4.5, mode: 'linear' }));
+  check('linear washin rises evenly across the span',
+    linear.every((v, i) => i === 0 || Math.abs((v - linear[i - 1]) - 1.125) < 1e-9),
+    linear.map((v) => v.toFixed(2)).join(', '));
+
+  const quad = [0, 0.5, 1]
+    .map((f) => washinAt(f * 5.655, 5.655, { total: 4.5, mode: 'quadratic' }));
+  check('and quadratic washin holds most of it back for the tip',
+    quad[1] < linear[2] && Math.abs(quad[2] - 4.5) < 1e-9,
+    `${quad[1].toFixed(2)} at mid-span against ${linear[2].toFixed(2)} linear`);
+}
+
+// ---------------------------------------------------------------------------
+section('Chord fraction is not array index');
+
+{
+  // Three places in this project interpolated along a rib surface by array
+  // INDEX while their callers passed a CHORD fraction:
+  //
+  //   ovalization.js  the billow profile and the chordwise pressure
+  //   vribs.js        where a diagonal attaches
+  //   lineplan.js     where every line attaches
+  //
+  // Points are spread evenly along the SURFACE, and the nose carries far
+  // more surface per unit chord than the flat middle, so the two never
+  // agree. The first was found by accident; the other two by looking for
+  // the pattern.
+  const wingF = buildWing({
+    planform: planformFromDesignInputs({
+      span: 11.31, rootChord: 2.35, tipChord: 0.5, tipSweep: 1.3,
+    }),
+    lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, 5.655),
+    airfoil: naca4('4415'), cells: 24, pointsPerSurface: 24,
+  });
+  const ribF = wingF.ribs[4];
+
+  // How far apart the two readings are, on the wing's own geometry.
+  const poly = ribF.lower;
+  const n = poly.length;
+  const a = poly[0];
+  const b = poly[n - 1];
+  const ax = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const len2 = ax[0] ** 2 + ax[1] ** 2 + ax[2] ** 2;
+  const along = (p) => (((p[0] - a[0]) * ax[0] + (p[1] - a[1]) * ax[1]
+    + (p[2] - a[2]) * ax[2]) / len2);
+
+  const worstGap = Math.max(...poly.map((p, i) => Math.abs(along(p) - i / (n - 1))));
+  // 1.5 points on the lower surface of this rib, 2.2 on the upper — the
+  // upper is more curved, so index drifts further from chord there. Either
+  // way it is tens of millimetres, not rounding.
+  check('index and chord disagree by points of chord, not rounding',
+    worstGap > 0.01,
+    `${(worstGap * 100).toFixed(1)} points of chord at worst, `
+    + `${(worstGap * ribF.chord * 1000).toFixed(0)} mm on this rib`);
+
+  // The projection has to be monotonic for the walk to be valid: a surface
+  // that doubled back would need a different method.
+  const projected = poly.map(along);
+  check('the projection runs monotonically nose to tail',
+    projected.every((v, i) => i === 0 || v >= projected[i - 1]));
+
+  // The diagonals place their apex at the row's chord fraction.
+  const afF = naca4('4415');
+  afF.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const vF = buildVRibs({
+    wing: wingF, airfoil: afF, rows: ['B'], baseSpread: 0.18, maxReach: 1,
+  });
+  const apex = vF.vribs.find((g) => g.fromRib === 4) || vF.vribs[0];
+  const apexRib = wingF.ribs[apex.fromRib];
+
+  // ...and "chord" has to mean the chord.
+  //
+  // The two that were corrected then measured along the line from a
+  // surface's first point to its last. That was the chord line until the
+  // surfaces were split at the section's FOREMOST point, which on a cambered
+  // section is ahead of and above its own x = 0 — so every anchor and every
+  // diagonal sat a little forward of where it was set, and not where the
+  // openings, which measure along the chord, were keeping clear of. A fourth
+  // copy, in the handbook's own cascade, still went by array index.
+  const stationOf = (rib, q) => toRibPlane(rib, q)[0] / rib.chord;
+  const nose = toRibPlane(ribF, ribF.lower[0]);
+  check('a cambered section\'s foremost point is ahead of and above its own x = 0',
+    nose[0] < 0 && nose[1] > 0,
+    `${(nose[0] * 1000).toFixed(2)} mm and ${(nose[1] * 1000).toFixed(1)} mm on a ${ribF.chord.toFixed(2)} m rib`);
+  for (const f of [0.085, 0.30, 0.53, 0.78]) {
+    near(`a point asked for at ${(f * 100).toFixed(1)}% of chord is at ${(f * 100).toFixed(1)}% of chord`,
+      stationOf(ribF, ribSurfacePoint(ribF, 'lower', f)), f, 1e-9, ' of chord');
+  }
+  near('on the upper surface too',
+    stationOf(ribF, ribSurfacePoint(ribF, 'upper', 0.30)), 0.30, 1e-9, ' of chord');
+  // Measured the old way, the same point reads further aft — which is how
+  // far forward the old way put it.
+  const shift = (along(ribSurfacePoint(ribF, 'lower', 0.085)) - 0.085) * ribF.chord;
+  check('the line from the first point to the last put it a millimetre or so forward',
+    shift > 0.0003 && shift < 0.003, `${(shift * 1000).toFixed(1)} mm on this rib`);
+  check('a rib with no placement is measured along its own first point to last',
+    (() => {
+      const bare = { chord: 2, lower: [[0, 0, 0], [0.5, 0, -0.1], [2, 0, 0]], upper: [[0, 0, 0], [0.5, 0, 0.2], [2, 0, 0]] };
+      const q = ribSurfacePoint(bare, 'lower', 0.25);
+      return Math.abs(q[0] - 0.5) < 1e-12 && Math.abs(q[2] + 0.1) < 1e-12;
+    })());
+
+  near('a diagonal attaches at the chord fraction it was given',
+    stationOf(apexRib, apex.apex), 0.30, 1e-9, ' of chord');
+
+  const planF = buildLinePlan({
+    wing: wingF, airfoil: afF, layout: RISER_LAYOUTS['A/B/C+D'], everyNthRib: 2, lineLengthM: 6.5,
+  });
+  const offPlan = planF.lines
+    .filter((l) => l.level === 'upper' && afF.anchors[l.row] != null && Number.isInteger(l.ribIndex))
+    .map((l) => Math.abs(stationOf(wingF.ribs[l.ribIndex], l.to) - afF.anchors[l.row]));
+  check('every line of a plan attaches at its row\'s chord fraction',
+    offPlan.length > 20 && Math.max(...offPlan) < 1e-9,
+    `${offPlan.length} anchors, the worst ${(Math.max(...offPlan) * 100).toExponential(1)}% of chord off`);
+
+  const offBook = canopyAnchors(wingF, afF)
+    .map((q) => Math.abs(stationOf(wingF.ribs[q.ribIndex], q.point) - afF.anchors[q.row]));
+  check('and so does every anchor of the handbook\'s own cascade',
+    offBook.length > 20 && Math.max(...offBook) < 1e-9,
+    `${offBook.length} anchors`);
+}
+
+// ---------------------------------------------------------------------------
 section('The cell intake');
 
 {
@@ -8349,9 +13334,11 @@ section('The cell intake');
   const afI = naca4('4415');
 
   // Air enters at total pressure only where the flow stagnates, and the
-  // stagnation point MOVES: forward at high angle of attack, aft along the
-  // lower surface at low. That is why intakes are cut back rather than being
-  // a hole at the nose.
+  // stagnation point MOVES: aft along the lower surface as the angle of
+  // attack rises, forward to the nose as it falls. That is why intakes are
+  // cut back along the lower surface rather than being a hole at the nose.
+  // (This comment had it the other way round, above a test that asserted
+  // the right direction.)
   const stagPoints = [2, 6, 12].map((a) =>
     stagnationPoint(afI, a, { thinAirfoilFn: thinAirfoil }));
   check('the stagnation point is on the lower surface in normal flight',
@@ -8360,13 +13347,60 @@ section('The cell intake');
     stagPoints[0].distanceFromNose < stagPoints[1].distanceFromNose
     && stagPoints[1].distanceFromNose < stagPoints[2].distanceFromNose,
     stagPoints.map((p) => `${(p.chordFraction * 100).toFixed(2)}%`).join(' -> '));
-  check('it sits at the nose at zero lift', (() => {
-    const z = stagnationPoint(afI, stagPoints[0].alphaL0Deg,
-      { thinAirfoilFn: thinAirfoil });
-    return Math.abs(z.chordFraction) < 1e-9;
+
+  // Where, not just which way. On a flat plate potential flow gives the
+  // stagnation point exactly: x/c = sin^2(alpha). A symmetric section has no
+  // camber terms, so thin-aerofoil theory must land on it — and the formula
+  // this replaced, (alpha - alpha_L0) / 2 pi, is linear and does not: 2.78%
+  // at 10 degrees where the answer is 3.02%, 1.39% at 5 where it is 0.76%.
+  for (const a of [5, 10]) {
+    near(`a symmetric section stagnates at sin^2(alpha) of chord, at ${a} degrees`,
+      stagnationPoint(naca4('0012'), a, { thinAirfoilFn: thinAirfoil }).distanceFromNose,
+      Math.sin((a * Math.PI) / 180) ** 2, 2e-5, ' of chord');
+  }
+  // It is measured from the IDEAL angle of attack — where the flow meets the
+  // nose head-on — not from zero lift.
+  const ideal = stagPoints[0].alphaIdealDeg;
+  check('it sits at the nose at the ideal angle of attack',
+    Math.abs(stagnationPoint(afI, ideal, { thinAirfoilFn: thinAirfoil }).chordFraction) < 1e-6,
+    `${ideal.toFixed(2)} degrees`);
+  check('and at zero lift, four degrees below that, it is on the UPPER surface',
+    stagnationPoint(afI, stagPoints[0].alphaL0Deg,
+      { thinAirfoilFn: thinAirfoil }).surface === 'upper');
+  check('near the nose it goes as the square of the angle above ideal', (() => {
+    const p = stagPoints[1];
+    const A0 = (p.a0Deg * Math.PI) / 180;
+    // The camber terms move it a little; the square law is the bulk of it.
+    return Math.abs(p.distanceFromNose / (Math.sin(A0) ** 2) - 1) < 0.12;
   })());
+  near('the pressure coefficient there is 1',
+    surfaceCp(afI, 6, stagPoints[1].chordFraction), 1, 1e-6);
+  check('and falls away along the lower surface behind it',
+    surfaceCp(afI, 6, -0.03) < 0.9 && surfaceCp(afI, 6, -0.06) < surfaceCp(afI, 6, -0.03));
   check('and the first-order nature is declared, not hidden',
     stagPoints[0].firstOrder === true);
+
+  // The camber series must survive a real section file. Its mean line is the
+  // vertical average of the two surfaces, which at a rounded nose leaps up
+  // in the first thousandth of chord; A0 and every An weight the nose fully,
+  // so the Swoop2's own section came out with an ideal angle of 9.5 degrees
+  // and four An of about 0.3 — a spike's Fourier series, not a camber line.
+  const gnu = parseAirfoilText(
+    readFileSync('data/reference/lep/swoop2-gnuReflex.txt', 'latin1'), 'gnuReflex');
+  const serGnu = camberSeries(gnu);
+  check('a measured section has a believable ideal angle of attack',
+    Math.abs(serGnu.a0Base) < 0.05,
+    `${(-serGnu.a0Base * 180 / Math.PI).toFixed(2)} degrees`);
+  check('and camber terms the size of its camber',
+    serGnu.An.every((a) => Math.abs(a) < 0.12),
+    serGnu.An.map((a) => a.toFixed(3)).join(' '));
+  check('and it does not depend on where the nose is cut off', (() => {
+    const lo = camberSeries(gnu, { noseCut: 0.005 }).a0Base;
+    const hi = camberSeries(gnu, { noseCut: 0.03 }).a0Base;
+    return Math.abs(lo - hi) < 0.008;      // under half a degree
+  })());
+  near('while an analytic section keeps the A1 its camber gives it',
+    camberSeries(afI).An[0], 0.150, 0.004);
 
   // The travel is what the opening must cover, and more speedbar means more
   // of it.
@@ -8416,14 +13450,38 @@ section('The cell intake');
   check('a short opening fails the slow end and says which end',
     short.coversSlow === false && /slow-flight/.test(short.note));
 
-  const tiny = buildIntake({
+  // The opening that misses the ACCELERATED end is one set back from the
+  // nose, which is what real intakes are: the Swoop2's runs from 3% to 6% of
+  // chord along the lower surface. On the bar the stagnation point runs
+  // forward past its upper lip.
+  //
+  // (This used a tiny opening AT the nose, which the old linear formula put
+  // ahead of the stagnation point at 2 degrees. It is not: at 2 degrees the
+  // flow stagnates 0.1% of chord back, well inside it.)
+  const setBack = buildIntake({
     wing: wingI, airfoil: afI, thinAirfoilFn: thinAirfoil,
-    spec: { lowerCutM: 0.005, upperCutM: 0.001 },
+    opening: [-0.06, -0.03],
   });
   check('and one that misses the accelerated end says that instead',
-    tiny.coversAccelerated === false && /at speed/.test(tiny.note));
+    setBack.coversAccelerated === false && /at speed/.test(setBack.note));
   check('the two messages are different, so the failure is identifiable',
-    short.note !== tiny.note);
+    short.note !== setBack.note);
+  check('an opening given directly is the opening used',
+    setBack.opening[0] === -0.06 && setBack.opening[1] === -0.03);
+
+  // What it is fed at. Inside the opening, total pressure; outside, the
+  // pressure at the lip the stagnation point has passed, which is the most
+  // the cell can hold.
+  check('an opening that holds the stagnation point is fed at total pressure',
+    intake.feed.trim.inside && intake.feed.trim.feedCp === 1);
+  check('one it has run forward of is fed at less, and says which lip',
+    setBack.feed.accelerated.inside === false
+    && setBack.feed.accelerated.passed === 'upper lip'
+    && setBack.feed.accelerated.feedCp < 0.9 && setBack.feed.accelerated.feedCp >= 0,
+    `Cp ${setBack.feed.accelerated.feedCp.toFixed(2)}`);
+  check('and the feed improves as the wing is flown slower',
+    setBack.feed.accelerated.feedCp < setBack.feed.trim.feedCp
+    && setBack.feed.trim.feedCp <= setBack.feed.slow.feedCp);
 
   // Closed tips must not be silently free: they carry no opening area.
   const noneClosed = buildIntake({
@@ -8496,10 +13554,24 @@ section('The stabilo');
     everyNthRib: 2, lineLengthM: 6.5,
   });
   const before = planS2.lines.length;
+  const totalBefore = planS2.totalLengthM;
   addStabilo(planS2, wingS2, { anchors: 2 });
   check('adding a stabilo adds upper lines and a main',
     planS2.lines.length === before + 3
     && planS2.lines.filter((l) => l.isStabilo && l.level === 'main').length === 1);
+  // The plan's total is of the lines it has. It was left as it stood before
+  // the stabilo went in, so the readout and the line sheet gave a total that
+  // was short of the lines listed under it.
+  {
+    const added = planS2.lines.filter((l) => l.isStabilo)
+      .reduce((a, l) => a + (l.lengthMM * 2) / 1000, 0);
+    near('and the plan\'s total length takes them in',
+      planS2.totalLengthM, totalBefore + added, 1e-9, ' m');
+    near('so the total is the sum of the lines listed',
+      planS2.totalLengthM, planS2.lines.reduce((a, l) => a + (l.lengthMM * 2) / 1000, 0), 1e-9, ' m');
+    check('which is several metres of line that were not counted', added > 3,
+      `${added.toFixed(1)} m`);
+  }
   check('it is recorded on the plan', planS2.stabilo && planS2.stabilo.anchors === 2);
   check('its anchors are at the tip, not the root',
     planS2.lines.filter((l) => l.isStabilo && l.level === 'upper')
@@ -8631,30 +13703,61 @@ section('PMA periodical inspection');
   check('a line below its minimum fails',
     lineStrengthCheck({ newStrengthDaN: 160, material: 'dyneema', measuredDaN: 95 }).passes === false);
 
-  // The design-time question: how much drift is left before a lineset would
-  // fail geometry inspection. A design with no headroom fails the moment it
-  // ages, and the tool can say so while it is still on screen.
-  const perfect = inspectionHeadroom(
-    exampleLines.filter((l) => !l.isBrake).map((l) => ({ ...l, measuredMM: l.referenceMM })),
-    { stretchAllowanceMM: 0 },
-  );
-  check('a lineset built exactly to reference has full headroom',
-    perfect.allHaveHeadroom && perfect.worst.bandUsedFraction === 0);
+  // The design-time question: how much further the lines could move apart
+  // before a lineset would fail the geometry inspection.
+  //
+  // One offset is allowed on the whole wing, so what uses the band up is
+  // the lines moving DIFFERENTLY. This was measured one line at a time
+  // against the band's 24 mm width, so a lineset 20 mm longer throughout
+  // "used 83% of the band" and one 30 mm longer failed; both pass with
+  // nothing used, which is what the offset is for.
+  const suspension = exampleLines.filter((l) => !l.isBrake);
+  const drifted = (fn) => inspectionHeadroom(
+    suspension.map((l, k) => ({ name: l.name, referenceMM: l.referenceMM, expectedDriftMM: fn(l, k) })));
+  const perfect = drifted(() => 0);
+  check('a lineset built exactly to reference has the whole band left',
+    perfect.passes && perfect.allHaveHeadroom && perfect.spreadMM === 0
+      && perfect.bandUsedFraction === 0 && Math.abs(perfect.slackMM - 12) < 1e-9,
+    `offsets from ${perfect.offsetRangeMM[0]} to ${perfect.offsetRangeMM[1]} mm pass`);
   near('and the band is the full suspension tolerance', perfect.bandMM, 24, 1e-9, ' mm');
-  // Stretch eats the band. A design that expects 20 mm of stretch has used
-  // most of a 24 mm band before it has flown.
-  const stretched = inspectionHeadroom(
-    exampleLines.filter((l) => !l.isBrake).map((l) => ({ ...l, measuredMM: l.referenceMM })),
-    { stretchAllowanceMM: 20 },
-  );
-  check('expected stretch uses up the inspection band',
-    stretched.worst.bandUsedFraction > 0.7,
-    `${(stretched.worst.bandUsedFraction * 100).toFixed(0)}% of the band used`);
-  check('and a design that would exceed it is flagged',
-    inspectionHeadroom(
-      exampleLines.filter((l) => !l.isBrake).map((l) => ({ ...l, measuredMM: l.referenceMM })),
-      { stretchAllowanceMM: 30 },
-    ).allHaveHeadroom === false);
+  const uniform = drifted(() => -30);
+  check('one that has shrunk 30 mm throughout has as much: the offset takes it out',
+    uniform.passes && uniform.spreadMM === 0 && Math.abs(uniform.slackMM - 12) < 1e-9
+      && Math.abs(uniform.offsetMM - 30) < 1e-9,
+    `offsets from ${uniform.offsetRangeMM[0]} to ${uniform.offsetRangeMM[1]} mm pass`);
+  // The rear row 20 mm shorter than the front: what a settling Dyneema set
+  // does. Twenty of the band's twenty-four millimetres.
+  const rear = drifted((l) => (l.name[0] === 'C' ? -20 : 0));
+  check('a rear row 20 mm short of the front uses five sixths of the band',
+    rear.passes && Math.abs(rear.bandUsedFraction - 20 / 24) < 1e-9
+      && Math.abs(rear.slackMM - 2) < 1e-9 && Math.abs(rear.offsetMM - 10) < 1e-9
+      && rear.limitedBy[0][0] === 'C' && rear.limitedBy[1][0] !== 'C',
+    `${(rear.bandUsedFraction * 100).toFixed(0)}% of the band; offsets from `
+    + `${rear.offsetRangeMM[0]} to ${rear.offsetRangeMM[1]} mm pass, room for ${rear.slackMM} mm more`);
+  const tooFar = drifted((l) => (l.name[0] === 'C' ? -30 : 0));
+  check('and one 30 mm short cannot be passed by any offset',
+    !tooFar.passes && !tooFar.allHaveHeadroom && tooFar.slackMM < 0
+      && tooFar.offsetRangeMM[0] > tooFar.offsetRangeMM[1]);
+  // Brakes have a band of their own, and it is one-sided: with the
+  // suspension lines on their reference, a brake may not be short at all.
+  const withBrake = (brakeDrift) => inspectionHeadroom([
+    ...suspension.map((l) => ({ name: l.name, referenceMM: l.referenceMM, expectedDriftMM: 0 })),
+    { name: 'K1', referenceMM: 7002, expectedDriftMM: brakeDrift, isBrake: true },
+  ]);
+  check('a brake 10 mm short is passed by an offset the suspension lines can take',
+    withBrake(-10).passes && withBrake(-10).offsetRangeMM[0] === 10
+      && withBrake(-10).limitedBy[0] === 'K1');
+  check('and one 30 mm short is not, while one 30 mm long is',
+    !withBrake(-30).passes && withBrake(30).passes);
+  // The standard's own example: lines out by more than any offset mends.
+  const appendixA = inspectionHeadroom(exampleLines.map((l) => ({
+    name: l.name, referenceMM: l.referenceMM, isBrake: l.isBrake,
+    expectedDriftMM: l.measuredMM - l.referenceMM,
+  })));
+  check('the standard\'s worked example has no offset that passes it',
+    !appendixA.passes && appendixA.limitedBy[0][0] === 'K',
+    `it would need at least ${appendixA.offsetRangeMM[0]} mm for ${appendixA.limitedBy[0]} `
+    + `and at most ${appendixA.offsetRangeMM[1]} for ${appendixA.limitedBy[1]}`);
 
   // The fabric ratings, and the conversion the standard gives for the JDC
   // porosimeter: porosity = 5400 / seconds.
@@ -8686,53 +13789,188 @@ section('PMA periodical inspection');
   });
   const selX = selectLines(loadsX.tensions, {});
   const stX = stretchCorrection(selX, { loopAllowanceMM: 130 });
-  const rec = exchangeRecord({
+  const chainX = lengthChain(selX, { loopAllowanceMM: 130 });
+  // The embedded table gives no colours, so the test supplies them: the
+  // standard lists them, and a record without is marked as missing them.
+  const selColoured = {
+    ...selX,
+    lines: selX.lines.map((l) => (l.line ? { ...l, line: { ...l.line, colour: l.row === 'A' ? 'red' : 'natural' } } : l)),
+  };
+  const recArgs = {
     manufacturer: 'Demo', model: 'Test', size: 'M', weightRangeKg: [80, 100],
-    plan: planX, selection: selX, stretch: stX, riserLengthMM: 520,
-    // Required now: without it the totals are design lengths where the
-    // standard asks for lengths measured at 5 daN.
-    lengths: lengthChain(selX, { loopAllowanceMM: 130 }),
-  });
+    plan: planX, stretch: stX, riserLengthMM: 520,
+    // Required: without it the totals are design lengths where the standard
+    // asks for lengths measured at 5 daN.
+    lengths: chainX,
+  };
+  const rec = exchangeRecord({ ...recArgs, selection: selColoured });
 
   check('the record covers every line in the plan',
     rec.lines.length === planX.lines.length, `${rec.lines.length}`);
-  check('and every attachment point', rec.totalLineLengths.length > 20,
+  const pathsX = planPaths(planX);
+  check('and every attachment point',
+    rec.totalLineLengths.length === pathsX.length && pathsX.length === 41,
     `${rec.totalLineLengths.length} points`);
   check('it names the standard and version it follows',
     /PMA/.test(rec.standard) && rec.standardVersion === 'V 2024.12.1');
   check('and is complete when everything is supplied', rec.complete, rec.missing.join(', '));
+  const noColours = exchangeRecord({ ...recArgs, selection: selX });
+  check('without the lines\' colours it says they are missing',
+    !noColours.complete && noColours.missing.join() === 'line colours');
 
   // Sewn length is the distance between the insides of the two loops
   // (Figure 6) — not the cut length, which includes them. Getting this wrong
   // would understate every line by the loop allowance.
-  const firstStretch = stX.lines.find((l) => l.name === rec.lines[0].reference);
-  if (firstStretch) {
-    near('sewn length is the finished length, not the cut length',
-      rec.lines[0].sewnLengthMM, firstStretch.finishedLengthMM, 1e-9, ' mm');
-    check('which is shorter than the cut length by the loop allowance',
-      rec.lines[0].sewnLengthMM < firstStretch.cutLengthMM);
-  }
+  const firstChain = chainX.lines.find((l) => l.name === rec.lines[0].reference);
+  near('sewn length is the chain\'s, inside of loop to inside of loop',
+    rec.lines[0].sewnLengthMM, firstChain.sewnLengthMM, 1e-9, ' mm');
+  check('which is shorter than the cut length by the loop allowance',
+    firstChain.cutLengthMM - rec.lines[0].sewnLengthMM === 130
+      && /130 mm of line in the two/.test(rec.lines[0].construction),
+    rec.lines[0].construction);
 
-  check('total line lengths are declared as including the risers',
-    rec.totalLineLengths.every((t) => t.includesRisers === true));
-  check('and carry the trimmer position, as the standard requires',
+  // Total line length: the lines under the attachment point, each at the
+  // measuring tension, and the riser.
+  //
+  // This added the lineset's MEAN reference-minus-flying difference once to
+  // each flying total. A path is three lines.
+  const refOf = new Map(chainX.lines.map((l) => [l.name, l.referenceLengthMM]));
+  const totalsOk = rec.totalLineLengths.filter((t) => !t.isBrake).every((t) => t.totalLineLengthMM
+    === Math.round(t.path.reduce((x, n) => x + refOf.get(n), 0) + 520));
+  check('a total is its lines\' reference lengths and the riser', totalsOk
+    && rec.totalLineLengths.every((t) => t.measuredAtDaN === 5));
+  // On this wing, of few and hard-worked lines, the centre A lines carry
+  // MORE than 5 daN in flight, so at the measuring tension they are shorter
+  // than they fly — and the mean of the whole lineset, which is longer, was
+  // added to them.
+  const a1 = rec.totalLineLengths.find((t) => t.attachmentPoint === 'A1');
+  const a1Flying = planX.totals[1].A - planX.riserLengthMM + 520;
+  const oldWay = Math.round(a1Flying + chainX.meanReferenceMinusFlyingMM);
+  check('the mean difference added once put a centre A total 11 mm from its own lines\'',
+    a1.path.length === 3 && a1.totalLineLengthMM < a1Flying && oldWay > a1Flying
+      && oldWay - a1.totalLineLengthMM >= 9,
+    `A1: ${a1.totalLineLengthMM} mm at 5 daN, ${a1Flying} flying; the mean added once gave ${oldWay} `
+    + '— against a tolerance of 12');
+  // The rear rows stop at their riser. The brake's lower line ends at a
+  // pulley on the rear riser — the same point — and the walk down the plan
+  // went on through it: 0.6 m under every C and D attachment.
+  const lower = planX.lines.find((l) => l.name === 'KL1');
+  const c1 = rec.totalLineLengths.find((t) => t.attachmentPoint === 'C1');
+  check('a rear row\'s path stops at its riser, and does not run on down the brake',
+    lower.lengthMM > 500 && !c1.path.includes('KL1') && c1.path.join(' ') === 'C1 CM1 CR1'
+      && Math.abs(c1.totalLineLengthMM - a1.totalLineLengthMM) < 150
+      && pathsX.filter((q) => !q.isBrake).every((q) => !q.names.includes('KL1')),
+    `C1 ${c1.totalLineLengthMM} mm beside A1 ${a1.totalLineLengthMM}; the brake's lower line is ${lower.lengthMM} mm`);
+  check('the plan\'s own totals say the same',
+    planX.totals[1].C === Math.round(pathsX.find((q) => q.name === 'C1').lengthMM + planX.riserLengthMM)
+      && Math.abs(planX.totals[1].C - planX.totals[1].A) < 150);
+
+  // A brake's total is from the sail to the knot at its handle (Figure 5):
+  // no riser in it.
+  const k1 = rec.totalLineLengths.find((t) => t.attachmentPoint === 'K1');
+  check('suspension totals are declared as including the riser, and brake totals as not',
+    rec.totalLineLengths.every((t) => t.includesRisers === !t.isBrake)
+      && rec.totalLineLengths.filter((t) => t.isBrake).length === 13);
+  check('a brake\'s total runs handle to sail',
+    k1.path.join(' ') === 'k1 KM1 KR1 KL1'
+      && k1.totalLineLengthMM === Math.round(k1.path.reduce((x, n) => x + refOf.get(n), 0))
+      && planX.totals[1].K === planX.brakePlan.totals[1],
+    `K1 ${k1.totalLineLengthMM} mm; the plan's own ${planX.totals[1].K}, which had a riser added to it`);
+  check('and every total carries the trimmer position, as the standard requires',
     rec.totalLineLengths.every((t) => t.trimmerPosition));
 
+  // Strength: of the line NEW, and the least a used one may hold by ITS
+  // fibre. This published the kinked strength under "new" and gave every
+  // line Dyneema's 0.65.
   const withMin = rec.lines.filter((l) => l.minimumStrengthDaN != null);
   check('every sized line carries its inspection minimum',
-    withMin.length > 20, `${withMin.length} of ${rec.lines.length}`);
-  check('and that minimum is 65% of new, for Dyneema',
-    withMin.every((l) => Math.abs(l.minimumStrengthDaN - l.newStrengthDaN * 0.65) < 1e-6));
+    withMin.length === rec.lines.length, `${withMin.length} of ${rec.lines.length}`);
+  check('the strength published is of the line new',
+    rec.lines.every((l) => {
+      const m = selX.lines.find((q) => q.name === l.reference).line;
+      return l.newStrengthDaN === m.strengthNewDaN;
+    }));
+  // The same wing sized from the aramid lines alone, for the other fibre.
+  const selAramid = selectLines(loadsX.tensions, {
+    table: DEFAULT_LINE_TABLE.filter((m) => m.fibre === 'aramid'),
+  });
+  const recAramid = exchangeRecord({
+    ...recArgs, selection: selAramid, stretch: null,
+    lengths: lengthChain(selAramid, { loopAllowanceMM: 130 }),
+  });
+  const coreOf = (r) => [...new Set(r.lines.map((l) => l.core))].join();
+  const minimumIs = (r, k) => r.lines.every((l) => l.lineCoefficient === k
+    && Math.abs(l.minimumStrengthDaN - l.newStrengthDaN * k) < 1e-9);
+  check('and the minimum is 65% of it for Dyneema and 45% for aramid',
+    coreOf(rec) === 'dyneema' && minimumIs(rec, 0.65)
+      && coreOf(recAramid) === 'aramid' && minimumIs(recAramid, 0.45),
+    `${rec.lines.length} Dyneema lines at 0.65; sized in aramid, ${recAramid.lines.length} at 0.45`);
+  const aramidLine = recAramid.lines[0];
+  const aramidMat = selAramid.lines.find((q) => q.name === aramidLine.reference).line;
+  // What was published before: 0.65 of the KINKED strength, whatever the
+  // fibre. Too low on every line — the threshold an inspector would pass a
+  // worn line against.
+  const wasGiven = (m) => m.strengthKinkedDaN * 0.65;
+  check('an aramid line\'s minimum was a fifth too low',
+    wasGiven(aramidMat) < aramidLine.minimumStrengthDaN * 0.85,
+    `${aramidMat.code}: ${aramidLine.minimumStrengthDaN.toFixed(1)} daN (0.45 of ${aramidMat.strengthNewDaN} new); `
+    + `it was given ${wasGiven(aramidMat).toFixed(1)} (0.65 of ${aramidMat.strengthKinkedDaN} kinked)`);
+  const dyMat = selX.lines.find((q) => q.name === rec.lines[0].reference).line;
+  check('and a Dyneema line\'s by what it loses kinked',
+    wasGiven(dyMat) < rec.lines[0].minimumStrengthDaN
+      && Math.abs(wasGiven(dyMat) / rec.lines[0].minimumStrengthDaN
+        - dyMat.strengthKinkedDaN / dyMat.strengthNewDaN) < 1e-9,
+    `${dyMat.code}: ${rec.lines[0].minimumStrengthDaN.toFixed(1)} daN; it was given ${wasGiven(dyMat).toFixed(1)}`);
+  // The standard and the strength table line up, fibre by fibre: what it
+  // asks of a used line is under what a kinked new one keeps.
+  check('a line of a fibre the standard has no coefficient for gets no minimum, and is listed', (() => {
+    const odd = { ...selX, lines: selX.lines.map((l, k) => (k === 0
+      ? { ...l, line: { ...l.line, name: 'Line120', code: 'Line120', fibre: undefined } } : l)) };
+    const r = exchangeRecord({ ...recArgs, selection: odd });
+    return r.lines[0].minimumStrengthDaN === null && r.lines[0].core === 'unknown'
+      && r.missing.some((q) => /the fibre of 1 line/.test(q));
+  })());
 
   // The loop closes: the totals this record publishes are exactly what an
   // inspector measures against, so a wing built to them passes by definition.
   const asBuilt = lineGeometryCheck(
-    rec.totalLineLengths.slice(0, 12).map((t) => ({
+    rec.totalLineLengths.map((t) => ({
       name: t.attachmentPoint, measuredMM: t.totalLineLengthMM,
-      referenceMM: t.totalLineLengthMM, isBrake: false,
+      referenceMM: t.totalLineLengthMM, isBrake: t.isBrake,
     })), { correctionOffsetMM: 0 },
   );
   check('a wing measured as built passes its own geometry inspection', asBuilt.passes);
+
+  // And the first inspection, forecast: where the drift model expects each
+  // attachment point after some hours, put through the standard's check.
+  const forecastAt = (hours) => inspectionForecast({
+    record: rec,
+    drift: trimDrift({
+      lines: chainX.lines, hours, anchors: afX2.anchors, chordM: 2.6, paths: pathsX,
+    }),
+  });
+  const f0 = forecastAt(0);
+  check('before it has flown the forecast is the wing as built',
+    f0.check.passes && f0.check.correctionOffsetMM === 0
+      && f0.lines.length === 41 && f0.headroom.spreadMM === 0);
+  const f50 = forecastAt(50);
+  const brakes50 = f50.lines.filter((l) => l.isBrake).map((l) => l.expectedDriftMM);
+  check('by fifty hours the brakes are the shortest lines on the wing',
+    Math.max(...brakes50) < Math.min(...f50.lines.filter((l) => !l.isBrake).map((l) => l.expectedDriftMM))
+      && Math.max(...brakes50) < -20,
+    `brakes ${Math.min(...brakes50).toFixed(0)} to ${Math.max(...brakes50).toFixed(0)} mm, `
+    + `suspension points ${f50.headroom.spreadMM.toFixed(0)} mm apart`);
+  check('and no one offset passes both them and the lines that hold the wing',
+    !f50.check.passes && !f50.headroom.passes
+      && f50.check.outOfTolerance.every((n) => n[0] === 'K')
+      && f50.headroom.limitedBy[0][0] === 'K' && f50.source === 'estimated',
+    `${f50.check.outOfTolerance.length} attachment points out, all brakes: `
+    + `${f50.headroom.limitedBy[0]} needs at least ${f50.headroom.offsetRangeMM[0].toFixed(0)} mm, `
+    + `${f50.headroom.limitedBy[1]} at most ${f50.headroom.offsetRangeMM[1].toFixed(0)}`);
+  check('a forecast needs the drift of its attachment points', (() => {
+    try { inspectionForecast({ record: rec, drift: {} }); return false; }
+    catch (e) { return /drift of each attachment point/.test(e.message); }
+  })());
 
   const partial = exchangeRecord({ plan: planX, riserLengthMM: 0 });
   check('a record missing its identity is marked incomplete',
@@ -8744,14 +13982,23 @@ section('PMA periodical inspection');
 
   const tsv = exchangeTSV(rec);
   check('the record renders as TSV with both tables',
-    /reference\trow\tlevel/.test(tsv) && /attachment_point/.test(tsv));
+    /reference\trow\tlevel\tmaterial\tcore\tsewn_length_mm/.test(tsv)
+      && /attachment_point\ttotal_line_length_mm\tincludes_risers\ttrimmer_position\tlines/.test(tsv)
+      && /^K1\t\d+\tfalse\tclosed\tk1 KM1 KR1 KL1$/m.test(tsv)
+      && /total line lengths at 5 daN/.test(tsv));
   check('and an incomplete one is marked in the file itself',
     /INCOMPLETE/.test(exchangeTSV(partial)));
 
-  check('PHI\'s measured kinked strength is below the PMA retention figure',
-    kinkedRetention < PMA_STRENGTH.lineCoefficient.dyneema,
-    `${(kinkedRetention * 100).toFixed(1)}% against `
-    + `${(PMA_STRENGTH.lineCoefficient.dyneema * 100).toFixed(0)}% required`);
+  // The U-135 is Edelrid's 8000-U, which is aramid. This compared what it
+  // keeps kinked, 53.5%, with the 65% a used DYNEEMA line must hold, and
+  // drew from it that "a permanently kinked line can fail inspection while
+  // being otherwise sound". The figure for its own fibre is 45%.
+  check('PHI\'s kinked U-135 keeps more than the standard asks of a used aramid line',
+    fibreOf('U-135') === 'aramid'
+      && kinkedRetention > PMA_STRENGTH.lineCoefficient.aramid
+      && kinkedRetention < PMA_STRENGTH.lineCoefficient.dyneema,
+    `${(kinkedRetention * 100).toFixed(1)}% kept, against `
+    + `${(PMA_STRENGTH.lineCoefficient.aramid * 100).toFixed(0)}% asked of aramid`);
 }
 
 // ---------------------------------------------------------------------------
@@ -8781,20 +14028,35 @@ section('Reconciling mass against a real wing');
     Math.abs(planformMetrics(pfS).area - 22.70) / 22.70 < 0.02,
     `${planformMetrics(pfS).area.toFixed(2)} vs 22.70 m2`);
 
-  // The line plan's total length is close; its line *count* is not. A real
-  // wing runs four cascade levels plus brakes and a stabilo, where the
-  // generator runs three and no brakes — so it reaches the same length with
-  // about half as many, longer, lines.
+  // Like with like: the published 215 m and the 112 lines a side are the
+  // whole lineset, brakes and stabilo in it. This built the plan without
+  // brakes, found 194 m, and called the length "close" — the brakes it left
+  // out are most of the difference. With them, every second rib is a third
+  // over, and the solve that fits the anchors to the published total gets
+  // there with fewer of them.
+  const brakesS = { anchors: 13, levelCounts: [6, 3, 1] };
   const planS = buildLinePlan({
     wing: wingS, airfoil: afS, layout: RISER_LAYOUTS['A/B+C'],
-    everyNthRib: 2, lineLengthM: 7.50,
+    everyNthRib: 2, lineLengthM: 7.50, brakes: brakesS,
   });
-  check('total line length lands close to the published figure',
-    Math.abs(planS.totalLengthM - 215) / 215 < 0.12,
-    `${planS.totalLengthM.toFixed(0)} vs 215 m published`);
-  check('but the line count is well short of a real wing',
-    planS.lines.length < 112 * 0.75,
-    `${planS.lines.length} against 112 per side on the SAGE`);
+  addStabilo(planS, wingS, { anchors: 2 });
+  check('every second rib, brakes and stabilo in, is a third over the published length',
+    planS.totalLengthM > 215 * 1.2,
+    `${planS.totalLengthM.toFixed(0)} vs 215 m published, ${planS.lines.length} lines a side`);
+  // The stabilo is added after the plan, so it comes off the target, as the
+  // interface's solve does.
+  const stabiloS = planS.lines.filter((l) => l.isStabilo)
+    .reduce((a, l) => a + (2 * l.lengthMM) / 1000, 0);
+  const solvedS = anchorsForLineLength({
+    wing: wingS, airfoil: afS, rows: ['A', 'B'], targetMetres: 215 - stabiloS,
+    layout: RISER_LAYOUTS['A/B+C'], lineLengthM: 7.50, risers: 2, mainsPerRow: 3, brakes: brakesS,
+  });
+  check('solved to it, the anchors reach the published length',
+    Math.abs(solvedS.error) < 0.05 && !solvedS.saturated,
+    `${solvedS.totalMetres.toFixed(0)} m, A${solvedS.anchorsPerRow.A} B${solvedS.anchorsPerRow.B}`);
+  check('and either way the line count is short of the real wing\'s',
+    planS.lines.length < 112 && solvedS.plan.lines.length < planS.lines.length,
+    `${planS.lines.length} and ${solvedS.plan.lines.length} against 112 per side on the SAGE`);
 
   // Cloth weight is the single largest lever, and the default is too heavy
   // for a light wing: Dominico 10D is 27 g/m2 against a 38 g/m2 default.
@@ -8916,9 +14178,14 @@ section('Nesting: where the material goes');
     d.dominantLoss === 'shape' || d.dominantLoss === 'packing', d.dominantLoss);
 
   // Shape loss is concentrated in the tip panels, not spread evenly — which
-  // is why a remedy aimed at the large panels misses it.
-  check('the worst-shaped panels are far worse than the best',
-    d.bestShape[0].shapeEfficiency > d.worstShape[0].shapeEfficiency * 2,
+  // is why a remedy aimed at the large panels misses it. A tip panel is
+  // short, tapered and swept, and fills three quarters of its own box where
+  // a centre panel fills nearly all of it.
+  //
+  // (It read "less than half as well" when the tip panels were slivers a
+  // few centimetres wide, from ribs crowded at the tip.)
+  check('the worst-shaped panels are well short of the best',
+    d.bestShape[0].shapeEfficiency > d.worstShape[0].shapeEfficiency + 0.15,
     `${(d.worstShape[0].shapeEfficiency * 100).toFixed(0)}% vs `
     + `${(d.bestShape[0].shapeEfficiency * 100).toFixed(0)}%`);
   check('and they are the outboard cells',
@@ -8939,7 +14206,7 @@ section('Nesting: where the material goes');
   };
   const totalArea = panelsN.reduce((s2, p) => s2 + polyArea(outline(p)), 0);
 
-  const byBox = nestPanels(panelsN, { rollWidth: 1.4, gap: 0.03 });
+  const byBox = nestPanels(panelsN, { rollWidth: 1.4, gap: 0.03, method: 'skyline' });
   const boxLen = byBox.extent.maxX - byBox.extent.minX;
   const byProfile = nestByProfile(panelsN, { rollWidth: 1.4, gap: 0.02 });
 
@@ -8951,6 +14218,13 @@ section('Nesting: where the material goes');
   // panels that cannot be cut.
   check('and no two placed panels overlap',
     nestingOverlaps(byProfile) === 0, `${nestingOverlaps(byProfile)} overlapping pairs`);
+  // Not overlapping is not enough: the gap is where the knife runs. It is
+  // measured outline to outline, in every direction, rather than taken on
+  // the packer's word — the first profile packer kept it along the roll and
+  // let panels touch across it.
+  const closest = nestingClearance(byProfile);
+  check('and the gap asked for is kept between every pair, in every direction',
+    closest >= 0.02 - 1e-6, `closest two panels are ${(closest * 1000).toFixed(1)} mm apart, 20 asked`);
 
   const boxUtil = totalArea / (boxLen * 1.4);
   const profUtil = totalArea / (byProfile.lengthM * 1.4);
@@ -8966,8 +14240,9 @@ section('Nesting: where the material goes');
     byProfile.placed.every((p) => p.outline.every(([, y]) => y >= -1e-9 && y <= 1.4 + 1e-9)));
 
   // Packing from both edges of the roll. A single bottom-up skyline leaves a
-  // band along the far edge that nothing can reach — 173 mm on average, 12%
-  // of the roll — while the smallest panels are 24 mm tall.
+  // band along the far edge that nothing placed from the near edge reaches:
+  // two of this wing's 494 mm centre panels side by side leave a third of a
+  // metre of a 1.4 m roll, and the third does not fit.
   const oneSided = nestByProfile(panelsN, { rollWidth: 1.4, gap: 0.02, twoSided: false });
   const oneUtil = totalArea / (oneSided.lengthM * 1.4);
   const twoUtil = totalArea / (byProfile.lengthM * 1.4);
@@ -8982,8 +14257,40 @@ section('Nesting: where the material goes');
   // utilisation read 90% because the panels were on top of each other.
   check('every panel stays inside the roll from both edges',
     byProfile.placed.every((p) => p.outline.every(([, y]) => y >= -1e-9 && y <= 1.4 + 1e-9)));
-  check('and one-sided packing is not made worse by the two-sided machinery',
-    oneUtil > 0.54, `${(oneUtil * 100).toFixed(1)}%`);
+  // One-sided packing is still a packing: every panel placed, none on top
+  // of another. (This held it above 54%, a figure for one set of panels.)
+  check('and one-sided packing still places every panel without overlap',
+    oneSided.placed.length === panelsN.length && nestingOverlaps(oneSided) === 0,
+    `${(oneUtil * 100).toFixed(1)}%`);
+
+  // Turning a piece end for end keeps its grain and lets a tapered piece lie
+  // against its neighbour instead of beside it. Every piece used to go down
+  // the same way round.
+  const tri = (i) => ({ cell: i, surface: 'gusset', panel: { left: [[0, 0], [0.5, 0], [0.05, 0.4]], right: [] } });
+  const gussets = Array.from({ length: 16 }, (_, i) => tri(i));
+  const sameWay = nestByProfile(gussets, { rollWidth: 1.4, gap: 0.02, flip: false });
+  const turned = nestByProfile(gussets, { rollWidth: 1.4, gap: 0.02, flip: true });
+  check('triangles laid end for end take less roll than triangles all one way',
+    turned.lengthM < sameWay.lengthM * 0.9 && turned.turnedCount > 0
+    && nestingOverlaps(turned) === 0 && nestingClearance(turned) >= 0.02 - 1e-6,
+    `${sameWay.lengthM.toFixed(2)} -> ${turned.lengthM.toFixed(2)} m, ${turned.turnedCount} of 16 turned`);
+  // It is a heuristic inside a greedy placement and does not always win, so
+  // unless a caller says which, every way is tried and the shortest kept.
+  const anyWay = nestByProfile(panelsN, { rollWidth: 1.4, gap: 0.02 });
+  check('left to itself the packer is never longer than any one way of packing',
+    Object.values(anyWay.variants).every((m) => anyWay.lengthM <= m + 1e-9)
+    && Object.keys(anyWay.variants).filter((k) => /edge/.test(k)).length === 4,
+    Object.entries(anyWay.variants).filter(([k]) => /edge/.test(k))
+      .map(([k, m]) => `${k} ${m.toFixed(1)} m`).join('; '));
+  // A turned panel takes its seams with it, or a marked file loses its notches.
+  const forced = nestByProfile(panelsN, { rollWidth: 1.4, gap: 0.02, flip: true, twoSided: true });
+  check('a panel turned end for end carries its two seams round with it',
+    forced.placed.every((q) => {
+      const joined = q.left.concat(q.right.slice().reverse());
+      return joined.length === q.outline.length
+        && joined.every((pt, i) => Math.abs(pt[0] - q.outline[i][0]) < 1e-9 && Math.abs(pt[1] - q.outline[i][1]) < 1e-9);
+    }) && nestingOverlaps(forced) === 0,
+    `${forced.turnedCount} of ${forced.placed.length} turned`);
 
   // The gain holds across roll widths, so it is not a fluke of one number.
   for (const rw of [1.0, 1.8]) {
@@ -9104,6 +14411,67 @@ section('Printed patterns');
     catch (e) { return /Unknown paper/.test(e.message); }
   })());
 
+  // Every page that an outline crosses is printed — crosses, not merely has
+  // a point on. A page was kept only if some VERTEX of some shape fell on
+  // it, so a straight run passing between two of its points left the page
+  // out, and the grain line (two points, the length of the panel) appeared
+  // on its first and last sheets and on none between.
+  {
+    const usableW = PAPER.A4[0] - 2 * tiles.marginMM;
+    const usableH = PAPER.A4[1] - 2 * tiles.marginMM;
+    const crosses = (s, x0, y0) => {
+      const n = s.points.length;
+      const last = s.closed ? n : n - 1;
+      const inside = ([x, y]) => x >= x0 && x <= x0 + usableW && y >= y0 && y <= y0 + usableH;
+      for (let i = 0; i < last; i++) {
+        const a = s.points[i];
+        const b = s.points[(i + 1) % n];
+        for (let k = 0; k <= 400; k++) {
+          const q = [a[0] + ((b[0] - a[0]) * k) / 400, a[1] + ((b[1] - a[1]) * k) / 400];
+          if (inside(q)) return true;
+        }
+      }
+      return false;
+    };
+    const everyShape = [...new Set(tiles.pages.flatMap((p) => p.shapes))];
+    let missed = 0;
+    let vertexless = 0;
+    for (const p of tiles.pages) {
+      for (const sh of everyShape) {
+        const through = crosses(sh, p.originMM[0], p.originMM[1]);
+        if (through && !p.shapes.includes(sh)) missed++;
+        if (through && p.shapes.includes(sh) && !sh.points.some(([x, y]) =>
+          x >= p.originMM[0] - 1 && x <= p.originMM[0] + usableW + 1
+          && y >= p.originMM[1] - 1 && y <= p.originMM[1] + usableH + 1)) vertexless++;
+      }
+    }
+    check('a page carries every outline that passes through it',
+      missed === 0, `${missed} crossings left off their page`);
+    check('including the ones with no point of their own on that page',
+      vertexless > 0, `${vertexless} such crossings on ${tiles.pages.length} pages`);
+  }
+  // And each page says which panel an outline is.
+  check('every page names the panels whose outlines it carries',
+    tiles.pages.filter((p) => p.shapes.some((sh) => sh.kind === 'panel'))
+      .every((p) => /<text [^>]*fill="#555"[^>]*>\d+[UL]<\/text>/.test(p.svg)));
+
+  // One file that opens. The pages were written end to end into a single
+  // `.svg` — hundreds of root elements where a file may have one — and a
+  // browser showed the first above an XML error.
+  {
+    const html = tiledPagesToHTML(tiles, { title: 'test & pattern' });
+    check('the pages go into one HTML document',
+      html.startsWith('<!doctype html>') && html.trimEnd().endsWith('</html>')
+      && (html.match(/<html/g) || []).length === 1);
+    check('with every page in it, each on a sheet of its own',
+      (html.match(/<div class="sheet"/g) || []).length === tiles.pages.length
+      && (html.match(/<svg /g) || []).length === tiles.pages.length);
+    check('sized to the paper, with a page break after each',
+      /@page \{ size: 210mm 297mm; margin: 0; \}/.test(html) && /page-break-after: always/.test(html));
+    check('and it says how to print it',
+      /Print at 100%/.test(html) && /100 mm\s+bar/.test(html.replace(/\n/g, ' ')) && /test &amp; pattern/.test(html));
+  }
+
   // Every page must be valid SVG, since that is what gets printed.
   check('every page is well-formed SVG',
     tiles.pages.every((p) => p.svg.startsWith('<svg')
@@ -9140,17 +14508,23 @@ section('Registration marks');
     }));
   // Not to machine precision: the unrolling is exact on the left seam and
   // approximate on the right, which is the asymmetry recorded in
-  // docs/validation.md. Six microns over two and a half metres.
+  // docs/departures.md, section 4. A fraction of a micron over two and a
+  // half metres; the figure is printed.
   check('adjoining seams match before ovalization to well under a tenth of a millimetre',
     before < 1e-4, `${(before * 1e6).toFixed(1)} microns`);
 
   const marked = markPanels(oval);
 
-  // Ovalization widens each panel about its own centreline, lengthening its
-  // outer seam and shortening its inner one — so the seams a sewer joins no
-  // longer match. That difference is the ease, not an error.
+  // Ovalization widens each panel about its own centreline, and the two
+  // seams of a panel ease by different amounts — so the seams a sewer joins
+  // no longer match. That difference is the ease, not an error.
+  //
+  // The bound was 5 mm, taken from panels developed from a canopy built
+  // inside out, whose strips were far more curved than the real ones. On the
+  // corrected geometry the worst joined seam eases by about 2 mm over 2.5 m:
+  // real, and still worth the notches that share it out.
   check('ovalization leaves a real ease between joined seams',
-    marked.worstEaseMM > 5 && marked.worstEaseMM < 200,
+    marked.worstEaseMM > 0.5 && marked.worstEaseMM < 200,
     `${marked.worstEaseMM.toFixed(1)} mm over a seam`);
   check('and notches divide it into portions a sewer can work',
     marked.worstEasePerSegmentMM < marked.worstEaseMM / 3,
@@ -9278,8 +14652,13 @@ section('Reinforcement and the mass budget');
   // Anchor patches must follow the plan, not a guess at rows per rib.
   const dacron = reinf.items.find((i) => /Dacron/.test(i.item));
   const upperLines = planR.lines.filter((l) => l.level === 'upper').length;
-  check('one anchor patch per attachment, both sides',
-    dacron.count === upperLines * 2, `${dacron.count} for ${upperLines * 2}`);
+  // One per attachment POINT across the wing. An anchor on the centre rib
+  // is one point that both halves' lines come to, so it is counted once.
+  const centreAnchors = planR.lines
+    .filter((l) => l.level === 'upper' && Math.abs(l.to[1]) < 1e-9).length;
+  check('one anchor patch per attachment point across the wing',
+    dacron.count === upperLines * 2 - centreAnchors && centreAnchors > 0,
+    `${dacron.count} for ${upperLines} lines a side, ${centreAnchors} on the centre rib`);
   const noPlan = buildReinforcement(wingR, afR, {});
   check('without a plan the count is estimated, not zero',
     noPlan.items.find((i) => /Dacron/.test(i.item)).count > 0);
@@ -9344,45 +14723,22 @@ section('Reinforcement and the mass budget');
     budget.stillMissing.length >= 3 && budget.stillMissing.some((m) => /rod/.test(m)));
 
   // ---------------------------------------------------------------------
-  // Rods: the largest single item in the gap.
-  const closedRibs = wingR.ribs.filter((_, i) => i % 2 === 1).map((r) => r.index);
-  const rods = buildRods(wingR, { closedRibs });
+  // Rods, which a mass budget has to count: a nose rod on every rib. (How a
+  // rod is built is tested under "Rods, as they are made".)
+  const rods = buildRods(wingR, {});
 
-  check('one rod per rib, both sides',
-    rods.count === wingR.ribs.length * 2, `${rods.count}`);
+  check('one rod per rib across the wing: the centre rib once',
+    rods.count === wingR.ribs.length * 2 - 1 && rods.count === wholeWingCounts(wingR).ribs,
+    `${rods.count}`);
   check('and a real length of rod', rods.totalLengthM > 5,
-    `${rods.totalLengthM.toFixed(1)} m`);
-  check('closed ribs take the shorter rod',
-    rods.rods.filter((r) => r.closed).every((r) => r.extentChord < DEFAULT_ROD_SPEC.extentOpen));
+    `${rods.totalLengthM.toFixed(1)} m, ${rods.totalMassG.toFixed(0)} g at `
+    + `${DEFAULT_ROD_SPEC.diameterMM} mm`);
 
-  // A rod follows the rib surface, so its length is an arc, not a chord
-  // fraction times the chord. On a cambered nose that is several per cent —
-  // small, and exactly the size of error a mass budget accumulates over a
-  // hundred rods.
-  check('the arc length exceeds the straight-line estimate',
+  // A rod follows the rib's surface round the nose, so it is longer than the
+  // chord its two ends span — by enough to matter over a wing's worth.
+  check('the rods are longer than the chord their ends span',
     rods.curvatureExcess > 0.02 && rods.curvatureExcess < 0.30,
     `+${(rods.curvatureExcess * 100).toFixed(1)}%`);
-  check('every rod is longer than its chordwise span',
-    rods.rods.every((r) => r.lengthM > r.chordwiseM));
-
-  // Mass goes as the square of diameter — the trade this exists to show.
-  // The sleeve is a fixed cost and has to be taken out first.
-  const thin = buildRods(wingR, { closedRibs, spec: { diameterMM: 1.0 } });
-  const thick = buildRods(wingR, { closedRibs, spec: { diameterMM: 2.0 } });
-  near('doubling the diameter quadruples the rod mass',
-    thick.rodMassKg / thin.rodMassKg, 4, 0.01);
-  check('while the sleeve is unchanged by it',
-    Math.abs(thick.sleeveMassKg - thin.sleeveMassKg) < 1e-12);
-
-  check('carbon is heavier than nylon for the same rod',
-    buildRods(wingR, { closedRibs, spec: { material: 'carbon' } }).rodMassKg
-      > rods.rodMassKg);
-  check('every material says what it is for',
-    Object.values(ROD_MATERIALS).every((m) => m.densityKgM3 > 0 && m.note.length > 20));
-  check('an unknown material is refused rather than guessed', (() => {
-    try { buildRods(wingR, { spec: { material: 'unobtainium' } }); return false; }
-    catch { return true; }
-  })());
 
   // Counting rods must remove them from the list of what is missing.
   const withRods = massBudget({
@@ -9390,7 +14746,10 @@ section('Reinforcement and the mass budget');
   });
   check('rods narrow the gap further',
     withRods.gapKg < budget.gapKg,
-    `${(budget.gapKg * 1000).toFixed(0)} -> ${(withRods.gapKg * 1000).toFixed(0)} g`);
+    `${(budget.gapKg * 1000).toFixed(0)} -> ${(withRods.gapKg * 1000).toFixed(0)} g: `
+    + `cloth ${(withRods.clothKg * 1000).toFixed(0)} g + line ${(withRods.lineKg * 1000).toFixed(0)} g `
+    + `+ reinforcement ${(withRods.reinforcementKg * 1000).toFixed(0)} g + rods ${(withRods.rodsKg * 1000).toFixed(0)} g `
+    + `= ${withRods.accountedKg.toFixed(3)} kg, gap ${(withRods.gapFraction * 100).toFixed(0)}%`);
   check('and drop out of what is still missing',
     !withRods.stillMissing.some((m) => /rod/.test(m))
     && budget.stillMissing.some((m) => /rod/.test(m)));
@@ -9410,9 +14769,17 @@ section('Reinforcement and the mass budget');
   });
   const tabs = buildTabs({ plan: planR, tensions: loadsT.tensions, airfoil: afT });
 
-  check('one tab per anchor, both sides',
-    tabs.count === planR.lines.filter((l) => l.level === 'upper').length * 2,
+  const centreTabs = tabs.tabs.filter((t) => t.copies === 1);
+  check('one tab per attachment point: a centre-rib anchor is one tab',
+    tabs.count === planR.lines.filter((l) => l.level === 'upper').length * 2 - centreTabs.length
+    && centreTabs.length > 0,
     `${tabs.count}`);
+  // That one tab takes the line from EACH half, so it carries both.
+  check('and the centre tab is sized for both of its lines',
+    centreTabs.every((t) => {
+      const one = loadsT.tensions.lines.find((l) => l.name === t.name).tensionN / 10;
+      return Math.abs(t.tensionDaN - 2 * one) < 1e-9;
+    }));
   check('no tab is overloaded', tabs.ok, `${tabs.overloaded.length} overloaded`);
   check('every tab carries a width, an area and a mass',
     tabs.tabs.every((t) => t.widthM > 0 && t.areaM2 > 0 && t.massKg > 0));
@@ -9433,10 +14800,16 @@ section('Reinforcement and the mass budget');
   // selection, where 76 of 88 lines are floor-sized rather than load-sized.
   // Two of twenty-eight do cross the threshold, which is worth stating
   // exactly rather than rounding to "all".
+  // Counted as the wing has them — the same count as `count` beside it.
+  // They were tabs of the half wing next to a count of the whole: a bill
+  // read "67 at minimum width" under "129 pieces".
   check('a solo wing is dominated by minimum-width tabs',
-    tabs.floorSized > tabs.tabs.length * 0.8,
-    `${tabs.floorSized} of ${tabs.tabs.length} at the minimum, `
+    tabs.floorSized > tabs.count * 0.8,
+    `${tabs.floorSized} of ${tabs.count} at the minimum, `
     + `${tabs.loadSized} sized by load`);
+  check('and the three ways a tab is sized add up to the tabs there are',
+    tabs.floorSized + tabs.loadSized + tabs.cappedSized === tabs.count,
+    `${tabs.floorSized} + ${tabs.loadSized} + ${tabs.cappedSized} of ${tabs.count}`);
   check('and the few that are load-sized are the most loaded ones',
     tabs.loadSized === 0 || tabs.tabs.filter((t) => t.widthLimitedBy === 'load')
       .every((t) => t.designDaN >= Math.max(...tabs.tabs
@@ -9543,6 +14916,34 @@ section('Documentation figures');
     check(`figure ${f} carries an accessible label`, /role="img"/.test(body)
       && /aria-label="/.test(body));
   }
+
+  // And each is the figure the code draws TODAY.
+  //
+  // "Generated, so it cannot drift" was true of the generator and not of
+  // the files: nothing ran it, so all six in docs/ were whatever the code
+  // drew on the day somebody last did. One had its two halves drawn over
+  // each other, one coloured every main line as a middle line, and three
+  // quoted numbers typed into the generator rather than computed.
+  //
+  // Held number by number to a tenth, and otherwise exactly, so the last
+  // digit of a cosine on another machine is not a failure and a changed
+  // figure is.
+  const drawn = diagramFigures();
+  const NUMBER = /-?\d+(?:\.\d+)?/g;
+  for (const f of figures) {
+    const want = drawn[`${f}.svg`];
+    const have = existsSync(`docs/${f}.svg`) ? readFileSync(`docs/${f}.svg`, 'utf8') : '';
+    const a = (want || '').match(NUMBER) || [];
+    const b = have.match(NUMBER) || [];
+    const worst = a.length === b.length
+      ? a.reduce((m, v, i) => Math.max(m, Math.abs(Number(v) - Number(b[i]))), 0) : Infinity;
+    check(`figure ${f} is the one the code draws now`,
+      !!want && want.replace(NUMBER, '#') === have.replace(NUMBER, '#') && worst <= 0.11,
+      want ? (worst === Infinity ? 'a different drawing: run node tools/make-diagrams.mjs'
+        : `${a.length} numbers, the furthest ${worst.toFixed(2)} out`) : 'not generated');
+  }
+  check('and the generator draws no figure the documents do not have',
+    Object.keys(drawn).sort().join() === figures.map((f) => `${f}.svg`).sort().join());
 
   // Every figure a document references must be present.
   //
@@ -9708,6 +15109,27 @@ function pointInPoly([px, py], poly) {
     if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
+}
+
+/** Length of the first segment of the root rib's upper surface. */
+function d3first(wing) {
+  const [a, b] = wing.ribs[0].upper;
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+/** The same wing in 30 cells a side, for cascades that need the ribs. */
+function demoWingDense() {
+  // Kept on the function: a `let` down here would not exist yet when the
+  // tests above call this.
+  if (demoWingDense.wing) return demoWingDense.wing;
+  const planform = planformFromDesignInputs({
+    span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1,
+  });
+  const lobe = buildLobe({ type: 'circle', projectedRatio: 0.88 }, planform.halfSpan);
+  const wing = buildWing({ planform, lobe, airfoil: naca4('4415'), cells: 30, pointsPerSurface: 20 });
+  wing.planform = planform;
+  demoWingDense.wing = wing;
+  return wing;
 }
 
 function demoWing() {

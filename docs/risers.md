@@ -1,121 +1,81 @@
-# Riser-aware line plans
+# The risers lean toward their lines
 
-A line plan is not just a cascade. Which riser each line ends on decides what
-the pilot can pull, and the tool had one hardcoded layout.
+A paraglider does not hang its lines from the karabiner. Between the karabiner
+and the lines there is about half a metre of riser webbing, and the line
+cascade fans out from the top of that webbing.
 
-## 1. Split A risers
+This model ran the lines from the karabiner itself at first. The fan therefore
+started at the pilot: a main line reached nearly three metres sideways from
+the karabiner and sat far from vertical for its whole length. Nothing on a
+real wing does that.
 
-Most modern wings split the A row across two risers. `A'` carries the
-**outboard** A anchors on its own; pulling it folds the tips — big ears —
-while the main A riser holds the centre flying.
+## Which way a riser points
 
-**Every Niviuk in the reference set is a split-A wing:** the Hook 6 is
-`A-A'/B/C` and the Artik R 2 is `A-A'/B`, a two-liner. The tool had neither
-layout, and the interface hardcoded `A/B/C+D`, so a designer could not draw
-the wings the database is full of.
+Webbing is flexible and carries only tension, so it lies along the forces at
+its ends. At its top those are its own lines, and their resultant is not
+vertical. In side view it nearly is: the pilot hangs under the balance point.
+In front view the lines of each half pull up and **out**, toward that half of
+the wing, and the chest strap holds the two karabiners together against it.
 
-Seven layouts now:
+So each riser leans outboard, along the pull of the lines it carries:
 
-```
-A/B/C+D      A/B+C      A/B/C/D      single
-A-A'/B/C     A-A'/B     A/B/C
-```
+| | riser | top is outboard of the karabiner by | lean |
+| --- | --- | --- | --- |
+| the default wing | 500 mm | 13 cm | 15° |
+| the suite's test wing | 500 mm | 15 cm | 17° |
+| the Swoop2 | 470 mm | 15.4, 15.3 and 18.5 cm (A, B, C) | 19° to 23° |
 
-### The split is a riser change, not a row change
+Fore and aft it stands within a few degrees of upright — the front riser a
+little forward, the rear one a little back, 8° at most.
 
-The lines on an `A'` riser are still **A lines** — same anchors, same chord
-position, same load path. What differs is where they terminate. So
-`applyRiserSplit` runs after the cascade is built and reassigns anchors
-outboard of a span fraction, rather than treating `A'` as a fifth row.
+`buildLinePlan` points each riser at the load-weighted centre of the anchors
+its lines reach, which is LEparagliding's construction; on the Swoop2 the
+program's own 3D output has the A riser top 15.4 cm outboard of the karabiner
+and 1.8 cm forward, and this lands on it. Checked independently against the
+load model, a riser placed that way is within 4.0° of the resultant of its own
+lines' tensions, and given those resultants (`riserResultants`) and rebuilt,
+within 0.3°.
 
-That is asserted: every line moved to the split riser is still row `A`, and
-centre A anchors stay on the main riser.
+### What this page used to say
 
-### Where to split is the designer's
+That the risers hang **vertically**, "because the pilot's weight pulls straight
+down" and "a riser that is not vertical is a riser with something else pushing
+on it, and there is nothing else there". There is: the other end. The model
+drew them straight down under that reasoning for some time, which is the one
+attitude the forces rule out.
 
-`splitFrom` defaults to 62% of half-span, and the control appears only when
-the chosen layout has a split. Moving it outboard puts fewer anchors on the
-`A'` riser — asserted, 45% against 80%.
+## Where the lengths go
 
-A split that catches **no** anchors is a riser with nothing on it. That is
-reported rather than left for the builder to find as an empty maillon.
+`lineLengthM` — **Line length** in the interface — is the height of the
+**lines**: wing to riser top. The risers hang below that, and the karabiner
+below them: on the default wing 6.5 m of line and a 0.5 m riser put the pilot
+7.0 m under the wing, and the balance is solved at that depth.
 
-## 2. In the interface
+I built it the other way first — riser top half a metre above a fixed
+karabiner — which shortened every line, and the comparison with a published
+total, which counts lines and not webbing, caught it.
 
-The layout is a control, the split position is a slider that appears with it,
-and the Lines view marks which anchors hang from the split riser. The cascade
-table gained a `riser` column, because "which riser" was previously
-computed and never shown.
+When a design is made in several sizes the lines go with the size and the
+riser does not: `docs/scaling.md`.
 
-The layout choice is verified to change an exported file, not just the screen.
+## A riser is not a line
 
-## 3. A phantom in the validation set
+It has no name in the line-naming convention, is not cut from line stock, and
+does not belong in a total line length. Pushing the webbing into `plan.lines`
+broke the name parser and the length total at once, which is the system saying
+it is not a line. It lives in `plan.riserWebbing` and carries `kind:
+'webbing'` rather than a line level — the audit has a rule that the deepest
+LINE level is `main`, and it caught me undoing a rename this project had
+already made once.
 
-While auditing which wings are actually checked, the corpus reader turned out
-to route two families — `magnum4` and `vibegt` — whose files **had never been
-committed**. A routing branch for data that is not there claims coverage the
-project does not have, and reads to anyone scanning the tests as though those
-wings were being validated.
+`plan.risers` is a third thing again: which rows each riser carries. I
+overwrote it before noticing.
 
-The family list is now declared explicitly and every name in it is asserted to
-have files in the repository. Verified by adding a phantom and watching it
-fail:
+## And the brake has none
 
-```
-FAIL every family the reader routes has files  no data for vibegt
-```
-
-**Vibe GT, Magnum 4 and Enzo 3 are not in this repository.** If those sheets
-exist they would be welcome — `docs/collecting-reference-data.md` is the brief
-— but the tool should not have implied it had them.
-
----
-
-## 4. B and C handles
-
-A two-liner has no D row and its brakes are for landing. Accelerated, the
-pilot steers on a **handle** attached to a rear riser: pulling it shortens
-that riser and pitches the wing, changing the angle of attack.
-
-That is the whole point of the technique. A brake pulls the trailing edge
-down, which adds camber and drag and, at speed, invites a stall from the back.
-A rear-riser pull changes the **incidence** instead — the wing rotates and the
-profile keeps its shape.
-
-| to gain 3° | travel | cost |
-| --- | --- | --- |
-| rear riser | 56 mm | section unchanged |
-| brake | 165 mm | **+6.9% of chord in camber** |
-
-### The lever is the anchor separation, not the riser separation
-
-My first version used the front-to-rear distance at the karabiner, 0.42 m,
-and gave **6.8° for 50 mm of pull** — where a real handle gives two or three
-degrees over its whole travel.
-
-`alphaChange` in the same module already had the right relation: the lever is
-`(xRear − xFront) × chord`, the distance between the anchor rows **on the
-wing**. Writing a second relation rather than reading the first is how a
-module ends up disagreeing with itself.
-
-Corrected, the C handle gives 3.2° at 60 mm and 4.3° at its stop.
-
-### Why B steering is the more sensitive
-
-The B row sits further forward, so its lever is shorter and the same pull does
-more:
-
-| handle | lever | 60 mm of pull |
-| --- | --- | --- |
-| B (0.30 c) | 0.52 m | **6.6°** |
-| C (0.53 c) | 1.07 m | 3.2° |
-
-Twice the effect for the same hand movement, which is exactly why B steering
-takes a lighter touch.
-
-### What limits the travel
-
-Not the pilot's arm. The wing pitches out of usable flight long before the
-riser runs out of webbing, so `maxPullMM` defaults to 80 mm — a design
-decision, and the caller's to set. A pull past it is clipped and says so
-rather than returning an angle no wing would fly at.
+The brake's lower line runs from the handle through a pulley on the rear
+riser. It is marked `riser: 'K'` to say which cascade it belongs to, and
+`plan.riserWebbing` took that for a fourth riser: a strap drawn over the A
+riser, and in the bill of materials **eight risers and 4.0 m of webbing on a
+wing with six and 3.0 m**. Every plan the interface builds has the brake
+cascade in it; the tests of the risers built theirs without.

@@ -28,8 +28,40 @@ for (const f of files) {
   const base = f.replace(/\.tsv$/, '');
 
   try {
+    // Data rows of a plain table: not blank, not a comment, not the header.
+    const dataRows = () => body.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length - 1;
     if (f === 'line-materials.tsv') {
       other.push({ f, kind: 'materials table', detail: `${parseMaterialsTable(body).length} line references` });
+    } else if (f === 'line-materials-suppliers.tsv') {
+      // The suppliers' own sheets: what each line family is made of, and the
+      // sizes whose weight, strength and stretch they publish.
+      const kinds = {};
+      for (const l of body.split('\n')) {
+        const k = /^(family|size|bending)\t/.exec(l);
+        if (k) kinds[k[1]] = (kinds[k[1]] || 0) + 1;
+      }
+      other.push({ f, kind: 'line suppliers\' data', detail:
+        `${kinds.family ?? 0} line families, ${kinds.size ?? 0} sizes, ${kinds.bending ?? 0} bending tests` });
+    } else if (f === 'published-specs.tsv') {
+      other.push({ f, kind: 'makers\' specifications', detail: `${dataRows()} sizes, to check size-families.tsv against` });
+    } else if (f === 'published-cells.tsv') {
+      other.push({ f, kind: 'cell counts', detail: `${dataRows()} designs with line sheets here` });
+    } else if (/-inspection\.tsv$/.test(f)) {
+      // Reference, measured and delta for one specimen: not a cut list.
+      other.push({ f, kind: 'inspection record', detail: `${dataRows()} attachment points` });
+    } else if (/^niviuk-.*-totals\.tsv$/.test(f)) {
+      // Sail-to-harness totals from the user manual, one row an attachment
+      // point. The line sheet reader is for single lines, so it is not used.
+      other.push({ f, kind: 'total line lengths', detail: `${dataRows()} attachment points, from the user manual` });
+    } else if (f === 'certification-flight-tests.tsv') {
+      other.push({ f, kind: 'certification test reports', detail: `${dataRows()} rows, the measured figures in EN 926-2 reports` });
+    } else if (/fabric-schedule/.test(f)) {
+      // Routed before the `niviuk-` branch takes it for a line sheet.
+      other.push({ f, kind: 'fabric schedule', detail: `${dataRows()} locations` });
+    } else if (/joncs/.test(f)) {
+      other.push({ f, kind: 'rods', detail: `${dataRows()} rows, as the design's own program computes them` });
+    } else if (/^lep-/.test(f)) {
+      other.push({ f, kind: 'LEparagliding lines', detail: `${dataRows()} lines, from lines.txt` });
     } else if (f === 'size-families.tsv') {
       const fams = parseSizeFamilies(body);
       const n = Object.values(fams).reduce((a, v) => a + v.length, 0);

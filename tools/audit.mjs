@@ -250,11 +250,18 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
 // easy to be right about.
 {
   const assess = readFileSync('ASSESSMENT.md', 'utf8');
+  // The wings and their makers from the generated catalogue, not a literal:
+  // this held 21 and "six manufacturers" as constants, which is the staleness
+  // it exists to catch.
+  const cat = existsSync('data/reference/CATALOGUE.md')
+    ? /\*\*(\d+) wings across (\d+) manufacturers/.exec(readFileSync('data/reference/CATALOGUE.md', 'utf8'))
+    : null;
+  const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
   const claims = [
     [/(\d+) core modules/, readdirSync('src/core').filter((f) => f.endsWith('.js')).length, 'core modules'],
-    [/(\d+) reference files/, readdirSync('data/reference').length, 'reference files'],
+    [/in (\d+) reference tables/, readdirSync('data/reference').filter((f) => f.endsWith('.tsv')).length, 'reference tables'],
     [/\*\*(\d+) open items/, (readFileSync('ROADMAP.md', 'utf8').match(/^- \[ \]/gm) || []).length, 'open items'],
-    [/(\d+) wings from six manufacturers/, 21, 'wings'],
+    [/(\d+) wings' line sheets from/, cat ? Number(cat[1]) : null, 'wings'],
   ];
   for (const [re, actual, what] of claims) {
     const m = re.exec(assess);
@@ -262,6 +269,10 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
       `the assessment's ${what} count is current`,
       m ? `says ${m[1]}, actual ${actual}` : 'claim not found');
   }
+  const makers = /wings' line sheets from (\w+) manufacturers/.exec(assess);
+  say(makers && cat && WORDS[makers[1]] === Number(cat[2]),
+    'and its count of their makers',
+    makers ? `says ${makers[1]}, the catalogue ${cat ? cat[2] : '?'}` : 'claim not found');
 }
 
 /* ---- 2b. terminology matches the standard ------------------------------ */

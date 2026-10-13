@@ -7,16 +7,30 @@
  * It is also what `comparePlans` needs to diff a generated plan against a real
  * wing, which is the whole point of having the data.
  *
- *   node tools/import-niviuk-totals.mjs <manual.pdf> <size> > out.tsv
+ *   node tools/import-niviuk-totals.mjs <manual.pdf> <size> --lines <per-line.tsv> > out.tsv
  *
  * The tables are printed three sizes side by side, so a row of text holds
  * three wings. The size is selected by its column index.
+ *
+ * `--lines` is the per-line sheet of the same wing (section 10.6, already
+ * imported). The grid has empty cells wherever a row of the wing has no line
+ * in a column, and extracted as text an empty cell leaves nothing behind: the
+ * numbers after it close up. Labelled from the left, the Hook 6's brake
+ * totals were filed as D lines for five rows. The per-line sheet says which
+ * columns each row really has, so the labels are taken from it — and a table
+ * with a short row is refused without it.
  */
 import { execFileSync } from 'child_process';
+import { readFileSync } from 'fs';
+import { gridRowsFromNames, labelsForRow } from './niviuk-totals-labels.mjs';
 
-const [pdf, wantSize] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const linesAt = args.indexOf('--lines');
+const linesFile = linesAt >= 0 ? args[linesAt + 1] : null;
+if (linesAt >= 0) args.splice(linesAt, 2);
+const [pdf, wantSize] = args;
 if (!pdf) {
-  console.error('usage: import-niviuk-totals.mjs <manual.pdf> [size|--list]');
+  console.error('usage: import-niviuk-totals.mjs <manual.pdf> [size|--list] [--lines <per-line.tsv>]');
   process.exit(1);
 }
 
@@ -153,9 +167,38 @@ out.push('# "LINES HEIGHT + RISER mm" — the PMA total, sail to harness,');
 out.push('#   so these INCLUDE the risers.');
 out.push('# Retrieved: 2026-08-31');
 out.push('anchor\trow\ttotal_length_mm');
+// Which column each value is in.
+//
+// A full row can be labelled from the header. A short one cannot: the text
+// does not say which cell was empty. With the per-line sheet every row is
+// labelled from the columns the wing has lines in; without it a short row
+// stops the import rather than being labelled from the left, which is how 150
+// totals came to be filed under the wrong row.
+const header = ROWS.map((r) => (r === 'BR' ? 'K' : r));
+const grid = linesFile
+  ? gridRowsFromNames(readFileSync(linesFile, 'utf8').split(/\r?\n/)
+    .filter((l) => l.trim() && !l.startsWith('#')).slice(1).map((l) => l.split('\t')[0]))
+  : null;
+const widest = Math.max(...rows.map((r) => r.values.length));
 for (const r of rows) {
+  let labels;
+  if (grid) {
+    labels = labelsForRow(r.values.length, grid[r.index - 1]);
+    if (!labels) {
+      console.error(`row ${r.index} has ${r.values.length} values and ${linesFile} `
+        + `${(grid[r.index - 1] || []).length} lines there: not written`);
+      process.exit(1);
+    }
+  } else if (r.values.length < widest) {
+    console.error(`row ${r.index} has ${r.values.length} values where others have ${widest}: `
+      + 'a cell of the grid is empty and the text does not say which. Give the wing\'s '
+      + 'per-line sheet with --lines so the columns can be told.');
+    process.exit(1);
+  } else {
+    labels = header.slice(0, r.values.length);
+  }
   r.values.forEach((v, i) => {
-    if (ROWS[i]) out.push(`${r.index}\t${ROWS[i] === 'BR' ? 'K' : ROWS[i]}\t${v}`);
+    if (labels[i]) out.push(`${r.index}\t${labels[i]}\t${v}`);
   });
 }
 console.log(out.join('\n'));

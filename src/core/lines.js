@@ -17,6 +17,8 @@
  *           take more load. This is the more realistic of the two.
  */
 
+import { ribSurfacePoint } from './wing3d.js';
+
 const DEFAULT_ROW_SHARES = { A: 0.35, B: 0.35, C: 0.20, D: 0.10 };
 
 /**
@@ -36,24 +38,11 @@ export function canopyAnchors(wing, airfoil, { rows = ['A', 'B', 'C', 'D'], ever
         ribIndex: i,
         station: rib.station,
         chord: rib.chord,
-        point: pointOnLowerSurface(rib, frac),
+        point: ribSurfacePoint(rib, 'lower', frac),
       });
     }
   });
   return anchors;
-}
-
-/** Interpolate a point at a chord fraction along a rib's lower surface. */
-function pointOnLowerSurface(rib, frac) {
-  const poly = rib.lower;
-  const n = poly.length;
-  const idx = Math.min(n - 2, Math.max(0, Math.floor(frac * (n - 1))));
-  const f = frac * (n - 1) - idx;
-  return [
-    poly[idx][0] + f * (poly[idx + 1][0] - poly[idx][0]),
-    poly[idx][1] + f * (poly[idx + 1][1] - poly[idx][1]),
-    poly[idx][2] + f * (poly[idx + 1][2] - poly[idx][2]),
-  ];
 }
 
 /** Load carried by one anchor, under the chosen weighting case. */

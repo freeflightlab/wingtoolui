@@ -22,7 +22,8 @@ Two things are easy to get wrong, and both are handled explicitly.
 **Geopotential vs geometric altitude.** The layer table is defined in
 geopotential altitude, which absorbs the variation of gravity with height so
 the hydrostatic integral keeps a constant g0. People think in geometric
-altitude. The two differ by **390 m at 50 km** — worth 1.3% in pressure.
+altitude. The two differ by **390 m at 50 km** — worth 5% in pressure: 79.8 Pa
+at 50 km geometric, against 75.9 Pa at the height whose geopotential is 50 km.
 Input is geometric; conversion is internal.
 
 **Base pressures are derived, not transcribed.** Each layer's base pressure
@@ -48,8 +49,9 @@ A temperature offset changes density and the transport properties but **not**
 pressure — a warm day does not move the pressure at altitude.
 
 Gravity varies with altitude in the model, so required speed scales as
-`sqrt(g/rho)`, not `1/sqrt(rho)`. The difference is 0.3% at 10 km. Small, but
-it is real and the tests assert the correct form.
+`sqrt(g/rho)`, not `1/sqrt(rho)`. At 10 km gravity is 0.31% below its
+sea-level value, so the two scalings differ by half that, 0.16%, in speed.
+Small, but it is real and the tests assert the correct form.
 
 ### Non-dimensional groups
 
@@ -80,9 +82,15 @@ A 25 m² wing at 85 kg, holding CL 0.6:
 
 At 50 km the wing would have to fly at **Mach 0.99** to hold itself up, at a
 Reynolds number below 50,000. Neither the section model nor the wing model
-applies there, and the tool says so rather than printing a glide ratio as if
-it meant something. The atmosphere viewport draws the altitude at which the
+applies there, and the tool says so: where a flag says the models fail, the
+readout and the balance table print a dash for the glide ratio and the sink,
+and say why. The speed stays, because it is what the lift equation asks for
+at that density. The atmosphere viewport draws the altitude at which the
 required speed reaches Mach 1 as a hard line.
+
+(This page said that before it was true. At 50 km the readout printed glide
+8.48 and an L/D of 7.25 beside "incompressible and Prandtl-Glauert models both
+fail"; the interface test now holds it to the sentence.)
 
 This is the honest answer to "how does this wing perform at 50 km": it does
 not fly there. The model is still useful for the 0–25 km range where
@@ -101,10 +109,18 @@ sum_n A_n sin(n t) [ 4b/(a0 c(t)) + n / sin t ] = alpha(t) - alpha_L0(t)
 
 Odd harmonics only, collocated at N points, solved directly.
 
-This replaces the hand-typed Oswald factor the equilibrium solver had been
-taking on trust. Span loading, induced drag and the Oswald factor now come out
-as **results** of the planform, so changing the taper changes the induced drag
-rather than leaving it fixed.
+In the polar, this replaces a hand-typed Oswald factor: span loading, induced
+drag and the Oswald factor come out as **results** of the planform, so changing
+the taper changes the induced drag — e is 0.960 on the default wing, 0.933
+with a 2.0 m tip and 0.978 with a 0.30 m one.
+
+The interface's **balance** does not take it. That is the handbook's
+equilibrium, and it still takes the typed "Oswald e" (0.90): typing 0.70 moves
+the balance from glide 8.48 to 7.53 and leaves the polar where it was. The
+balance table shows the lifting line's factor beside the typed one so the two
+can be compared; the solve that couples them, `solveEquilibriumFromWing`, is in
+the core and the suite, not the interface (`docs/full-pipeline.md`, section
+6).
 
 Validated against the exact elliptical case, where theory gives e = 1 and
 `CL_alpha = a0/(1 + a0/(pi AR))`:
@@ -205,13 +221,14 @@ section makes less lift at a given angle.
 The full-pipeline run reported minimum sink of 0.69 to 0.78 m/s on every wing
 tested, against a real 0.95 to 1.15. Two of its four known problems were this.
 
-The cause was not the drag. **The polar is very flat past about CL 1.0** —
-sink falls from 0.854 to 0.820 m/s between alpha 8 and 14 — so an
-unconstrained search put the minimum at the top of the alpha range, at
-**CL 1.37 and 24 km/h**. That is not a flight state. A paraglider's usable
-lift coefficient is limited by pitch stability and the collapse floor, not by
-where the aerofoil finally stalls, and it loses the front of the wing long
-before it gets there.
+The cause was not the drag. **The polar is very flat past about CL 1.0.** On
+the suite's wing (12.25 m span, 2.86 m root, NACA 4415, 95 kg, sea level, alpha 2 to 14) sink falls
+from 0.809 m/s at alpha 8 to 0.779 at alpha 12 and rises only to 0.782 at 14,
+so an unconstrained search puts the minimum at **CL 1.30 and 23 km/h**. That is
+not a flight state. A paraglider's usable lift coefficient is limited by pitch
+stability and the collapse floor, not by where the aerofoil finally stalls,
+and it loses the front of the wing long before it gets there. (The figures
+here were 0.854, 0.820, CL 1.37 and 24 km/h, from a set-up not recorded.)
 
 `maxUsableCL` caps the search, defaulting to 0.9. The reported minimum now
 sits where a wing can actually be flown, and the best glide is unchanged —
@@ -229,10 +246,12 @@ a smooth section.
 `surfaceFactor` makes that adjustable, defaulting to **1.0** so nothing
 changes for anyone who does not set it. But it cannot be the explanation:
 
-| surface factor | min sink | best glide |
+| surface factor | min sink, at the default cap of CL 0.9 | best glide |
 | --- | --- | --- |
-| 1.0 | 0.809 m/s | 9.41 |
-| 2.0 | 0.920 m/s | 8.25 |
+| 1.0 | 0.831 m/s | 9.41 |
+| 2.0 | 0.945 m/s | 8.25 |
+
+(The sink column was 0.809 and 0.920, which is what a cap of 1.0 gives.)
 
 Doubling the profile drag moves sink toward the real figure and moves glide
 **away** from it. The glide was already right at 9.4 against a real ~9.5, so

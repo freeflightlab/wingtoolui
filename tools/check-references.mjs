@@ -38,7 +38,11 @@ const code = codeFiles.map(read).join('\n')
 
 // Names that are not code at all: wing and project names written in
 // camelCase because that is how their authors write them.
-const NOT_CODE = new Set(['gnuLAB2']);
+const NOT_CODE = new Set([
+  'gnuLAB2',    // Laboratori d'envol's own design program
+  'paraFEM',    // a separate OpenGlider project, named in docs/openglider.md
+  'parabem',    // likewise
+]);
 
 // Names that WERE code and were deliberately removed. Documents may mention
 // them — CONTRIBUTING.md records that `buildRiserAssembly` duplicated
@@ -60,6 +64,13 @@ const RETIRED = new Map([
   ['reconcileRibOpenings', 'a duplicate of ribOpenings, removed'],
   ['estimateTotalLineLength', 'renamed lineConsumptionEstimate'],
   ['applyDesignToLep', 'renamed writeDesignIntoLep'],
+  // Three builders of the same misreading: a rod as a chordwise stub.
+  ['rodGroup', 'a rod as a chord range on one surface; buildRods builds real ones'],
+  ['buildRodGroups', 'built those stubs; buildRods replaces it'],
+  ['buildNoseJoncs', 'a first approximation of a nose rod; buildRods replaces it'],
+  // Two of four copies of one job, each measuring "chord" its own way.
+  ['pointAt', 'vribs.js\'s own point on a rib surface; ribSurfacePoint replaces it'],
+  ['pointOnSurface', 'lineplan.js\'s own point on a rib surface; ribSurfacePoint replaces it'],
 ]);
 
 const prose = [

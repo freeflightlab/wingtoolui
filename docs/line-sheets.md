@@ -77,7 +77,8 @@ Geo 7 MS, row A, 6951 mm from carabiner to canopy:
 
 So the **first junction sits 64% of the way up**, and the second covers **78%
 of what remains**, leaving the upper lines the last 22%. The upper lines are
-the short ones — 250–650 mm across the whole inventory.
+the short ones — 250–650 mm on 52 of the Geo 7's 57, the other five being the
+tip lines of the next section.
 
 An earlier construction placed both junctions barely a third of the way up.
 The wing still built, the totals were still roughly right — but the upper
@@ -95,10 +96,16 @@ On the Geo 7, A13 and A14 are 1205 mm and 977 mm where every inboard A line is
 take one long line straight to the main level. `tipDirectAnchors` reproduces
 this.
 
-Worth noting what it does *not* change: total carabiner-to-canopy length is
-barely affected, because the junctions lie near the straight line from maillon
-to anchor whatever the level count. It changes the cut list and the number of
-pieces, not the trim.
+It changes the cut list and the number of pieces, and not where the canopy
+sits: the anchors are where the wing puts them either way.
+
+It does change the lengths that get there. This section said the total from
+carabiner to canopy was "barely affected"; in the generator it is not. On a
+24-cell wing the outermost anchors come out 130 to 180 mm longer with direct
+tip lines than without, and the two inboard of them up to 30 mm shorter,
+because each junction is placed for the anchors it still serves. Whether a
+real wing's totals move that way cannot be told from a sheet that only has
+them one way.
 
 ---
 
@@ -111,11 +118,18 @@ pieces, not the trim.
 - **shape deviation** — the spread once that offset is removed. *This* is the
   trim distribution across the span.
 
-Comparing a parametric wing of roughly Geo 7 MS proportions against the real
-thing gives a mean offset of ~215 mm and a mean shape deviation of ~104 mm,
-with the largest deviations at the tip anchors. Those are genuine differences
-between two different wings — a flatter arc puts the tip anchors further from
-the pilot — not errors in the cascade. The tool is for diffing a design against
+Comparing a parametric wing of the Geo 7 MS's proportions against the real
+thing — 11.52 m span, 2.84 m root, 24 cells a side, its own 14, 14, 15 and 14
+anchors a row, its 527 mm riser, 6.5 m lines, on a circular arc of 0.88 —
+gives a mean offset of 241 mm and a mean shape deviation of 110 mm over 57
+anchors, the largest at the tip anchors A14, B14 and C15. The 12-cell test
+wing, which is not that wing at all, is 83 mm and 192 mm from it.
+
+The arc is the larger difference, and not in the direction a circle
+suggests. The Geo 7 MS is published at 8.87 m projected on 11.52 flat, 0.77;
+built on a circle of that ratio, the same plan fits its lines worse, 244 mm.
+A real arc is flatter in the middle and steeper at the tip than any circle,
+which is what moves the tip anchors. The tool is for diffing a design against
 reference wings, not for claiming a match.
 
 ---

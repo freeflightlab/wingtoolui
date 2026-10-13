@@ -58,14 +58,14 @@ a2r = (a² − b² + c²) / (2a)
 Exact in real arithmetic. In floating point it is not: when ribs are close
 together `a²` is tiny while `b²` and `c²` are not, so the numerator is a
 difference of nearly equal numbers, and dividing by the small `2a` amplifies
-what survives. On a 12-cell wing this produced about 10 µm of seam-length
-drift — harmless in fabric, but it meant the tests could not assert the
-exactness the method actually has.
+what survives. On a 12-cell wing this produced, when it was measured, about
+10 µm of seam-length drift — harmless in fabric, but it meant the tests could
+not assert the exactness the method actually has.
 
 The same quantities are computed here as a dot-product projection and a
 cross-product perpendicular distance, taken straight from the vectors.
-Algebraically identical, and neither subtracts nearly equal quantities. Seam
-length is now preserved to machine precision.
+Algebraically identical, and neither subtracts nearly equal quantities. The
+left seam is now preserved to machine precision: 10⁻¹⁵ m on a 2.5 m seam.
 
 ### 3.1 The distortion measure was tautological
 
@@ -85,9 +85,10 @@ It surfaced only when H-ribs were added and predicted to show distortion where
 V-ribs would not. They showed none either — and neither did the sail panels
 they were being compared against, which was the tell.
 
-Measuring the fourth side gives a figure that responds to geometry: 0.0034% on
-a normal wing, exactly zero on a cylinder and a cone, and growing with the
-twist of a ruled surface. The test is now two-sided — **zero where the surface
+Measuring the fourth side gives a figure that responds to geometry: 0.0001% on
+the default wing (0.0007% at twenty points a surface rather than fifty), 0.06%
+on a surface built not to be developable, exactly zero on a cylinder and a
+cone, and growing with the twist of a ruled surface. The test is now two-sided — **zero where the surface
 really is developable, non-zero where it is not** — because only that
 distinguishes a real measure from a tautological one.
 
@@ -99,9 +100,11 @@ the **left seam is exact and the right seam is not**: the right-hand points
 `R2` of one step and `R1` of the next are images of the same 3D point but are
 not forced to coincide.
 
-Measured on a 24-cell wing the gap peaks around 13 µm, and the right seam's
-total length differs from the true 3D rib by about 6 µm over roughly 2 m — 3
-parts per million, far below what fabric can hold. It is reported as
+Measured on a 24-cell wing at forty points a surface the gap peaks at 0.8 µm,
+and the right seam's total length differs from the true 3D rib by 0.16 µm over
+2.46 m — 0.06 parts per million, far below what fabric can hold. (At twenty
+points it is 3 µm and 0.3 µm. This paragraph said 13 µm and 6 µm, from before
+section 3's change.) It is reported as
 `maxClosureGap` on every developed panel so it can be watched rather than
 assumed. It also means swapping which rib you pass as "left" changes which seam
 is exact, by an amount too small to matter.
@@ -385,12 +388,19 @@ The rib spacing the membrane equation needs is **not a separate input**: the
 panel width at each station *is* the local spacing, so it comes from the panel
 itself and varies along the chord as it should.
 
+On the first upper panel of the 12-cell test wing — a cell 495 mm wide — at
+400 Pa and 300 N/m of cloth tension:
+
 | | flat 6% | from pressure |
 | --- | --- | --- |
-| peak billow | 13% chord | **9% chord** |
-| mean excess | 5.01% | 0.80% |
+| largest excess | 6.00% | 4.93% |
+| where, along the seam | 11% | **10%** |
+| mean excess | 4.45% | 1.54% |
 | at the LE seam | 0 | 0 |
-| responds to speed | no | 0.19% at 200 Pa, 4.13% at 800 |
+| responds to speed | no | 0.35% at 200 Pa, 7.37% at 800 |
+
+(On a wing of twice the cells the pressure figures are a quarter of these:
+0.35% at 400 Pa. That is the square of the spacing, above.)
 
 **One thing the first version got wrong.** Applied on its own, the pressure
 model put its peak at *0% chord*, because that is where suction peaks. But the

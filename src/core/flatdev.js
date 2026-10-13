@@ -125,6 +125,37 @@ export function developPanel(L, R) {
  */
 export function developWing(wing) {
   const out = [];
+
+  // The centre cell, when there is one.
+  //
+  // With a centre RIB the half wing starts at y=0 and every cell lies wholly
+  // within one half. With a centre CELL the innermost rib sits half a cell
+  // out, and the cell between it and its mirror straddles the centreline —
+  // one piece of cloth belonging to neither half.
+  //
+  // Walking consecutive ribs misses it entirely. A 65-cell wing came out
+  // with 64 cells' worth of panels and nothing said so, which would leave a
+  // builder two panels short of a wing.
+  if (wing.centreRib === false && wing.ribs.length) {
+    const inner = wing.ribs[0];
+    const mirror = {
+      upper: inner.upper.map(([x, y, z]) => [x, -y, z]),
+      lower: inner.lower.map(([x, y, z]) => [x, -y, z]),
+    };
+    out.push({
+      cell: 0,
+      surface: 'upper',
+      centre: true,
+      panel: developPanel(mirror.upper, inner.upper),
+    });
+    out.push({
+      cell: 0,
+      surface: 'lower',
+      centre: true,
+      panel: developPanel(mirror.lower, inner.lower),
+    });
+  }
+
   for (let i = 0; i < wing.ribs.length - 1; i++) {
     const Lr = wing.ribs[i];
     const Rr = wing.ribs[i + 1];

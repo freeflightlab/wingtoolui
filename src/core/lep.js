@@ -1,3 +1,4 @@
+import { wholeWingCounts } from './wing3d.js';
 /* lep.js — interoperability with LEparagliding data files.
  *
  * `leparagliding.txt` is the input format of the author's own FORTRAN design
@@ -227,6 +228,129 @@ export function readAoA(doc) {
   };
 }
 
+/**
+ * Every rib as LEparagliding builds it, in centimetres: the geometry matrix
+ * scaled, the washin the program actually applies, the special wingtip, the
+ * per-rib thickness, and each rib's section file and anchors.
+ *
+ * Three things here are the program's behaviour rather than the manual's, and
+ * each is visible in its own output (`swoop2-lep-out.txt`):
+ *
+ *   - Washin mode 1 is documented as `alpha_tip * (c1 - ci) / (c1 - cN)`. The
+ *     program evaluates it while READING the ribs, before rib N exists, so
+ *     every rib but the last divides by c1. The Swoop2 prints 3.136 degrees at
+ *     rib 25, which is 5 * (209.07 - 77.93) / 209.07.
+ *   - The special wingtip moves the last rib's edges AFTER the washin has
+ *     been computed from its original chord.
+ *   - A zero rotation point is replaced by 0.01%.
+ *
+ * `lepToDesign` used the washin COLUMN, which is zero on the Swoop2 because
+ * its file asks for mode 1 — so the imported wing had no washin at all
+ * against five degrees at the tip.
+ */
+export function lepRibs(doc) {
+  const g = readGeometry(doc);
+  const k = g.wingScale;
+  const N = g.ribs.length;
+  const notes = [];
+  const notReproduced = [];
+
+  const ribs = g.ribs.map((r) => ({
+    index: r.index,
+    x: r.xRib * k,
+    yLE: r.yLE * k,
+    yTE: r.yTE * k,
+    xp: r.xp * k,
+    z: r.z * k,
+    beta: r.betaDeg,
+    // A zero rotation point is replaced, as the program does, to avoid a
+    // degenerate rotation.
+    rp: r.rpPct === 0 ? 0.01 : r.rpPct,
+    washinColumn: r.washinDeg,
+    rotZ: r.rotZDeg,
+    zPos: r.posZPct,
+  }));
+  for (const r of ribs) r.chord = r.yTE - r.yLE;
+
+  // Washin — see the header for why the divisor is c1 for all but the tip.
+  const c1 = ribs[0].chord;
+  const cN = ribs[N - 1].chord;
+  const { tipDeg, mode, centreDeg } = g.alpha;
+  ribs.forEach((r, i) => {
+    const last = i === N - 1;
+    const divisor = last ? c1 - cN : c1;
+    if (mode === 1) r.washin = divisor ? (tipDeg * (c1 - r.chord)) / divisor : 0;
+    else if (mode === 2) {
+      r.washin = divisor ? ((tipDeg - centreDeg) * (c1 - r.chord)) / divisor + centreDeg : centreDeg;
+    } else r.washin = r.washinColumn;
+  });
+  if (mode === 1 || mode === 2) {
+    notes.push(`washin mode ${mode}: every rib but the tip divides by the root chord, `
+      + 'as LEparagliding does');
+  }
+
+  // Section 27, the special wingtip. Only the angled tip (type 1) is
+  // reproduced; the others are reported rather than approximated.
+  const s27 = sectionData(doc, 27).map((l) => l.trim()).filter(Boolean);
+  const tipType = s27.length ? parseInt(s27[0], 10) : 0;
+  if (tipType === 1 && N >= 2) {
+    const aLE = (parseFloat(s27[1].split(/\s+/)[1]) * Math.PI) / 180;
+    const aTE = (parseFloat(s27[2].split(/\s+/)[1]) * Math.PI) / 180;
+    const a = ribs[N - 2];
+    const b = ribs[N - 1];
+    const dx = b.x - a.x;
+    b.yLE = a.yLE + dx * Math.tan(aLE);
+    b.yTE = a.yTE + dx * Math.tan(aTE);
+    b.chord = b.yTE - b.yLE;
+    notes.push('special wingtip type 1: last rib cut at the leading- and '
+      + 'trailing-edge angles');
+  } else if (tipType) {
+    notReproduced.push(`special wingtip type ${tipType}`);
+  }
+
+  // Section 30: a thickness factor per rib. The Swoop2 closes its tip by
+  // taking the last rib to 1% of its section.
+  const s30 = sectionData(doc, 30).map((l) => l.trim()).filter(Boolean);
+  const thickness = new Map();
+  if (s30.length && parseInt(s30[0], 10) === 1) {
+    for (const l of s30.slice(1)) {
+      const f = l.split(/\s+/).map(Number);
+      if (Number.isFinite(f[0]) && Number.isFinite(f[1])) thickness.set(f[0], f[1]);
+    }
+  }
+
+  // Section 2 per rib: section file, intake, open, displacement, the
+  // relative weight the loads use; section 3: the anchors.
+  const s2 = readAirfoils(doc);
+  const s3 = readAnchors(doc);
+  ribs.forEach((r, i) => {
+    const a = s2[i];
+    r.airfoilFile = a?.file ?? null;
+    r.intakeIn = a?.intakeStartPct ?? null;
+    r.intakeOut = a?.intakeEndPct ?? null;
+    r.open = a?.open ?? true;
+    r.disp = (a?.displacementCm ?? 0) * k;
+    r.weight = a?.relativeWeight ?? 1;
+    r.thickness = thickness.get(r.index) ?? 1;
+    const an = s3[i];
+    r.anchorCount = an?.count ?? 0;
+    // Positions A..F in percent of chord; F is the brake point.
+    r.anchorsPct = an ? [an.A, an.B, an.C, an.D, an.E, an.F] : [];
+  });
+
+  return {
+    scale: k,
+    brand: g.brand,
+    name: g.wingName,
+    cells: g.cells,
+    ribCount: g.ribCount,
+    centreRib: g.centreRib,
+    ribs,
+    notes,
+    notReproduced,
+  };
+}
+
 /* ------------------------------------------------------------- to model -- */
 
 /**
@@ -238,36 +362,55 @@ export function readAoA(doc) {
  * recomputed, because the whole point of importing is to reproduce the file's
  * wing, not to re-derive a similar one.
  */
-export function lepToDesign(doc) {
+export function lepToDesign(doc, { sections = {} } = {}) {
   const g = readGeometry(doc);
   const airfoils = readAirfoils(doc);
-  const anchors = readAnchors(doc);
   const aoa = readAoA(doc);
+  // The ribs as the program builds them — washin, special wingtip and
+  // thickness included — rather than the raw matrix.
+  const t = lepRibs(doc);
 
-  const k = g.wingScale / 100; // cm -> m, with the wing scale applied
+  const m = 0.01; // centimetres, already scaled, to metres
 
-  const planformRows = g.ribs.map((r) => ({
-    y: r.xRib * k,
-    xLE: r.yLE * k,
-    xTE: r.yTE * k,
-  }));
+  const planformRows = t.ribs.map((r) => ({ y: r.x * m, xLE: r.yLE * m, xTE: r.yTE * m }));
 
-  const explicitRibs = g.ribs.map((r) => ({
-    station: r.xRib * k,
-    chord: (r.yTE - r.yLE) * k,
-    xLE: r.yLE * k,
-    washinDeg: r.washinDeg,
-    betaDeg: r.betaDeg,
-    zetaDeg: r.rotZDeg,
-    // LEP's Z grows downward, toward the pilot; ours grows up.
-    lobePoint: [r.xp * k, -r.z * k],
-    rp: r.rpPct / 100,
-    posZ: r.posZPct / 100,
-  }));
+  const missingSections = [];
+  const explicitRibs = t.ribs.map((r) => {
+    const section = r.airfoilFile ? sections[r.airfoilFile] ?? null : null;
+    if (r.airfoilFile && !section) missingSections.push(r.airfoilFile);
+    return {
+      station: r.x * m,
+      chord: r.chord * m,
+      xLE: r.yLE * m,
+      washinDeg: r.washin,
+      betaDeg: r.beta,
+      zetaDeg: r.rotZ,
+      // LEP's Z grows downward, toward the pilot; ours grows up.
+      lobePoint: [r.xp * m, -r.z * m],
+      rp: r.rp / 100,
+      posZ: r.zPos / 100,
+      // The rib's own section and thickness factor, when the caller has the
+      // file. Without it the rib takes the tool's section, and
+      // `missingSections` says so.
+      airfoil: section,
+      thickness: r.thickness,
+      airfoilFile: r.airfoilFile,
+      // Anchor positions on THIS rib, fraction of chord, rows present only.
+      anchors: Object.fromEntries(['A', 'B', 'C', 'D', 'E']
+        .slice(0, r.anchorCount)
+        .map((row, j) => [row, r.anchorsPct[j] / 100])),
+      brakePoint: r.anchorsPct[5] > 0 ? r.anchorsPct[5] / 100 : null,
+    };
+  });
 
-  const first = anchors[0];
+  // The rows the design actually has. A three-line wing has no D, and a D
+  // anchor must not be invented for it: reading the missing column as zero
+  // put one at the leading edge, and keeping the slider's value instead put a
+  // phantom D row at 78% on a wing that has none.
+  const first = t.ribs[0];
   const anchorFractions = first
-    ? { A: first.A / 100, B: first.B / 100, C: first.C / 100, D: first.D / 100 }
+    ? Object.fromEntries(['A', 'B', 'C', 'D', 'E'].slice(0, first.anchorCount)
+      .map((row, j) => [row, first.anchorsPct[j] / 100]))
     : null;
 
   const intake = airfoils[0]
@@ -278,18 +421,29 @@ export function lepToDesign(doc) {
     name: g.wingName,
     brand: g.brand,
     geometry: g,
+    ribTable: t,
     planformRows,
     explicitRibs,
     anchorFractions,
+    rows: first ? ['A', 'B', 'C', 'D', 'E'].slice(0, first.anchorCount) : [],
     intake,
     airfoilFiles: [...new Set(airfoils.map((a) => a.file))],
+    missingSections: [...new Set(missingSections)],
     aoa,
+    // Section 8 in the units the tool uses. The line length in the file is
+    // scaled with the wing; the riser length is not.
+    lineLengthM: aoa ? (aoa.lineLengthCm * t.scale) / 100 : null,
+    riserLengthM: aoa ? aoa.riserLengthCm / 100 : null,
+    karabinerM: aoa ? aoa.karabinerCm / 100 : null,
     cells: g.cells,
     halfCells: g.halfCells,
+    centreRib: g.centreRib,
+    notes: t.notes,
+    notReproduced: t.notReproduced,
     // Handy summary numbers, in metres.
-    flatSpan: 2 * Math.max(...g.ribs.map((r) => r.xRib)) * k,
-    projectedSpan: 2 * Math.max(...g.ribs.map((r) => r.xp)) * k,
-    rootChord: (g.ribs[0].yTE - g.ribs[0].yLE) * k,
+    flatSpan: 2 * Math.max(...t.ribs.map((r) => r.x)) * m,
+    projectedSpan: 2 * Math.max(...t.ribs.map((r) => r.xp)) * m,
+    rootChord: t.ribs[0].chord * m,
   };
 }
 
@@ -319,8 +473,13 @@ export function writeDesignIntoLep(doc, model) {
     '1.0',
     '1.0',
     // Counts are whole-wing; the matrix below is the half wing.
-    `\t${(ribs.length - 1) * 2}`,
-    `\t${ribs.length * 2 - 1}`,
+    //
+    // By whether a rib sits on the centreline: `2n - 2` cells and `2n - 1`
+    // ribs is a wing with a centre RIB. A 65-cell wing, whose innermost rib
+    // is half a cell out, was written as 64 cells and 65 ribs — a centre-rib
+    // wing whose centre rib is not on the centre, which no reader can build.
+    `\t${wholeWingCounts(wing).cells}`,
+    `\t${wholeWingCounts(wing).ribs}`,
     `\t${(wing.cfg.washinTotal ?? maxWashin(ribs)).toFixed(1)}        0         0.0`,
     '"ds" 0',
   ];
@@ -595,4 +754,171 @@ export function blankLepDocument(halfRibs = 25) {
 export function designToLep(model, template = null) {
   const doc = template || blankLepDocument(model.wing.ribs.length);
   return writeLep(writeDesignIntoLep(doc, model));
+}
+
+/**
+ * Section 12: H, V and VH ribs — everything sewn INSIDE the wing that is not
+ * a rib.
+ *
+ * The Swoop2 carries 124 of them, of three kinds, and the three do not share
+ * a row layout. Read as one layout, the first kind came out sensible and the
+ * other two as nonsense (a strap to "rib 100" on a 26-rib half wing, a 60 cm
+ * "width"), so each is read as what its own columns say:
+ *
+ *   type 11   `n 11  i r  j r  w 0 0 0`
+ *             A strap from anchor row `r` on rib `i` to the same row on rib
+ *             `j = i + 1`, of width `w`. Seventy on the Swoop2: every
+ *             adjacent pair from 1-2 to 23-24 at each of rows 1 to 3, and
+ *             24-25 at row 1.
+ *
+ *   type 15   `n 15  i r  L R  a b c d`
+ *             A diagonal from anchor row `r` on rib `i`, to the left
+ *             (`L` = 1, the rib before) or to the right (`R` = 1, the rib
+ *             after). Thirty-nine on the Swoop2: rows 1 to 3 on ribs 2, 3,
+ *             6, 7 ... 22, 23 and 25.
+ *
+ *             Left is towards the centre. That is not taken from a manual,
+ *             it is what the file's own lines say: the wing's lines attach
+ *             on ribs 2-3, 6-7, 10-11 ... (section 9), and on every one of
+ *             those ribs the flag sends the diagonal AWAY from its lined
+ *             partner — rib 2 "left" to rib 1, rib 3 "right" to rib 4. Read
+ *             the other way round, all 36 would run from one lined rib to
+ *             another, which is the one place a diagonal is never needed.
+ *
+ *   type 16   `n 16  i x h a b  j x h a b`
+ *             A piece between ribs `i` and `j = i + 1`, each end given by a
+ *             position `x` along the chord in percent and three more
+ *             numbers. Fifteen on the Swoop2, at 11, 39 and 72% on the rib
+ *             pairs 4-5, 8-9 ... 20-21 — exactly the pairs of ribs that
+ *             carry no line, between the tops of the diagonals either side.
+ *
+ * WHAT IS NOT ESTABLISHED, and so is kept as written rather than used:
+ *
+ *   - the four numbers that close a type-15 row (`60.0 28.0 85. 2.` on every
+ *     one of the Swoop2's) — they give the piece its shape;
+ *   - the three numbers after each position on a type-16 row;
+ *   - whether a type-11 width is centimetres or percent of chord.
+ *     LEparagliding numbers its percent-of-chord forms ten above the
+ *     centimetre ones (11 to 16 for 1 to 6), which would make it percent,
+ *     but nothing in this repository shows it and the manual could not be
+ *     reached when this was written.
+ *
+ * So the diagonals are built where the file says — which rib, which row,
+ * which neighbour — at the width the tool is set to, and the straps and the
+ * general pieces are counted and named, not drawn.
+ */
+export function parseHVRibs(doc) {
+  // `doc.sections` is an array, and a section holds `dataIndices` into
+  // `doc.lines` rather than the lines themselves — reading `sec.lines` gave
+  // an object with no filter on it.
+  const sec = (doc?.sections ?? []).find((x) => Number(x.number) === 12);
+  const lines = (sec?.dataIndices ?? [])
+    .map((i) => doc.lines[i])
+    .filter((l) => typeof l === 'string' && l.trim() && !l.startsWith('*'));
+  const empty = {
+    count: 0, declared: 0, entries: [], byType: {}, straps: [], diagonals: [],
+    general: [], other: [], hRibs: [], notUnderstood: 0, modelled: false,
+  };
+  if (!lines.length) return { ...empty, note: 'no section 12' };
+
+  const declared = parseInt(lines[0].trim(), 10);
+  const entries = [];
+  const straps = [];
+  const diagonals = [];
+  const general = [];
+  const other = [];
+  const whole = (v) => Number.isInteger(v) && v > 0;
+
+  for (const raw of lines.slice(1)) {
+    const f = raw.trim().split(/\s+/).map(Number);
+    // The row after the count is two numbers: how the pieces are spaced on
+    // the plans. Every piece has at least seven.
+    if (f.length < 7 || f.some((v) => !Number.isFinite(v))) continue;
+    const [index, type] = f;
+    const kind = type > 10 ? type - 10 : type;
+    const e = { index, type, fields: f.slice(2) };
+
+    if (kind === 1 && whole(f[2]) && whole(f[4])) {
+      Object.assign(e, {
+        kind: 'strap', fromRib: f[2], fromAnchor: f[3], toRib: f[4], toAnchor: f[5],
+        width: f[6],
+        // Kept under its old name for the H-rib builder, which treats the
+        // number as centimetres. See the header: the unit is not established.
+        widthCm: f[6],
+      });
+      straps.push(e);
+    } else if (kind === 5 && whole(f[2]) && whole(f[3])) {
+      Object.assign(e, {
+        kind: 'diagonal', rib: f[2], row: f[3], left: f[4] === 1, right: f[5] === 1,
+        // The piece's shape, as written. Not interpreted.
+        shape: f.slice(6, 10),
+        // For anything that lists every piece by the two ribs it joins.
+        fromRib: f[2], toRib: f[4] === 1 ? f[2] - 1 : f[2] + 1,
+      });
+      diagonals.push(e);
+    } else if (kind === 6 && f.length >= 12 && whole(f[2]) && whole(f[7])) {
+      Object.assign(e, {
+        kind: 'general', fromRib: f[2], toRib: f[7],
+        ends: [
+          { rib: f[2], chordPct: f[3], rest: f.slice(4, 7) },
+          { rib: f[7], chordPct: f[8], rest: f.slice(9, 12) },
+        ],
+      });
+      general.push(e);
+    } else {
+      Object.assign(e, { kind: 'other', fromRib: f[2], toRib: f[4] });
+      other.push(e);
+    }
+    entries.push(e);
+  }
+
+  const byType = {};
+  for (const e of entries) byType[e.type] = (byType[e.type] || 0) + 1;
+
+  const said = [];
+  if (diagonals.length) said.push(`${diagonals.length} diagonals`);
+  if (straps.length) said.push(`${straps.length} straps between adjacent ribs`);
+  if (general.length) said.push(`${general.length} pieces between two ribs at a chord position`);
+  if (other.length) {
+    said.push(`${other.length} of type ${[...new Set(other.map((e) => e.type))].join(', ')}`
+      + ' whose columns are not read');
+  }
+
+  return {
+    declared: Number.isFinite(declared) ? declared : entries.length,
+    count: entries.length,
+    entries,
+    byType,
+    /** Types 1 and 11: a strap between the same anchor row on two adjacent ribs. */
+    straps,
+    /** Types 5 and 15: a diagonal from an anchor to the rib before or after. */
+    diagonals,
+    /** Types 6 and 16: a piece between two ribs, each end at a chord position. */
+    general,
+    /** Anything else in the section, counted and not read. */
+    other,
+    /** The straps, under the name the H-rib builder was written against. */
+    hRibs: straps,
+    /** Rows whose columns are not read at all. */
+    notUnderstood: other.length,
+    modelled: false,
+    note: `${entries.length} internal pieces in the file: ${said.join(', ')}.`,
+  };
+}
+
+/**
+ * The file's own diagonals, as the pieces `buildVRibs` places.
+ *
+ * Rib numbers in the file start at 1 at the centre; rows are 1 for A.
+ */
+export function lepDiagonalPieces(hv) {
+  const out = [];
+  for (const d of hv?.diagonals ?? []) {
+    const row = 'ABCDE'[d.row - 1];
+    if (!row) continue;
+    const from = d.rib - 1;
+    if (d.left) out.push({ row, fromRib: from, toRib: from - 1, source: `section 12 row ${d.index}` });
+    if (d.right) out.push({ row, fromRib: from, toRib: from + 1, source: `section 12 row ${d.index}` });
+  }
+  return out;
 }

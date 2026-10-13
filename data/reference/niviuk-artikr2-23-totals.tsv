@@ -3,6 +3,10 @@
 # "LINES HEIGHT + RISER mm" — the PMA total, sail to harness,
 #   so these INCLUDE the risers.
 # Retrieved: 2026-08-31
+# Rows relabelled 2026-10-06: where the manual's grid has an empty cell the
+#   importer had moved the values after it one column left (a brake total
+#   filed as a D line). The columns are restored from the same manual's
+#   per-line table. No length is changed. See docs/niviuk-import.md.
 anchor	row	total_length_mm
 1	A	7093
 1	B	7068
@@ -37,19 +41,19 @@ anchor	row	total_length_mm
 8	C	6900
 8	D	7013
 9	A	6847
-9	B	6814
-9	C	6898
-9	D	6673
+9	C	6814
+9	D	6898
+9	K	6673
 10	A	6717
-10	B	6700
-10	C	6775
-10	D	6550
+10	C	6700
+10	D	6775
+10	K	6550
 11	A	6630
-11	B	6635
-11	C	6490
+11	C	6635
+11	K	6490
 12	A	6620
-12	B	6650
-12	C	6497
+12	C	6650
+12	K	6497
 13	A	6473
-13	B	6483
-13	C	6594
+13	C	6483
+13	K	6594

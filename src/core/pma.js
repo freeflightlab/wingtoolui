@@ -22,6 +22,9 @@
  * it, so these are defaults rather than rules.
  */
 
+import { fibreOf } from './trimdrift.js';
+import { planPaths } from './lineplan.js';
+
 /** Section 5.5: line geometry inspection. */
 export const PMA_GEOMETRY = {
   // Δ must fall inside this band for every suspension line.
@@ -133,11 +136,20 @@ export function lineGeometryCheck(lines, { correctionOffsetMM = null } = {}) {
  * hold 65% of its new strength, and an **aramid** line only 45% — aramids
  * lose more with age and UV, so less is demanded of them.
  *
- * That is a different measurement from the kinked strength in
- * `data/reference/line-materials.tsv`, which is a new line bent around a pin
- * rather than an old one pulled straight. The two should not be conflated:
- * PHI's Edelrid 8000-135 holds 53% kinked, below PMA's 65% in-service floor,
- * and it is not a failing line — it is a different test.
+ * `value_new` is "the breaking strength value of a new line provided by
+ * either the paraglider manufacturer or the line supplier" — the strength
+ * NEW, pulled straight. The kinked strength in
+ * `data/reference/line-materials.tsv` is a different measurement, a new line
+ * bent rather than an old one pulled straight, and is not what goes in here.
+ *
+ * The two sets of numbers do line up, fibre by fibre. In that table the
+ * aramid lines keep 38 to 70 % of their strength kinked and the standard
+ * asks 45 % of a used one; the Dyneema lines keep 59 to 114 %, most of them
+ * over 85, and it asks 65 %.
+ *
+ * This compared PHI's Edelrid 8000-135 — 53 % kinked — with "PMA's 65 %
+ * in-service floor" for Dyneema. The 8000-U is aramid (a DHV test report
+ * says so), its floor is 45 %, and 53 is above it.
  */
 export function lineStrengthCheck({
   newStrengthDaN, source = 'manufacturer', material = 'dyneema',
@@ -194,29 +206,78 @@ export function porosityFromSeconds(seconds) {
  * Would this design's line lengths survive an inspection?
  *
  * A design tool's version of the geometry test: instead of measured lengths
- * it takes the lengths a build would produce, and asks whether the tolerance
- * band leaves any room. A wing whose own cut lengths already sit at the edge
- * of ±12 mm has nothing left for three years of stretch.
+ * it takes how far each attachment point is expected to have moved, and asks
+ * whether one correction offset can still bring them all inside the band.
+ *
+ * The offset is the whole point of the test. A lineset that has shrunk 30 mm
+ * everywhere is 30 mm shorter and flies as designed; the inspector takes the
+ * 30 mm out and finds every line on its reference. What no offset takes out
+ * is the lines moving DIFFERENTLY — and so the room a design has is the
+ * range of offsets that passes:
+ *
+ *     -12 - min(drift)  <=  offset  <=  +12 - max(drift)      suspension
+ *       0 - min(drift)  <=  offset  <=  +50 - max(drift)      brakes
+ *
+ * with the offset itself held to 1.5 % of the longest line. While that range
+ * is not empty the wing passes, and half its width is how much further the
+ * lines could move apart before it did not.
+ *
+ * This measured each line's drift against the 24 mm width of the band, one
+ * line at a time, so a lineset stretched 20 mm throughout "used 83 % of the
+ * band" and one stretched 30 mm failed. Both pass with nothing to spare
+ * used: that is what the offset is for.
+ *
+ * @param {object[]} lines  {name, referenceMM (or lengthMM), expectedDriftMM
+ *                          (signed; `expectedStretchMM` is read too), isBrake}
  */
 export function inspectionHeadroom(lines, { stretchAllowanceMM = 0 } = {}) {
-  const band = PMA_GEOMETRY.toleranceMM[1] - PMA_GEOMETRY.toleranceMM[0];
-  const rows = lines.map((l) => {
-    const drift = l.expectedStretchMM ?? stretchAllowanceMM;
-    return {
-      name: l.name,
-      lengthMM: l.lengthMM,
-      expectedStretchMM: drift,
-      // How much of the band the expected drift already uses.
-      bandUsedFraction: band > 0 ? drift / band : 0,
-      leavesHeadroom: drift < band / 2,
-    };
-  });
-  const worst = rows.reduce((m, r) => (r.bandUsedFraction > m.bandUsedFraction ? r : m), rows[0]);
+  const [sLo, sHi] = PMA_GEOMETRY.toleranceMM;
+  const [bLo, bHi] = PMA_GEOMETRY.brakeToleranceMM;
+  const rows = lines.map((l) => ({
+    name: l.name,
+    isBrake: !!l.isBrake,
+    lengthMM: l.referenceMM ?? l.lengthMM,
+    expectedDriftMM: l.expectedDriftMM ?? l.expectedStretchMM ?? stretchAllowanceMM,
+  }));
+  const limit = Math.max(0, ...rows.map((r) => r.lengthMM ?? 0)) * PMA_GEOMETRY.offsetFractionOfMax;
+
+  // The offsets each line allows, and the line that sets each end.
+  let lo = -limit; let hi = limit;
+  let setsLo = null; let setsHi = null;
+  for (const r of rows) {
+    const [a, b] = r.isBrake ? [bLo, bHi] : [sLo, sHi];
+    if (a - r.expectedDriftMM > lo) { lo = a - r.expectedDriftMM; setsLo = r.name; }
+    if (b - r.expectedDriftMM < hi) { hi = b - r.expectedDriftMM; setsHi = r.name; }
+  }
+  const drifts = rows.filter((r) => !r.isBrake).map((r) => r.expectedDriftMM);
+  const spread = drifts.length ? Math.max(...drifts) - Math.min(...drifts) : 0;
+  const band = sHi - sLo;
+  // Where each line sits once the offset is in the middle of what passes.
+  const offset = (lo + hi) / 2;
+  for (const r of rows) {
+    const [a, b] = r.isBrake ? [bLo, bHi] : [sLo, sHi];
+    r.deltaMM = r.expectedDriftMM + offset;
+    r.marginMM = Math.min(r.deltaMM - a, b - r.deltaMM);
+    r.leavesHeadroom = r.marginMM > 0;
+  }
+  const worst = rows.reduce((m, r) => (r.marginMM < m.marginMM ? r : m), rows[0]);
   return {
     rows,
     bandMM: band,
+    // How far apart the suspension points have moved, and how much of the
+    // band that takes: at 1 no offset fits them all.
+    spreadMM: spread,
+    bandUsedFraction: band > 0 ? spread / band : 0,
+    offsetRangeMM: [lo, hi],
+    offsetMM: offset,
+    offsetLimitMM: limit,
+    // Half the width of the passing range: the further movement there is
+    // room for. Negative when nothing passes.
+    slackMM: (hi - lo) / 2,
+    limitedBy: [setsLo, setsHi],
     worst,
-    allHaveHeadroom: rows.every((r) => r.leavesHeadroom),
+    passes: lo <= hi + 1e-9,
+    allHaveHeadroom: hi - lo > 1e-9,
   };
 }
 
@@ -244,7 +305,13 @@ export function inspectionHeadroom(lines, { stretchAllowanceMM = 0 } = {}) {
  *
  *   - **Total line length** is sail to harness and therefore includes the
  *     riser (Figure 4), with the trimmer at whatever position the maker
- *     specifies. A sheet quoted to the maillon is a different quantity.
+ *     specifies. A sheet quoted to the maillon is a different quantity. A
+ *     brake's is sail to "the top side of the handle knot" (Figure 5), and
+ *     has no riser in it.
+ *
+ *   - **Breaking strength** is of the NEW line (`value_new`), and the least
+ *     a used one may hold is that times the coefficient of its own fibre:
+ *     0.65 for Dyneema, 0.45 for aramid, Technora and Vectran.
  */
 export function exchangeRecord({
   manufacturer, model, size,
@@ -260,7 +327,9 @@ export function exchangeRecord({
   lengths = null,
   riserLengthMM = 0,
   trimmerPosition = 'closed',
-  lineCoefficientMaterial = 'dyneema',
+  // Left unset, each line takes the coefficient of its own fibre. Naming a
+  // material here applies it to every line, as a manufacturer may.
+  lineCoefficientMaterial = null,
 } = {}) {
   if (!plan) throw new Error('exchangeRecord needs a line plan');
 
@@ -271,57 +340,82 @@ export function exchangeRecord({
   const chainByName = new Map();
   if (lengths) for (const l of lengths.lines) chainByName.set(l.name, l);
 
+  const unknownFibre = [];
   const lines = plan.lines.map((l) => {
     const sel = byName.get(l.name);
     const st = stretchByName.get(l.name);
+    const chain = chainByName.get(l.name);
+    const mat = sel && sel.line ? sel.line : null;
+    // `value_new`: the strength of the line new. This published the KINKED
+    // strength under that heading — half the figure, on an aramid line.
+    const newDaN = mat ? (mat.strengthNewDaN ?? mat.strengthDaN ?? null) : null;
+    // Each line by its own fibre. Every line was given Dyneema's 0.65, of
+    // that kinked strength: a minimum a fifth too low on an aramid line and
+    // some 7% too low on a Dyneema one.
+    const fibre = mat ? fibreOf(mat) : null;
+    const coefficientOf = lineCoefficientMaterial ?? fibre;
+    const known = coefficientOf != null
+      && PMA_STRENGTH.lineCoefficient[String(coefficientOf).toLowerCase()] != null;
+    if (mat && !known) unknownFibre.push(l.name);
+    const check = newDaN != null && known
+      ? lineStrengthCheck({ newStrengthDaN: newDaN, material: coefficientOf }) : null;
+    // Figure 6: inside of one loop to inside of the other.
+    const sewn = chain?.sewnLengthMM ?? (st ? st.finishedLengthMM : Math.round(l.lengthMM));
+    const cut = chain?.cutLengthMM ?? (st ? st.cutLengthMM : null);
     return {
       reference: l.name,
       row: l.row,
       level: l.level,
-      material: sel && sel.line ? sel.line.code : null,
-      // Figure 6: inside of one loop to inside of the other.
-      sewnLengthMM: chainByName.get(l.name)?.sewnLengthMM
-        ?? (st ? st.finishedLengthMM : Math.round(l.lengthMM)),
-      colour: sel && sel.line ? (sel.line.colour ?? null) : null,
-      construction: st ? 'spliced both ends' : null,
-      newStrengthDaN: sel && sel.line
-        ? (sel.line.strengthKinkedDaN ?? sel.line.strengthDaN) : null,
-      minimumStrengthDaN: sel && sel.line
-        ? lineStrengthCheck({
-          newStrengthDaN: sel.line.strengthKinkedDaN ?? sel.line.strengthDaN,
-          material: lineCoefficientMaterial,
-        }).minimumStrengthDaN : null,
+      material: mat ? mat.code : null,
+      core: fibre,
+      sewnLengthMM: sewn,
+      colour: mat ? (mat.colour ?? null) : null,
+      construction: cut != null && cut > sewn
+        ? `a loop each end, ${Math.round(cut - sewn)} mm of line in the two`
+        : (st ? 'spliced both ends' : null),
+      newStrengthDaN: newDaN,
+      lineCoefficient: check ? check.lineCoeff : null,
+      minimumStrengthDaN: check ? check.minimumStrengthDaN : null,
     };
   });
 
-  // Total line length per attachment point, sail to harness.
+  // Total line length per attachment point: the lines under it, and the
+  // riser.
   //
   // The standard measures this at 5 daN, and on a paraglider that tension
-  // exceeds the 1 g load on every line — so the reference length is longer
-  // than the flying length the design computed. On the longest, thinnest,
-  // least loaded lines the difference reaches 20 mm, which is 166% of the
-  // +/-12 mm inspection band. Publishing the design length in its place puts
-  // a systematic error into every manual and every inspection.
+  // exceeds the 1 g load on most lines — so the reference length is longer
+  // than the flying length the design computed. It is the sum of each line's
+  // own reference length down the path: every line of a path carries the
+  // whole 5 daN.
+  //
+  // This added the lineset's MEAN reference-minus-flying difference once to
+  // each total. A path is three lines, so that was about a third of it.
   const totals = [];
-  const referenceOffset = lengths
-    ? lengths.meanReferenceMinusFlyingMM : 0;
-  if (plan.totals) {
-    for (const [index, byRow] of Object.entries(plan.totals)) {
-      for (const [row, mm] of Object.entries(byRow)) {
-        totals.push({
-          attachmentPoint: `${row}${index}`,
-          row,
-          index: Number(index),
-          totalLineLengthMM: Math.round(mm + referenceOffset),
-          measuredAtDaN: lengths ? lengths.measurementDaN : null,
-          basis: lengths ? 'reference length at the measuring tension'
-            : 'design length; no length chain supplied',
-          includesRisers: true,
-          trimmerPosition,
-        });
-      }
-    }
+  for (const p of planPaths(plan)) {
+    const parts = p.names.map((n) => chainByName.get(n));
+    const measured = !!lengths && parts.every((x) => x && x.referenceLengthMM > 0);
+    const linesMM = measured
+      ? parts.reduce((a, x) => a + x.referenceLengthMM, 0)
+      : p.lengthMM;
+    const riser = p.isBrake ? 0 : riserLengthMM;
+    totals.push({
+      attachmentPoint: `${p.row}${p.index}`,
+      topLine: p.name,
+      row: p.row,
+      index: p.index,
+      path: p.names,
+      isBrake: p.isBrake,
+      totalLineLengthMM: Math.round(linesMM + riser),
+      measuredAtDaN: measured ? lengths.measurementDaN : null,
+      basis: measured ? 'reference length at the measuring tension'
+        : 'design length; no length chain supplied',
+      // A brake runs to its handle, not through a riser.
+      includesRisers: !p.isBrake,
+      trimmerPosition,
+    });
   }
+  const rowOrder = (r) => (r === 'K' ? 'ZY' : r === 'S' ? 'ZX' : r);
+  totals.sort((a, b) => rowOrder(a.row).localeCompare(rowOrder(b.row)) || a.index - b.index);
 
   const missing = [];
   if (!manufacturer) missing.push('manufacturer');
@@ -329,6 +423,13 @@ export function exchangeRecord({
   if (!size) missing.push('size');
   if (!weightRangeKg) missing.push('weight range');
   if (!selection) missing.push('line materials and strengths');
+  // The standard lists them, and a strength table does not: which colour
+  // each line is, is the maker's choice.
+  else if (!lines.some((l) => l.colour)) missing.push('line colours');
+  if (unknownFibre.length) {
+    missing.push(`the fibre of ${unknownFibre.length} line${unknownFibre.length > 1 ? 's' : ''} `
+      + '(no inspection minimum without it)');
+  }
   if (!riserLengthMM) missing.push('riser length');
   if (!lengths) {
     missing.push('length chain (totals are design lengths, not measured at 5 daN)');
@@ -357,6 +458,48 @@ export function exchangeRecord({
   };
 }
 
+/**
+ * A design's first inspection, before there is a wing to inspect.
+ *
+ * The record gives every attachment point its reference length; the drift
+ * model (`trimDrift`, with the plan's paths) says how far each is expected to
+ * have moved after some hours. Put through the standard's own geometry check
+ * that is a forecast of what an inspector will find — and, with
+ * `inspectionHeadroom`, of how much room is left.
+ *
+ * It is a forecast and carries the drift model's standing with it: the
+ * directions are the makers', the sizes are estimates.
+ */
+export function inspectionForecast({ record, drift }) {
+  if (!record?.totalLineLengths?.length) {
+    throw new Error('inspectionForecast needs a record with total line lengths');
+  }
+  if (!drift?.points) throw new Error('inspectionForecast needs the drift of each attachment point');
+  const moved = new Map(drift.points.map((p) => [`${p.row}${p.index}`, p]));
+  const lines = [];
+  const notForecast = [];
+  for (const t of record.totalLineLengths) {
+    const m = moved.get(t.attachmentPoint);
+    if (!m) { notForecast.push(t.attachmentPoint); continue; }
+    lines.push({
+      name: t.attachmentPoint,
+      isBrake: !!t.isBrake,
+      referenceMM: t.totalLineLengthMM,
+      expectedDriftMM: m.deltaMM,
+      measuredMM: Math.round(t.totalLineLengthMM + m.deltaMM),
+    });
+  }
+  if (!lines.length) throw new Error('inspectionForecast: no attachment point has a drift');
+  return {
+    hours: drift.hours,
+    lines,
+    notForecast,
+    check: lineGeometryCheck(lines),
+    headroom: inspectionHeadroom(lines),
+    source: drift.source ?? 'estimated',
+  };
+}
+
 /** The exchange record as TSV, which is what actually gets emailed. */
 export function exchangeTSV(record) {
   const out = [];
@@ -365,19 +508,31 @@ export function exchangeTSV(record) {
   out.push(`# riser ${record.riserLengthMM} mm, trimmer ${record.trimmerPosition}`);
   if (!record.complete) out.push(`# INCOMPLETE: ${record.missing.join(', ')}`);
   out.push('');
-  out.push(['reference', 'row', 'level', 'material', 'sewn_length_mm',
-    'colour', 'new_strength_daN', 'minimum_strength_daN'].join('\t'));
+  out.push(`# inspection every ${record.periodicalInspection.intervalYears} years or `
+    + `${record.periodicalInspection.intervalHours} hours, whichever comes first`);
+  out.push('# new_strength is of the line new (value_new); minimum_strength is that times');
+  out.push('#   the coefficient of the line\'s own fibre (section 5.4)');
+  out.push('');
+  out.push(['reference', 'row', 'level', 'material', 'core', 'sewn_length_mm',
+    'colour', 'construction', 'new_strength_daN', 'line_coeff',
+    'minimum_strength_daN'].join('\t'));
   for (const l of record.lines) {
-    out.push([l.reference, l.row, l.level, l.material ?? '', l.sewnLengthMM,
-      l.colour ?? '', l.newStrengthDaN ?? '', l.minimumStrengthDaN != null
+    out.push([l.reference, l.row, l.level, l.material ?? '', l.core ?? '',
+      l.sewnLengthMM, l.colour ?? '', l.construction ?? '', l.newStrengthDaN ?? '',
+      l.lineCoefficient ?? '', l.minimumStrengthDaN != null
         ? l.minimumStrengthDaN.toFixed(1) : ''].join('\t'));
   }
   out.push('');
+  const measured = record.totalLineLengths.find((t) => t.measuredAtDaN != null);
+  out.push(measured
+    ? `# total line lengths at ${measured.measuredAtDaN} daN: sail to the riser's loop at the harness;`
+    : '# total line lengths as DESIGNED, not at the measuring tension: sail to the riser\'s loop;');
+  out.push('#   a brake\'s from the sail to the knot at its handle, with no riser in it');
   out.push(['attachment_point', 'total_line_length_mm', 'includes_risers',
-    'trimmer_position'].join('\t'));
+    'trimmer_position', 'lines'].join('\t'));
   for (const t of record.totalLineLengths) {
     out.push([t.attachmentPoint, t.totalLineLengthMM, t.includesRisers,
-      t.trimmerPosition].join('\t'));
+      t.trimmerPosition, (t.path ?? []).join(' ')].join('\t'));
   }
   return `${out.join('\n')}\n`;
 }

@@ -15,7 +15,21 @@
  * This reads the option names each exported function destructures — across
  * however many lines it spans — and flags any caller passing something else.
  */
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync as rawRead, readdirSync } from 'fs';
+
+/**
+ * Source with comments removed.
+ *
+ * A call site's options are found by reading the text between its braces, and
+ * a comment there is read as arguments. An explanatory note mentioning "rib 4"
+ * and "0.12" came back as `buildVRibs({ 2: ... })` and `{ 4: ... }` passing
+ * options nothing accepts — three failures, all of them prose.
+ *
+ * Fourth checker in this project to have read its own commentary as data.
+ */
+const readFileSync = (path, enc) => rawRead(path, enc)
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 /** Option names a function destructures, from a possibly multi-line signature. */
 function acceptedKeys(body) {
@@ -109,13 +123,31 @@ for (const [file, body] of sources) {
 // deliberately when a new capability is added.
 const USER_FACING = [
   'optimiseLineSet', 'trimSchedule', 'fabricSchedule', 'parseCascadeSpec',
-  'parseRodSpec', 'noseRodGroup', 'checkWingRibStress', 'checkDiagonalTension',
-  'buildFamily', 'buildBOM', 'lineGeometryCheck', 'applyRiserSplit',
-  'lineTableFor', 'buildIntake', 'tiledPages', 'comparePlans',
+  'parseRodSpec', 'noseRodGroup', 'buildRods', 'checkWingRibStress', 'checkDiagonalTension',
+  // The inspection is reached through its forecast, which runs the
+  // standard's geometry check and the headroom on a design's own drift.
+  'buildFamily', 'buildBOM', 'inspectionForecast', 'exchangeRecord', 'trimDrift',
+  'applyRiserSplit',
+  'lineTableFor', 'intakeFeed', 'tiledPages', 'comparePlans',
+  // Found built, tested and unreachable in one review, each behind a control
+  // or a claim that said otherwise: the free body was computed nowhere, the
+  // line drag coefficient had a field and no reader, billow from pressure
+  // read a value nothing set, and an imported design was sized from this
+  // tool's catalogue instead of its own lines.
+  'freeBodyCheck', 'lineDrag', 'chordwiseLoading',
+  'lepLineSelection', 'lepLengthChain',
+  // Built and tested, and reachable only from the suite until this round:
+  // the comparison of two designs, the anchor solve the full-pipeline run
+  // validates with, and the design inputs the picker and that run now share.
+  'compareDesigns', 'anchorsForLineLength', 'referenceDesignInputs',
 ];
-const uiSrc = readFileSync('src/ui/app.js', 'utf8');
+// A CALL in the interface's code, comments apart. The name anywhere in the
+// file used to do, and a function mentioned in a comment and called nowhere
+// passed.
+const uiSrc = readFileSync('src/ui/app.js', 'utf8')
+  .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 const unreachable = USER_FACING
-  .filter((fn) => !new RegExp(`\\b${fn}\\b`).test(uiSrc));
+  .filter((fn) => !new RegExp(`\\b${fn}\\s*\\(`).test(uiSrc));
 
 const unique = [...new Set(bad)];
 console.log(`${Object.keys(accepted).length} exported functions with option objects`);

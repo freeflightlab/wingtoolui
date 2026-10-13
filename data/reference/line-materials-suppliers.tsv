@@ -1,0 +1,103 @@
+# What paraglider line is made of, from the people who make and test it.
+#
+# line-materials.tsv gives strengths and diameters and does not say which
+# fibre a line is. The model guessed from the name, and guessed the two most
+# used families backwards: Edelrid's 8000-U and 8001 are aramid and were
+# classed as Dyneema; Liros's PPSL is Dyneema under a polyester cover and was
+# classed as aramid. This file is the record the classification is held to.
+#
+# Retrieved 2026-10-07.
+#
+# Sources
+#   ED-7343   Edelrid technical data sheet "2 7343 HELIX", 2025
+#             https://avs.edelrid.com/images/attribut/ED-TD-7343-HELIX-2025.pdf
+#   ED-6843   Edelrid technical data sheet "2 6843 CARVEX", 2025
+#             https://avs.edelrid.com/images/attribut/ED-TD-6843-CARVEX-2025.pdf
+#   ED-7850   Edelrid technical data sheet "2 7850 TARAX", 2025
+#             https://avs.edelrid.com/images/attribut/ED-TD-7850-TARAX-2025.pdf
+#   ED-7950   Edelrid technical data sheet "2 7950 MATRIX", 2025
+#             https://avs.edelrid.com/images/attribut/ED-TD-7950-MATRIX-2025.pdf
+#   ED-8001   Edelrid product page, MAGIX PRO DRY (article 8001): "hydrophobic,
+#             non-sheathed, high-end Technora paragliding line"
+#             https://edelrid.com/ch-fr/professional/cordes/magix-pro-dry-technora-cord
+#   DHV-452   DHV line test report LI 452-2016, Edelrid 8000-U type 190:
+#             material "Aramid", no sheath; EN 926-1:2015 chapter 4.6
+#             https://service.dhv.de/dbfiles/managed/pruefung/2022/02/li_452-2016_edelrid_8000u-19.pdf
+#   DHV-1042  DHV line test report LI 1042.2021, Edelrid 9200-035:
+#             material "Dyneema", no sheath; EN 926-1:2015
+#             https://service.dhv.de/dbfiles/managed/pruefung/2022/02/li_1042.2021_ed9200-035.pdf
+#   LIROS-24  LIROS flight sport brochure 2024: PPSL, PPSLS and DSL "core
+#             pre-stretched Dyneema, cover polyester"; DFL Dyneema under
+#             polyester; LTC "100 % Technora", no cover; TSL Technora under
+#             polyester; DC "pre-stretched, coated Dyneema"
+#             https://www.liros.com/userdata/files/LIROS_flightsport_brochure_2024_DINa5_hoch_28s___low_res.pdf
+#   COUSIN    Cousin Trestec paraglider line brochure: Vectraline "100 %
+#             Vectran single braid", Technoline "100 % Technora single braid"
+#             https://pdf.nauticexpo.com/pdf/cousin-trestec/brochure-suspentes-pour-parapente/23231-107191.html
+#   NIVIUK-L3 Niviuk technical data, Link 3: every suspension line a TNL
+#             (80 to 400) supplied by Teijin Limited, Japan — the maker of
+#             Technora — and the brake line Edelrid's TARAX-240
+#             https://niviuk.com/biblioteca/items/2382_A/tech_data_link_3_paramotor_niviuk_paragliders.pdf
+#
+# Part 1 — families. `core` is what carries the load; `cover` is "none" for a
+# line that is braided and coated without a sheath. `basis` is "stated" where
+# the source names the fibre, and "inferred" where it is read from the name
+# and from how much strength the line keeps when kinked.
+#
+kind	maker	family	core	cover	basis	source
+family	Edelrid	8000-U	aramid	none	stated	DHV-452
+family	Edelrid	8001	aramid	none	stated	ED-8001
+family	Edelrid	9200	dyneema	none	stated	DHV-1042
+family	Edelrid	7343	aramid	polyester	stated	ED-7343
+family	Edelrid	6843	aramid	polyester	stated	ED-6843
+family	Edelrid	7850	dyneema	polyester	stated	ED-7850
+family	Edelrid	7950	dyneema	polyester	stated	ED-7950
+family	Liros	PPSL	dyneema	polyester	stated	LIROS-24
+family	Liros	PPSLS	dyneema	polyester	stated	LIROS-24
+family	Liros	DSL	dyneema	polyester	stated	LIROS-24
+family	Liros	DFL	dyneema	polyester	stated	LIROS-24
+family	Liros	DC	dyneema	none	stated	LIROS-24
+family	Liros	LTC	aramid	none	stated	LIROS-24
+family	Liros	TSL	aramid	polyester	stated	LIROS-24
+family	Liros	TCR	aramid	none	inferred	keeps 52 % kinked, as the Technora lines do; not in LIROS-24
+family	Teijin	TNL	aramid	polyester	stated	NIVIUK-L3
+family	Cousin	Vectraline	vectran	none	inferred	COUSIN names the family; V12-100 and V16-140 read as its 12100 and 16140
+#
+# Part 2 — sizes, as the data sheets print them. Diameter and weight are the
+# nominal figures; strength is the guaranteed minimum and the average.
+#
+kind	maker	family	item	diameter_mm	weight_g_per_m	min_strength_daN	avg_strength_daN	elongation_at_break_pct	source
+size	Edelrid	7343	050	0.95	0.65	50	58	5.0	ED-7343
+size	Edelrid	7343	075	1.0	0.70	75	85	5.0	ED-7343
+size	Edelrid	7343	090	1.2	1.10	90	105	5.0	ED-7343
+size	Edelrid	7343	140	1.3	1.40	140	155	5.0	ED-7343
+size	Edelrid	7343	190	1.5	1.80	190	215	5.0	ED-7343
+size	Edelrid	7343	230	1.7	2.40	230	265	5.0	ED-7343
+size	Edelrid	7343	280	1.8	2.60	280	315	5.0	ED-7343
+size	Edelrid	7343	340	2.1	3.70	340	375	5.0	ED-7343
+size	Edelrid	7343	420	2.3	4.10	420	450	5.0	ED-7343
+size	Edelrid	7343	500	2.4	4.60	500	580	5.0	ED-7343
+size	Edelrid	6843	140	1.4	1.50	140	165	5.0	ED-6843
+size	Edelrid	6843	180	1.5	1.80	180	210	5.0	ED-6843
+size	Edelrid	6843	230	1.9	2.80	230	250	5.0	ED-6843
+size	Edelrid	6843	280	2.1	3.20	280	310	5.0	ED-6843
+size	Edelrid	6843	370	2.4	4.60	370	440	5.0	ED-6843
+size	Edelrid	7850	080	1.0	0.70	80	100	5.0	ED-7850
+size	Edelrid	7850	100	1.1	1.00	100	125	5.0	ED-7850
+size	Edelrid	7850	130	1.3	1.30	130	165	5.0	ED-7850
+size	Edelrid	7850	160	1.5	1.70	160	205	5.0	ED-7850
+size	Edelrid	7850	200	1.7	2.00	200	255	5.0	ED-7850
+size	Edelrid	7850	240	1.9	2.30	240	295	5.0	ED-7850
+size	Edelrid	7950	080	0.9	0.70	80	95	4.5	ED-7950
+size	Edelrid	7950	100	1.1	1.00	100	115	4.5	ED-7950
+size	Edelrid	7950	145	1.3	1.30	145	170	4.5	ED-7950
+size	Edelrid	7950	190	1.6	1.80	190	245	4.5	ED-7950
+size	Edelrid	7950	300	1.9	2.60	300	330	4.5	ED-7950
+#
+# Part 3 — the bending test. EN 926-1 breaks a line new and again after
+# 5,000 bending cycles; `after_daN` is the report's calculated value (the
+# weakest of three specimens less the measurement uncertainty).
+#
+kind	maker	item	core	new_daN	after_daN	specimens_daN	source
+bending	Edelrid	8000-U 190	aramid	184.4	115.9	146.0 117.4 128.8	DHV-452
+bending	Edelrid	9200-035	dyneema	38.9	26.5	32.7 28.4 26.7	DHV-1042

@@ -29,7 +29,7 @@ find them; this does.
 node tools/check.mjs
 ```
 
-Thirteen stages, one command. All thirteen must pass.
+Fifteen stages, one command. All fifteen must pass.
 
 ## What the checks are for
 
@@ -42,6 +42,7 @@ Thirteen stages, one command. All thirteen must pass.
 | interface | features with no button, buttons with no effect |
 | reference sweep | wings that parse but describe impossible geometry |
 | assertions | checks that cannot fail, which report success |
+| units | a value used outside the unit its name claims |
 | references | names in comments and documents that point at nothing |
 | options | calls that look right, run clean, and do nothing |
 | corpus | model constants that have drifted from their data |
@@ -56,8 +57,9 @@ the first run rather than absorbed into an allowance.
 
 **Measure, do not assume.** Several corrections in this project came from a
 plausible-sounding number that was never checked. A 260 N anchor load turned
-out to be ten times the real one. A "flat 6%" billow turned out to encode an
-assumption nobody had stated. If a number can be taken from the model or from
+out to be seven times the worst real one, and a 400 Pa dynamic pressure six
+times the wing's own. A "flat 6%" billow turned out to encode an assumption
+nobody had stated. If a number can be taken from the model or from
 the reference data, take it.
 
 **Report the gap rather than closing it by tuning.** `docs/departures.md`

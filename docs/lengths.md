@@ -19,25 +19,32 @@ what gets published, and neither is what an inspector measures.
 ## The surprise in the middle
 
 It is natural to assume the measuring tension is small beside the flight load,
-so a reference length is near enough the flying length. **On a paraglider it
-is the other way round.**
+so a reference length is near enough the flying length. **On most of a
+paraglider's lines it is the other way round.**
 
-The load is spread over fifty-odd lines per side, so at 1 g:
+The load is spread over many lines, so at 1 g, on the 12-cell test wing at
+95 kg (46 lines a side):
 
 | level | lines | flight load | against 5 daN |
 | --- | --- | --- | --- |
-| upper | 52 | 0.0 – 2.6 daN, mean 0.9 | far below |
-| middle | 27 | 0.0 – 4.7 daN, mean 1.9 | below |
-| main | 9 | 0.7 – 9.3 daN, mean 4.7 | below on average |
+| upper | 28 | 0.0 – 3.7 daN, mean 1.7 | below |
+| middle | 12 | 0.6 – 6.6 daN, mean 3.5 | below on average |
+| main | 6 | 3.1 – 12.7 daN, mean 7.8 | above on average |
 
-**A line measured at 5 daN is longer than it flies at 1 g.** The reference
-length is a stretched length.
+and on the same wing with 24 cells (85 lines): upper 0.9, middle 1.9 and
+main 5.2 daN on average — the mains about at the measuring tension, the rest
+well below.
+
+**A line measured at 5 daN is longer than it flies at 1 g**, on 39 of those
+46 lines (79 of 85 on the 24-cell wing). The reference length is a stretched
+length. The seven that carry more than 5 daN — the inner mains and middles —
+are the other way about, by up to 8 mm.
 
 ## How much it matters
 
 ```
-reference − flying:  mean  +4.8 mm
-                     worst +19.9 mm   = 166% of the PMA ±12 mm band
+reference − flying:  mean  +3.2 mm
+                     worst +11.8 mm   = 98% of the PMA ±12 mm band
 ```
 
 The worst cases are the **long, thin, lightly loaded** lines — the floor-sized
@@ -48,8 +55,10 @@ chosen for load in the first place. The closed form is
 Δ = L · ε · (F_measure − F_flight) / F_rated
 ```
 
-and on the worst line: `4388 × 0.04 × (5 − 0.4) / 41 = 19.9 mm`, which the
-tests check against the model rather than trusting it.
+and on the worst line, the outermost D: `2438 × 0.04 × (5 − 0.03) / 41 =
+11.8 mm`, which the tests check against the model rather than trusting it.
+More cells hardly change it: the lines get lighter and stay as long. On the
+24-cell wing the worst is 11.4 mm.
 
 **Publishing a design length where the standard asks for a measured one puts a
 systematic error into every manual and every inspection** — one that would

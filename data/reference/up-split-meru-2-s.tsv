@@ -1,6 +1,10 @@
 # MERU 2 S
 # Source: UP Meru 2 Einzelleine sheet
-# measure: single-line
+# measure: total-including-risers
+# (declared single-line until 2026-10-06: the workbook's sheet is NAMED
+#  "Einzelleine / single" and holds sail-to-harness totals. a1 here is over
+#  seven metres, 0.3 m more than this wing's own component lines add up to —
+#  as on the Makalu 5, whose sheet says "lines including risers".)
 # Split from a multi-size sheet, one column per size
 name	length_mm
 a1	7324

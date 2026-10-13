@@ -17,7 +17,7 @@ import { naca4 } from '../src/core/airfoil.js';
 import { developWing, developmentError } from '../src/core/flatdev.js';
 import { nestPanels, fabricEstimate } from '../src/core/export.js';
 import {
-  buildLinePlan, RISER_LAYOUTS, anchorsForLineLength,
+  buildLinePlan, RISER_LAYOUTS, anchorsForLineLength, ANCHOR_DENSITY,
 } from '../src/core/lineplan.js';
 import { analyseLoads, selectLines, parseMaterialsTable, DEFAULT_LINE_TABLE, lengthChain } from '../src/core/loads.js';
 import { solveEquilibrium } from '../src/core/equilibrium.js';
@@ -26,7 +26,7 @@ import { atmosphere } from '../src/core/atmosphere.js';
 import { ribOpenings } from '../src/core/ribholes.js';
 import { buildVRibs } from '../src/core/vribs.js';
 import {
-  parseSizeFamilies, referenceDesignInputs, lineLengthPerSpan,
+  parseSizeFamilies, referenceDesignInputs, lineLengthPerSpan, EXAMPLE_SCALING,
 } from '../src/core/scaling.js';
 import { lineGeometryCheck } from '../src/core/pma.js';
 
@@ -104,8 +104,17 @@ for (const [family, sizes] of Object.entries(fams)) {
       }
 
       // --- lines --------------------------------------------------------
+      // A design whose line sheets are on file is built with its own rows,
+      // riser count and anchor counts — the topology is the same in every
+      // size of a family. Any other is a two-liner above an aspect ratio of
+      // 6.2 and a three-riser, four-row wing below it.
+      //
+      // The aspect ratio was all there was, and it built the Alpina 5, a
+      // two-liner at 5.9, as four rows on three risers: half as much line
+      // again as the wing has.
+      const own = ANCHOR_DENSITY.designs.find((d) => d.name === family) ?? null;
       const af = naca4('4415');
-      const risers = size.flatAR >= 6.2 ? 2 : 3;
+      const risers = own ? own.risers : (size.flatAR >= 6.2 ? 2 : 3);
       af.anchors = risers === 2
         ? { A: 0.09, B: 0.38, C: 0.60 }
         : { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
@@ -113,18 +122,42 @@ for (const [family, sizes] of Object.entries(fams)) {
       // from the cell count, which is the relationship real wings follow.
       const target = size.totalLineLength
         ?? lineLengthPerSpan(size.flatAR) * size.flatSpan;
-      const solved = anchorsForLineLength({
-        wing, airfoil: af, rows: Object.keys(af.anchors), targetMetres: target,
-        layout: RISER_LAYOUTS[risers === 2 ? 'A/B+C' : 'A/B/C+D'],
-        lineLengthM: size.flatSpan * 0.464, risers, mainsPerRow: 3,
-        brakes: { anchors: 13, levelCounts: [6, 3, 1] },
-      });
+      // The line height the interface gives a wing of this span: the
+      // published heights' 0.566 x span + 0.459 m to the karabiner, less the
+      // riser. It was 0.464 x span here — 5.35 m on the Geo 7 MS, whose
+      // lines are 6.42 — "what real mains imply", which is the length of a
+      // main line and not of a path. The lines were a sixth too short, and
+      // that hid about as much of the generator's surplus.
+      const riserM = 0.5;
+      const lineHeightM = EXAMPLE_SCALING.lineLength.slope * size.flatSpan
+        + EXAMPLE_SCALING.lineLength.intercept - riserM;
+      const layout = RISER_LAYOUTS[risers === 2 ? 'A/B+C' : 'A/B/C+D'];
+      const brakes = { anchors: 13, levelCounts: [6, 3, 1] };
+      let solved;
+      if (own) {
+        const plan0 = buildLinePlan({
+          wing, airfoil: af, layout, lineLengthM: lineHeightM,
+          anchorsPerRow: own.rows, mainsPerRow: 3, brakes,
+        });
+        solved = {
+          plan: plan0, anchorsPerRow: own.rows, frontFraction: null, saturated: false,
+          error: (plan0.totalLengthM - target) / target,
+        };
+      } else {
+        solved = anchorsForLineLength({
+          wing, airfoil: af, rows: Object.keys(af.anchors), targetMetres: target,
+          layout, lineLengthM: lineHeightM, risers, mainsPerRow: 3, brakes,
+        });
+      }
       const plan = solved.plan;
-      // Known and recorded: with three cascade levels the lines are longer
-      // than a real four-level wing's, so at realistic anchor density the
-      // total runs above published. Density is the constraint kept because it
+      // Known and recorded: at realistic anchor density the total does not
+      // land on the published one. Density is the constraint kept because it
       // sets the loads. Tracked as a limitation, not flagged as a defect.
-      overshoot.push({ id, error: solved.error });
+      overshoot.push({
+        id, error: solved.error, risers, published: size.totalLineLength != null,
+        anchors: solved.anchorsPerRow, front: solved.frontFraction,
+        saturated: solved.saturated, own: !!own,
+      });
       const mass = size.midWeight || 95;
       const loads = analyseLoads({
         plan, planform: pf, stations: wing.stations,
@@ -225,14 +258,41 @@ console.log(`${rows.length} wings completed the full pipeline, `
   + `${problems.length} problems\n`);
 
 if (overshoot.length) {
-  const errs = overshoot.map((o) => o.error);
-  const mean = errs.reduce((a, b) => a + b, 0) / errs.length;
+  const pct = (v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}%`;
+  const line = (label, list) => {
+    if (!list.length) return;
+    const errs = list.map((o) => o.error);
+    const mean = errs.reduce((a, b) => a + b, 0) / errs.length;
+    console.log(`  ${label.padEnd(34)} ${String(list.length).padStart(2)} wings  mean ${pct(mean)}  `
+      + `(${pct(Math.min(...errs))} to ${pct(Math.max(...errs))})`);
+  };
   console.log('known limitation, tracked not flagged:');
-  console.log(`  total line length runs +${(mean * 100).toFixed(0)}% against published `
-    + `(${(Math.min(...errs) * 100).toFixed(0)}% to +${(Math.max(...errs) * 100).toFixed(0)}%)`);
-  console.log('  three cascade levels where real wings use four, so the lines are');
-  console.log('  longer for the same anchor count. Density is kept because it sets');
-  console.log('  the loads; the length follows and is reported.\n');
+  console.log('  total line length against the target, at an anchor density real wings use');
+  line('all', overshoot);
+  line('with a published total', overshoot.filter((o) => o.published));
+  line('with its own rows and anchor counts', overshoot.filter((o) => o.own));
+  line('  of them on three risers', overshoot.filter((o) => o.own && o.risers === 3));
+  line('  of them on two', overshoot.filter((o) => o.own && o.risers === 2));
+  line('density solved, on three risers', overshoot.filter((o) => !o.own && o.risers === 3));
+  line('density solved, on two', overshoot.filter((o) => !o.own && o.risers === 2));
+  const sorted = overshoot.slice().sort((a, b) => b.error - a.error);
+  // Saturated means the search ran out of real-wing densities: at the
+  // sparsest when the lines are still too long, at the densest when they are
+  // still too short. It said "the sparsest" for both, and so put a single-
+  // skin attached on every rib down as the sparsest a real wing is.
+  const show = (o) => `${o.id} ${pct(o.error)} (${Object.entries(o.anchors || {})
+    .map(([r, n]) => `${r}${n}`).join(' ')}${o.saturated
+    ? `, at the ${o.error > 0 ? 'sparsest' : 'densest'} a real wing is` : ''})`;
+  console.log(`  furthest over:  ${sorted.slice(0, 3).map(show).join('; ')}`);
+  console.log(`  furthest under: ${sorted.slice(-3).map(show).join('; ')}`);
+  console.log(`  density solved, and still over at the sparsest a real wing is: `
+    + `${overshoot.filter((o) => o.saturated && o.error > 0).length} of `
+    + `${overshoot.filter((o) => !o.own).length}; still under at the densest: `
+    + `${overshoot.filter((o) => o.saturated && o.error < 0).length}`);
+  console.log('  A two-liner\'s front row starts with pairs of short bridles (sixteen a side');
+  console.log('  on each Ozone two-liner), a level the generator does not build, so it has');
+  console.log('  more line for the same anchors. Density is kept because it sets the loads;');
+  console.log('  the length follows and is reported.\n');
 }
 
 if (problems.length) {
@@ -265,6 +325,17 @@ if (byAR.length > 4) {
   const cHi = mean(hi, 'cxLines');
   console.log(`  ${cHi < cLo ? 'ok  ' : 'FAIL'} higher aspect ratio has less line drag `
     + `(${cLo.toFixed(5)} vs ${cHi.toFixed(5)})`);
+
+  // The ranges themselves, so a document quoting them can be checked
+  // against a run rather than against the last time someone looked.
+  const range = (k, d) => `${Math.min(...rows.map((r) => r[k])).toFixed(d)} to `
+    + `${Math.max(...rows.map((r) => r[k])).toFixed(d)}`;
+  const bySink = rows.slice().sort((a, b) => a.sink - b.sink);
+  console.log('\nthe ranges, over every wing:');
+  console.log(`  trim speed ${range('speed', 1)} km/h; glide ${range('glide', 2)}; `
+    + `minimum sink ${range('sink', 3)} m/s`);
+  console.log(`  lowest sinks: ${bySink.slice(0, 3).map((r) => `${r.id} ${r.sink.toFixed(3)}`).join('; ')}`);
+  console.log(`  nesting ${range('util', 3)} of the roll used`);
 }
 
 process.exit(problems.length ? 1 : 0);

@@ -34,6 +34,13 @@ const stages = [
   // and that is how a duplicate 'Panels DXF' button and a bill of materials
   // with no button at all both survived. It now presses the real buttons.
   ['interface', 'node tools/ui-test.cjs', /(all UI paths OK)/],
+  // Every control on the panel has to change something: the model, a view,
+  // or a file a button writes. One review found five that changed nothing,
+  // each reading as a working feature, and the interface test — which probes
+  // settings chosen by hand — had none of the five among them. On the
+  // parametric wing and on an imported design, where the controls that do
+  // not apply have to be off the panel rather than on it doing nothing.
+  ['controls', 'node tools/dead-controls.cjs', /(\d+) controls that change nothing/],
   // Every wing in the database against the physics, not just against the
   // parser. 74 of 103 reference files were reached by nothing stronger than
   // "does it parse", and a file can parse perfectly and describe an
@@ -50,6 +57,11 @@ const stages = [
   // Names quoted in comments and documents must exist in the code. A rename
   // breaks the callers, which tests catch; it leaves the prose pointing at
   // nothing, which they do not.
+  // A name that states its unit must be used in that unit. Three places
+  // interpolated by array index while their callers passed a chord fraction,
+  // which is the same shape of mistake in a space rather than a unit.
+  ['units', 'node tools/check-units.mjs',
+    /(\d+) values used outside the unit their name claims/],
   ['references', 'node tools/check-references.mjs',
     /(\d+) names that point at nothing in the code/],
   ['options', 'node tools/check-options.mjs',
@@ -58,7 +70,7 @@ const stages = [
   // what they say. `ANCHOR_DENSITY` was six hand-entered Ozone designs while
   // the corpus held 25 across six makers.
   ['corpus', 'node tools/corpus-learnings.mjs',
-    /(\d+) row-count group\(s\) where the corpus disagrees/],
+    /(\d+) place\(s\) where the corpus disagrees/],
   // Every material figure says where it came from, and an estimate says so
   // in a word a reader will notice. Presenting an estimate as a measurement
   // is what costs a tool its credibility the first time somebody checks.

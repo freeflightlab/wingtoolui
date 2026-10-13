@@ -10,10 +10,8 @@
  * the wing — and both are worth knowing.
  */
 import { readFileSync, readdirSync } from 'fs';
-import {
-  parseLineTable, parseSimpleLineSheet, parseUpLineSheet, parseBgdLineTable,
-  splitMultiSizeSheet, summarise,
-} from '../src/core/lineplan.js';
+import { splitMultiSizeSheet, summarise } from '../src/core/lineplan.js';
+import { referenceLines } from '../tools/reference-files.mjs';
 
 const files = readdirSync('data/reference').filter((f) => f.endsWith('.tsv'));
 const problems = [];
@@ -21,20 +19,13 @@ const checked = [];
 const multiSize = [];
 const collisions = [];
 
+// Which reader a file wants is decided in one place, by what is in the file.
+// A copy of the list here chose by file name, and one of its patterns —
+// `/^up-.*Components/`, capital C — missed every UP component sheet named in
+// lower case or in German: fourteen sheets this never checked.
 const read = (f, body) => {
-  if (/^up-.*Components/.test(f)) return parseUpLineSheet(body).lines;
-  if (/^bgd-/.test(f)) return parseBgdLineTable(body).lines;
-  if (/^niviuk-.*-totals/.test(f) || f === 'niviuk-spec.tsv') return null;
-  // An inspection record — reference, measured, delta — has no line names,
-  // so the checks below, which are about the shape of a cascade, do not
-  // apply to it.
-  if (/-inspection/.test(f)) return null;
-  // A fabric schedule lists materials by location; it has no lines at all.
-  if (/fabric-schedule/.test(f)) return null;
-  if (/^niviuk-/.test(f) || /^up-split-/.test(f)) return parseSimpleLineSheet(body).lines;
-  if (/materials|families|risers|min-strength/.test(f)) return null;
-  const t = parseLineTable(body);
-  return t.lines.length ? t.lines : null;
+  const r = referenceLines(f, body);
+  return r ? r.lines : null;
 };
 
 for (const f of files) {
@@ -111,8 +102,16 @@ for (const f of files) {
       `${up.toFixed(0)} against ${main.toFixed(0)} mm`]);
   }
 
-  // 3. Row A is forward of row C, so on any wing with an arc the A lines are
-  //    not the longest at a given cascade level.
+  // 3. From sail to harness, every row is much the same length: the rows
+  //    are a chord apart at the top and meet at the bottom.
+  //
+  //    This compared the A and C rows' TOP lines on a sheet of single lines,
+  //    and called a wing implausible where the A ones were 1.6 times longer.
+  //    That is not an invariant. The Summit X's a-lines are 1.7 times its
+  //    c-lines and the Makalu 5's twice, because their rows are cascaded
+  //    differently — and the same wings' totals agree to 0.2%. It only ever
+  //    passed because the sheets that break it were not being read. Held on
+  //    totals, where it is true.
   const byRow = {};
   for (const l of withLen.filter((l) => l.level === 'upper')) {
     (byRow[l.row] ||= []).push(l.lengthMM);
@@ -121,9 +120,15 @@ for (const f of files) {
     ? byRow[r].reduce((a, b) => a + b, 0) / byRow[r].length : null);
   const a = rowMean('A');
   const c = rowMean('C');
-  if (a != null && c != null && a > c * 1.6) {
-    problems.push([f, 'A uppers implausibly longer than C',
+  if (isTotals && a != null && c != null && Math.abs(a / c - 1) > 0.10) {
+    problems.push([f, 'A and C totals differ by more than a tenth',
       `${a.toFixed(0)} against ${c.toFixed(0)} mm`]);
+  }
+  // And a sheet that says it lists single lines does not have a shortest
+  // line three metres long. Eight did: they are totals.
+  if (!isTotals && Math.min(...withLen.map((l) => l.lengthMM)) > 3000) {
+    problems.push([f, 'declared as single lines, and every one is a whole line long',
+      `shortest ${Math.min(...withLen.map((l) => l.lengthMM))} mm`]);
   }
 
   // 4. Line names are unique. A duplicate means two rows of a table were

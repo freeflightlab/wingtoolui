@@ -34,15 +34,18 @@ returning "0 darts", because darting cannot add cloth.
 it. Two derivations were tried and both were wrong:
 
 **From the developable distortion.** `developmentError` measures how badly a
-flat development matches the surface. It returns about **0.002%** on every
-wing here, so it reported that no wing needs shaping at all. Wrong quantity:
+flat development matches the surface. It returns **0.0001%** on the default
+wing and on the published ones tried — 0.00005 to 0.00014% — and 0.017% on
+the Swoop2, so it reported that no wing needs shaping at all. Wrong quantity:
 it measures how well a *cone* is unrolled, and 3D shaping exists precisely
 because the nose is not a cone.
 
 **From arc against chord across a cell.** The panel follows the arc while the
-flat pattern gives the chord. But the dihedral change across one cell is about
-**half a degree**, so the excess came out at **0.001 mm**. The arc across a
-single cell is very nearly straight; that is not where the cloth goes.
+flat pattern gives the chord. But the dihedral changes by only **one to four
+degrees** across a cell — 1.4 to 2.4 on the default wing, 2.4 to 4.5 on a
+34-cell Ultralite 5 — so the excess comes out between **0.003 and 0.08 mm**.
+The arc across a single cell is very nearly straight; that is not where the
+cloth goes.
 
 The real driver is that the nose is **doubly curved** — a tight chordwise
 radius wrapped around a spanwise arc — and no developable panel matches it.

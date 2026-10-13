@@ -84,15 +84,26 @@ export const DEFAULT_SCHEDULE = {
 };
 
 /**
- * A fabric schedule, checked for the things that make a wing wrong.
+ * A fabric schedule, checked.
  *
- * The checks are not style. A soft cloth at the nose gives a wing that will
- * not hold its shape on launch; a sail heavier than its ribs is the wrong way
- * round and wastes weight where it does nothing.
+ * Two kinds of finding, and they are not treated alike:
+ *
+ *   - A cloth that is not in the library is a PROBLEM. Nothing can be weighed
+ *     with it, so the schedule is not usable (`ok` is false).
+ *   - A choice that looks wrong is a WARNING. A soft cloth at the nose gives
+ *     a wing that holds its shape less well unpressurised; a sail heavier
+ *     than its ribs puts weight where it does least. Both are a designer's
+ *     to make — Niviuk's own Bi Skin 2 P has a 38 g nose over 32 g ribs — so
+ *     they are said and the schedule still stands.
+ *
+ * Both used to be problems, and the interface refused to write a bill of
+ * materials for either: choosing a rib cloth lighter than the sail produced
+ * no bill at all, only a line in the status bar.
  */
 export function fabricSchedule(spec = {}, { library = CLOTH } = {}) {
   const schedule = { ...DEFAULT_SCHEDULE, ...spec };
   const problems = [];
+  const warnings = [];
   const resolved = {};
 
   for (const loc of LOCATIONS) {
@@ -106,20 +117,20 @@ export function fabricSchedule(spec = {}, { library = CLOTH } = {}) {
     resolved[loc] = { name, ...cloth };
   }
   if (problems.length) {
-    return { schedule, resolved, problems, ok: false, note: problems[0] };
+    return { schedule, resolved, problems, warnings, ok: false, note: problems[0] };
   }
 
   // The nose has to hold its shape when the wing is not pressurised, which is
   // what a hard finish is for.
   if (resolved.leadingEdge.finish === 'E3W') {
-    problems.push('the leading edge has a soft-finish cloth; the nose is the '
+    warnings.push('the leading edge has a soft-finish cloth; the nose is the '
       + 'part that must hold its shape unpressurised');
   }
 
   // Ribs work in tension across their depth, not as a bulging membrane, and
   // a sail heavier than its ribs puts the weight where it does least.
   if (resolved.rib.gsm < resolved.upperSail.gsm) {
-    problems.push(`the sail (${resolved.upperSail.gsm} g/m2) is heavier than `
+    warnings.push(`the sail (${resolved.upperSail.gsm} g/m2) is heavier than `
       + `the ribs (${resolved.rib.gsm} g/m2), which is the wrong way round`);
   }
 
@@ -131,25 +142,26 @@ export function fabricSchedule(spec = {}, { library = CLOTH } = {}) {
     schedule,
     resolved,
     problems,
-    ok: problems.length === 0,
+    warnings,
+    ok: true,
     distinctCloths: distinct.size,
     gsmByLocation: totalGsm,
     // A workshop stocks rolls, so the count matters the same way line types
     // do.
     cloths: [...distinct],
-    note: problems.length === 0
-      ? `${distinct.size} cloths across ${LOCATIONS.length} locations`
-      : `${problems.length} problem(s): ${problems[0]}`,
+    note: `${distinct.size} cloths across ${LOCATIONS.length} locations`
+      + (warnings.length ? `; ${warnings.length} to look at: ${warnings[0]}` : ''),
   };
 }
 
-/** The weights the bill of materials wants, from a schedule. */
+/** The weights the bill of materials wants, from a schedule, kg per m2. */
 export function clothWeightsFor(schedule) {
   if (!schedule.ok) {
     throw new Error(`clothWeightsFor: the schedule has problems — ${schedule.problems[0]}`);
   }
   const kg = (loc) => schedule.resolved[loc].gsm / 1000;
   return {
+    leadingEdge: kg('leadingEdge'),
     upperSail: kg('upperSail'),
     lowerSail: kg('lowerSail'),
     rib: kg('rib'),

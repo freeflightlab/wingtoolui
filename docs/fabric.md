@@ -31,22 +31,33 @@ there flutters.
 Weight alone cannot express any of that, and weight alone was what the model
 had.
 
-## What the tool refuses
+## What the tool says about a choice
 
-These are not style rules.
+- **A cloth that is not in the library is refused**, with the list of what
+  there is: nothing can be weighed in a cloth with no weight.
+- **A soft-finish cloth at the leading edge is flagged.** A wing whose nose
+  will not hold its shape unpressurised is a wing that will not launch
+  cleanly.
+- **A sail heavier than its ribs is flagged.** That is the wrong way round: it
+  puts the weight where it does least.
 
-- **A soft-finish cloth at the leading edge.** A wing whose nose will not hold
-  its shape unpressurised is a wing that will not launch cleanly.
-- **A sail heavier than its ribs.** That is the wrong way round: it puts the
-  weight where it does least.
-- **A cloth that is not in the library**, with the list of what there is.
+The last two were refusals as well, and a refusal stopped the bill of
+materials altogether — so a designer trying a light rib cloth got no bill
+instead of a bill with a warning on it. They are the designer's to decide.
+The bill is written either way and carries them under TO LOOK AT.
 
 ## In the tool
 
 Four selects under Assumptions — leading edge, upper surface, lower surface,
 ribs and diagonals — and the chosen weights flow into the bill of materials
-rather than four constants. The schedule reports how many distinct cloths it
-needs, because a workshop stocks rolls the same way it stocks line spools.
+rather than four constants. "Leading edge cloth to" says how much of the upper
+surface, from the nose, is cut from the leading-edge cloth: a quarter of the
+chord by default. The schedule reports how many distinct cloths it needs,
+because a workshop stocks rolls the same way it stocks line spools.
+
+The patterns do not yet follow: the upper and lower surfaces are nested on
+one roll whatever cloths are chosen, and the nose cloth has no seam of its own
+in the cut panels. The bill says so when more than one cloth is in use.
 
 ## Provenance
 

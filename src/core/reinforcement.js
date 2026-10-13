@@ -1,9 +1,8 @@
 /* reinforcement.js — where a wing is strengthened, and what it costs.
  *
- * The bill of materials counts cloth and line and says, at the bottom of
- * every printout, that reinforcement is not counted. On a 22 m^2 wing the
- * bill comes to 2.4 kg against a finished weight of 3.5 to 4.5 kg, and
- * reinforcement is the largest single item in that gap.
+ * Mylar, dacron, tape, rods and attachment tabs: none of it aerodynamic
+ * surface and none of it line, and together a few hundred grams of a wing
+ * that a bill counting cloth and line alone leaves out.
  *
  * It is placed rather than calculated: a designer decides where a wing needs
  * help, and the rules are conventions rather than derivations. What can be
@@ -29,6 +28,8 @@
  * are wear and handling, which is why a light wing drops them first.
  */
 
+import { toRibPlane, ribCopies, hasCentreRib } from './wing3d.js';
+
 /** Areal weights, kg per square metre, and widths in metres. */
 export const DEFAULT_REINFORCEMENT = {
   mylar: { gsm: 0.170, widthM: 0.045 },        // stiff film, heavy for its area
@@ -49,6 +50,11 @@ export const DEFAULT_REINFORCEMENT = {
  * @param {object} airfoil   for the intake and anchor positions
  * @param {object} o         spec overrides, and the line plan for anchor counts
  */
+/** True for a point on the wing's centreline, which the two halves share. */
+function onCentreline(p) {
+  return Array.isArray(p) && Math.abs(p[1]) < 1e-9;
+}
+
 export function buildReinforcement(wing, airfoil, { spec = {}, plan = null } = {}) {
   const R = { ...DEFAULT_REINFORCEMENT, ...spec };
   const items = [];
@@ -60,18 +66,22 @@ export function buildReinforcement(wing, airfoil, { spec = {}, plan = null } = {
   if (R.fitMylar) {
     // Two strips per rib, each running the length of the intake plus a margin.
     const intake = airfoil.intake || { start: 0.012, end: 0.055 };
+    // Per rib of the WHOLE wing: a rib on the centreline is one rib, not one
+    // on each side. Doubling the half counted it twice — 52 ribs' worth of
+    // mylar, seam tape and rods on a wing that has 51.
     let lengthM = 0;
-    for (const rib of ribs) {
+    let ribCount = 0;
+    ribs.forEach((rib, i) => {
       const span = Math.max(0.04, (intake.end - intake.start) * rib.chord) + 0.03;
-      lengthM += span * 2;
-    }
-    lengthM *= sides;
+      lengthM += span * 2 * ribCopies(wing, i);
+      ribCount += ribCopies(wing, i);
+    });
     items.push({
       item: 'Mylar at the intakes',
       lengthM,
       areaM2: lengthM * R.mylar.widthM,
       massKg: lengthM * R.mylar.widthM * R.mylar.gsm,
-      count: ribs.length * 2 * sides,
+      count: ribCount * 2,
       why: 'holds the nose shape against the highest pressure on the wing',
     });
   }
@@ -80,15 +90,20 @@ export function buildReinforcement(wing, airfoil, { spec = {}, plan = null } = {
   if (R.fitDacron) {
     // One patch per anchor. Take the count from the plan where there is one,
     // rather than assuming a row on every rib.
+    //
+    // Across the whole wing: an anchor on the centreline is one point that
+    // both halves' lines come to, so it takes one patch, not two.
+    const rowCount = Object.keys(airfoil.anchors || { A: 0, B: 0, C: 0 }).length;
     const anchorCount = plan
-      ? plan.lines.filter((l) => l.level === 'upper').length
-      : ribs.length * Object.keys(airfoil.anchors || { A: 0, B: 0, C: 0 }).length;
+      ? plan.lines.filter((l) => l.level === 'upper')
+        .reduce((n, l) => n + (onCentreline(l.to) ? 1 : 2), 0)
+      : ribs.reduce((n, _, i) => n + ribCopies(wing, i), 0) * rowCount;
     const areaEach = R.dacron.patchM * R.dacron.patchM;
     items.push({
       item: 'Dacron at the anchors',
-      count: anchorCount * sides,
-      areaM2: anchorCount * sides * areaEach,
-      massKg: anchorCount * sides * areaEach * R.dacron.gsm,
+      count: anchorCount,
+      areaM2: anchorCount * areaEach,
+      massKg: anchorCount * areaEach * R.dacron.gsm,
       why: 'spreads a point load that would otherwise tear the ripstop',
     });
   }
@@ -100,6 +115,8 @@ export function buildReinforcement(wing, airfoil, { spec = {}, plan = null } = {
       lengthM += Math.abs(ribs[i + 1].station - ribs[i].station);
     }
     lengthM *= sides;
+    // And across the centre cell, when the innermost rib is half a cell out.
+    if (ribs.length && !hasCentreRib(wing)) lengthM += 2 * Math.abs(ribs[0].station);
     items.push({
       item: 'Trailing edge tape',
       lengthM,
@@ -113,8 +130,7 @@ export function buildReinforcement(wing, airfoil, { spec = {}, plan = null } = {
   if (R.fitSeamTape) {
     // Every chordwise seam, which is one per rib per surface.
     let lengthM = 0;
-    for (const rib of ribs) lengthM += rib.chord * 2;
-    lengthM *= sides;
+    ribs.forEach((rib, i) => { lengthM += rib.chord * 2 * ribCopies(wing, i); });
     items.push({
       item: 'Seam tape',
       lengthM,
@@ -167,33 +183,48 @@ export function massBudget({ bom, reinforcement, rods = null, publishedKg = null
 /* ----------------------------------------------------------------- rods -- */
 
 /**
- * Leading-edge rods.
+ * Nylon rods.
  *
- * The largest single item in the mass gap, and the one a light wing feels
- * most. A rod is a nylon or carbon rod sewn into a sleeve along the nose,
- * holding the leading edge open so the wing keeps its intake shape at low
- * angles of attack and reinflates cleanly after a collapse. Before rods, that
- * job was done by fabric stiffness and mylar alone, and wings needed a larger
- * nose radius to manage without.
+ * A rod is a length of nylon in a pocket sewn to a rib. It works in bending,
+ * the one thing cloth cannot do, and holds a shape the wing would lose when
+ * it is not pressurised: the radius of the nose above all.
  *
  * ---------------------------------------------------------------------------
- * What decides the length
+ * Two kinds, as the one complete design here has them
  * ---------------------------------------------------------------------------
- * A rod runs from the leading edge back along the rib, far enough to control
- * the curvature that matters and no further — every millimetre past that is
- * weight and pack volume. Makers typically run to somewhere between 25% and
- * 45% of chord, longer on the ribs that face a cell opening and shorter on
- * the closed ones behind a diagonal.
+ * Laboratori d'envol's Swoop2 defines its rods in section 21 of its file, and
+ * its design program prints every one it makes (`data/reference/
+ * swoop2-joncs.tsv`): 25 of each kind a side, 72.81 m for the wing.
  *
- * The rod follows the rib's own surface rather than a straight line, so its
- * length is an arc length along the profile, not a chord fraction times the
- * chord. On a cambered nose the difference is a few per cent — small, and
- * exactly the sort of small that a mass budget accumulates over a hundred
- * rods.
+ *   nose     ONE piece from the upper surface, round the leading edge, to the
+ *            lower surface: on the Swoop2 from 18.5% of chord on top to 15%
+ *            underneath, 55 to 83 cm long. Two pieces butted at the nose
+ *            would hinge exactly where the rod is there to stop a hinge.
+ *   batten   along the upper surface only: 23.5% to 70% on the Swoop2.
  *
- * Diameter is the designer's choice, and mass goes as the square of it: a
- * 1.4 mm rod weighs twice a 1.0 mm rod for the same length. That is the trade
- * this exists to make visible.
+ * Each end of a rod leaves the surface over a run-out zone, curving into the
+ * rib by a per cent or two of chord, so the end of a stiff rod does not bear
+ * on the sail. The file gives each zone as four numbers — where it starts,
+ * where the rod ends, how far it leaves the surface and with what exponent.
+ *
+ * ---------------------------------------------------------------------------
+ * What this replaced
+ * ---------------------------------------------------------------------------
+ * Section 21 reads `12.0 18.5 1.5 2.0` for the upper end of the nose rod, and
+ * for a long time this project took that as "a rod from 12% to 18.5% of the
+ * upper surface, 1.5 mm in diameter". On every wing that was not an imported
+ * file it then drew, billed and cut marks for a 14 cm stub that did not reach
+ * the nose, where the design's own program makes a rod of 83 cm that goes
+ * round it. The 1.5 is the run-out, in per cent of chord; the file states no
+ * diameter at all. Reading the program's own rod table settled it — the
+ * table had been in the repository throughout.
+ *
+ * `rodPolyline` builds a rod as the program does, on any section, and on the
+ * Swoop2's own ribs its lengths are the printed ones. An imported file still
+ * gets its rods from `lepJoncs`, which follows the program step for step.
+ *
+ * Diameter and material are the designer's: mass goes as the square of the
+ * diameter, which is the trade to see.
  */
 
 /** Rod materials: density in kg/m^3, and what they are for. */
@@ -215,94 +246,476 @@ Object.defineProperty(ROD_MATERIALS, 'provenance', {
   enumerable: false,
 });
 
+/**
+ * The Swoop2's own rods, as groups: the default a parametric wing starts
+ * from. Zones and run-outs are fractions of chord, from its section 21; the
+ * diameter is not in the file and is this tool's setting.
+ */
+export const SWOOP2_RODS = [
+  {
+    kind: 'nose', name: 'nose',
+    upperZone: [0.12, 0.185], lowerZone: [0.07, 0.15],
+    runout: [0.015, 0.020], exponent: 2,
+  },
+  {
+    kind: 'batten', name: 'batten',
+    frontZone: [0.235, 0.295], aftZone: [0.63, 0.70],
+    runout: [0.011, 0.011], exponent: 2,
+  },
+];
+
 export const DEFAULT_ROD_SPEC = {
   material: 'nylon',
-  diameterMM: 1.3,
-  // Fraction of chord the rod runs back along the upper surface.
-  extentOpen: 0.42,      // ribs facing a cell opening
-  extentClosed: 0.28,    // closed ribs, which need less
-  sleeveGsm: 0.030,      // the fabric sleeve the rod sits in
-  sleeveWidthM: 0.018,
-  everyRib: true,
+  diameterMM: 1.5,
+  // Shorter than this is not a rod.
+  minLengthM: 0.05,
 };
 
 /**
- * Rods for a wing.
- *
- * @param {object} wing
- * @param {object} o  spec overrides, plus `closedRibs` — the indices that do
- *                    not face a cell opening, which take the shorter rod.
+ * A nose rod for a wing that says only how far back it runs: the Swoop2's
+ * run-out lengths, ending where the designer says.
  */
-export function buildRods(wing, { spec = {}, closedRibs = null } = {}) {
-  const R = { ...DEFAULT_ROD_SPEC, ...spec };
-  const mat = ROD_MATERIALS[R.material];
-  if (!mat) throw new Error(`Unknown rod material: ${R.material}`);
-
-  const closed = new Set(closedRibs || []);
-  const areaM2 = Math.PI * ((R.diameterMM / 2000) ** 2);
-  const rods = [];
-
-  for (const rib of wing.ribs) {
-    const isClosed = closed.has(rib.index);
-    const extent = isClosed ? R.extentClosed : R.extentOpen;
-    // Arc length along the upper surface out to the extent, not a straight
-    // line: the nose is where the profile curves most.
-    const lengthM = upperArcLength(rib, extent);
-    rods.push({
-      ribIndex: rib.index,
-      closed: isClosed,
-      extentChord: extent,
-      lengthM,
-      // A straight chordwise measure, for comparison.
-      chordwiseM: extent * rib.chord,
-      massKg: lengthM * areaM2 * mat.densityKgM3,
-    });
+export function noseRodGroup({
+  upperTo = 0.185, lowerTo = 0.15, fromRib = 0, toRib = null,
+  diameterMM = DEFAULT_ROD_SPEC.diameterMM, material = 'nylon', name = 'nose',
+} = {}) {
+  if (!(upperTo > 0 && upperTo < 1) || !(lowerTo > 0 && lowerTo < 1)) {
+    throw new Error('noseRodGroup needs an extent on each surface, as a fraction of chord');
   }
-
-  const sides = 2;
-  const totalLengthM = rods.reduce((s, r) => s + r.lengthM, 0) * sides;
-  const rodMass = rods.reduce((s, r) => s + r.massKg, 0) * sides;
-  const sleeveMass = totalLengthM * R.sleeveWidthM * R.sleeveGsm;
-  const straight = rods.reduce((s, r) => s + r.chordwiseM, 0) * sides;
-
+  const [nose, ] = SWOOP2_RODS;
+  const upLen = nose.upperZone[1] - nose.upperZone[0];
+  const loLen = nose.lowerZone[1] - nose.lowerZone[0];
   return {
-    rods,
-    material: R.material,
-    diameterMM: R.diameterMM,
-    count: rods.length * sides,
-    totalLengthM,
-    rodMassKg: rodMass,
-    sleeveMassKg: sleeveMass,
-    massKg: rodMass + sleeveMass,
-    // How much the curvature costs against a straight-line estimate.
-    straightLengthM: straight,
-    curvatureExcess: straight > 0 ? totalLengthM / straight - 1 : 0,
-    spec: R,
+    kind: 'nose', name,
+    upperZone: [Math.max(upperTo * 0.25, upperTo - upLen), upperTo],
+    lowerZone: [Math.max(lowerTo * 0.25, lowerTo - loLen), lowerTo],
+    runout: nose.runout.slice(), exponent: nose.exponent,
+    fromRib, toRib, diameterMM, material,
   };
 }
 
-/** Arc length along the upper surface from the leading edge to a chord fraction. */
-function upperArcLength(rib, extentChord) {
-  const b = (rib.betaDeg * Math.PI) / 180;
-  const oy = rib.lobePoint[0];
-  const oz = rib.lobePoint[1];
-  const flat = ([x, y, z]) => [
-    (x - rib.xLE) / rib.chord,
-    (-(y - oy) * Math.sin(b) + (z - oz) * Math.cos(b)) / rib.chord,
-  ];
-  const pts = rib.upper.map(flat);
-  let s = 0;
-  for (let i = 1; i < pts.length; i++) {
-    if (pts[i][0] > extentChord) {
-      // Partial final segment, so the length does not jump with sampling.
-      const f = (extentChord - pts[i - 1][0]) / ((pts[i][0] - pts[i - 1][0]) || 1);
-      s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) * Math.max(0, f);
-      break;
+/**
+ * One rod on one rib section, built as LEparagliding builds it.
+ *
+ * `loop` is the section in its own plane, metres, in the usual order: from
+ * the trailing edge forward along the upper surface, round the nose, and back
+ * along the lower. Returns the rod as a polyline in the same coordinates —
+ * so it can be drawn on the rib and marked on its pattern — and its length.
+ *
+ * The rod follows the surface, and across each run-out zone leaves it for
+ * the inside of the rib: by `runout` of the chord at the rod's end, growing
+ * as the distance into the zone to the power `exponent`.
+ */
+export function rodPolyline(loop, group, { chord: chordGiven = null, origin = null } = {}) {
+  if (!Array.isArray(loop) || loop.length < 5) return null;
+  let iLE = 0;
+  for (let i = 1; i < loop.length; i++) if (loop[i][0] < loop[iLE][0]) iLE = i;
+  // Stations are fractions of the section's own chord, from its own zero —
+  // as a section file states them and as the program reads them. A cambered
+  // section's foremost point lies a hair ahead of that zero, so the two are
+  // not the same thing; with neither given, the loop's own extent is used.
+  const u0 = origin ?? loop[iLE][0];
+  const chord = chordGiven ?? (Math.max(...loop.map((p) => p[0])) - u0);
+  if (!(chord > 0)) return null;
+  const X = (p) => p[0] - u0;
+  // Each surface from the nose outward.
+  const upper = loop.slice(0, iLE + 1).reverse();
+  const lower = loop.slice(iLE);
+  const exponent = group.exponent ?? 2;
+
+  // The point on a surface at a chordwise distance from the nose.
+  const at = (branch, x) => {
+    for (let i = 1; i < branch.length; i++) {
+      if (X(branch[i]) >= x) {
+        const a = branch[i - 1];
+        const b = branch[i];
+        const f = (x - X(a)) / ((X(b) - X(a)) || 1);
+        return [a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])];
+      }
     }
-    s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    return null;
+  };
+  // A surface between two stations, with the stations themselves and any
+  // zone boundary between them put in as points.
+  const run = (branch, x0, x1, marks = []) => {
+    const first = x0 <= 0 ? branch[0].slice() : at(branch, x0);
+    const last = at(branch, x1);
+    if (!first || !last) return null;
+    const out = [{ x: Math.max(0, x0), p: first }];
+    const inner = branch.filter((p) => X(p) > x0 + 1e-9 && X(p) < x1 - 1e-9)
+      .map((p) => ({ x: X(p), p: p.slice() }));
+    for (const m of marks) {
+      if (m > x0 + 1e-9 && m < x1 - 1e-9 && !inner.some((q) => Math.abs(q.x - m) < 1e-9)) {
+        const q = at(branch, m);
+        if (q) inner.push({ x: m, p: q });
+      }
+    }
+    inner.sort((a, b) => a.x - b.x);
+    return out.concat(inner, [{ x: x1, p: last }]);
+  };
+  // Leave the surface across a zone, towards the inside of the rib: down
+  // from the upper surface, up from the lower.
+  const leave = (pts, zoneStart, zoneEnd, amount, inward) => {
+    const span = Math.abs(zoneEnd - zoneStart);
+    if (!(span > 0) || !(amount > 0)) return;
+    const k = (amount * chord) / (span ** exponent);
+    const outward = zoneEnd > zoneStart ? 1 : -1;
+    for (const q of pts) {
+      const d = (q.x - zoneStart) * outward;
+      if (d > 0) q.p[1] += inward * k * (Math.min(d, span) ** exponent);
+    }
+  };
+
+  let pts;
+  if (group.kind === 'nose') {
+    const [ui, uf] = group.upperZone.map((f) => f * chord);
+    const [li, lf] = group.lowerZone.map((f) => f * chord);
+    const up = run(upper, 0, uf, [ui]);
+    const lo = run(lower, 0, lf, [li]);
+    if (!up || !lo) return null;
+    leave(up, ui, uf, group.runout?.[0] ?? 0, -1);
+    leave(lo, li, lf, group.runout?.[1] ?? 0, +1);
+    // From the upper end forward to the nose, then back underneath.
+    pts = up.slice().reverse().map((q) => q.p).concat(lo.slice(1).map((q) => q.p));
+  } else if (group.kind === 'batten') {
+    const branch = group.surface === 'lower' ? lower : upper;
+    const inward = group.surface === 'lower' ? +1 : -1;
+    const [fa, fb] = group.frontZone.map((f) => f * chord);
+    const [aa, ab] = group.aftZone.map((f) => f * chord);
+    const mid = run(branch, fa, ab, [fb, aa]);
+    if (!mid) return null;
+    leave(mid, fb, fa, group.runout?.[0] ?? 0, inward);
+    leave(mid, aa, ab, group.runout?.[1] ?? 0, inward);
+    pts = mid.map((q) => q.p);
+  } else {
+    throw new Error(`Unknown kind of rod: ${group.kind}`);
   }
-  return s * rib.chord;
+
+  let lengthM = 0;
+  for (let i = 1; i < pts.length; i++) {
+    lengthM += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  }
+  return { points: pts, lengthM, chordM: chord };
 }
+
+/** How much of the chord a rod's ends span, for comparing with its length. */
+function rodChordwise(group) {
+  return group.kind === 'nose'
+    ? group.upperZone[1] + group.lowerZone[1]
+    : group.aftZone[1] - group.frontZone[0];
+}
+
+/**
+ * The rods of a wing: every group on every rib it covers.
+ *
+ * @param {object} wing
+ * @param {object} o
+ * @param {object[]} o.groups   `noseRodGroup(...)`, `SWOOP2_RODS`, or what
+ *                              `parseRodSpec` returns; ribs count from 0 at
+ *                              the centre, and a group with no `toRib` runs
+ *                              to the tip
+ * @param {object} o.spec       material, diameter and shortest rod for any
+ *                              group that does not say
+ */
+export function buildRods(wing, { groups = null, spec = {} } = {}) {
+  if (!wing?.ribs?.length) throw new Error('buildRods needs a wing');
+  const R = { ...DEFAULT_ROD_SPEC, ...spec };
+  const use = groups ?? [noseRodGroup({ diameterMM: R.diameterMM, material: R.material })];
+  const rods = [];
+  const skipped = [];
+
+  for (const g of use) {
+    const material = g.material ?? R.material;
+    const mat = ROD_MATERIALS[material];
+    if (!mat) throw new Error(`Unknown rod material: ${material}`);
+    const diameterMM = g.diameterMM ?? R.diameterMM;
+    if (!(diameterMM > 0)) throw new Error('a rod needs a positive diameter');
+    const areaM2 = Math.PI * ((diameterMM / 2000) ** 2);
+    const from = Math.max(0, g.fromRib ?? 0);
+    const to = Math.min(g.toRib ?? wing.ribs.length - 1, wing.ribs.length - 1);
+    for (let i = from; i <= to; i++) {
+      const rib = wing.ribs[i];
+      // The section as cut, in the rib's own plane: what the Rib view draws
+      // and the rib pattern is cut from.
+      const loop = rib.upper.slice().reverse().concat(rib.lower.slice(1))
+        .map((p) => toRibPlane(rib, p));
+      // In that plane the section's zero is the origin and its chord the
+      // rib's.
+      const made = rodPolyline(loop, g, { chord: rib.chord, origin: 0 });
+      if (!made) { skipped.push({ group: g.name, rib: i, why: 'its ends are off this rib' }); continue; }
+      if (made.lengthM < R.minLengthM) {
+        skipped.push({ group: g.name, rib: i, why: 'too short to be a rod' });
+        continue;
+      }
+      rods.push({
+        group: g.name ?? g.kind,
+        kind: g.kind,
+        rib: i,
+        ribIndex: i,
+        points: made.points,
+        lengthM: made.lengthM,
+        // What its ends span along the chord: a rod is longer, because it
+        // follows the section, and a nose rod much longer.
+        chordwiseM: rodChordwise(g) * made.chordM,
+        chordM: made.chordM,
+        diameterMM,
+        material,
+        massG: made.lengthM * areaM2 * mat.densityKgM3 * 1000,
+      });
+    }
+  }
+
+  // Each rod as many times as the whole wing has its rib: twice, except on
+  // a rib that sits on the centreline.
+  const copies = (r) => ribCopies(wing, r.rib);
+  const total = (f) => rods.reduce((a, r) => a + f(r) * copies(r), 0);
+  const byDiameter = {};
+  const byGroup = {};
+  for (const r of rods) {
+    const k = copies(r);
+    const d = byDiameter[r.diameterMM] ||= { count: 0, lengthM: 0, massG: 0 };
+    d.count += k; d.lengthM += r.lengthM * k; d.massG += r.massG * k;
+    const g = byGroup[r.group] ||= { kind: r.kind, count: 0, lengthM: 0, massG: 0 };
+    g.count += k; g.lengthM += r.lengthM * k; g.massG += r.massG * k;
+  }
+  const count = total(() => 1);
+  const totalLengthM = total((r) => r.lengthM);
+  const totalMassG = total((r) => r.massG);
+  const straight = total((r) => r.chordwiseM);
+
+  return {
+    rods,
+    skipped,
+    // The count the wing has, not twice the half: a rod on a centre rib is
+    // one rod.
+    count,
+    totalLengthM,
+    totalMassG,
+    massKg: totalMassG / 1000,
+    byDiameter,
+    byGroup,
+    // How much longer the rods are than the chord their ends span.
+    straightLengthM: straight,
+    curvatureExcess: straight > 0 ? totalLengthM / straight - 1 : 0,
+    spec: R,
+    note: `${count} rods, ${totalLengthM.toFixed(1)} m, ${totalMassG.toFixed(0)} g`
+      + (skipped.length ? `; ${skipped.length} not made (${skipped[0].why})` : ''),
+  };
+}
+
+/**
+ * Does a rod cross an opening in its rib?
+ *
+ * A rod's pocket is sewn to the rib, and a rod across a hole has nothing to
+ * be sewn to. Rods and openings are placed by rules that do not know about
+ * each other — the trap `checkRibInternals` was written for — so they are
+ * compared as they lie on the rib: the rod's own line against each opening's
+ * outline, with a margin for the pocket. The openings this tool cuts are
+ * shaped to keep 10 mm or more from a rod (`buildRibHoles`); this is the
+ * independent look, at 8 mm, and it also sees a design's own holes.
+ *
+ * This used to compare chord ranges, and also reported a clash wherever a
+ * line anchor fell within a rod's run, on the grounds that "an anchor tab
+ * sewn over a rod puts its load into a hinge". The Swoop2 has its A anchors
+ * at 11% of chord inside a nose rod that runs to 15%: a tab there is how
+ * wings are built, and that check is gone.
+ *
+ * @param {object[]} o.rods        from `buildRods`
+ * @param {object}  o.holesByRib   rib index -> list of outlines, each a list
+ *                                 of [u, v] in the rib's own plane
+ */
+export function checkRodClearance({ rods, holesByRib = {}, marginM = 0.008 }) {
+  const get = (i) => (holesByRib instanceof Map ? holesByRib.get(i) : holesByRib[i]) ?? [];
+  const segDist = (p, a, b) => {
+    const vx = b[0] - a[0];
+    const vy = b[1] - a[1];
+    const L2 = vx * vx + vy * vy;
+    const t = L2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / L2)) : 0;
+    return Math.hypot(p[0] - a[0] - t * vx, p[1] - a[1] - t * vy);
+  };
+  const inside = (p, poly) => {
+    let hit = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i];
+      const b = poly[j];
+      if ((a[1] > p[1]) !== (b[1] > p[1])
+        && p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) hit = !hit;
+    }
+    return hit;
+  };
+  const cross = (a, b, c, d) => {
+    const o = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+    return (o(a, b, c) > 0) !== (o(a, b, d) > 0) && (o(c, d, a) > 0) !== (o(c, d, b) > 0);
+  };
+
+  const clashes = [];
+  for (const r of rods) {
+    const holes = get(r.rib);
+    let worst = Infinity;
+    let through = false;
+    holes.forEach((poly) => {
+      if (!poly || poly.length < 3) return;
+      for (let i = 0; i < r.points.length; i++) {
+        const p = r.points[i];
+        if (inside(p, poly)) through = true;
+        for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+          worst = Math.min(worst, segDist(p, poly[j], poly[k]));
+          if (i > 0 && cross(r.points[i - 1], p, poly[j], poly[k])) through = true;
+        }
+      }
+      // The outline's own corners against the rod, for a rod with long
+      // straight runs between its points.
+      for (const q of poly) {
+        for (let i = 1; i < r.points.length; i++) {
+          worst = Math.min(worst, segDist(q, r.points[i - 1], r.points[i]));
+        }
+      }
+    });
+    if (through || worst < marginM) {
+      clashes.push({
+        kind: 'hole', rib: r.rib, group: r.group,
+        clearanceM: through ? 0 : worst, through,
+      });
+    }
+  }
+  const ribs = [...new Set(clashes.map((c) => c.rib))].sort((a, b) => a - b);
+  return {
+    clashes,
+    ok: clashes.length === 0,
+    holeClashes: clashes.length,
+    ribs,
+    marginM,
+    note: clashes.length === 0
+      ? 'no rod crosses an opening'
+      : `a rod crosses or touches an opening on rib${ribs.length > 1 ? 's' : ''} `
+        + `${ribs.join(', ')}: its pocket has nothing to be sewn to there`,
+  };
+}
+
+/**
+ * Rods written out, one group to a line:
+ *
+ *     # kind    first zone    second zone    dia   ribs
+ *     nose      12.0 18.5     7.0 15.0       1.5
+ *     batten    23.5 29.5     63.0 70.0      1.5   0 24
+ *
+ * which is the Swoop2's own definition. Per cent of chord, as LEP section 21
+ * states them, because that is how a rod scales with the wing.
+ *
+ *   nose     the first zone is on the upper surface and the second on the
+ *            lower: the rod runs from the END of the first (18.5%), round
+ *            the nose, to the end of the second (15%), leaving the surface
+ *            from each zone's start.
+ *   batten   both zones are on the upper surface: the rod runs from the
+ *            start of the first (23.5%) to the end of the second (70%).
+ *
+ * The rib range is optional (centre rib 0; none means every rib). A line
+ * that starts with neither word is taken as a name and read by its numbers —
+ * a second zone that begins aft of the first is a batten — which is how a
+ * spec written before the kinds were named still reads, correctly now: those
+ * were taken as four short separate rods, one per pair of numbers.
+ */
+export function parseRodSpec(text, { ribCount = null } = {}) {
+  if (typeof text !== 'string') throw new Error('parseRodSpec needs text');
+
+  const groups = [];
+  const problems = [];
+  const inferred = [];
+  let lineNo = 0;
+
+  for (const raw of text.split(/\r?\n/)) {
+    lineNo++;
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+
+    // The name may contain spaces, so the numbers are found from the right.
+    const tok = line.split(/\s+/);
+    const nums = [];
+    while (tok.length && /^-?[\d.]+$/.test(tok[tok.length - 1])) nums.unshift(Number(tok.pop()));
+    const words = tok.join(' ');
+    const said = /^(nose|batten)\b/i.exec(words);
+    const name = words || `rod ${groups.length + 1}`;
+
+    if (nums.length !== 5 && nums.length !== 7) {
+      problems.push(`line ${lineNo}: expected "kind  zone zone  zone zone  diameter  `
+        + `[fromRib toRib]", got ${nums.length} numbers`);
+      continue;
+    }
+    const [a, b, c, d, dia] = nums;
+    const pct = (v) => v / 100;
+    const kind = said ? said[1].toLowerCase() : (c >= b ? 'batten' : 'nose');
+    if (!said) inferred.push(`"${name}" read as a ${kind === 'nose' ? 'nose rod' : 'batten'}`);
+
+    let bad = false;
+    for (const [lab, from, to] of [['first', a, b], ['second', c, d]]) {
+      if (!(to > from)) {
+        problems.push(`line ${lineNo}: "${name}" ${lab} zone runs ${from} to ${to}, `
+          + 'which is backwards');
+        bad = true;
+      } else if (from < 0 || to > 100) {
+        problems.push(`line ${lineNo}: "${name}" ${lab} zone is outside the chord`);
+        bad = true;
+      }
+    }
+    if (kind === 'batten' && !bad && !(c >= b)) {
+      problems.push(`line ${lineNo}: "${name}" is a batten, and its second zone `
+        + `starts at ${c}, ahead of where its first ends at ${b}`);
+      bad = true;
+    }
+    if (!(dia > 0)) {
+      problems.push(`line ${lineNo}: "${name}" needs a positive diameter`);
+      bad = true;
+    }
+    const fromRib = nums.length === 7 ? Math.round(nums[5]) : 0;
+    const toRib = nums.length === 7 ? Math.round(nums[6]) : null;
+    if (toRib != null && !(toRib >= fromRib)) {
+      problems.push(`line ${lineNo}: "${name}" rib range ${fromRib} to ${toRib} is backwards`);
+      bad = true;
+    }
+    if (ribCount != null && toRib != null && toRib > ribCount - 1) {
+      problems.push(`line ${lineNo}: "${name}" reaches rib ${toRib} but the `
+        + `wing has ${ribCount}, counted from 0`);
+      bad = true;
+    }
+    if (bad) continue;
+
+    const [nose, batten] = SWOOP2_RODS;
+    groups.push(kind === 'nose'
+      ? {
+        kind, name, upperZone: [pct(a), pct(b)], lowerZone: [pct(c), pct(d)],
+        runout: nose.runout.slice(), exponent: nose.exponent,
+        diameterMM: dia, fromRib, toRib,
+      }
+      : {
+        kind, name, surface: 'upper', frontZone: [pct(a), pct(b)], aftZone: [pct(c), pct(d)],
+        runout: batten.runout.slice(), exponent: batten.exponent,
+        diameterMM: dia, fromRib, toRib,
+      });
+  }
+
+  if (!groups.length && !problems.length) problems.push('the spec defines no rods');
+
+  const describe = (g) => (g.kind === 'nose'
+    ? `a nose rod from ${(g.upperZone[1] * 100).toFixed(1)}% on top round to `
+      + `${(g.lowerZone[1] * 100).toFixed(1)}% underneath`
+    : `a batten from ${(g.frontZone[0] * 100).toFixed(1)}% to ${(g.aftZone[1] * 100).toFixed(1)}% on top`);
+  return {
+    groups,
+    problems,
+    inferred,
+    ok: problems.length === 0,
+    count: groups.length,
+    note: problems.length === 0
+      ? groups.map(describe).join('; ')
+        + (inferred.length ? ` (${inferred.join('; ')})` : '')
+      : `${problems.length} problem(s): ${problems[0]}`,
+  };
+}
+
+/** The spec text for the Swoop2's own rods, as a starting point. */
+export const SWOOP2_ROD_SPEC = `# kind    first zone   second zone   dia
+nose      12.0 18.5    7.0 15.0      1.5
+batten    23.5 29.5    63.0 70.0     1.5`;
 
 /* ------------------------------------------------------ attachment tabs -- */
 
@@ -367,7 +780,10 @@ export function buildTabs({ plan, tensions = null, airfoil, spec = {} } = {}) {
     ? new Map(tensions.lines.map((l) => [l.name, l.tensionN])) : null;
 
   const tabs = anchors.map((a) => {
-    const tensionN = byName ? (byName.get(a.name) ?? 0) : 0;
+    // An anchor on the centreline is ONE tab that the line from each half
+    // comes to, so it carries both: twice the one line the half model has.
+    const centre = onCentreline(a.to);
+    const tensionN = (byName ? (byName.get(a.name) ?? 0) : 0) * (centre ? 2 : 1);
     const tensionDaN = tensionN / 10;
     const designDaN = tensionDaN * T.loadFactor * T.safetyFactor;
     // Width the stitching needs to carry the design load.
@@ -378,6 +794,8 @@ export function buildTabs({ plan, tensions = null, airfoil, spec = {} } = {}) {
       name: a.name,
       row: a.row,
       ribIndex: a.ribIndex ?? null,
+      // How many of this tab the whole wing has.
+      copies: centre ? 1 : 2,
       chordFraction: (airfoil.anchors && airfoil.anchors[a.row]) ?? null,
       tensionDaN,
       designDaN,
@@ -393,20 +811,23 @@ export function buildTabs({ plan, tensions = null, airfoil, spec = {} } = {}) {
     };
   });
 
-  const sides = 2;
   const overloaded = tabs.filter((t) => t.seamLoadDaNPerCm > T.seamStrengthDaNPerCm + 1e-9);
   return {
     tabs,
-    count: tabs.length * sides,
-    totalAreaM2: tabs.reduce((s, t) => s + t.areaM2, 0) * sides,
-    massKg: tabs.reduce((s, t) => s + t.massKg, 0) * sides,
+    count: tabs.reduce((s, t) => s + t.copies, 0),
+    totalAreaM2: tabs.reduce((s, t) => s + t.areaM2 * t.copies, 0),
+    massKg: tabs.reduce((s, t) => s + t.massKg * t.copies, 0),
     // A tab that has hit the maximum width and still exceeds its seam load is
     // a real design problem: the answer is another anchor, not a wider tab.
     overloaded,
     ok: overloaded.length === 0,
     spec: T,
-    loadSized: tabs.filter((t) => t.widthLimitedBy === 'load').length,
-    floorSized: tabs.filter((t) => t.widthLimitedBy === 'minimum').length,
+    // Counted as the wing has them, like `count` above: these were tabs of
+    // the half wing beside a count of the whole, "67 at minimum width" out
+    // of 129.
+    loadSized: tabs.filter((t) => t.widthLimitedBy === 'load').reduce((s, t) => s + t.copies, 0),
+    floorSized: tabs.filter((t) => t.widthLimitedBy === 'minimum').reduce((s, t) => s + t.copies, 0),
+    cappedSized: tabs.filter((t) => t.widthLimitedBy === 'maximum').reduce((s, t) => s + t.copies, 0),
   };
 }
 
@@ -439,296 +860,3 @@ export function checkTabClearance(tabSet, holeSet, { chordM } = {}) {
     checked: tabSet.tabs.filter((t) => t.chordFraction != null).length,
   };
 }
-
-/**
- * Rods as chord-range groups, which is how a real design file describes them.
- *
- * `buildRods` above places one rod per rib running back from the nose, which
- * is the common case and what the handbook describes. Real wings are not
- * limited to that: LEparagliding's section 21 defines rods as **groups**, each
- * a chord range over a rib range, and a wing may have several.
- *
- * Laboratori d'envol's own Swoop2 has two groups — 12 to 18.5% and 7 to 15%
- * of chord over ribs 1 to 25, then 23.5 to 29.5% and 63 to 70% — so a rod is
- * not always at the leading edge and not always alone.
- *
- * This is the group form. It sits beside `buildRods` rather than replacing
- * it, because the simple case is still the common one and the two produce the
- * same kind of output.
- */
-export function rodGroup({
-  fromChord, toChord, fromRib, toRib,
-  diameterMM = 1.3, material = 'nylon', surface = 'upper', name = 'rod',
-}) {
-  if (!(toChord > fromChord)) {
-    throw new Error('rodGroup needs toChord aft of fromChord');
-  }
-  if (!(toRib >= fromRib)) {
-    throw new Error('rodGroup needs toRib outboard of fromRib');
-  }
-  const mat = ROD_MATERIALS[material];
-  if (!mat) throw new Error(`Unknown rod material: ${material}`);
-  return {
-    name, fromChord, toChord, fromRib, toRib, surface,
-    diameterMM, material, mat,
-    chordSpan: toChord - fromChord,
-  };
-}
-
-/** Every rod a set of groups produces, with length and mass. */
-export function buildRodGroups({ wing, groups }) {
-  const rods = [];
-  for (const g of groups) {
-    const areaM2 = Math.PI * ((g.diameterMM / 2000) ** 2);
-    for (let i = g.fromRib; i <= Math.min(g.toRib, wing.ribs.length - 1); i++) {
-      const rib = wing.ribs[i];
-      if (!rib) continue;
-      const lengthM = rib.chord * g.chordSpan;
-      rods.push({
-        group: g.name,
-        rib: i,
-        surface: g.surface,
-        fromChord: g.fromChord,
-        toChord: g.toChord,
-        chordM: rib.chord,
-        lengthM,
-        diameterMM: g.diameterMM,
-        massG: lengthM * areaM2 * g.mat.densityKgM3 * 1000,
-      });
-    }
-  }
-
-  const byDiameter = {};
-  for (const r of rods) {
-    const d = byDiameter[r.diameterMM] ||= { count: 0, lengthM: 0, massG: 0 };
-    d.count += 2;
-    d.lengthM += r.lengthM * 2;
-    d.massG += r.massG * 2;
-  }
-
-  const totalLengthM = rods.reduce((a, r) => a + r.lengthM, 0) * 2;
-  const totalMassG = rods.reduce((a, r) => a + r.massG, 0) * 2;
-
-  return {
-    rods,
-    count: rods.length * 2,
-    totalLengthM,
-    totalMassG,
-    byDiameter,
-    note: `${rods.length * 2} rods, ${totalLengthM.toFixed(1)} m, `
-      + `${totalMassG.toFixed(0)} g`,
-  };
-}
-
-/**
- * Do the rods clash with anything else in the rib?
- *
- * A rod occupies a band of chord, and so do the lightening holes and the line
- * anchors. They are placed by separate rules that do not know about each
- * other — the trap `checkRibInternals` was written for, met again with a
- * component it does not know about.
- *
- * A rod cannot pass through a hole, and an anchor tab sewn over a rod puts
- * its load into a hinge.
- */
-export function checkRodClearance({
-  rods, holes = [], anchors = [], marginChord = 0.01,
-}) {
-  const clashes = [];
-  for (const r of rods) {
-    for (const h of holes) {
-      const from = Math.min(h.fromChord, h.toChord);
-      const to = Math.max(h.fromChord, h.toChord);
-      if (r.fromChord < to + marginChord && r.toChord > from - marginChord) {
-        clashes.push({ kind: 'hole', rib: r.rib, group: r.group });
-      }
-    }
-    for (const a of anchors) {
-      const x = a.chordFraction ?? a;
-      if (x > r.fromChord - marginChord && x < r.toChord + marginChord) {
-        clashes.push({ kind: 'anchor', rib: r.rib, group: r.group, at: x });
-      }
-    }
-  }
-  return {
-    clashes,
-    ok: clashes.length === 0,
-    holeClashes: clashes.filter((c) => c.kind === 'hole').length,
-    anchorClashes: clashes.filter((c) => c.kind === 'anchor').length,
-    marginChord,
-    note: clashes.length === 0
-      ? 'no rod overlaps a hole or an anchor'
-      : `${clashes.length} clash(es): a rod cannot pass through a hole, and an `
-        + 'anchor tab sewn over a rod puts its load into a hinge',
-  };
-}
-
-/**
- * A rod that wraps the nose, which is what most leading-edge rods do.
- *
- * `rodGroup` puts a rod on one surface. Laboratori d'envol's own Swoop2 does
- * not work that way. Its section 21 defines two groups, and each carries
- * **both** an upper and a lower extent:
- *
- *     group 1   upper 12.0 to 18.5%    lower 7.0 to 15.0%
- *     group 2   upper 23.5 to 29.5%    lower 63.0 to 70.0%
- *
- * The first is a leading-edge rod: it runs back from the nose along the upper
- * surface and forward along the lower, so the two extents together wrap round
- * the nose and hold its radius. That is the whole point of a leading-edge rod
- * — the nose is where an unpressurised wing loses its shape first, and a rod
- * on one surface only would hinge at the nose rather than hold it.
- *
- * The second group is something else: a rod at 23.5 to 29.5% of the upper
- * surface and another at 63 to 70% of the lower, which are two separate
- * stiffeners rather than one wrapping piece.
- *
- * So a group carries a list of extents, and whether they wrap is a property
- * of where they sit rather than a flag anyone sets.
- */
-export function noseRodGroup({
-  upperFrom, upperTo, lowerFrom, lowerTo,
-  fromRib, toRib, diameterMM = 1.3, material = 'nylon', name = 'nose',
-}) {
-  const parts = [];
-  if (upperTo != null) {
-    parts.push(rodGroup({
-      fromChord: upperFrom, toChord: upperTo, fromRib, toRib,
-      diameterMM, material, surface: 'upper', name: `${name} upper`,
-    }));
-  }
-  if (lowerTo != null) {
-    parts.push(rodGroup({
-      fromChord: lowerFrom, toChord: lowerTo, fromRib, toRib,
-      diameterMM, material, surface: 'lower', name: `${name} lower`,
-    }));
-  }
-  if (!parts.length) {
-    throw new Error('noseRodGroup needs at least one surface extent');
-  }
-
-  // A pair wraps the nose when both extents reach forward of it. If either
-  // starts well aft, they are two separate stiffeners that happen to share a
-  // group, and calling that a nose rod would be wrong.
-  const NOSE = 0.20;
-  const wrapsNose = parts.length === 2
-    && parts.every((p) => p.fromChord <= NOSE);
-
-  return {
-    name,
-    parts,
-    wrapsNose,
-    fromRib,
-    toRib,
-    diameterMM,
-    note: wrapsNose
-      ? 'both extents reach the nose, so the pair wraps it and holds its '
-        + 'radius; a rod on one surface alone would hinge there instead'
-      : 'the extents do not both reach the nose, so these are separate '
-        + 'stiffeners rather than one wrapping piece',
-  };
-}
-
-
-
-/**
- * Rod groups written out, the way section 21 of a LEP file states them.
- *
- * A single from/to pair describes one rod on one surface. A real wing has
- * several, and a leading-edge rod needs an extent on each surface to wrap the
- * nose. Four sliders cannot say that; a written spec can:
- *
- *     # name          upper        lower        dia  ribs
- *     leading edge    12.0 18.5    7.0 15.0     1.5  0 25
- *     mid             23.5 29.5    63.0 70.0    1.1  0 25
- *
- * Which is the Swoop2's own definition, transcribed.
- *
- * Percentages of chord, because that is how the file states them and how a
- * rod scales with the wing. A dash in place of a pair means no rod on that
- * surface.
- */
-export function parseRodSpec(text, { ribCount = null } = {}) {
-  if (typeof text !== 'string') throw new Error('parseRodSpec needs text');
-
-  const groups = [];
-  const problems = [];
-  let lineNo = 0;
-
-  for (const raw of text.split(/\r?\n/)) {
-    lineNo++;
-    const line = raw.replace(/#.*$/, '').trim();
-    if (!line) continue;
-
-    // name may contain spaces, so the numbers are found from the right.
-    const tok = line.split(/\s+/);
-    const nums = [];
-    while (tok.length && (/^-?[\d.]+$/.test(tok[tok.length - 1]) || tok[tok.length - 1] === '-')) {
-      nums.unshift(tok.pop());
-    }
-    const name = tok.join(' ') || `rod ${groups.length + 1}`;
-
-    // upper pair, lower pair, diameter, rib range.
-    if (nums.length < 7) {
-      problems.push(`line ${lineNo}: expected "name upperFrom upperTo `
-        + `lowerFrom lowerTo diameter fromRib toRib", got ${nums.length} numbers`);
-      continue;
-    }
-    const [uf, ut, lf, lt, dia, fr, tr] = nums;
-    const pct = (v) => (v === '-' ? null : Number(v) / 100);
-
-    const g = {
-      name,
-      upperFrom: pct(uf), upperTo: pct(ut),
-      lowerFrom: pct(lf), lowerTo: pct(lt),
-      diameterMM: Number(dia),
-      fromRib: Math.round(Number(fr)),
-      toRib: Math.round(Number(tr)),
-    };
-
-    if (g.upperTo == null && g.lowerTo == null) {
-      problems.push(`line ${lineNo}: "${name}" has no extent on either surface`);
-      continue;
-    }
-    for (const [lab, from, to] of [['upper', g.upperFrom, g.upperTo],
-      ['lower', g.lowerFrom, g.lowerTo]]) {
-      if (to != null && !(to > from)) {
-        problems.push(`line ${lineNo}: "${name}" ${lab} runs ${from} to ${to}, `
-          + 'which is backwards');
-      }
-      if (to != null && (from < 0 || to > 1)) {
-        problems.push(`line ${lineNo}: "${name}" ${lab} is outside the chord`);
-      }
-    }
-    if (!ROD_MATERIALS.nylon || !(g.diameterMM > 0)) {
-      problems.push(`line ${lineNo}: "${name}" needs a positive diameter`);
-    }
-    if (!(g.toRib >= g.fromRib)) {
-      problems.push(`line ${lineNo}: "${name}" rib range ${g.fromRib} to `
-        + `${g.toRib} is backwards`);
-    }
-    if (ribCount != null && g.toRib > ribCount - 1) {
-      problems.push(`line ${lineNo}: "${name}" reaches rib ${g.toRib} but the `
-        + `wing has ${ribCount}`);
-    }
-
-    groups.push(g);
-  }
-
-  if (!groups.length) problems.push('the spec defines no rods');
-
-  return {
-    groups,
-    problems,
-    ok: problems.length === 0,
-    count: groups.length,
-    note: problems.length === 0
-      ? `${groups.length} rod group${groups.length > 1 ? 's' : ''}`
-      : `${problems.length} problem(s): ${problems[0]}`,
-  };
-}
-
-/** The spec text for the Swoop2's own rods, as a starting point. */
-export const SWOOP2_ROD_SPEC = `# name        upper        lower       dia  ribs
-leading edge  12.0 18.5    7.0 15.0    1.5  0 25
-mid           23.5 29.5    63.0 70.0   1.1  0 25`;

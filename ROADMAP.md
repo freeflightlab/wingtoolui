@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 1744-test validation suite and a benchmark with regression budgets
+- [x] 2423-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -158,29 +158,39 @@ material published after the handbook:
       following angle of attack instantly. The Kussner lag would tighten the
       comparison at low mass ratio.
 - [x] **Asymmetric and collapse load cases** — a tip collapse sheds far less
-      lift than its span fraction (25% of span sheds 17% of lift), a frontal
-      collapse moves the A row's load onto C, and sized on the full envelope
-      the asymmetric case governs every line with 35 of 76 needing more
-      material than symmetric sizing.
-- [x] **Reconciliation with real linesets** — checked against PHI's own line
-      choices: the collapse envelope implies 28.6x the 1g load, and PHI's most
-      load-critical line sits at 28x. Real wings are already built to the
-      collapse case, which is why they survive one; symmetric certification
-      sizing alone is thinner than any line on that wing.
+      lift than its span fraction (25% of span sheds 16% of lift), and a
+      frontal collapse moves the A row's load onto C. Half the span gone, with
+      a dynamic factor of 1.5, works the remaining lines 2.5 times as hard as
+      level flight.
+- [x] **The collapse envelope, corrected** — it put that multiple ON TOP of
+      the 8 g limit and its margin (30 times level flight in every line) and
+      concluded that "collapse governs every line". Each case now carries its
+      own load factor: a collapse in level flight governs nothing, and would
+      have to come at 3.1 g to size a line (`governingCollapseG`).
+- [x] **Reconciliation with a real lineset, redone** — the old one compared
+      that 30x with "28x on PHI's most load-critical line", a literal in the
+      test file. Computed from PHI's own sheet (`publishedCascadeLoads`,
+      `strengthFactors`) the hardest-worked line is at 8.7x its level-flight
+      load on kinked strength (7 to 11 with the row split varied; 13 to 20 on
+      new strength), and half the 62 lines are under 30x. The wing is built to
+      about the symmetric case.
 - [x] **Practical minimum diameter** — neither PHI nor Ozone uses line below
       0.50 mm, and it is handling rather than strength that stops them. With
       the floor in place most of a lineset is floor-sized, not load-sized, and
       `selectLines` reports which.
-- [ ] **Measured collapse loads** — the dynamic factor is still a stand-in.
-      The agreement above is circumstantial: a different factor with a
-      different collapse fraction lands in the same place.
+- [ ] **Measured line loads** — every strength factor above rests on a
+      modelled split between the rows, and the answer moves by a third with
+      it. Riser loads measured on one wing would settle it. The collapse
+      dynamic factor is still a stand-in too, though it no longer decides any
+      line.
 - [ ] **Brake cascade decoding** — the PHI sheet's brake block lists each upper
       line twice, plain and with the spanwise distribution added, so its
       columns do not map one-to-one onto names. Needs the pulley geometry.
 - [x] **Wake interference between lines** — measured rather than assumed.
-      Only 16 of 88 lines are genuinely inside another's wake once the wake
-      width is taken properly, against 67 by a naive proximity test. Worth
-      2.7% of line drag and +0.03 of glide. Off by default.
+      Only 15 of the test wing's 48 lines a side are genuinely inside
+      another's wake once the wake width is taken properly, against 36 by a
+      naive proximity test. Worth 5% of line drag and +0.05 of glide. Off by
+      default.
 - [ ] **Wake merging and unsteadiness** — the model takes a single upstream
       shielder and a steady far-wake profile. Several lines shielding one, and
       the unsteady vortex street, are not represented.
@@ -213,13 +223,14 @@ material published after the handbook:
 - [x] **Alpina 5 specifications** — six sizes added, giving a five-family,
       three-manufacturer scaling sample.
 - [x] **Lynx 2 specifications** — BGD joins as a sixth family and third
-      manufacturer. Used as a genuine out-of-sample test, which found that the
-      aspect-ratio line-length law assumes span scaling and is up to 16% out
-      on an area-scaling family.
-- [ ] **Why BGD scales its lineset with area** — five families scale total
-      line length with span (exponent 1.02-1.30), BGD with area (2.03). BGD is
-      the only 2.5-liner in the set; whether the hybrid layout is the cause is
-      untested. More makers would settle it.
+      manufacturer, out of sample. Against the sums of BGD's own line sheets
+      the aspect-ratio line-length law is 6.6 to 7.5% under at every size.
+- [x] **"BGD scales its lineset with area" — withdrawn.** That was BGD's
+      published "Total line length" row, which is 10.7 m per square metre at
+      every size; its line sheets, in this repository all along, go with the
+      linear factor BGD state. All seven families scale with span (exponent
+      1.02 to 1.30). `size-families.tsv` holds the sheet sums now and
+      `published-specs.tsv` the published row.
 - [ ] **Collapse-line (Z) risers** — the Zeno 2, Lyght and Alpina 5 all carry
       a Z row on its own riser, structurally unlike the three-riser wings
       modelled so far. Parsed and named; not generated.
@@ -263,9 +274,9 @@ material published after the handbook:
 - [ ] **What separates the Alpina 5 from the Allegro light** — still 9.7
       residual points apart at aspect ratios within 0.04. Neither riser count
       nor cell count accounts for it.
-- [ ] **Why BGD is the outlier on two counts** — the largest residual
-      (+10.2%) and the only family scaling its lineset with area rather than
-      span. Two anomalies, one manufacturer, no explanation.
+- [ ] **Why the Lynx 2 carries more line than its aspect ratio suggests** —
+      the largest residual, +7.8%, and the same at every size. It is the only
+      2.5-liner in the set; whether that is the cause is untested.
 - [ ] **Line count as a scaling parameter** — the total-line-length slope
       tracks how many lines a wing carries (258 pieces on the Ultralite 5
       against 224 on the Geo 7). Normalising by piece count may recover a
@@ -362,6 +373,96 @@ validation notes flagged.
 
 ## Audit
 
+- [x] **Riser webbing in the geometry** — the cascade fanned out from the
+      karabiner itself, a main line sitting 48 degrees from vertical for its
+      whole length. The fan starts above the risers now, and each riser lies
+      along the resultant of its own lines' tension (hung vertically first,
+      then pointed, one pass). See `docs/risers.md`.
+- [x] **The Swoop2 rods checked against its own program** — 50 rods a side
+      in 2 blocs, not four times that: a nose rod is one piece round the
+      leading edge, and bloc 2 is a batten along the upper surface (it was
+      carried as undecoded until the program was read). All 50 come out at
+      their printed length. See `docs/rods-validated.md`.
+
+- [x] **A free body check** — `freebody.js`. Weight, lift, drag and line
+      tension as one body in gravity, with the geometry checked against the
+      balance rather than only against itself. See `docs/free-body.md`.
+- [x] **Flat lines at the tip** — reported as 12 of 99 lines running nearly
+      spanwise. Measured from vertical, an outboard line looks flat because
+      its rib leans with the arc; what matters is the angle from the way its
+      anchor is pulled, in the rib's own plane. The flattest line of the
+      suite's wing is 84 degrees from vertical and 42 from its rib, carrying
+      three quarters of its tension along the load; none of its 44 top lines
+      is past the 60 degree limit (the furthest is 46). The free body measures it that
+      way now. See `docs/free-body.md`.
+- [x] **Diagonals attach seam to seam** — and always did: a `buildVRibs`
+      gusset runs from a point on the lower seam of a rib with a line to a
+      run of the upper seam of the rib beside it, and two from one anchor are
+      the V. `buildSeamDiagonals` gives the same V as two straight legs. The
+      claim that gussets landed "in the middle of a panel" was wrong and is
+      now a test.
+- [x] **Diagonal leg asymmetry** — was "4.3 to 1, because of sweep"; that
+      was the inside-out canopy. On the corrected wing the legs differ as the
+      cells either side do: 1.04 at the root, 1.34 at the last rib.
+
+- [x] **Lines in the 3D model as tubes at their real diameter** — OBJ
+      polylines are optional and most importers drop them, so the cascade was
+      in the file and invisible. Each line is now a swept tube at the
+      diameter its selection chose. See `docs/cad-export.md`.
+
+- [x] **OpenGlider reviewed** — see `docs/openglider.md`. Its mini-ribs are
+      the concrete gap; its panel method and FEM are separate projects, not
+      libraries to borrow.
+- [x] **LEP section 12 read** — the Swoop2 carries 124 H/V/VH ribs and this
+      tool was reading none of them.
+- [x] **Mini-ribs built** — the Swoop2's 70 type-11 H ribs are constructed
+      from its own file, 3116 cm2 of cloth that was being ignored. Types 15
+      and 16 are counted and reported as not understood rather than guessed.
+
+- [x] **Chord fraction was array index in three places** — the billow
+      profile, where a diagonal attaches, and where every line attaches. The
+      first was found because clustering points for the CAD export made the
+      seam ease stop converging; the other two by looking for the pattern.
+      See `docs/departures.md`.
+
+- [x] **CAD export** — the wing as OBJ: both surfaces, the ribs and every
+      line in named groups sharing one vertex pool. STL cannot carry lines
+      and STEP is a hand-written entity graph that opens as nothing if it is
+      slightly wrong. See `docs/cad-export.md`.
+
+- [x] **Light mode, viewport export and a parameter table** — colours mapped
+      at one point rather than at every call site; SVG and PNG on every
+      viewport; every setting and derived figure as one table, with view
+      preferences left out. See `docs/viewports.md`.
+
+- [x] **Odd cell counts are reported, not rounded away** — the Alpina 5 and
+      Lynx 2 have 65 cells, which this model cannot build. Found by building
+      every reference wing and comparing it with its published figures rather
+      than checking components against each other.
+- [x] **A true centre cell** — a cell can now straddle the centreline, so an
+      odd cell count is buildable. The Alpina 5 and Lynx 2 build their
+      published 65. The centre cell is developed as its own panel, which
+      walking consecutive ribs missed entirely: a 65-cell wing came out with
+      64 cells' worth of cloth. See `docs/reference-wings.md`.
+
+- [x] **The reference set checked against the manufacturers** —
+      `published-specs.tsv`, transcribed separately so the two can disagree.
+      72 figures across the Ultralite 5 and Geo 7, zero disagreements.
+- [x] **The Swoop2 works as a complete design** — every view and all 30
+      exports run on it, 17 files, asserted in the interface test.
+- [ ] **The other nine families checked against their makers** — only the
+      Ultralite 5 and Geo 7 are covered so far.
+
+- [x] **The outboard diagonal collapses towards the tip** — 75 mm by rib 12,
+      because the rib tilt cancels the cell gap. `minLengthM` skips them,
+      halving the size spread; off by default because it can leave a rib
+      unsupported. See `docs/diagonal-ribs.md`.
+
+- [x] **The diagonals view drew every fibre red** — it measured the load
+      against the diagonal's own axis rather than the line. No test could see
+      it: the drawing was checked by element count and the stub DOM threw
+      attributes away. The stub records them now and the colours are checked.
+
 - [x] **Does it sew?** — every panel checked against the ribs it is sewn to,
       and against its neighbour: 0.006 mm worst. The front view is
       dimensioned and its figures held to the model's. See `docs/panels.md`.
@@ -383,12 +484,11 @@ validation notes flagged.
 - [x] **A check that cannot fail is now itself checked** —
       `tools/check-assertions.mjs`, a stage.
 
-- [x] **Rods on the rib, and nose rods that wrap** — rods had their own
-      viewport showing a bare aerofoil, which is a second poorer rib view; a
-      rod alone says nothing. They draw on the real rib now. A leading-edge
-      rod needs an extent on BOTH surfaces or it hinges at the nose, which
-      `rodGroup` could not express — `noseRodGroup` and `parseRodSpec` do,
-      in the form LEP section 21 states. See `docs/rods.md`.
+- [x] **Rods on the rib** — rods had their own viewport showing a bare
+      aerofoil, which is a second poorer rib view; a rod alone says nothing.
+      They draw on the real rib now. (This entry went on to describe a nose
+      rod as two extents, one on each surface. That reading was wrong: see
+      "Rods built as the design's own program builds them", below.)
 
 - [x] **A checkout doctor** (`npm run doctor`) — a first user's build failed
       with seven modules missing because they had cloned the old flat layout.
@@ -401,12 +501,19 @@ validation notes flagged.
       the best material per line needs seven types across three suppliers,
       which no workshop builds. Choosing N types is a one-dimensional
       k-segmentation and dynamic programming solves it exactly: four types
-      cost 0.4% of drag against a different line at every anchor.
-- [x] **Trim drift and the check schedule** — `trimdrift.js`. Dyneema creeps
-      longer under load, aramid shrinks with moisture, and the difference is
-      what rotates the wing. One fibre throughout holds its trim; mixing them
-      moves it 1.7 degrees over a 200 hour life. Rates are estimated and say
-      so.
+      cost 1.0% of drag against a different line at every anchor. (Real
+      linesets use 3 to 16 types, almost all from two makers:
+      `docs/line-sets.md`.)
+- [x] **Trim drift and the check schedule** — `trimdrift.js`, rewritten
+      2026-10. It said Dyneema creeps longer under load and aramid shrinks,
+      and that one fibre throughout holds its trim. The makers say the
+      reverse of the first: a Dyneema line settles shorter in its first 20 to
+      50 hours, the lightly loaded rear lines most, and aramid hardly moves.
+      Fibres are now read from the suppliers' own sheets (most of the
+      catalogue had been filed under the wrong one), a line's working load is
+      level flight against its new strength, and an attachment point moves
+      by the sum down its path. Sizes are estimates and say so. See
+      `docs/line-sets.md`.
 - [x] **Custom cascade specification** — `parseCascadeSpec` reads the format
       a manufacturer sheet uses (`A 30 14 3`), builds exactly that, and writes
       a built plan back out. Two defects fixed on the way: `mainsPerRow` said
@@ -437,12 +544,11 @@ validation notes flagged.
       geometry scaled every size 1.8% over, and is now refused — but only
       when the base area is used for scaling. See `docs/scaling.md`.
 
-- [x] **Rods as chord-range groups, and a Structure view** — `rodGroup`,
-      `buildRodGroups` and `checkRodClearance` extend the existing rod model
-      with the group form a real design file uses. Diagonals and rods were
-      computed and never drawn; the Structure tab shows diagonals shaded fibre
-      by fibre for tension, and rods on the rib with their clashes. See
-      `docs/construction.md`.
+- [x] **A Structure view** — diagonals and rods were computed and never
+      drawn; the Structure tab shows diagonals shaded fibre by fibre for
+      tension, and rods are on the rib. (The "rods as chord-range groups"
+      this entry also announced — `rodGroup`, `buildRodGroups` — were the
+      misreading of section 21 and are gone. See `docs/rods.md`.)
 
 - [x] **Every dataset measured, not just parsed** (`tools/corpus-learnings.mjs`)
       — 86 of 116 reference files reached nothing stronger than a physics
@@ -573,7 +679,7 @@ validation notes flagged.
       the setting says: the same mistake as testing functions instead of
       buttons, one round later. Verified the probe can fail.
 
-- [x] **Full-pipeline validation** (`tests/full-pipeline.mjs`) — all 38
+- [x] **Full-pipeline validation** (`tests/full-pipeline.mjs`) — all 55
       published sizes through every stage, checked against each other and
       against physics. Found four defects every module test passed: a
       square-rooted area ratio used as a span ratio (19.5% out on every wing),
@@ -581,26 +687,30 @@ validation notes flagged.
       relationship), anchor loads grouped by index rather than rib (12% of the
       wing's weight lost), and an unknown layout name silently defaulted.
       See `docs/full-pipeline.md`.
-- [x] **Cascade junction and line length measured, not assumed** — the second
-      junction was at 0.78 against a measured 0.860, and the line length 30%
-      long. Total consumption +38% to +16% against published.
+- [x] **Cascade junction and line height measured, not assumed** — the
+      second junction was at 0.78 against a measured 0.860. The pipeline's
+      line height, 0.464 x span, was the length of one main line and a sixth
+      short of a path; it uses the published heights' law now.
 - [x] **`recoverLevelFractions`** — reads the cascade junction back from any
       real line table. It is a design parameter spanning 0.786 to 0.925, not
       a constant.
-- [ ] **The last +16%: two-liner middle lines run too far sideways.** Three
-      explanations ruled out by measurement — not a missing fourth level (all
-      five wings run three), not riser count (within-group spread exceeds
-      between-group), and not the junction fraction (an 18% change moves the
-      middle length 2%). The generator's middles are 1812 mm against the
-      Zeno 2's 886 while the Geo 7 matches; the branching ratio is right at
-      3.0 against 3.14. It is the lateral run that is wrong.
+- [ ] **The two-liners' bridle level.** Built with their own anchors and
+      line height, the three-liners come within a tenth of their sheets (Geo
+      7 MS +7%, Ultralite 5 19 -8%) and the two-liners a third over (Alpina 5
+      ML +32%, Zeno 2 ML +34%). Each Ozone two-liner carries sixteen short
+      bridles a side, A1a to A8b, gathering pairs of A attachments just below
+      the sail: a level the generator does not build. (This item said the
+      reverse once — "not a missing fourth level, all five wings run three" —
+      counting levels by their names, which call a bridle an A line.)
 - [x] **Minimum sink was outside the flyable envelope** — the polar is flat
       past CL 1.0, so the search put the minimum at CL 1.37 and 24 km/h.
       `maxUsableCL` caps it; glide is unaffected. Not a profile-drag error:
       doubling it moves sink toward reality and glide away from it.
-- [ ] **A residual 10% in minimum sink** — the cap does not close it and
-      profile drag is demonstrably not the cause. Needs a published sink
-      polar to calibrate against; there is none in the reference set.
+- [ ] **A residual in minimum sink** — 0.83 m/s at the default cap against
+      about 1.0 for a real wing of the size, 17% low (10% at a cap of 0.75).
+      Trimmed from the calage instead of an assumed angle (`trimFromCalage`)
+      it closes on the Geo 7's certified cases; the interface's balance does
+      not use that solve yet. See `docs/certification.md`.
 
 - [x] **Reference data collection** — `docs/collecting-reference-data.md` is a
       self-contained brief for building the database in a separate
@@ -632,19 +742,83 @@ validation notes flagged.
       drift up unnoticed. Four commands meant three got skipped, and this item
       staying open for most of the project was the evidence.
 
+### Round of 2026-10-07 to 10-12: lines, fibres, inspection, and the real-data checks
+
+- [x] **Line fibres from the suppliers' own sheets** — most of the catalogue
+      was filed under the wrong fibre (the Edelrid 8000-U lines are aramid;
+      PPSL, PPSLS, DSL, DFL and DC are Dyneema), `data/reference/line-materials-suppliers.tsv`
+      holds the sources, and kinked retention now sorts by fibre almost
+      without overlap. Sheathed line weights came down 20 to 50% to Edelrid's
+      published figures; of two lines one diameter, the stronger is chosen.
+- [x] **Loads by path** — a merged cascade carried only its first row's load
+      (the risers held 55% of the pilot under A+B and C+D), and with uneven
+      anchor counts per row 13 top lines carried nothing. Tension is summed
+      down each anchor's own path, keyed by its own line.
+- [x] **The cascade as real wings build it** — the rear row hangs from the
+      row ahead's mains (it had mains of its own, 12 m a side); each junction
+      limits its fan to 50 degrees from the line below, where a rule measured
+      from vertical had added 11 to 14% of line; the stabilo junction sits
+      four fifths of the way up rather than in the sail.
+- [x] **Totals by path** — C and D totals ran on into the brake's lower line
+      (0.62 m too long), and brake totals carried a riser they do not have.
+- [x] **The PMA record and the inspection** — new strength where the
+      standard asks for it, each line's coefficient by its fibre, totals by
+      path at 5 daN; the inspection is a forecast at 50 h and the service
+      hours, and its headroom takes the offset into account.
+- [x] **The free body measures a line against its rib**, not against
+      vertical.
+- [x] **Riser webbing weighed as webbing**, 20 g/m, not as cloth.
+- [x] **The pipeline builds each real wing as itself** — its own rows,
+      risers and anchors where its sheets are on file, the published line
+      height law, and a tip chord solved to the published area (it was 22% of
+      the root, 1 to 7% short of the area).
+- [x] **Front-row density measured on twenty designs** — 0.28 to 0.94 of
+      the ribs, the range the anchor search keeps to (it was 0.50 to 0.95).
+- [x] **Glide withheld where the models fail** — at 50 km the readout printed
+      glide 8.48 beside "both models fail".
+- [x] **Solve anchors to the line length** in the Lines panel, and **a
+      remembered design compared with the one on the page** in the Balance
+      panel: `anchorsForLineLength` and `compareDesigns` had no way in.
+- [x] **The reference catalogue reads every supporting table** — 26 files
+      were listed as "FAILED TO PARSE".
+- [x] **Nesting four times faster**, with identical layouts.
+- [ ] **The derived plan attaches every second rib.** A real density on the
+      default wing (13 of 25 ribs); on a published wing from the picker it is
+      not, and the solve is a button rather than the default.
+- [ ] **The picker could set each design's riser layout** — a two-liner
+      loaded from it is built on three risers until the designer changes it.
+- [ ] **The brake lines dominate the inspection forecast**, on an estimated
+      settle rate; no aged lineset has been measured.
+- [ ] **A real arc is no circle** — the Geo 7's lines fit its published
+      projected span worse on a circle (244 mm) than on a tighter one (110).
+- [ ] **Single-skins are built as four rows** where the Skin 4 P and Bi Skin
+      2 P have nine.
+- [ ] **The interface's balance is the handbook's**, on typed coefficients;
+      the coupled solve and the trim from the calage are core and suite only.
+- [ ] **The speed system, trimmers and riser webbing** (`risers.js`) are core
+      and suite only.
+- [ ] **The Swoop2's 70 straps and 15 pieces between ribs** are read and
+      listed, not built: the file does not say how high in the cell a strap
+      sits.
+
 ## Phase 3 — construction detail
 
-- [x] **Rib stress and reinforcement reach** — rib cloth cannot carry an
-      anchor load at all, even at 1 g, so the model sizes how far the
-      reinforcement must reach. Wired to real anchor loads via
-      `checkWingRibStress`: the longest reach on a real wing is 44 mm and no
-      rib needs tape to the seam. An earlier claim of a spanwise rule came
-      from an invented 260 N anchor load, 10x the real one, and is corrected
-      in `docs/rib-stress.md`.
+- [x] **Rib stress and reinforcement reach** — at 1 g a 20 mm tab carries
+      a real anchor load into bare rib cloth; at the 8 g case it does not, by
+      a factor of four, so the model sizes how far the reinforcement must
+      reach. `checkWingRibStress` runs it on a wing's own loads, each rib's
+      own depth at each anchor and the holes really cut: 56 mm at most on the
+      12-cell test wing, 6 mm on the default wing, 8 mm on the Swoop2, and no
+      rib needs tape to the seam. Two earlier accounts are corrected in
+      `docs/rib-stress.md`: one rested on an invented 260 N anchor load, the
+      next on a rib "a quarter of its chord" deep and a load path walked
+      along the chord.
 
-- [x] **Cell intake geometry** — the opening placed and checked against the
-      stagnation point, which moves 3.3% of chord across the speed range. Two
-      distinct failure modes reported separately. See `docs/intake.md`.
+- [x] **Cell intake geometry** — the opening checked against the
+      stagnation point, which goes as the square of the angle above the
+      section's ideal angle of attack: 0.1% of chord under the nose at 2°,
+      5.0% at 12° on a NACA 4415. The rib note says what the opening is fed
+      at across the speed range. See `docs/intake.md`.
 - [x] **Confusable sample counts guarded across the family** — `thinAirfoil`
       was passed an angle where it takes a sample count, a silent 9% error in
       the zero-lift angle. Five functions share the shape; a sweep found no
@@ -690,9 +864,9 @@ Turning geometry into something a person can actually sew.
       anchor patches counted from the line plan, and a mass budget that
       reports the remaining gap against a published weight rather than
       claiming to be one. See `docs/construction.md`.
-- [x] **Rods** — arc length along the rib surface rather than a chord
-      fraction (8.3% longer), mass as the square of diameter, and shorter rods
-      on the closed ribs. Counting them removes them from the missing list.
+- [x] **Rods** — length along the rib surface rather than a chord
+      fraction, mass as the square of diameter. Counting them removes them
+      from the missing list. (Rebuilt since: `docs/rods.md`.)
 - [x] **Thread and seam allowance** — both counted, taking a reconciliation
       against Skywalk's published SAGE 95 from 66% to 85% accounted. Cloth
       weight was the largest error: the default 38 g/m² against the wing's
@@ -715,9 +889,16 @@ Turning geometry into something a person can actually sew.
       designs show three (taper, flat, step). Within 16% of every design.
       Recorded as six designs rather than 33 sizes: topology is constant
       within a family, so sizes are not independent observations.
-- [ ] **More designs.** Six is enough to separate two-liners from
-      three-liners and not enough to fit a curve. The ratio ranges nearly
-      touch at 2.13 against 2.58.
+- [x] **More designs.** The ratio table is 19 designs from four makers now,
+      measured from their sheets by `tools/corpus-learnings.mjs`, and the
+      front-row density 20 from five (`FRONT_DENSITY`: 0.28 to 0.94 of the
+      ribs, median 0.54, with the cell counts in
+      `data/reference/published-cells.tsv`). It still separates two-liners
+      from three-liners without fitting a curve: the ranges nearly touch, at
+      2.50 against 2.58. The density goes with the maker more than anything
+      measured — Ozone's 0.50 to 0.94, UP's 0.28 to 0.62 — and the anchor
+      search was kept to 0.50 to 0.95 by six Ozone wings, three of them with
+      the wrong rib count.
 - [x] **Stabilo lines** — found by name where a maker gives one and
       structurally where none does, which is two makers in three. Generated
       onto its own main line, and excluded from the lift distribution.
@@ -725,13 +906,16 @@ Turning geometry into something a person can actually sew.
       seam so ovalization's 31 mm of ease becomes 3.9 mm per segment, plus
       grain arrows and panel labels on their own DXF layers. See
       `docs/construction.md`.
-- [ ] **Materials** *(ch.10)*: a real properties table — weights, strengths,
-      stretch — feeding wing mass estimation and line sizing.
-- [ ] **Line specification** *(ch.8.3–8.4)*: load per line from the cascade,
-      then diameter selection and sheathing decisions with a safety factor.
-      Requires the load model Phase 2 adds.
-- [ ] **Bill of materials** with fabric metres by colour, line metres by type,
-      and hardware counts.
+- [x] **Materials** *(ch.10)*: the line catalogue (78 lines, new and kinked
+      strength, fibre, sheath and weight, from PHI's measurements and the
+      suppliers' sheets), named cloth grades by location, rods and tabs.
+- [x] **Line specification** *(ch.8.3–8.4)*: load per line from the cascade,
+      diameter selection with a margin on each row, and the stretch and loop
+      chain to cut lengths (`loads.js`).
+- [x] **Bill of materials** with fabric metres, line metres by type, and
+      hardware counted from the plan.
+- [ ] **Fabric by colour** in the bill — the cloth is by grade and location;
+      a colour scheme is not modelled.
 
 ---
 
@@ -750,9 +934,12 @@ Making it pleasant to use across a real project.
 - [x] **Packing from both edges of the roll** — a second skyline descending
       from the far edge, reaching the band a bottom-up packer cannot use.
       55.7% to 56.9%, and 61.0% on a 1.8 m roll.
-- [ ] **Close the remaining placement gap.** 56.9% against a 73% shape
-      ceiling. What is left needs true polygon placement rather than two
-      skylines.
+- [ ] **Close the remaining placement gap.** On the default wing 63.5% of
+      the roll is used, the panels filling 93.8% of their own boxes and the
+      boxes 67.7% of the roll: the loss is the packing's. What is left needs
+      true polygon placement rather than two skylines. (This said 56.9%
+      against a 73% shape ceiling, figures from before the panels were
+      aligned to their long axes: `docs/nesting.md`.)
 - [x] **Place the tip panels into the gaps.** `pairPanels` now tries both a
       complementary order (largest with smallest) and the original adjacent
       one, and takes whichever packs better — neither wins on every wing. See
@@ -793,8 +980,9 @@ describing geometry and starts predicting behaviour.
 - [x] **Structural check**: line loads into rib and panel stress.
       `ribstress.js` does both — `checkWingRibStress` for the rib half, built
       earlier and left marked open, and `panelStress` /
-      `checkWingPanelStress` for the sail. The seam is the limit on every
-      panel, not the cloth. See `docs/rib-stress.md`.
+      `checkWingPanelStress` for the sail. The seam is the nearer limit on
+      every panel, and not a near one: 14% at 8 g on the test wing's widest
+      cell, at the wing's own dynamic pressure. See `docs/rib-stress.md`.
 - [x] **Spanwise lift distribution** by lifting-line — done in Phase 2;
       `spanLoadDistribution` in loads.js has used `liftingLine` since the load
       model was built. Listed here as open long after it shipped, which is

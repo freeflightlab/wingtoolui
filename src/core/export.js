@@ -1,5 +1,7 @@
+import { resampleSurface } from './airfoil.js';
+import { toRibPlane, ribCopies } from './wing3d.js';
 import { markPanels, markPlacedSeams, DEFAULT_MARKING } from './marking.js';
-import { nestByProfile } from './pairing.js';
+import { nestByProfile, nestingOverlaps } from './pairing.js';
 /* export.js — DXF and SVG output.
  *
  * DXF is the format the handbook's own FORTRAN subroutine writes, and it is
@@ -88,6 +90,38 @@ const fmt = (n) => Number(n).toFixed(6);
  */
 export function nestPanels(panels, {
   rollWidth = 1.4, gap = 0.03, binSize = 0.01, angleStep = 10, candidates = 10,
+  method = 'profile',
+} = {}) {
+  // The profile packer, whenever it succeeds and its layout checks out.
+  //
+  // The tool drew and exported the skyline layout below while a better packer
+  // sat unused in pairing.js: 48% of the roll against 64% on the default
+  // wing, 39.6 m of cloth a half against 30.1. The profile packer keeps the
+  // gap in every direction and is measured, not trusted — any overlap and
+  // this falls back to the skyline layout, which cannot overlap by
+  // construction.
+  if (method === 'profile') {
+    try {
+      const n = nestByProfile(panels, { rollWidth, gap });
+      if (nestingOverlaps(n) === 0) {
+        n.placed = n.placed.map((q, i) => ({ ...panelsById(panels, q), ...q, _i: i }));
+        n.method = 'profile';
+        return n;
+      }
+    } catch (e) {
+      // fall through to the skyline layout
+    }
+  }
+  return nestSkyline(panels, { rollWidth, gap, binSize, angleStep, candidates });
+}
+
+/** The panel a placed entry came from, so its other fields ride along. */
+function panelsById(panels, q) {
+  return panels.find((p) => p.cell === q.cell && p.surface === q.surface && p.panel === q.panel) || {};
+}
+
+function nestSkyline(panels, {
+  rollWidth = 1.4, gap = 0.03, binSize = 0.01, angleStep = 10, candidates = 10,
 } = {}) {
   // Developed paraglider panels are strongly curved — a mid-span panel fills
   // barely a third of its own bounding box, and a tip panel far less. Packing
@@ -168,7 +202,7 @@ export function nestPanels(panels, {
   }
 
   const all = placed.flatMap((p) => p.outline);
-  return { placed, extent: bounds(all), rollWidth };
+  return { placed, extent: bounds(all), rollWidth, method: 'skyline' };
 }
 
 /**
@@ -262,44 +296,197 @@ export function panelsToDXF(panels, { rollWidth = 1.4, gap = 0.03, labels = true
   return doc.toString();
 }
 
-export function ribsToDXF(wing, { gap = 0.04 } = {}) {
+/**
+ * A closed outline moved outward by a fixed distance: a seam allowance.
+ *
+ * Each vertex moves along the bisector of its two edges' normals, far enough
+ * that both edges end up `d` from where they were. At a sharp corner — a
+ * trailing edge — that distance runs away, so it is held to `miterLimit`
+ * times `d`.
+ *
+ * The rib view drew its allowance by pushing every point away from the
+ * rib's CENTRE instead. On a shape as long and thin as a rib that is right
+ * at the nose and the tail and wrong everywhere between: at 80% of chord
+ * "away from the centre" is along the chord, so the dashed line ran a
+ * centimetre aft of the surface it was supposed to be a centimetre outside.
+ */
+export function offsetClosedLoop(loop, d, { miterLimit = 2.5 } = {}) {
+  // Drop repeated points, and a last point that repeats the first.
+  const pts = [];
+  for (const p of loop) {
+    const q = pts[pts.length - 1];
+    if (!q || Math.hypot(p[0] - q[0], p[1] - q[1]) > 1e-12) pts.push([p[0], p[1]]);
+  }
+  while (pts.length > 1
+    && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) <= 1e-12) {
+    pts.pop();
+  }
+  const n = pts.length;
+  if (n < 3 || !d) return pts;
+
+  let area = 0;
+  for (let i = 0, j = n - 1; i < n; j = i++) area += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  // Outward is to the right of the direction of travel on a counter-clockwise
+  // outline, to the left on a clockwise one.
+  const side = area > 0 ? 1 : -1;
+  const normal = (a, b) => {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const m = Math.hypot(dx, dy) || 1;
+    return [(dy / m) * side, (-dx / m) * side];
+  };
+
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const n1 = normal(pts[(i - 1 + n) % n], pts[i]);
+    const n2 = normal(pts[i], pts[(i + 1) % n]);
+    let mx = n1[0] + n2[0];
+    let my = n1[1] + n2[1];
+    const ml = Math.hypot(mx, my);
+    let reach = d;
+    if (ml < 1e-9) {
+      [mx, my] = n1;
+    } else {
+      mx /= ml;
+      my /= ml;
+      const cos = mx * n1[0] + my * n1[1];
+      reach = d / Math.max(cos, 1 / miterLimit);
+    }
+    out.push([pts[i][0] + mx * reach, pts[i][1] + my * reach]);
+  }
+  return out;
+}
+
+/**
+ * Every rib of the half wing as a pattern, laid out in a column.
+ *
+ * `features(rib)` supplies what is marked on each one, in the rib's own
+ * plane: `{ loop, cutLine, anchors, holes, rods, apexes, bases, intake }`.
+ * It is the interface's, so the file carries exactly what the Rib tab
+ * draws. Without it only the outline is written.
+ *
+ * This wrote the outline and a label and nothing else — no line anchors, no
+ * openings, no rods, no marks for the diagonals, no seam allowance — while
+ * the Rib tab drew all of them. A rib cut from the file could not have been
+ * sewn into the wing on the screen.
+ */
+export function ribsToDXF(wing, { gap = 0.04, features = null } = {}) {
   const doc = dxfDocument();
   // Every rib's flat pattern occupies roughly the same chordwise range and is
   // centred on its own chord line, so drawing them in place stacks them all
   // on top of each other — a file that looks plausible on screen and is
   // useless to cut from. Lay them out in a column instead.
   let cursor = 0;
+  const any = { cut: false, anchors: 0, holes: 0, rods: 0, diagonals: 0 };
+  // Room between ribs for what is written under each one: the marks hang
+  // below the lower edge, and the next rib's own label sits above its top.
+  if (features) gap = Math.max(gap, 0.12);
   wing.ribs.forEach((rib) => {
-    const loop = rib.upper.slice().reverse().concat(rib.lower.slice(1));
-    const flat = flattenRib(loop, rib);
-    const ys = flat.map((p) => p[1]);
+    const f = features ? features(rib) : null;
+    const flat = f ? f.loop : flattenRib(rib.upper.slice().reverse().concat(rib.lower.slice(1)), rib);
+    const outer = f && f.cutLine && f.cutLine.length ? f.cutLine : flat;
+    const ys = outer.map((p) => p[1]);
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
     const dy = cursor - minY;
-    const placed = flat.map(([x, y]) => [x, y + dy]);
+    const at = ([x, y]) => [x, y + dy];
+    const layerOf = (what) => `rib-${rib.index}-${what}`;
 
-    doc.polyline(placed, { layer: `rib-${rib.index}`, color: ACI.cyan, closed: true });
+    // The sewing line: the rib as it is in the wing.
+    doc.polyline(flat.map(at), { layer: `rib-${rib.index}`, color: ACI.cyan, closed: true });
+    if (f) {
+      // The cutting line, a seam allowance outside it.
+      if (f.cutLine && f.cutLine.length) {
+        doc.polyline(f.cutLine.map(at), { layer: layerOf('cut'), color: ACI.green, closed: true });
+        any.cut = true;
+      }
+      // Openings: cut out.
+      for (const h of f.holes ?? []) {
+        doc.polyline(h.map(at), { layer: layerOf('openings'), color: ACI.green, closed: true });
+        any.holes++;
+      }
+      // Line anchors: a cross on the lower edge, and the row's letter.
+      const tick = Math.max(0.004, rib.chord * 0.006);
+      for (const a of f.anchors ?? []) {
+        const [x, y] = at(a.point);
+        doc.line([x - tick, y], [x + tick, y], { layer: layerOf('anchors'), color: ACI.magenta });
+        doc.line([x, y - tick], [x, y + tick], { layer: layerOf('anchors'), color: ACI.magenta });
+        doc.text(a.row, [x + tick, y + tick], { layer: layerOf('anchors'), height: tick * 2, color: ACI.magenta });
+        any.anchors++;
+      }
+      // Rods: where each pocket runs.
+      for (const r of f.rods ?? []) {
+        if (r.length > 1) {
+          doc.polyline(r.map(at), { layer: layerOf('rods'), color: ACI.yellow });
+          any.rods++;
+        }
+      }
+      // Diagonals: the point one hangs from, and the run one is sewn along.
+      for (const a of f.apexes ?? []) {
+        const [x, y] = at(a.point);
+        doc.line([x - tick, y - tick], [x + tick, y + tick], { layer: layerOf('diagonals'), color: ACI.red });
+        doc.line([x - tick, y + tick], [x + tick, y - tick], { layer: layerOf('diagonals'), color: ACI.red });
+        doc.text(a.label, [x + tick, y - tick * 3], { layer: layerOf('diagonals'), height: tick * 2, color: ACI.red });
+        any.diagonals++;
+      }
+      for (const b of f.bases ?? []) {
+        if (b.points.length > 1) {
+          doc.polyline(b.points.map(at), { layer: layerOf('diagonals'), color: ACI.red });
+          const mid = at(b.points[Math.floor(b.points.length / 2)]);
+          doc.text(b.label, [mid[0], mid[1] - tick * 3], { layer: layerOf('diagonals'), height: tick * 2, color: ACI.red });
+          any.diagonals++;
+        }
+      }
+      // The intake: where the lower panel stops and the upper one begins.
+      for (const p of f.intake ?? []) {
+        const [x, y] = at(p);
+        doc.line([x, y - tick * 1.5], [x, y + tick * 1.5], { layer: layerOf('intake'), color: ACI.blue });
+      }
+    }
+
+    // How many to cut: the file holds one half of the wing, so every rib is
+    // cut twice except one that sits on the centreline. Unsaid, a builder
+    // working from this file cut one of each.
+    // Written from the nose, over the rib it names. It started at the first
+    // point of the outline — the trailing edge — and ran off to the right of
+    // every rib in the file.
     doc.text(
-      `R${rib.index}  y=${rib.station.toFixed(3)}m  c=${rib.chord.toFixed(3)}m  washin=${rib.alphaDeg.toFixed(2)}deg`,
-      [placed[0][0], cursor + (maxY - minY) + gap * 0.25],
+      `R${rib.index}  y=${rib.station.toFixed(3)}m  c=${rib.chord.toFixed(3)}m  washin=${rib.alphaDeg.toFixed(2)}deg  cut ${ribCopies(wing, rib.index)}`,
+      [Math.min(...flat.map((q) => q[0])), cursor + (maxY - minY) + 0.012],
       { layer: 'notes', height: 0.02, color: ACI.yellow },
     );
     cursor += (maxY - minY) + gap;
   });
+
+  // What the lines in this file are, said in the file.
+  const legend = features
+    ? [
+      'cyan: the sewing line (the rib as it is in the wing)',
+      any.cut ? 'green, outside it: the cutting line, with the seam allowance' : 'no seam allowance: cut on the sewing line, or add your own',
+      any.holes ? 'green, inside: openings, cut out' : 'no openings',
+      'magenta crosses: where a line attaches to this rib, lettered by row (K a brake, S a stabilo); a rib with none carries no line',
+      any.rods ? 'yellow: rods' : 'no rods',
+      any.diagonals ? 'red: diagonals - an X where one hangs from this rib (row>rib it runs to), a line where one is sewn on (row<rib it comes from)' : 'no diagonals',
+      'blue ticks: the ends of the cell intake on the lower edge',
+    ]
+    : ['outlines only: the sewing line of each rib'];
+  legend.forEach((t, k) => {
+    doc.text(t, [0, -0.10 - k * 0.03], { layer: 'notes', height: 0.018, color: ACI.yellow });
+  });
   return doc.toString();
 }
 
-/** Project a rib's 3D loop back into its own plane for flat cutting. */
+/**
+ * A rib's 3D loop in its own plane, as cut: the section itself, with the
+ * washin, yaw and dihedral all undone.
+ *
+ * This inverted the dihedral by hand, and inverted the wrong-signed one, so
+ * with the placement corrected it would have skewed every rib it drew. It
+ * uses the placement's own inverse now (`toRibPlane`), which cannot drift
+ * from the forward map.
+ */
 function flattenRib(loop, rib) {
-  const b = (rib.betaDeg * Math.PI) / 180;
-  const oy = rib.lobePoint[0];
-  const oz = rib.lobePoint[1];
-  return loop.map(([x, y, z]) => {
-    const dy = y - oy;
-    const dz = z - oz;
-    const v = -dy * Math.sin(b) + dz * Math.cos(b);
-    return [x, v];
-  });
+  return loop.map((p) => toRibPlane(rib, p));
 }
 
 /**
@@ -527,13 +714,13 @@ export function vribFabricEstimate(vribSet, { rollWidth = 1.4, gap = 0.03 } = {}
 export function markedPanelsToDXF(panels, {
   rollWidth = 1.4, gap = 0.03, nested = null, marking = {}, packer = 'profile',
 } = {}) {
-  // The profile packer saves about 4.5 m of roll on a 25 m2 wing against the
-  // box packer, so it is the default. `packer: 'box'` keeps the old layout
-  // for comparison.
-  const layout = nested
-    || (packer === 'profile'
-      ? nestByProfile(panels, { rollWidth, gap })
-      : nestPanels(panels, { rollWidth, gap }));
+  // The same checked layout everything else uses. `packer: 'box'` asks for
+  // the older skyline layout instead, for comparison — it used to fall
+  // through to `nestPanels`, which had since become the profile packer too,
+  // so the two choices produced the same file.
+  const layout = nested || nestPanels(panels, {
+    rollWidth, gap, method: packer === 'profile' ? 'profile' : 'skyline',
+  });
   const marks = markPanels(panels, marking);
   const byKey = new Map(marks.marks.map((m) => [`${m.surface}:${m.cell}`, m]));
   const doc = dxfDocument();
@@ -546,9 +733,8 @@ export function markedPanelsToDXF(panels, {
     });
 
     const m = byKey.get(`${p.surface}:${p.cell}`);
-    // The profile packer returns the placed outline but not the two seams
-    // separately, so marks are placed from the seams only when they are
-    // available. A layout without them still gets its outline and label.
+    // Both packers carry the two seams through their transform; a layout
+    // handed in without them still gets its outline and label.
     if (!m) continue;
     if (!p.left || !p.right) {
       doc.text(m.label, [p.outline[0][0], p.outline[0][1]],
@@ -681,8 +867,13 @@ export function tiledPages(panels, {
     for (let c = 0; c < cols; c++) {
       const x0 = minX + c * stepX;
       const y0 = minY + r * stepY;
-      const clip = shapes.filter((s) => s.points.some(([x, y]) =>
-        x >= x0 - 1 && x <= x0 + usableW + 1 && y >= y0 - 1 && y <= y0 + usableH + 1));
+      // What crosses this page: anything with a SEGMENT through it, not only
+      // anything with a vertex on it. Asking for a vertex dropped a straight
+      // run that crossed a page between two of its points — a grain line, or
+      // the flat aft part of a panel edge — and a page crossed only by such
+      // runs was counted blank and never printed.
+      const rect = [x0 - 1, y0 - 1, x0 + usableW + 1, y0 + usableH + 1];
+      const clip = shapes.filter((s) => shapeCrosses(s, rect));
       if (!clip.length) { blank++; continue; }
       pages.push({
         column: c + 1,
@@ -717,6 +908,78 @@ export function tiledPages(panels, {
   };
 }
 
+/**
+ * The part of a segment inside a rectangle `[x0, y0, x1, y1]`, or null.
+ * Liang-Barsky: the segment is cut back against each side in turn.
+ */
+function clipSegment(a, b, [x0, y0, x1, y1]) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  let t0 = 0;
+  let t1 = 1;
+  for (const [p, q] of [[-dx, a[0] - x0], [dx, x1 - a[0]], [-dy, a[1] - y0], [dy, y1 - a[1]]]) {
+    if (p === 0) {
+      if (q < 0) return null;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+    else { if (r < t0) return null; if (r < t1) t1 = r; }
+  }
+  return [[a[0] + t0 * dx, a[1] + t0 * dy], [a[0] + t1 * dx, a[1] + t1 * dy]];
+}
+
+/** Does any part of a shape's outline pass through the rectangle? */
+function shapeCrosses(shape, rect) {
+  const pts = shape.points;
+  const n = pts.length;
+  if (n === 1) return !!clipSegment(pts[0], pts[0], rect);
+  const last = shape.closed ? n : n - 1;
+  for (let i = 0; i < last; i++) {
+    if (clipSegment(pts[i], pts[(i + 1) % n], rect)) return true;
+  }
+  return false;
+}
+
+/**
+ * Every page of a tiled pattern in ONE file that opens and prints.
+ *
+ * The pages are separate drawings. They were written one after another into
+ * a single `.svg` — eight hundred root elements in a file that may have one
+ * — so a browser showed the first page above an XML error and nothing else.
+ * A pattern nobody could open, let alone print.
+ *
+ * This is a page of HTML holding each drawing at its own paper size, with a
+ * page break after it: opened in any browser and printed at 100% with no
+ * margins, it comes out sheet by sheet at true scale.
+ */
+export function tiledPagesToHTML(tiles, { title = 'pattern' } = {}) {
+  const [w, h] = tiles.pageMM;
+  const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const head = [
+    '<!doctype html>',
+    '<html lang="en"><head><meta charset="utf-8">',
+    `<title>${esc(title)}</title>`,
+    '<style>',
+    `@page { size: ${w}mm ${h}mm; margin: 0; }`,
+    'html, body { margin: 0; padding: 0; background: #888; }',
+    `.sheet { width: ${w}mm; height: ${h}mm; margin: 4mm auto; background: #fff; overflow: hidden; `
+      + 'page-break-after: always; break-after: page; }',
+    '.sheet svg { display: block; }',
+    '.how { font: 12px/1.5 monospace; color: #fff; max-width: 170mm; margin: 6mm auto; }',
+    '@media print { body { background: #fff; } .sheet { margin: 0; } .how { display: none; } }',
+    '</style></head><body>',
+    `<p class="how">${esc(title)}: ${tiles.pages.length} sheets of ${esc(tiles.paper)} `
+      + `(${tiles.columns} across by ${tiles.rows} down; ${tiles.blankPagesSkipped} blank ones left out). `
+      + 'Print at 100% — "actual size", no scaling to fit — with no margins, then measure the 100 mm '
+      + 'bar on any sheet before cutting. Each sheet says where it goes: a letter for its row and a '
+      + `number for its column. Sheets overlap by ${tiles.overlapMM} mm; lay one over the next until `
+      + 'the crosses agree.</p>',
+  ];
+  const body = tiles.pages.map((p) => `<div class="sheet" data-sheet="${p.reference}">\n${p.svg}\n</div>`);
+  return `${head.join('\n')}\n${body.join('\n')}\n</body></html>\n`;
+}
+
 /** One page, at exactly 1:1. */
 function pageSVG(shapes, x0, y0, o) {
   const t = ([x, y]) => [x - x0 + o.marginMM, y - y0 + o.marginMM];
@@ -732,6 +995,29 @@ function pageSVG(shapes, x0, y0, o) {
     const stroke = s.kind === 'notch' ? '#d000a0' : (s.kind === 'grain' ? '#b08000' : '#000');
     out.push(`<path d="${path(s.points, s.closed)}" fill="none" stroke="${stroke}" `
       + `stroke-width="0.3"/>`);
+  }
+
+  // Which panel each outline belongs to, written on every page it crosses.
+  // The pages carried the outlines and their grid reference and nothing to
+  // say what was being cut: a sheet from the middle of the roll showed two
+  // curves and no way to tell cell 7's upper panel from cell 8's lower.
+  // The same rectangle that decided the outline is on this page, so every
+  // outline on it gets its name; the name is then kept on the paper.
+  const inside = [x0 - 1, y0 - 1, x0 + o.usableW + 1, y0 + o.usableH + 1];
+  for (const s of shapes) {
+    if (s.kind !== 'panel' || !s.label) continue;
+    const n = s.points.length;
+    let at = null;
+    for (let i = 0; i < n && !at; i++) {
+      const seg = clipSegment(s.points[i], s.points[(i + 1) % n], inside);
+      if (seg) at = [(seg[0][0] + seg[1][0]) / 2, (seg[0][1] + seg[1][1]) / 2];
+    }
+    if (!at) continue;
+    const [lx, ly] = t(at);
+    const px = Math.min(o.marginMM + o.usableW - 12, Math.max(o.marginMM + 1, lx));
+    const py = Math.min(o.marginMM + o.usableH - 1, Math.max(o.marginMM + 5, ly - 1.5));
+    out.push(`<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" font-size="4" `
+      + `fill="#555" font-family="monospace">${s.label}</text>`);
   }
 
   // The overlap strip, so a builder can see how far to lay one page over the
@@ -994,4 +1280,318 @@ export function outlinesFromSegments(segments, { tolerance = 1e-4 } = {}) {
         + 'different tolerance, or the file genuinely has open edges'
       : `${loops.length} closed outlines, nothing left over`,
   };
+}
+
+/**
+ * The wing as a 3D model, for CAD.
+ *
+ * ---------------------------------------------------------------------------
+ * Why OBJ
+ * ---------------------------------------------------------------------------
+ * The thing being exported is two surfaces, a set of ribs, and a few hundred
+ * LINES. That last part decides it.
+ *
+ * **STL** carries triangles and nothing else — no curves, no grouping, no
+ * names. Half of a paraglider is its line cascade, and STL cannot represent a
+ * line at all. It would export a sail and silently drop the rigging.
+ *
+ * **IGES** can hold curves and surfaces, but it is a 1980s format with
+ * uneven modern support and no clean way to group entities into named parts.
+ *
+ * **STEP** carries the most information of any of them — true B-rep surfaces
+ * and a real assembly tree — and it is the right answer for a machined part.
+ * It is the wrong answer here. Writing valid AP214 means emitting a correct
+ * entity graph of cartesian points, b-spline surfaces, faces, shells and
+ * product structure, and any mistake produces a file that opens as nothing.
+ * A paraglider has no parametric feature tree to preserve: its surfaces are
+ * ruled between rib curves, so a mesh loses essentially nothing.
+ *
+ * **OBJ** is the only light, universally-read format that carries polygon
+ * surfaces AND polylines AND named groups in one file. Blender, Rhino,
+ * Fusion, FreeCAD, MeshLab and every three.js viewer read it. It is plain
+ * text, so it diffs and compresses.
+ *
+ * Groups share a single vertex pool, which is exactly what was wanted: the
+ * upper surface, the lower surface, the ribs and the lines are independently
+ * selectable and hideable, while the ribs still share their edges with the
+ * surfaces rather than being a separate floating copy.
+ *
+ * The whole wing is written, not the half that is modelled. A CAD model of
+ * half a paraglider is a curiosity.
+ */
+export function wingToOBJ({
+  wing, linePlan = null, name = 'wing', mirror = true, includeLines = true,
+  pointsPerSurface = 60, spacing = 'none',
+  // Lines as solid tubes at their real diameter, not only as polylines.
+  lineSelection = null, lineTubes = true, tubeSides = 6,
+  defaultLineDiameterMM = 1.2,
+  // How thick to DRAW the lines, against how thick they are.
+  //
+  // At true scale a 0.5 mm line on a 10.3 m span is 1/20,600 of the model.
+  // That is sub-pixel at any sensible zoom, so a model with the entire
+  // cascade in it opens looking like a bare sail — which is exactly what it
+  // was reported as doing, twice, after the tubes were already there.
+  //
+  // The lines really are that thin; the model is not wrong. But a drawing
+  // nobody can see is not doing its job, so the tubes are drawn thickened by
+  // default, in the way a map draws a road wider than its true width.
+  //
+  // **Defaults to 1: true scale.**
+  //
+  // It briefly defaulted to an automatic thickening so the cascade would be
+  // visible at wing scale. That was a fudge: a model whose dimensions are
+  // not the design's dimensions is not a model of the design, and anyone
+  // measuring it would get the wrong answer.
+  //
+  // At true scale the lines are genuinely 1/20,000 of the span and you have
+  // to zoom in to see them. That is what a paraglider looks like. The option
+  // remains for anyone who wants a picture rather than a model, and whatever
+  // is used is stated in the file header.
+  lineDiameterScale = 1,
+} = {}) {
+  if (!wing?.ribs?.length) throw new Error('wingToOBJ needs a wing with ribs');
+
+  // The model is made of the wing's own points — the ones the ribs are cut
+  // along and the panels developed along.
+  //
+  // It used to re-sample each rib here with the points clustered at the
+  // nose, because the wing itself spread them evenly and the leading edge
+  // came out as a straight cut. That could not help: points re-spaced along
+  // a polyline lie ON the polyline, so the model's nose was the same
+  // straight cut with more vertices on it. The wing clusters its own points
+  // at the nose now, and the model shows what is built. `spacing` remains
+  // for a caller that wants the vertex count changed.
+  const ribs = wing.ribs.map((rib) => {
+    if (!spacing || spacing === 'none') return rib;
+    const re = (pts) => {
+      // resampleSurface works in 2D; the rib points are 3D, so each axis is
+      // carried through the same parameterisation.
+      const flat = pts.map((p) => [p[0], p[2]]);
+      const idx = resampleSurface(
+        pts.map((p, i) => [i, 0]), pointsPerSurface, { spacing });
+      return idx.map(([fi]) => {
+        const i0 = Math.min(pts.length - 2, Math.max(0, Math.floor(fi)));
+        const f = Math.min(1, Math.max(0, fi - i0));
+        const a = pts[i0];
+        const b = pts[i0 + 1];
+        return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f,
+          a[2] + (b[2] - a[2]) * f];
+      });
+    };
+    return { ...rib, upper: re(rib.upper), lower: re(rib.lower) };
+  });
+
+  const v = [];
+  const index = new Map();
+  // Vertices are shared between groups, so a rib edge is the same points as
+  // the panel edge beside it rather than a duplicate sitting on top of it.
+  // `+0` turns -0 into 0 before the key is made.
+  //
+  // Mirroring the centreline gives y = -0, which prints as "-0.000000" and
+  // keys differently from "0.000000" — the same point stored twice. Four
+  // copies of the trailing-edge point appeared that way, and a CAD package
+  // reading them sees coincident vertices and an open edge where there is
+  // none.
+  const round = (x) => Number((x + 0).toFixed(6)) + 0;
+  const vert = (p) => {
+    const q = [round(p[0]), round(p[1]), round(p[2])];
+    const key = `${q[0]},${q[1]},${q[2]}`;
+    let i = index.get(key);
+    if (i === undefined) {
+      v.push(q);
+      i = v.length;            // OBJ indices are 1-based
+      index.set(key, i);
+    }
+    return i;
+  };
+
+  // Both halves, or just the one modelled.
+  const sides = mirror ? [1, -1] : [1];
+  const flip = (p, s) => [p[0], p[1] * s, p[2]];
+
+  const faces = { upper: [], lower: [] };
+  const ribLines = [];
+
+  for (const s of sides) {
+    for (let r = 0; r < ribs.length; r++) {
+      const rib = ribs[r];
+
+      // The rib outline as a closed polyline: up one surface, back the other.
+      const loop = rib.upper.map((p) => vert(flip(p, s)))
+        .concat(rib.lower.slice(1, -1).reverse().map((p) => vert(flip(p, s))));
+      // A rib on the centreline is its own mirror image: the wing has it
+      // once, and it was written once for each side — two outlines on the
+      // same vertices.
+      const onCentreline = rib.upper.every((p) => Math.abs(p[1]) < 1e-9);
+      if (!(onCentreline && s !== sides[0])) ribLines.push(loop.concat([loop[0]]));
+
+      // Panels between this rib and the next, on each surface.
+      const next = ribs[r + 1];
+      if (!next) continue;
+      for (const surf of ['upper', 'lower']) {
+        const a = rib[surf];
+        const b = next[surf];
+        const n = Math.min(a.length, b.length);
+        for (let i = 0; i < n - 1; i++) {
+          const q = [
+            vert(flip(a[i], s)), vert(flip(a[i + 1], s)),
+            vert(flip(b[i + 1], s)), vert(flip(b[i], s)),
+          ];
+          // Wind the mirrored half the other way so its normals face out.
+          faces[surf].push(s > 0 ? q : q.slice().reverse());
+        }
+      }
+    }
+
+    // The centre cell, when a cell straddles the centreline: the panel
+    // between the innermost rib and its mirror. Written once, from the
+    // positive side, because it belongs to neither half.
+    if (wing.centreRib === false && s > 0 && ribs.length) {
+      const inner = ribs[0];
+      for (const surf of ['upper', 'lower']) {
+        const a = inner[surf];
+        for (let i = 0; i < a.length - 1; i++) {
+          faces[surf].push([
+            vert(flip(a[i], -1)), vert(flip(a[i + 1], -1)),
+            vert(flip(a[i + 1], 1)), vert(flip(a[i], 1)),
+          ]);
+        }
+      }
+    }
+  }
+
+  // Lines, as polylines AND as tubes at their real diameter.
+  //
+  // A polyline is the honest representation of a line's path, and most
+  // viewers ignore it: OBJ's `l` element is optional and a great many
+  // importers read only faces. The lines were in the file and invisible.
+  //
+  // So each line is also swept into a tube of its actual diameter — from the
+  // line selection where there is one, which runs from 0.43 to 2.50 mm across
+  // the catalogue. That is geometry every viewer draws, and it is to scale:
+  // an A line really is thicker than a brake line, and a designer looking at
+  // the model can see which is which.
+  const lineGroups = {};
+  const tubeFaces = {};
+
+  // A diameter for each line, by name, from the selection.
+  const diameterOf = new Map();
+  if (lineSelection?.lines?.length) {
+    for (const sel of lineSelection.lines) {
+      if (sel?.name && sel.line?.diameterMM > 0) {
+        diameterOf.set(sel.name, sel.line.diameterMM / 1000);
+      }
+    }
+  }
+
+  // The span the model covers, for the automatic scale.
+  const modelSpan = (() => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const rib of ribs) {
+      for (const p of rib.upper) { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); }
+    }
+    return Number.isFinite(lo) ? (hi - lo) * (mirror ? 2 : 1) : 10;
+  })();
+  const thinnest = (() => {
+    const all = [...diameterOf.values()];
+    return all.length ? Math.min(...all) : defaultLineDiameterMM / 1000;
+  })();
+  const tubeScale = lineDiameterScale === 'auto'
+    ? Math.max(1, (modelSpan / 1000) / thinnest)
+    : Math.max(0, Number(lineDiameterScale) || 1);
+
+  if (includeLines && linePlan?.lines?.length) {
+    for (const s of sides) {
+      // The riser webbing goes in with the lines: it is what carries the load
+      // between the pilot and the cascade, and a model without it shows the
+      // fan starting at the karabiner.
+      for (const l of [...linePlan.lines, ...(linePlan.riserWebbing ?? [])]) {
+        if (!l.from || !l.to) continue;
+        const row = l.row || 'line';
+        const a = flip(l.from, s);
+        const b = flip(l.to, s);
+        (lineGroups[row] ||= []).push([vert(a), vert(b)]);
+
+        if (!lineTubes) continue;
+        const trueDia = diameterOf.get(l.name) ?? defaultLineDiameterMM / 1000;
+        const dia = trueDia * tubeScale;
+        const r = dia / 2;
+
+        // A frame perpendicular to the line. Any vector not parallel to it
+        // will do to start; the cross products make the rest orthogonal.
+        const ax = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const len = Math.hypot(ax[0], ax[1], ax[2]);
+        if (!(len > 0)) continue;
+        const u = [ax[0] / len, ax[1] / len, ax[2] / len];
+        const seed = Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+        const p1 = [
+          u[1] * seed[2] - u[2] * seed[1],
+          u[2] * seed[0] - u[0] * seed[2],
+          u[0] * seed[1] - u[1] * seed[0],
+        ];
+        const p1n = Math.hypot(p1[0], p1[1], p1[2]) || 1;
+        const e1 = [p1[0] / p1n, p1[1] / p1n, p1[2] / p1n];
+        const e2 = [
+          u[1] * e1[2] - u[2] * e1[1],
+          u[2] * e1[0] - u[0] * e1[2],
+          u[0] * e1[1] - u[1] * e1[0],
+        ];
+
+        const ring = (centre) => {
+          const out = [];
+          for (let k = 0; k < tubeSides; k++) {
+            const th = (2 * Math.PI * k) / tubeSides;
+            const c = Math.cos(th) * r;
+            const d = Math.sin(th) * r;
+            out.push(vert([
+              centre[0] + e1[0] * c + e2[0] * d,
+              centre[1] + e1[1] * c + e2[1] * d,
+              centre[2] + e1[2] * c + e2[2] * d,
+            ]));
+          }
+          return out;
+        };
+        const ra = ring(a);
+        const rb = ring(b);
+        const faces = (tubeFaces[row] ||= []);
+        for (let k = 0; k < tubeSides; k++) {
+          const k2 = (k + 1) % tubeSides;
+          faces.push([ra[k], ra[k2], rb[k2], rb[k]]);
+        }
+      }
+    }
+  }
+
+  const out = [
+    `# ${name} — paraglider, exported as OBJ`,
+    '#',
+    '# Groups: upper_surface, lower_surface, ribs, and one per line row.',
+    `# Line tubes are drawn ${tubeScale.toFixed(1)}x their true diameter`
+      + `${tubeScale > 1.01 ? ', so they can be seen at wing scale' : ' (true scale)'}.`,
+    `# True diameters, mm: ${[...new Set([...diameterOf.values()])]
+      .sort((a, b) => a - b).map((d) => (d * 1000).toFixed(2)).join(', ') || 'not selected'}`,
+    '# They share a vertex pool, so a rib edge IS the panel edge beside it.',
+    '# Units are metres. X is chordwise, Y spanwise, Z up.',
+    `o ${name.replace(/\s+/g, '_')}`,
+  ];
+  for (const p of v) {
+    out.push(`v ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)}`);
+  }
+  for (const [surf, list] of [['upper_surface', faces.upper],
+    ['lower_surface', faces.lower]]) {
+    out.push(`g ${surf}`);
+    for (const f of list) out.push(`f ${f.join(' ')}`);
+  }
+  out.push('g ribs');
+  for (const l of ribLines) out.push(`l ${l.join(' ')}`);
+  for (const [row, segs] of Object.entries(lineGroups)) {
+    out.push(`g lines_${row}`);
+    for (const seg of segs) out.push(`l ${seg.join(' ')}`);
+    // The same lines as surfaces, so a viewer that reads only faces still
+    // shows the cascade.
+    for (const f of tubeFaces[row] ?? []) out.push(`f ${f.join(' ')}`);
+  }
+
+  return `${out.join('\n')}\n`;
 }

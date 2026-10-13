@@ -66,6 +66,16 @@ loads into, every attachment point gets its own row. The Skin 4 P runs **a
 through i — nine load-bearing rows** — and F to I were being rejected as
 unrecognised, dropping a fifth of its line plan.
 
+**And the levels have to be settled on the whole sheet.** A canopy line is
+written in lower case and the levels below it with a number in front — `2A1`,
+`3A1`, `4A3`. Read name by name those came back as levels called `cascade-2`,
+`cascade-3` and `cascade-4`, which nothing downstream knows, so no Niviuk
+sheet had a middle line or a main line in it. `parseSimpleLineSheet` resolves
+them now (`docs/line-plans.md`, section 2), along with the Artik R 2's `C1` to
+`C4` and the Takoo 6's `BC1`, which are written in upper case under lower-case
+canopy lines and were being counted as canopy lines: the Artik had eighteen C
+attachments where it has fourteen.
+
 That is the same structural fact as the line-length result above, seen from
 the other side: a single-surface wing replaces internal structure with lines,
 so it has more of them, in more rows, and they carry more of the shape.
@@ -118,6 +128,46 @@ them was reading four values off the printed pages and comparing — the
 cross-check `docs/collecting-reference-data.md` asks for and which is easy to
 skip because the numbers look reasonable either way.
 
+### And one that four values could not catch: the columns
+
+Section 10.7 is a grid: a row for each attachment along the span, a column for
+each line row. Where a wing has no line the cell is empty — the Hook 6's D row
+stops four ribs out — and extracted as text an empty cell leaves nothing
+behind. The importer labelled the numbers on a row A, B, C, D, BR from the
+left, so everything after an empty cell moved one column over:
+
+```
+Hook 6, size 24      as imported                  as printed
+row 4    6870 6770 6827 6926 6835    A B C D K        A B C D K
+row 5    6825 6717 6790 6674         A B C D          A B C K
+row 10   6185 6184 6408              A B C            A B K
+row 11   6310                        A                K
+```
+
+**150 totals in 22 of the 25 files were filed under the wrong row**: brake
+totals as D lines on the Hook 6 and Ikuma 3, as C lines on the Skin 4 P, and
+on the Artik R 2 its C totals as B, its D totals as C and its brake's as D. The four values
+checked against the page were all `A1`, which is in the first cell of the
+first row of every table.
+
+What gives it away is the wing. From row 4 to row 5 the Hook 6's A total falls
+45 mm and its "D" total 252; from row 10 to row 11 its "A" total goes *up*
+125 mm at the wingtip. Put back, the eleven brake totals run from 7140 down to
+6310 mm in steps of no more than 231, and there are D totals on the four rows
+that have D lines.
+
+The same manual's section 10.6 lists every line by name, so it says which
+columns each row of the grid has. `tools/relabel-niviuk-totals.mjs` put the
+labels back from it — it moves labels and changes no length — and each file
+says so in its header. `tools/import-niviuk-totals.mjs` now takes that sheet
+(`--lines`) and refuses a table with a short row without it.
+
+Three things it could not settle, and which are as they were: the tables stop
+at row 12 or 13 where the per-line sheets go on to 14, 16 or 18; the brake
+column is missing from the full rows of the Artik R 2, Skin 4 P and Takoo 6,
+where the importer kept only as many values as it had found labels; and the
+Hook 6's per-line sheet has a `c10` in its ninth row.
+
 ---
 
 ## 6. Multi-size sheets, split
@@ -152,6 +202,15 @@ does.
 Files now carry `# measure: total-including-risers` or `# measure:
 single-line`, and an unknown value is refused rather than written. A key
 cannot drift out of step with its reader the way a sentence can.
+
+It can still be wrong. The writer defaulted to `single-line`, and UP's
+workbooks call their totals sheet "Einzelleine / single" — so the eight split
+sheets of the Meru 2 and Summit X declared that every line on the wing is
+seven metres long. They hold totals: `a1` is 7.4 m, 0.3 m more than that
+wing's own component lines add up to, as on the Makalu 5, whose sheet says
+"lines including risers". The key has no default now, a sheet whose shortest
+line is over three metres cannot be written as single lines, and the sweep
+checks the same of every file that says it is.
 
 ---
 

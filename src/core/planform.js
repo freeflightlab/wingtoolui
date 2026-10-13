@@ -131,20 +131,119 @@ export function discretePlanform(rows) {
 
 /**
  * Rib (profile) stations across the half wing.
- * `distribution` biases stations toward the tip, where chord changes fastest.
- *   'uniform'  equal spacing
- *   'cosine'   denser near the tip
+ *
+ * Where the ribs go is a choice about cloth, not about numerics: a cell is a
+ * thing somebody sews. Three rules:
+ *
+ *   'chord'    cells narrow towards the tip as the chord does, by `taper`:
+ *
+ *                  width  ~  (1 - taper) + taper * chord / root chord
+ *
+ *              0 is even cells, 1 is every cell the same shape in plan.
+ *   'uniform'  even cells (the same as 'chord' with no taper)
+ *   'cosine'   stations at sin(u pi/2) of the half span. Kept so a design
+ *              saved with it still loads as it was, and for nothing else.
+ *
+ * 'cosine' was the default, with the reason that it "biases stations toward
+ * the tip, where chord changes fastest". That is how a panel method is
+ * meshed. It is not how a wing is built: on the default wing, 24 cells a
+ * side over a 5.1 m half span, it made the last cell 11 mm wide on a 0.9 m
+ * chord, and the one before it 33 mm. Nobody cuts those, and every pattern,
+ * diagonal and line anchor out there inherited them.
+ *
+ * The 'chord' rule is what the one complete design in the repository does.
+ * The Swoop2 states all 26 of its rib stations: its cells narrow from 249 mm
+ * at the centre to 128 mm at the tip while its chord goes from 2.09 m to
+ * 0.61 m — half the width for less than a third of the chord — and this
+ * rule with taper 0.735 puts every one of its ribs within 3 mm over 5.24 m.
+ * A power law (width ~ chord^0.64 at best) misses by 12 mm. The default is
+ * that design's figure rounded, 0.75; it is one design, not a survey.
+ *
+ * The rule is applied as a density rather than cell by cell — ribs per metre
+ * ~ 1 / ((1 - taper) + taper c/c0), and each cell takes an equal share of
+ * its integral — so the stations do not depend on where in a cell its chord
+ * is read.
  */
-export function ribStations(planform, nCells, distribution = 'cosine') {
-  // nCells counts cells in the HALF wing; there are nCells+1 ribs including
-  // the centre rib at y=0.
-  const out = [];
-  for (let i = 0; i <= nCells; i++) {
-    const u = i / nCells;
-    const t = distribution === 'cosine' ? Math.sin((u * Math.PI) / 2) : u;
-    out.push(t * planform.halfSpan);
+export function ribStations(planform, nCells, distribution = 'chord', {
+  centreRib = true,
+  taper = 0.75,
+} = {}) {
+  // `nCells` counts the FULL cells outboard of the centreline, on one half.
+  //
+  // With a centre RIB there is a rib at y=0 and the wing has 2*nCells cells.
+  // That is what this did, and it is why an odd published count could not be
+  // built: the Alpina 5 and the Lynx 2 have 65.
+  //
+  // With a centre CELL there is no rib on the centreline. A cell straddles
+  // it, half on each side, so the half wing carries nCells full cells plus
+  // that half — nCells + 0.5 cell widths — and the wing has 2*nCells+1
+  // cells. The innermost rib sits half a cell out, and mirroring it across
+  // the centreline closes the centre cell.
+  //
+  // Both give nCells+1 ribs on the half; what changes is where the innermost
+  // one sits.
+  const span = centreRib ? nCells : nCells + 0.5;
+  const first = centreRib ? 0 : 0.5;
+  const half = planform.halfSpan;
+  const us = [];
+  for (let i = 0; i <= nCells; i++) us.push((i + first) / span);
+
+  const k = Math.min(1, Math.max(0, Number.isFinite(taper) ? taper : 0));
+  if (distribution === 'cosine') {
+    return us.map((u) => Math.sin((u * Math.PI) / 2) * half);
   }
-  return out;
+  if (distribution !== 'chord' || k === 0 || typeof planform.chord !== 'function') {
+    return us.map((u) => u * half);
+  }
+
+  // Cumulative rib count against span, then read off equal shares of it.
+  const N = 2000;
+  let c0 = 0;
+  for (let i = 0; i <= 200; i++) c0 = Math.max(c0, planform.chord((half * i) / 200));
+  if (!(c0 > 0)) return us.map((u) => u * half);
+  // A chord that runs out to nothing would ask for cells of no width.
+  const g = (y) => Math.max(0.05, (1 - k) + (k * planform.chord(y)) / c0);
+  const F = [0];
+  for (let i = 1; i <= N; i++) {
+    F.push(F[i - 1] + (half / N) / g((half * (i - 0.5)) / N));
+  }
+  let at = 0;
+  return us.map((u) => {
+    if (u >= 1) return half;
+    const target = F[N] * u;
+    while (at < N - 1 && F[at + 1] < target) at++;
+    const f = (target - F[at]) / (F[at + 1] - F[at]);
+    return (half * (at + f)) / N;
+  });
+}
+
+/**
+ * The cells those stations make on one half: how wide each is, and which
+ * are too narrow to sew.
+ *
+ * `minWidthM` is a judgement, not a rule: 60 mm is under half of the
+ * narrowest cell on the Swoop2 (128 mm).
+ */
+export function cellWidths(stations, { centreRib = true, minWidthM = 0.06 } = {}) {
+  const widths = [];
+  if (!centreRib && stations.length) widths.push(2 * stations[0]);
+  for (let i = 1; i < stations.length; i++) widths.push(stations[i] - stations[i - 1]);
+  const narrow = widths.filter((w) => w < minWidthM);
+  return {
+    widths,
+    centreM: widths[0] ?? 0,
+    tipM: widths[widths.length - 1] ?? 0,
+    narrowestM: widths.length ? Math.min(...widths) : 0,
+    widestM: widths.length ? Math.max(...widths) : 0,
+    tooNarrow: narrow.length,
+    minWidthM,
+    ok: narrow.length === 0,
+  };
+}
+
+/** How many cells a wing has across its whole span. */
+export function totalCells(nCells, { centreRib = true } = {}) {
+  return centreRib ? nCells * 2 : nCells * 2 + 1;
 }
 
 /** Flat area of the whole wing (both halves), by Simpson integration. */

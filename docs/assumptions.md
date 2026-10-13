@@ -1,7 +1,8 @@
 # Assumptions, and who gets to make them
 
-An audit of every numeric default in a core module's options found **75**, of
-which **33 could not be reached from the interface**. Some are internal tuning
+An audit of every numeric default in a core module's options found, when it
+was made, **75**, of which **33 could not be reached from the interface**.
+Some are internal tuning
 — a packer's search resolution, an integration step count — and stay where
 they are. The rest are design decisions, and a tool that hides a design
 decision makes it on the user's behalf without saying so.
@@ -11,7 +12,7 @@ decision makes it on the user's behalf without saying so.
 | setting | was | why it is a decision |
 | --- | --- | --- |
 | karabiner separation | 0.42 m | sets where the cascade converges; changes the whole line plan |
-| loop allowance | 130 mm | material, not rounding: 130 mm over 88 lines is 11 m of cord |
+| loop allowance | 130 mm | material, not rounding: 130 mm over the default wing's 228 lines is 29.6 m of cord |
 | line drag coefficient | 1.1 | a cylinder in cross-flow, but Reynolds number moves it |
 | measuring tension | 5 daN | the PMA's, and it sets the reference length an inspector checks |
 | row load shares | convention | the handbook table, or the section's own pressure distribution |
@@ -41,7 +42,12 @@ the exported lengths untouched.
 
 The export now comes from the plan the rest of the tool uses, carrying the
 flying, sewn and cut length of every line with its load and material.
-`buildCascade` still draws the front view, which is what it is for.
+
+The front view was left drawing the old cascade for some time after that —
+the same defect, in the one place that draws rather than writes — so the riser
+layout, the merges, the brakes, the stabilo and the split A were all absent
+from it. It draws the plan now, and nothing in the interface uses
+`buildCascade`.
 
 ### The settings probe could only see length changes
 
@@ -56,19 +62,26 @@ Exposing the assumptions made a second problem obvious: **30 of 74 controls
 sat in a single group** called "Panels & cutting" — the line plan, the
 assumptions, the rib openings, the diagonals and the printing, all together.
 
-They are now nine groups that match what a designer is working on:
+They are now ten groups that match what a designer is working on, with the
+exports in an eleventh. On the default wing:
 
 | group | controls |
 | --- | --- |
-| Planform | 9 |
-| Airfoil | 9 |
-| Arc & twist | 11 |
+| Planform | 15 |
+| Section | 9 |
+| Arc & twist | 7 |
 | Environment | 2 |
 | Balance | 13 |
-| **Lines & risers** | 5 |
-| **Internal structure** | 8 |
-| Panels & cutting | 10 |
-| **Assumptions** | 7 |
+| **Lines & risers** | 8 |
+| **Internal structure** | 14 |
+| Panels & cutting | 9 |
+| **Size family** | 5 |
+| **Assumptions** | 17 |
+
+Ninety-nine in all; a group shows more or fewer as its own options are turned
+on. One was still in the wrong heap until this table was checked against the
+interface: **Merge line rows** sat in "Arc & twist", between the washin and
+the rib yaw. It is with the lines.
 
 Splitting them **duplicated three settings** — `mergeRows`, `compareTo` and
 `lineRow` each ended up with two controls, because the same setting was bound

@@ -2,49 +2,83 @@
  *
  * Manufacturers ship a wing in five or six sizes. The naive assumption is that
  * a family is one design scaled: multiply every length by k, areas go as k^2,
- * done. Measured against a real family that is right for the canopy and wrong
- * for everything attached to it.
+ * done. Measured against real families that is right for the canopy, right
+ * for the height of the lines, and wrong for two things: the riser, which is
+ * a piece of hardware, and the mass.
  *
- * Fitted to PHI's ALLEGRO light across its six sizes (XS 17 m^2 to XL 24 m^2):
+ * PHI's ALLEGRO light across its six sizes (XS 17 m^2 to XL 24 m^2), each
+ * figure as a power of the span ratio:
  *
- *   flat area      k^1.99      isometric, to measurement error
- *   projected area k^1.96      isometric
- *   maximum chord  k^1.02      isometric
- *   minimum chord  k^0.96      isometric
+ *   flat area      k^2.00
+ *   projected area k^1.99
+ *   maximum chord  k^1.01
+ *   minimum chord  k^0.97
  *   aspect ratio   constant at 6.03 across every size
  *
- * So the canopy really is scaled. But:
+ * So the canopy is scaled. So is the line length PHI publish: from the S to
+ * the XL it is 0.6025 x span to within 5 mm, which is the rounding of a
+ * figure quoted to the centimetre. The XS is 98 mm longer than that.
+ *
+ * ---------------------------------------------------------------------------
+ * What this header used to say, and why it was wrong
+ * ---------------------------------------------------------------------------
+ * "Line length is affine, not proportional: 0.566 x span + 0.459 m, R^2 =
+ * 0.995. Lines are set partly by the pilot's geometry and by handling, not
+ * purely by wing size. Scaling a design isometrically gives lines that are
+ * too long on the big sizes."
+ *
+ * The fit is real and its reading was not. All of that 0.459 m comes from one
+ * size. Leave the XS out and the fixed part is -0.02 m, which is none: five
+ * sizes of six lie on a line through the origin. And a power law "lands 1.6% out where the
+ * affine fit is within 0.6%" only if its exponent is held at 1 from the XS —
+ * fitted, it is 0.93 and within 0.63%, as close as the affine one. Six sizes
+ * across 18% of span cannot tell the two forms apart.
+ *
+ * Ozone's line sheets say the same of the height, to the bottom of the riser:
+ * on the Geo 7 it follows the square root of the area to 0.3% at all five
+ * sizes, and on the Ultralite 5 to 0.5% from the 17 to the 25. (The 13 and
+ * the 15 hang 5% shorter: two sizes the maker chose to make differently, and
+ * no law fitted across the family finds them.) The riser inside that height
+ * does not scale — by the sheets' own arithmetic 527 mm on four sizes of the
+ * Geo 7 and 472 mm on its XS; 570 and 600 mm on PHI's; 520 and 540 mm on
+ * Skywalk's — so the lines above it grow FASTER than the wing, not slower,
+ * and the cord in a lineset goes as span to the power 1.02 to 1.30 in all
+ * seven families. On the two
+ * three-liners the top lines take all of it: scaled, they would be 6% and
+ * 15% longer on the largest size than on the middle one, and they are 13.5%
+ * and 26.6% longer. `docs/scaling.md` has the arithmetic.
+ *
+ * The affine laws below are kept as what they are: a way to interpolate a
+ * figure inside a family that has been measured.
  *
  *   line length    0.566 * span + 0.459 m     R^2 = 0.995
  *   total line     21.46 * span - 5.54 m      R^2 = 0.983
  *   wing weight    0.159 * projected area + 0.293 kg
  *
- * All three are **affine, not proportional** — they have a fixed part that
- * does not scale. Lines are set partly by the pilot's geometry and by
- * handling, not purely by wing size; weight carries fixed hardware. A power
- * law fitted to line length lands 1.6% out at the large end where the affine
- * fit is within 0.6%, and the residual is systematic rather than noise.
- *
- * The practical consequence: scaling a design isometrically gives lines that
- * are too long on the big sizes and too short on the small ones.
+ * The weight does have a fixed part, in every family measured: 0.3 to 1.1 kg
+ * that is there at any area.
  *
  * ---------------------------------------------------------------------------
  * The affine laws are for interpolation, not extrapolation
  * ---------------------------------------------------------------------------
- * This matters and is easy to get wrong. Fitted to the whole six-size family
- * the line-length law is within 0.6% everywhere. But fitted to only the three
- * smallest sizes and used to predict the three largest, it lands 1.8% out —
- * *worse* than plain isometric scaling at 1.5%.
+ * Fitted to the three smallest sizes and used on the three largest:
  *
- * The reason is the intercept. Over a short baseline the split between the
- * fixed and the scaling part of the length is poorly determined, and
- * extrapolating amplifies that error, while isometric scaling has no free
- * parameter to get wrong. Mass is worse still: 5.9% out on the same test.
+ *                 line length          total line           weight
+ *                 affine  isometric    affine  isometric    affine  isometric
+ *   ML            0.63%    1.47%       1.00%    0.60%       2.49%    0.56%
+ *   L             1.08%    1.42%       1.16%    0.63%       3.76%    0.19%
+ *   XL            1.83%    1.40%       1.52%    0.60%       5.89%    1.42%
+ *
+ * The affine error grows with every size beyond the fit. Plain scaling does
+ * not. For the weight and the total it is the worse of the two at once, and
+ * for the line length by the third size out.
+ *
+ * (The isometric line length is 1.4% out at every size because it is scaled
+ * from the XS, the one size that is off the line.)
  *
  * So `scaleToArea` reports whether the target sits inside the range the laws
  * were fitted over, and falls back to isometric scaling outside it unless
- * told otherwise. Interpolating within a measured family is where these laws
- * earn their keep.
+ * told otherwise.
  *
  * One more thing the data shows, which is a design decision rather than a law:
  * wing loading is not held constant across a family. The ALLEGRO light runs
@@ -52,6 +86,7 @@
  * flown proportionally heavier, so a family is not a set of identically
  * behaving wings.
  */
+import { planformFromDesignInputs, planformMetrics } from './planform.js';
 
 /**
  * Laws fitted to one family, kept as a worked example — **not** as defaults to
@@ -71,10 +106,15 @@
  *     Ozone Geo 7                  0.1270   +0.9639     0.974
  *     Ozone Ultralite 5            0.0927   +0.3871     0.999
  *
- * Every fit is tight, so affine is the right shape. But the slopes differ by
- * a factor of 1.7 across the three, because they depend on how many lines a
- * wing has, how deep its cascade runs and how it is built. Applying one
- * family's coefficients to another is simply wrong.
+ * Every fit is tight, so a straight line interpolates each family well. But
+ * the slopes differ by a factor of 1.7 across the three (2.3 across the seven
+ * families now in the table), because they depend on how many lines a wing
+ * has, how deep its cascade runs and how it is built. Applying one family's
+ * coefficients to another is simply wrong.
+ *
+ * Every intercept of the total is NEGATIVE: the cord grows faster than the
+ * span, for the reason in the header. And every intercept of the mass is
+ * positive.
  *
  * So `scaleToArea` scales isometrically unless it is handed laws fitted to
  * the family being scaled. Use `fitScalingFamily` on your own sizes.
@@ -99,7 +139,20 @@ export const EXAMPLE_SCALING = {
  *                          lineLength, totalLineLength, mass, midWeight}
  */
 export function fitScalingFamily(sizes) {
-  const fit = (xs, ys) => {
+  // A size that does not give a figure is left out of that figure's fit.
+  //
+  // It used to go in as zero. `null` is a number to arithmetic, so a family
+  // whose table has no line length at all came back with the law
+  // `0 x span + 0` at R2 = 1 — a perfect fit to nothing, which `scaleToArea`
+  // then applied, giving a wing with lines 0 m long by the "affine" method.
+  // And one blank cell in a column of five bent the other four: BGD's total
+  // line length, with no figure for the XS, fitted as 110 m per metre of span.
+  const fit = (xsAll, ysAll) => {
+    const pairs = xsAll.map((x, i) => [x, ysAll[i]])
+      .filter(([x, y]) => typeof x === 'number' && typeof y === 'number'
+        && Number.isFinite(x) && Number.isFinite(y));
+    const xs = pairs.map((q) => q[0]);
+    const ys = pairs.map((q) => q[1]);
     const n = xs.length;
     if (n < 2) return null;
     const mx = xs.reduce((a, b) => a + b, 0) / n;
@@ -110,7 +163,9 @@ export function fitScalingFamily(sizes) {
     const intercept = my - slope * mx;
     const ssRes = ys.reduce((a, y, i) => a + (y - (intercept + slope * xs[i])) ** 2, 0);
     const ssTot = ys.reduce((a, y) => a + (y - my) ** 2, 0);
-    return { slope, intercept, r2: ssTot ? 1 - ssRes / ssTot : 1 };
+    // `n` goes with the law: two sizes give a line through two points, and
+    // an R2 of 1 that says nothing.
+    return { slope, intercept, r2: ssTot ? 1 - ssRes / ssTot : 1, n };
   };
 
   const span = sizes.map((s) => s.flatSpan);
@@ -146,8 +201,11 @@ export function fitScalingFamily(sizes) {
     lineLength: fit(span, sizes.map((s) => s.lineLength)),
     totalLineLength: fit(span, sizes.map((s) => s.totalLineLength)),
     wingMass: fit(proj, sizes.map((s) => s.mass)),
-    midWeight: sizes[0].midWeight != null ? fit(proj, sizes.map((s) => s.midWeight)) : null,
-    projectedRatio: proj.reduce((a, p, i) => a + p / flat[i], 0) / sizes.length,
+    midWeight: fit(proj, sizes.map((s) => s.midWeight)),
+    projectedRatio: (() => {
+      const r = proj.map((p, i) => p / flat[i]).filter((v) => Number.isFinite(v) && v > 0);
+      return r.length ? r.reduce((a, b) => a + b, 0) / r.length : null;
+    })(),
     // Exponent of each quantity against the span ratio, as a check that the
     // canopy really is scaling isometrically.
     exponents: {
@@ -185,15 +243,16 @@ function exponent(span, values) {
  *
  * The canopy is scaled isometrically — every length by k = sqrt(areaRatio), so
  * aspect ratio, chord distribution, arc shape and washin are all preserved.
- * Line length and mass come from the affine laws instead, because they do not
- * scale with the canopy.
+ * So is the line length, unless laws fitted to this family are handed in:
+ * then line length and mass are read off those, inside the range they were
+ * fitted over.
  */
 export function scaleToArea(base, targetAreaM2, laws = null, {
   outsideRange = 'isometric',
 } = {}) {
   // With no fitted laws the only defensible scaling is isometric. Falling back
   // to another family's coefficients would look like more knowledge than there
-  // is: the affine slopes vary by a factor of 1.7 between the families
+  // is: the affine slopes vary by a factor of 2.3 between the families
   // measured, so borrowing them is worse than assuming nothing.
   if (!laws) laws = { projectedRatio: base.projectedArea / base.flatArea || 0.86 };
   const k = Math.sqrt(targetAreaM2 / base.flatArea);
@@ -204,15 +263,20 @@ export function scaleToArea(base, targetAreaM2, laws = null, {
   const inRange = !range || (targetAreaM2 >= range[0] * 0.98 && targetAreaM2 <= range[1] * 1.02);
   const useAffine = inRange || outsideRange === 'affine';
 
+  // A figure the base does not give stays not given. `null * k` is 0, and a
+  // size scaled from a table with no line length came back with lines 0 m
+  // long and a smallest chord of 0 m.
+  const times = (v, f) => (typeof v === 'number' && Number.isFinite(v) ? v * f : null);
+
   const lineLength = (laws.lineLength && useAffine)
     ? laws.lineLength.slope * flatSpan + laws.lineLength.intercept
-    : base.lineLength * k;
+    : times(base.lineLength, k);
 
   const projectedArea = targetAreaM2 * (laws.projectedRatio ?? 0.86);
 
   const mass = (laws.wingMass && useAffine)
     ? laws.wingMass.slope * projectedArea + laws.wingMass.intercept
-    : base.mass * k * k;
+    : times(base.mass, k * k);
 
   return {
     scaleFactor: k,
@@ -221,8 +285,8 @@ export function scaleToArea(base, targetAreaM2, laws = null, {
     projectedArea,
     projectedSpan: base.projectedSpan ? base.projectedSpan * k : null,
     aspectRatio: (flatSpan * flatSpan) / targetAreaM2,
-    maxChord: base.maxChord * k,
-    minChord: base.minChord * k,
+    maxChord: times(base.maxChord, k),
+    minChord: times(base.minChord, k),
     lineLength,
     totalLineLength: (laws.totalLineLength && useAffine)
       ? laws.totalLineLength.slope * flatSpan + laws.totalLineLength.intercept
@@ -231,8 +295,19 @@ export function scaleToArea(base, targetAreaM2, laws = null, {
     // The label must reflect what was actually used. With no fitted laws the
     // affine branch has nothing to apply and every quantity falls back to the
     // scale factor, so calling that 'affine' would misreport it.
-    method: (useAffine && laws.lineLength) ? 'affine' : 'isometric',
-    lawsSource: laws.source || (laws.lineLength ? 'fitted' : 'none — isometric'),
+    //
+    // And it is 'affine' where ANY fitted law was applied. A family whose
+    // table gives totals and masses but no line length has two laws, not
+    // three, and both of them are used.
+    method: (useAffine && (laws.lineLength || laws.totalLineLength || laws.wingMass))
+      ? 'affine' : 'isometric',
+    methods: {
+      lineLength: (laws.lineLength && useAffine) ? 'affine' : 'isometric',
+      totalLineLength: (laws.totalLineLength && useAffine) ? 'affine' : 'isometric',
+      mass: (laws.wingMass && useAffine) ? 'affine' : 'isometric',
+    },
+    lawsSource: laws.source
+      || ((laws.lineLength || laws.totalLineLength || laws.wingMass) ? 'fitted' : 'none — isometric'),
     mass,
     midWeight: laws.midWeight
       ? laws.midWeight.slope * projectedArea + laws.midWeight.intercept
@@ -240,9 +315,10 @@ export function scaleToArea(base, targetAreaM2, laws = null, {
     // What isometric scaling would have given, for comparison. The gap is the
     // reason this module exists.
     isometric: {
-      lineLength: base.lineLength * k,
-      mass: base.mass * k * k,
-      lineLengthErrorPct: 100 * ((base.lineLength * k) / lineLength - 1),
+      lineLength: times(base.lineLength, k),
+      mass: times(base.mass, k * k),
+      lineLengthErrorPct: (times(base.lineLength, k) != null && lineLength)
+        ? 100 * ((base.lineLength * k) / lineLength - 1) : null,
     },
   };
 }
@@ -318,7 +394,9 @@ export function parseSizeTable(tsv) {
   }
   const names = rows.size || [];
   const num = (key, i) => {
-    const v = Number(rows[key]?.[i]);
+    const cell = (rows[key]?.[i] ?? '').trim();
+    if (cell === '' || cell === '-') return null;   // not given, and not zero
+    const v = Number(cell);
     return Number.isFinite(v) ? v : null;
   };
   return names.map((name, i) => {
@@ -360,8 +438,13 @@ export function parseSizeFamilies(tsv) {
   const out = {};
   for (const line of lines.slice(1)) {
     const f = line.split('\t');
+    // A blank cell is a figure that was not given, and `Number('')` is 0.
+    // Every blank in this table used to be read as zero: PHI's line pieces,
+    // which nobody has counted, came back as none.
     const n = (k) => {
-      const v = Number(f[idx(k)]);
+      const cell = (f[idx(k)] ?? '').trim();
+      if (cell === '' || cell === '-') return null;
+      const v = Number(cell);
       return Number.isFinite(v) ? v : null;
     };
     const fam = f[idx('family')];
@@ -577,17 +660,20 @@ export function compareFamilies(families) {
  * Loading rises with aspect ratio — but only across the mainstream
  * progression, and the exception is instructive.
  *
- * Mean loading at the middle of the certified weight range:
+ * Loading at the middle of the certified weight range, on projected area,
+ * averaged over the sizes of each family in `size-families.tsv`:
  *
  *   wing                application      AR    mid    top of range
  *   Ozone Ultralite 5   hike and fly    4.56   4.93       6.17
  *   Ozone Geo 7         progression     5.16   3.87       4.31
  *   PHI Allegro light   performance XC  6.03   4.22       4.74
- *   Ozone Zeno 2        competition     6.90   4.85       5.27
+ *   Ozone Alpina 5      performance XC  6.07   4.49       5.00
+ *   BGD Lynx 2          performance XC  6.20   4.45       4.91
+ *   Skywalk SAGE        performance XC  6.40   4.33       4.85
+ *   Ozone Zeno 2        competition     6.90   4.95       5.36
  *
- * Across all four the correlation is **r = +0.11** — nothing. Drop the
- * hike-and-fly wing and it is **r = +0.99**, one of the cleanest trends in
- * this whole dataset.
+ * Across all seven the correlation is **r = +0.11** — nothing. Drop the
+ * hike-and-fly wing and it is **r = +0.92** across the six that are left.
  *
  * The mountain wing is not noise, it is a different brief. A small wing flown
  * heavily is more stable, penetrates better and packs smaller, so the
@@ -597,15 +683,29 @@ export function compareFamilies(families) {
  *
  * So the fit below covers progression through competition, and hike-and-fly
  * wings are excluded by design rather than by trimming an outlier.
+ *
+ * What the trend is good for. It gives the level of a FAMILY to 5%: the six
+ * family means lie within 4.6% of the line. It does not give a SIZE. Makers
+ * load the large sizes of a family harder than the small ones — the Allegro
+ * light runs from 3.57 to 4.80 kg/m² on one aspect ratio — so a single size
+ * is as far as 17% from the line that its family sits on.
+ *
+ * This once read "r = +0.99, one of the cleanest trends in this whole
+ * dataset". That was three families, which is one more point than a straight
+ * line needs, and its table gave the Zeno 2 as 4.85 where the file gives
+ * 4.95. The suite now refits the line from the file and compares.
  */
 export const LOADING_VS_AR = {
-  slope: 0.5632,
-  intercept: 0.917,
+  slope: 0.573,
+  intercept: 0.873,
   appliesTo: ['progression', 'sport', 'performance XC', 'competition'],
   excludes: ['hike and fly'],
-  basis: 'middle of certified weight range, projected area',
-  r: 0.986,
-  sampleFamilies: 3,
+  basis: 'middle of certified weight range, projected area, mean over the sizes of a family',
+  r: 0.923,
+  sampleFamilies: 6,
+  // The worst of the six family means, and the worst single size.
+  worstFamilyErrorPct: 4.6,
+  worstSizeErrorPct: 17.4,
 };
 
 /** Expected loading for an aspect ratio, or null where the trend does not apply. */
@@ -646,22 +746,23 @@ export function loadingCheck(sizes) {
  * Total line length from aspect ratio and span.
  *
  * The raw affine law — total line length against span — does not transfer
- * between families: its slope varies by a factor of 1.7, from 16.2 on a
- * competition wing to 36.6 on a mountain wing. That was recorded earlier as a
+ * between families: its slope runs from 16.2 on a competition wing to 36.6 on
+ * a mountain wing and 42.5 on BGD's Lynx 2. That was recorded earlier as a
  * flat "coefficients do not transfer", with the reason unresolved because
  * aspect ratio and span are confounded at r = +0.91: a higher aspect ratio
  * means a longer span at the same area.
  *
- * Five families across three manufacturers separate them.
+ * Five families separate them — four of Ozone's and one of PHI's.
  *
  * **Aspect ratio has an effect independent of span.** Geo 7 and Allegro light
- * are both three-liners with mean spans within 5% of each other. The Allegro's
- * aspect ratio is 17% higher, and it carries 9% less line per metre of span.
- * Span cannot explain that.
+ * are both three-liners with mean spans 5% apart. The Allegro's aspect ratio
+ * is 17% higher, and it carries 9% less line per metre of span. Span cannot
+ * explain that.
  *
- * **Riser count has a comparable effect.** Allegro light and Alpina 5 have
- * near-identical aspect ratios (6.03 and 6.07) and spans, but the Alpina is a
- * two-liner and carries 10% less line per metre of span.
+ * **Riser count looked as if it had one too, and does not.** Allegro light and
+ * Alpina 5 have near-identical aspect ratios (6.03 and 6.07) and spans, and
+ * the Alpina, a two-liner, carries 10% less line per metre of span. One pair
+ * is one pair: see `twoLinerFactor` below.
  *
  * Normalising by span removes the dominant size effect and leaves a quantity
  * that does transfer:
@@ -675,61 +776,99 @@ export function loadingCheck(sizes) {
  *   Ozone Alpina 5    6.07   18.9     19.6
  *   Ozone Zeno 2      6.90   15.5     15.4
  *
+ * ("actual" is the mean over a family's sizes; the line is fitted to those
+ * five means.)
+ *
  * Predicting a family's total line length from aspect ratio and span alone
- * lands within **6.2%** on all five — across three manufacturers, two- and
- * three-line wings, and a range of nearly 2:1 in area. That is the first
- * line-length estimate in this project that survives leaving the family it
- * was fitted to.
+ * lands within **6.2%** at the middle size of each of the five and within
+ * **7.4%** at every size of them — two- and three-line wings over a range of
+ * more than 2:1 in area. That is the first line-length estimate in this
+ * project that survives leaving the family it was fitted to.
  *
  * ---------------------------------------------------------------------------
- * The limit, found by testing it out of sample
+ * Out of sample
  * ---------------------------------------------------------------------------
- * Applied to BGD's Lynx 2 — a sixth family, a third manufacturer, and none of
- * its data used in the fit — the law lands within 1% on the smallest size and
- * **16% out on the largest**. The error is systematic in size, not scatter,
- * and the reason is that the law carries a hidden assumption: that a family's
- * total line length scales with **span**.
+ * Two families were not in the fit, from two more makers.
  *
- * Fitting the exponent of total line length against the linear scale factor,
- * per family:
+ *   Skywalk SAGE   five sizes   within 0.8% at every one
+ *   BGD Lynx 2     four sizes   6.6 to 7.5% under at every one
+ *
+ * The Lynx 2 is a 2.5-liner — three rows in the middle and two at the tips —
+ * and it carries more line than the law gives a wing of its aspect ratio, by
+ * about the same at every size. So the law has now been 7.4% out inside its
+ * own sample and 7.5% out of it.
+ *
+ * ---------------------------------------------------------------------------
+ * A limit that was not one
+ * ---------------------------------------------------------------------------
+ * This block used to say the law lands "within 1% on the smallest Lynx 2 and
+ * 16% out on the largest", and that the reason is a hidden assumption: "BGD
+ * scales its lineset with AREA", exponent 2.03, "a design decision at the
+ * manufacturer level".
+ *
+ * It was measured against the "Total line length" in BGD's specification
+ * table — 209, 226, 247, 268, 290 m. That row is 10.7 m for every square
+ * metre of flat area at all five sizes, so it does go with area. It is not
+ * the lineset. BGD's own production line sheets are in `data/reference`, with
+ * the same 121 lines a side at every size, and they add up to
+ *
+ *             S        M        ML       L
+ *   sheet     229.7    241.6    252.4    262.7 m
+ *   ratio     0.951    1        1.045    1.088      BGD's factor: 0.96 1 1.04 1.08
+ *   table     226      247      268      290 m
+ *
+ * — the linear factor BGD state, at every level of the cascade, like the line
+ * height BGD publish in the same table (6.7 to 7.9 m). The table's total is
+ * its M figure multiplied by the ratio of the flat areas, to the metre. No
+ * lineset of a fixed number of lines can go with area while its height goes
+ * with span, and that should have been the first thing asked of an exponent
+ * of 2.
+ *
+ * Fitting the exponent of total line length against span, per family:
  *
  *   Ozone Ultralite 5   1.30      Ozone Alpina 5   1.06
  *   Ozone Geo 7         1.15      Ozone Zeno 2     1.04
- *   PHI Allegro light   1.02      BGD Lynx 2       **2.03**
+ *   PHI Allegro light   1.02      Skywalk SAGE     1.05
+ *                                 BGD Lynx 2       1.08
  *
- * A linear scale factor multiplies span by k and area by k², so an exponent
- * near 1 means the lineset scales with span and near 2 means it scales with
- * area. Five families do the first. BGD does the second: its published totals
- * track area almost exactly, and it is the only maker here that publishes an
- * explicit linear scaling factor per size.
+ * All seven are a little over 1, for the reason in the header of this file:
+ * the riser does not scale and the height does.
  *
- * That is a design decision at the manufacturer level, not a measurement
- * artefact, and this project cannot say why — only that assuming one regime
- * silently mis-sizes the other by up to 16% at the ends of a range.
- *
- * So `lineConsumptionEstimate` takes the exponent, defaulting to 1, and
- * `lineLengthExponent` fits it from a family's own sizes. Use the AR law to
- * set the level, and the family's own exponent to move across sizes.
+ * `lineConsumptionEstimate` still takes an exponent and a reference size,
+ * and `lineLengthExponent` still fits one from a family's own sizes — it is
+ * how to carry a measured size to its neighbours. Nothing in the data asks
+ * for an exponent near 2.
  *
  * ---------------------------------------------------------------------------
  * Two further caveats. Five families is a small sample for a two-parameter
- * fit. And riser count is still partly collinear with aspect ratio here —
- * both two-liners are high-aspect wings — so the `risers` correction below is
- * offered as an adjustment, not as an independently established effect.
+ * fit, and four of the five are one maker's. And the riser-count correction
+ * is withdrawn: Skywalk's SAGE, a two-liner at AR 6.4 that was not in the
+ * fit, lands within 0.8% of the uncorrected line at every size, where a
+ * factor of 0.90 would put it 9% low. Over the three two-liners now in the
+ * file the mean residual is -1.2%, and over the three three-liners +1.1%.
  */
 export const LINE_LENGTH_PER_SPAN = {
   slope: -5.120,
   intercept: 50.72,
   r2: 0.951,
+  // Inside the five fitted families: the worst at a family's middle size, and
+  // the worst at any size (the largest Ultralite 5).
   worstFamilyErrorPct: 6.2,
-  worstOutOfSampleFamilyErrorPct: 0.8,   // Skywalk SAGE, five sizes
+  worstSizeErrorPct: 7.4,
   sampleFamilies: 5,
-  sampleManufacturers: 3,
+  // Ozone, four families, and PHI, one.
+  sampleManufacturers: 2,
   arRange: [4.56, 6.90],
-  // Fitted on families whose lineset scales with span. Out of sample on an
-  // area-scaling family the error reaches 16%.
+  // The families that were not in the fit, and the worst the law does on any
+  // size of each.
+  outOfSample: [
+    { family: 'Skywalk SAGE', sizes: 5, worstErrorPct: 0.8 },
+    { family: 'BGD Lynx 2', sizes: 4, worstErrorPct: 7.5 },
+  ],
+  worstOutOfSampleErrorPct: 7.5,
+  // Every family measured scales its lineset with span, near enough: the
+  // exponent runs from 1.02 to 1.30.
   assumesSpanScaling: true,
-  worstOutOfSampleErrorPct: 16.2,
   // Refuted out of sample: see the note above. Left at 1 so it is inert, with
   // the measured value recorded beside it.
   twoLinerFactor: 1.0,
@@ -766,9 +905,9 @@ export function lineConsumptionEstimate({
   const perSpan = lineLengthPerSpan(aspectRatio, { risers });
 
   // The plain law is total = k * span, which is the exponent-1 case. Given a
-  // reference size and a fitted exponent, scale from the reference instead —
-  // without this an area-scaling family is mis-sized at both ends of its
-  // range, in opposite directions.
+  // reference size and a fitted exponent, scale from the reference instead:
+  // a family whose cord goes as span to the 1.3 is otherwise about 5% out at
+  // the ends of its range, in opposite directions.
   const base = referenceSpan ?? flatSpan;
   const total = perSpan * base * ((flatSpan / base) ** exponent);
 
@@ -777,8 +916,10 @@ export function lineConsumptionEstimate({
     totalLineLengthM: total,
     exponent,
     inFittedRange: aspectRatio >= lo && aspectRatio <= hi,
+    // The worst the law does at any size of the families it was fitted to.
+    // Out of sample it has done better (0.8%) and as badly (7.5%).
     expectedErrorPct: exponent === 1
-      ? LINE_LENGTH_PER_SPAN.worstFamilyErrorPct
+      ? LINE_LENGTH_PER_SPAN.worstSizeErrorPct
       : null,
   };
 }
@@ -786,9 +927,13 @@ export function lineConsumptionEstimate({
 /**
  * Fit how a family's total line length scales, as an exponent against span.
  *
- * Near 1 the lineset scales with span; near 2 with area. Both occur in the
- * measured data, and which one a maker uses cannot be guessed from the wing's
- * numbers — it has to be fitted from the family, or taken from the maker.
+ * Near 1 the lineset scales with span; near 2 it would scale with area. Every
+ * family measured from its line sheets is between 1.02 and 1.30. A published
+ * "total line length" can come out near 2 — BGD's does, 2.03 — and that says
+ * how the table was filled in, not how the lines were cut: see the note on
+ * `LINE_LENGTH_PER_SPAN`. `regime` is kept so that an exponent near 2 is
+ * named for what it would mean, and a caller who gets 'area' should go and
+ * look at where the totals came from.
  */
 export function lineLengthExponent(sizes) {
   const pts = sizes
@@ -823,17 +968,16 @@ export function lineLengthExponent(sizes) {
  * within 20 mm. On their own numbers the worst deviation is 8.8 mm and the
  * mean is 2.7 mm.
  *
- * **Risers do not scale.** Which explains the intercept in the affine
- * line-length law fitted earlier. Skywalk quotes "middle line length *without*
- * risers", and that quantity scales proportionally to within 6 mm across five
- * sizes — exponent 0.994. Quote the same length *including* a riser that does
- * not scale, and the relationship looks affine with an intercept roughly the
- * size of the riser. The intercept was never a property of the lines.
+ * **Risers do not scale.** Skywalk quotes "middle line length *without*
+ * risers", and that quantity scales proportionally to within 7 mm across five
+ * sizes. Ozone's sheets for the Geo 7 and the Ultralite 5 give the length of
+ * every line path *with* its riser, and the riser those imply is the same on
+ * sizes whose lines differ by a metre.
  *
- * PHI's family fits a non-scaling part of about 895 mm against a published
- * riser of 570-600 mm, so the riser explains most of its intercept but not
- * all — and their riser steps between sizes rather than being constant, which
- * accounts for some of the rest.
+ * This comment used to go on: "which explains the intercept in the affine
+ * line-length law. PHI's family fits a non-scaling part of about 895 mm
+ * against a published riser of 570-600 mm, so the riser explains most of its
+ * intercept". PHI's fixed part is one size. See `splitFixedAndScaling`.
  */
 export function scalingCheck({
   referenceLengths, scaledLengths, scaleRatio, toleranceMM = 20,
@@ -867,27 +1011,66 @@ export function scalingCheck({
 }
 
 /**
- * Split a quoted line length into the part that scales and the part that does
- * not.
+ * Split a quoted line length into the part that goes with span and the part
+ * that does not — and say whether that split rests on one size.
  *
- * A maker who quotes line length including risers produces a set of numbers
- * that look affine in span. Fitting a fixed part and a proportional part
- * recovers the non-scaling component, which should come out near the riser
- * length — and does, closely for a family with a constant riser and less well
- * for one whose riser steps between sizes.
+ * Least squares over the sizes, and then the same fit with each size left out
+ * in turn. `restsOn` is the index of a size whose absence takes away more
+ * than half of the fixed part, or null.
+ *
+ * It is there because of what the first version of this did with PHI's six
+ * line lengths. It drew its line through the FIRST size and searched for the
+ * fixed part that fitted the rest best, found 0.945 m, and the suite recorded
+ * "a length quoted with risers does need a fixed part" against a riser of
+ * 570 to 600 mm. The first size is PHI's XS, which is 98 mm longer than the
+ * other five would make it. Leave it out and they lie within 5 mm of a line
+ * through the origin: fixed part -0.02 m. A fit that is made to pass through
+ * one point reports that point.
  */
 export function splitFixedAndScaling(spans, lengths) {
-  let best = null;
-  for (let fixed = 0; fixed <= 1.5; fixed += 0.005) {
-    const k = (lengths[0] - fixed) / spans[0];
-    if (k <= 0) continue;
-    let worst = 0;
-    for (let i = 0; i < spans.length; i++) {
-      worst = Math.max(worst, Math.abs((fixed + k * spans[i]) - lengths[i]));
+  const fitOf = (xs, ys) => {
+    const n = xs.length;
+    if (n < 2) return null;
+    const mx = xs.reduce((a, b) => a + b, 0) / n;
+    const my = ys.reduce((a, b) => a + b, 0) / n;
+    const sxx = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+    if (sxx === 0) return null;
+    const perSpan = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / sxx;
+    const fixedM = my - perSpan * mx;
+    const worstM = Math.max(...xs.map((x, i) => Math.abs(fixedM + perSpan * x - ys[i])));
+    return { fixedM, perSpan, worstM };
+  };
+  const pairs = spans.map((x, i) => [x, lengths[i]])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+  const xs = pairs.map((q) => q[0]);
+  const ys = pairs.map((q) => q[1]);
+  const all = fitOf(xs, ys);
+  if (!all) return null;
+
+  // A line through the origin, for comparison: what "it all scales" misses by.
+  const k0 = xs.reduce((a, x, i) => a + x * ys[i], 0) / xs.reduce((a, x) => a + x * x, 0);
+  const proportionalWorstM = Math.max(...xs.map((x, i) => Math.abs(k0 * x - ys[i])));
+
+  const leaveOneOut = xs.length >= 4
+    ? xs.map((_, i) => ({
+      dropped: i,
+      ...fitOf(xs.filter((__, j) => j !== i), ys.filter((__, j) => j !== i)),
+    }))
+    : [];
+  let restsOn = null;
+  for (const l of leaveOneOut) {
+    if (Math.abs(all.fixedM) > 0.05 && Math.abs(l.fixedM) < Math.abs(all.fixedM) / 2) {
+      if (restsOn == null
+        || Math.abs(l.fixedM) < Math.abs(leaveOneOut[restsOn].fixedM)) restsOn = l.dropped;
     }
-    if (!best || worst < best.worstM) best = { fixedM: fixed, perSpan: k, worstM: worst };
   }
-  return best;
+  return {
+    ...all,
+    proportional: { perSpan: k0, worstM: proportionalWorstM },
+    leaveOneOut,
+    restsOn,
+    withoutIt: restsOn != null ? leaveOneOut[restsOn] : null,
+  };
 }
 
 /**
@@ -979,13 +1162,42 @@ export function partialCorrelate(x, y, z) {
  * right size and the wrong shape, and `derived` names every field that was
  * not in the source.
  */
-export function referenceDesignInputs(size, { tipChordFraction = 0.22 } = {}) {
+export function referenceDesignInputs(size, { tipChordFraction = 0.22, solveTipToArea = true } = {}) {
   if (!size || !size.flatSpan || !size.flatArea) return null;
 
-  // Tip chord is not published. A fraction of the root is the usual
-  // relationship and is flagged as an assumption.
+  // Tip chord is not published, and the flat area is. With the span, the
+  // root chord and the shape defaults fixed, the tip is the one free
+  // dimension, so it is solved to the published area.
+  //
+  // It was 22% of the root, and the wing built from it came out 1.1 to 4.1%
+  // short of its published area on the 38 sizes of `size-families.tsv` and
+  // 1.7 to 6.9% on Niviuk's 17 (a Skin 4 P 14 at 13.0 m2 against 14.0). The
+  // interface's picker solved it and this did not, so the same wing had two
+  // outlines: the picker's, at its own area, and the one the full-pipeline
+  // validation ran on.
   const rootChord = size.maxChord ?? (size.flatArea / size.flatSpan) * 1.18;
-  const tipChord = size.minChord ?? rootChord * tipChordFraction;
+  const shape = {
+    tipSweep: rootChord * 0.55,
+    ellipticityLE: 0.85,
+    ellipticityTE: 0.55,
+  };
+  let tipChord = size.minChord ?? rootChord * tipChordFraction;
+  let tipChordBasis = size.minChord ? 'published' : `assumed at ${tipChordFraction} of the root`;
+  if (!size.minChord && solveTipToArea) {
+    const areaFor = (tip) => planformMetrics(planformFromDesignInputs({
+      span: size.flatSpan, rootChord, tipChord: tip, ...shape,
+    })).area;
+    let lo = 0.05 * rootChord;
+    let hi = 0.8 * rootChord;
+    if (size.flatArea >= areaFor(lo) && size.flatArea <= areaFor(hi)) {
+      for (let i = 0; i < 50; i++) {
+        const mid = (lo + hi) / 2;
+        if (areaFor(mid) < size.flatArea) lo = mid; else hi = mid;
+      }
+      tipChord = Math.round(((lo + hi) / 2) * 1000) / 1000;
+      tipChordBasis = 'solved to the published area';
+    }
+  }
 
   return {
     inputs: {
@@ -994,10 +1206,9 @@ export function referenceDesignInputs(size, { tipChordFraction = 0.22 } = {}) {
       tipChord,
       // Sweep and ellipticity are shape, not size, and are not in any
       // specification. These are neutral starting values.
-      tipSweep: rootChord * 0.55,
-      ellipticityLE: 0.85,
-      ellipticityTE: 0.55,
+      ...shape,
     },
+    tipChordBasis,
     cells: size.cells ?? 40,
     // Span ratio, which is what buildLobe takes.
     //

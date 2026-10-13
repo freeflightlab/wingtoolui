@@ -11,7 +11,9 @@
   --rule-soft:  #1e2a32;
   --text:       #ccd8de;
   --text-dim:   #7b8f9b;
-  --text-faint: #4e6270;
+  /* Hints, readout labels and inactive tabs are text a designer reads; at
+     #4e6270 they were 2.7:1 on the panel. */
+  --text-faint: #728794;
 
   --aci-cyan:    #35d6e8;
   --aci-green:   #5fd97a;
@@ -141,8 +143,15 @@ html, body {
 
 .vp > svg {
   display: block;
+  /* Clear of the label bar above and the note below. The drawing filled the
+     whole frame and the fit takes it to the edges, so a tall wing ran its
+     karabiners through the note and a wide cutting layout ran its panels
+     over the export buttons. */
+  position: absolute;
+  left: 0;
+  top: 28px;
   width: 100%;
-  height: 100%;
+  height: calc(100% - 64px);
   /* The viewBox is re-fitted to the drawn content after every redraw, so the
      drawing scales itself. These keep the element from claiming more room
      than the frame gives it while that happens. */
@@ -172,12 +181,20 @@ html, body {
 }
 .vp-note {
   position: absolute;
-  bottom: 8px;
+  bottom: 6px;
   left: 10px;
   font-family: var(--mono);
   font-size: 10px;
+  line-height: 1.3;
   color: var(--text-dim);
   pointer-events: none;
+  /* Two lines rather than one cut off: the notes carry the findings — how
+     many diagonals are unbuildable, where the pilot hangs — and an ellipsis
+     hid them on any panel narrower than the sentence. */
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 /* ---------- control groups ---------- */
@@ -230,6 +247,9 @@ html, body {
 .field input[type=range] { grid-column: 1 / -1; }
 
 .field.row { grid-template-columns: 1fr 84px; }
+/* A select names a choice in words, and 84 px cut most of them short:
+   "Denser a", "every rc". It takes what the words need, up to most of the row. */
+.field.row.pick { grid-template-columns: minmax(0, 1fr) minmax(84px, 62%); }
 .field.row input[type=number], .field.row select {
   grid-column: 2;
   width: 100%;
@@ -310,6 +330,24 @@ input[type=range]::-moz-range-thumb {
 .tbl td:last-child { text-align: right; color: var(--aci-yellow); }
 .tbl td:first-child { color: var(--text-dim); }
 .tbl tr.em td:last-child { color: var(--aci-cyan); }
+
+/* A remembered design against the one on the page. Better and worse each
+   have a colour per theme: the dark theme's accents are too light to read on
+   white. */
+:root { --better: var(--aci-green); --worse: var(--aci-red); }
+.compare .cmp-head {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin: 8px 0 2px;
+}
+.tbl.cmp td { padding: 2px 0; vertical-align: top; }
+.tbl.cmp td:nth-child(2) { text-align: right; color: var(--text); white-space: nowrap; padding: 2px 6px; }
+.tbl.cmp td:last-child { text-align: right; color: var(--text-dim); white-space: nowrap; width: 3.6em; }
+.tbl.cmp tr.better td:first-child, .tbl.cmp tr.better td:last-child { color: var(--better); }
+.tbl.cmp tr.worse td:first-child, .tbl.cmp tr.worse td:last-child { color: var(--worse); }
+.compare .hint { margin-top: 5px; }
+
 
 /* ---------- status bar ---------- */
 
@@ -468,3 +506,67 @@ input[type=range]::-moz-range-thumb {
   padding: 6px 8px;
   resize: vertical;
 }
+
+/* Light mode.
+ *
+ * The drawing colours are mapped in app.js rather than here, because the SVG
+ * is built with explicit stroke attributes and a stylesheet cannot reach
+ * them. This block is the chrome: backgrounds, panels, rules and text. */
+[data-theme="light"] {
+  /* The accents are written for a dark screen, and on white the yellow and
+     cyan were under 2:1 against the page: every value in the readout and the
+     balance table, and every active tab. The drawings already darken them
+     (themeColour, x0.62, enough for lines); text takes x0.55, which clears
+     4.5:1 on white. */
+  --aci-cyan:    #1d7680;
+  --aci-green:   #347743;
+  --aci-magenta: #7f326c;
+  --aci-yellow:  #806c27;
+  --aci-blue:    #3c4c8c;
+  --aci-red:     #8c3333;
+  --ink:        #f5f7f8;
+  --panel:      #ffffff;
+  --panel-2:    #eef2f4;
+  --rule:       #ccd6db;
+  --rule-soft:  #e2e9ec;
+  --text:       #1d2a31;
+  --text-dim:   #5a6c77;
+  --text-faint: #66777f;
+
+  --grid:       #e4ebee;
+  --grid-major: #ccd8de;
+}
+
+[data-theme="light"] svg { background: #ffffff; }
+[data-theme="light"] .field textarea {
+  background: #ffffff;
+  color: #1d2a31;
+  border-color: #ccd6db;
+}
+
+/* Save controls on each viewport label. Small and quiet: they are there when
+   wanted and should not compete with the drawing. */
+.vp-save { float: right; display: inline-flex; gap: 4px; }
+.vp-save-btn {
+  font: 10px/1 var(--mono);
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid var(--rule-soft);
+  border-radius: 3px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+.vp-save-btn:hover { color: var(--text); border-color: var(--rule); }
+
+/* The theme switch, in the masthead where somebody would look for it. */
+.themebtn {
+  font: 11px/1 var(--mono);
+  color: var(--text-dim);
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 5px 10px;
+  margin-left: 10px;
+  cursor: pointer;
+}
+.themebtn:hover { color: var(--text); border-color: var(--text-faint); }

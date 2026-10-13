@@ -37,7 +37,29 @@ function buildFromSampler(sampleFn, halfSpan) {
     at(s) {
       const p = pointAtLength(pts, cum, s);
       const h = Math.max(1e-6, total * 1e-4);
-      const p1 = pointAtLength(pts, cum, Math.max(0, s - h));
+
+      // Reflect across the centreline rather than clamping to it.
+      //
+      // The difference is centred on `s` everywhere except at the centre,
+      // where `Math.max(0, s - h)` made it one-sided and returned the angle
+      // half a step OUTBOARD. The arc is level at the centre, so beta there
+      // is exactly zero, and it came back as 0.0161 degrees.
+      //
+      // Small, but it tilts the centre rib off the centreline by 0.1 mm, and
+      // mirroring a rib that is not quite flat leaves a sliver of overlapping
+      // faces in the 3D model — 122 of them — which a CAD package renders as
+      // shading artefacts and a boolean operation trips over.
+      //
+      // The lobe is symmetric, so the point at -x is the point at +x with its
+      // spanwise coordinate negated. That makes the difference genuinely
+      // centred at s = 0 and gives beta = 0 exactly.
+      const before = s - h;
+      const p1 = before >= 0
+        ? pointAtLength(pts, cum, before)
+        : (() => {
+          const q = pointAtLength(pts, cum, -before);
+          return [-q[0], q[1]];
+        })();
       const p2 = pointAtLength(pts, cum, Math.min(total, s + h));
       const beta = Math.atan2(-(p2[1] - p1[1]), p2[0] - p1[0]);
       return { y: p[0], z: p[1], beta };

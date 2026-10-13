@@ -29,29 +29,89 @@
  * concentrates it again, because the cloth that would have carried it is not
  * there.
  *
+ * The path runs from the anchor, on the lower surface, ACROSS the rib towards
+ * the upper surface, and the load fans out by 30 degrees either side of it —
+ * the Whitmore section of gusset-plate design. So the room it has is the
+ * depth of the rib at the anchor, and a hole is in its way where the hole's
+ * outline comes inside the fan.
+ *
  * This is a line-load model — force per unit width of cloth — not a finite
  * element analysis, and it says so.
  *
+ * It was not that. The room was taken as a quarter of the chord, where a
+ * 15% section is 7 to 15% of chord deep at its anchors; and the path was
+ * walked along the chord, aft of the anchor, where the description above it
+ * said up — so a hole ahead of an anchor could not be in the way and a hole
+ * behind it was, at whatever height it was cut.
+ *
  * ---------------------------------------------------------------------------
- * What building it showed
+ * What building it showed, and what it got wrong first
  * ---------------------------------------------------------------------------
  * The first result looked absurd: the A anchor working the rib cloth at 2971%
- * of its capacity. Checking the arithmetic rather than tuning it:
+ * of its capacity, on "260 N at 1 g, 2080 N at the 8 g case" through a 20 mm
+ * tab. The arithmetic was right and the load was not: it was a number that
+ * sounded plausible, not one the load model gave. Half a 95 kg wing is 466 N
+ * shared between its anchors — 28 of them on the 12-cell test wing, 17 N
+ * each on average and 37 N on the worst.
  *
- *     A1 at 1 g       260 N over a 20 mm tab   =  13.0 kN/m
- *     at the 8 g case  2080 N                  = 104.0 kN/m
- *     Skytex 27 hard carries about                 3.5 kN/m
+ * On real loads:
  *
- * The number is right. **Rib cloth cannot carry an anchor load at all** — not
- * at the design case, not even at 1 g. Real wings do not tear because the
- * load never enters bare cloth: it goes into a Dacron tab, which
- * `reinforcement.js` already sizes by width.
+ *     the worst anchor at 1 g     37 N over a 20 mm tab  =   1.8 kN/m
+ *     at the 8 g case            295 N                   =  14.7 kN/m
+ *     Skytex 27 hard carries about                           3.5 kN/m
  *
- * So the question this module can usefully answer is not "does the cloth
- * hold" — it does not, ever — but **how far the reinforcement has to reach
- * before bare cloth can take over**. That sets the tab *length*, which
- * nothing in this project had sized.
+ * So at 1 g the tab alone puts the load into cloth that carries it, and at
+ * the design case it does not, by a factor of four. The load goes into a
+ * Dacron tab and patch, which `reinforcement.js` sizes by width, and the
+ * question this module answers is **how far that reinforcement has to reach
+ * before bare cloth can take over** — its length, which nothing else here
+ * sizes. On the test wing it is 56 mm at most.
  */
+
+import { toRibPlane } from './wing3d.js';
+import { ribProfile } from './ribholes.js';
+
+/**
+ * The depth of a rib at an anchor, when nothing says what it is.
+ *
+ * A stand-in, and reported as one (`depthAssumed`): a 15% section is 11% of
+ * chord deep at an A anchor, 15% at B, 13% at C and 7% at D.
+ */
+export const ASSUMED_RIB_DEPTH = 0.10;
+
+/**
+ * The chordwise run a hole takes out at one height in the rib, in metres.
+ *
+ * `vM` is the height in the rib's own plane. A hole with an outline is cut by
+ * the line at that height; one given only as a chord range is taken to run
+ * the whole depth of the rib, which is the cautious reading.
+ */
+function holeRunAt(hole, vM, chordM) {
+  const pts = hole.outline;
+  if (Array.isArray(pts) && pts.length > 2 && Number.isFinite(vM)) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const [u0, v0] = pts[j];
+      const [u1, v1] = pts[i];
+      if ((v0 - vM) * (v1 - vM) > 0) continue;
+      if (v0 === v1) { lo = Math.min(lo, u0, u1); hi = Math.max(hi, u0, u1); continue; }
+      const u = u0 + ((vM - v0) / (v1 - v0)) * (u1 - u0);
+      lo = Math.min(lo, u);
+      hi = Math.max(hi, u);
+    }
+    return hi > lo ? [lo, hi] : null;
+  }
+  if (Array.isArray(pts) && pts.length > 2) {
+    const us = pts.map((q) => q[0]);
+    return [Math.min(...us), Math.max(...us)];
+  }
+  if (Number.isFinite(hole.fromChord) && Number.isFinite(hole.toChord)) {
+    return [Math.min(hole.fromChord, hole.toChord) * chordM,
+      Math.max(hole.fromChord, hole.toChord) * chordM];
+  }
+  return null;
+}
 
 /** Fabric strengths, N per metre of width, from the tear rating they must pass. */
 export const RIB_CLOTH = {
@@ -64,10 +124,12 @@ export const RIB_CLOTH = {
   // because a reader is entitled to know which numbers came from a
   // manufacturer and which came from an assumption.
   //
-  // The conclusions this module draws do not rest on the absolute values:
-  // "rib cloth cannot carry an anchor load" holds at any plausible figure,
-  // because the load exceeds the cloth by a factor of thirty. A number that
-  // would change the conclusion would have to be an order of magnitude out.
+  // What this module concludes — that the reinforcement at an anchor is
+  // short next to the depth of its rib — survives these being out by a
+  // factor of two either way: the test wing's worst anchor needs 19 mm of
+  // reinforcement at twice this strength and 129 mm at half of it, in a rib
+  // 282 mm deep. The lengths themselves move with the figure, and are only
+  // as good as it is.
 
   // PMA §5.3 rates a *point* tear in daN, not a line load. These are the
   // line loads a cloth of that rating carries in service, which is a
@@ -91,56 +153,66 @@ Object.defineProperty(RIB_CLOTH, 'provenance', {
 /**
  * Stress in the rib cloth along the load path from one anchor.
  *
- * The load path is taken as running from the attachment point up toward the
+ * The load path runs from the attachment point across the rib toward the
  * upper surface, which is the direction the line pulls once the wing is
  * flying and the direction the PMA test pulls in.
+ *
+ * `depthM` is the depth of the rib at the anchor and `anchorPointM` the
+ * anchor's own position in the rib's plane, `[u, v]` in metres; with those
+ * the holes are met where their outlines really are. Without them the depth
+ * is `ASSUMED_RIB_DEPTH` of the chord and a hole is taken to run the whole
+ * depth of the rib over its chord range.
  */
 export function anchorLoadPath({
   anchorChordFraction, loadN, chordM,
   tabWidthM = 0.02, spreadAngleDeg = 30,
   holes = [], clothLineLoadNPerM = 3500,
   stations = 24,
+  depthM = null, anchorPointM = null,
 }) {
   if (!(loadN >= 0)) throw new Error('anchorLoadPath needs a non-negative load');
   if (!(chordM > 0)) throw new Error('anchorLoadPath needs a chord');
 
   const spread = Math.tan((spreadAngleDeg * Math.PI) / 180);
   const out = [];
+  const depthAssumed = !(depthM > 0);
+  const depth = depthAssumed ? chordM * ASSUMED_RIB_DEPTH : depthM;
+  const uA = anchorPointM ? anchorPointM[0] : anchorChordFraction * chordM;
+  const vA = anchorPointM ? anchorPointM[1] : null;
 
   // How far to walk into the cloth.
   //
-  // Scanning a fixed 25% of chord reported a hole "in the load path" even
-  // when it sat 500 mm beyond the point where the spread load had already
-  // fallen below what bare cloth carries — every rib on the test wing was
-  // flagged, which is the same as flagging none.
+  // Scanning a fixed distance reported a hole "in the load path" even when
+  // it sat 500 mm beyond the point where the spread load had already fallen
+  // below what bare cloth carries — every rib on the test wing was flagged,
+  // which is the same as flagging none.
   //
   // The path that matters ends where the reinforcement can stop. Beyond that
   // the cloth is carrying the load unaided and a hole there is an ordinary
   // hole, not an interruption. The 100 mm floor stays, because that is where
-  // the PMA needle goes.
-  const spreadForReach = Math.tan((spreadAngleDeg * Math.PI) / 180);
+  // the PMA needle goes — and the rib is only so deep.
   const neededWidthM = loadN / clothLineLoadNPerM;
-  const reachM = Math.max(0, (neededWidthM - tabWidthM) / (2 * spreadForReach));
-  const maxDistM = Math.min(Math.max(0.10, reachM), chordM * 0.25);
+  const reachM = Math.max(0, (neededWidthM - tabWidthM) / (2 * spread));
+  const maxDistM = Math.min(Math.max(0.10, reachM), depth);
 
   for (let i = 0; i <= stations; i++) {
     const distM = (i / stations) * maxDistM;
     // The load spreads into a band that widens with distance.
-    let widthM = tabWidthM + 2 * distM * spread;
+    const bandM = tabWidthM + 2 * distM * spread;
+    let widthM = bandM;
 
-    // A hole in the path removes cloth. What is left carries the same load.
+    // A hole in the band removes cloth. What is left carries the same load.
     let interrupted = null;
+    let removed = 0;
     for (const h of holes) {
-      const from = Math.min(h.fromChord, h.toChord);
-      const to = Math.max(h.fromChord, h.toChord);
-      const here = anchorChordFraction + (distM / chordM);
-      if (here >= from && here <= to) {
-        const holeWidthM = (to - from) * chordM;
-        const remaining = Math.max(0.002, widthM - holeWidthM);
-        interrupted = { holeWidthM, remainingM: remaining };
-        widthM = remaining;
-        break;
-      }
+      const run = holeRunAt(h, vA === null ? null : vA + distM, chordM);
+      if (!run) continue;
+      removed += Math.max(0, Math.min(uA + bandM / 2, run[1]) - Math.max(uA - bandM / 2, run[0]));
+    }
+    if (removed > 1e-9) {
+      const remaining = Math.max(0.002, bandM - removed);
+      interrupted = { holeWidthM: Math.min(removed, bandM), remainingM: remaining };
+      widthM = remaining;
     }
 
     const lineLoad = loadN / widthM;
@@ -164,8 +236,16 @@ export function anchorLoadPath({
     atPMADistance: atTest,
     ok: peak.utilisation <= 1,
     worstUtilisation: peak.utilisation,
-    // A hole anywhere in the path is worth naming even when the cloth holds.
-    holeInPath: out.some((s) => s.interrupted),
+    // A hole is in the path where it takes cloth out of the band AND what is
+    // left there cannot carry the load: inside the reinforcement's reach,
+    // or beyond it where the hole has narrowed the band back below what the
+    // cloth needs. A hole that only clips a band already wide enough is an
+    // ordinary hole; counting it flagged the outer ribs of every wing, where
+    // the 100 mm the needle test walks is most of the rib.
+    holeInPath: out.some((s) => s.interrupted && s.utilisation > 1),
+    holeInBand: out.some((s) => s.interrupted),
+    depthM: depth,
+    depthAssumed,
     lineLoadModel: true,
     note: peak.utilisation <= 1
       ? 'the cloth carries the anchor load along the whole path'
@@ -185,6 +265,9 @@ export function anchorLoadPath({
 export function reinforcementReach({
   loadN, tabWidthM = 0.02, spreadAngleDeg = 30,
   clothLineLoadNPerM = 3500, chordM = 2.45,
+  // The depth of the rib at the anchor. Left out, it is `ASSUMED_RIB_DEPTH`
+  // of the chord and the result says so.
+  depthM = null,
 }) {
   const spread = Math.tan((spreadAngleDeg * Math.PI) / 180);
   // Width at which the cloth is just adequate.
@@ -192,14 +275,18 @@ export function reinforcementReach({
   const reachM = (neededWidthM - tabWidthM) / (2 * spread);
 
   // The rib is only so deep: the load path runs from the anchor to the upper
-  // surface, a fraction of the chord.
-  const availableM = chordM * 0.25;
+  // surface, and that is the section's thickness there — 7 to 15% of chord
+  // at the anchors of a 15% section. This read a quarter of the chord, which
+  // gave every rib two or three times the room it has.
+  const depthAssumed = !(depthM > 0);
+  const availableM = depthAssumed ? chordM * ASSUMED_RIB_DEPTH : depthM;
   const reachesSeam = reachM > availableM;
 
   return {
     neededWidthM,
     reachM: Math.max(0, reachM),
     availableM,
+    depthAssumed,
     // The design rule this produces: at the ultimate case the tape cannot
     // stop, so it runs to the seam.
     reachesSeam,
@@ -223,18 +310,27 @@ export function reinforcementReach({
 export function checkRibStress({
   rib, anchors, holes = [], cloth = 'Porcher Skytex 27 hard',
   tabWidthM = 0.02, designFactor = 1,
+  // The rib's own outline, as `{ at(x) -> { up, lo } }` in chord units. A rib
+  // built by this tool carries it; a bare `{ index, chord }` does not, and
+  // the depth is then assumed.
+  section = null,
 }) {
   const spec = RIB_CLOTH[cloth];
   if (!spec) throw new Error(`Unknown rib cloth: ${cloth}`);
+  const prof = section ?? (rib.upper && rib.lower ? ribProfile(rib) : null);
 
   const paths = anchors.map((a) => {
     const loadN = a.loadN * designFactor;
+    const here = prof ? prof.at(a.chordFraction) : null;
+    const depthM = here ? (here.up - here.lo) * rib.chord : null;
+    const anchorPointM = here ? [a.chordFraction * rib.chord, here.lo * rib.chord] : null;
     return {
       name: a.name,
       chordFraction: a.chordFraction,
       loadN,
+      depthM,
       reach: reinforcementReach({
-        loadN, tabWidthM, clothLineLoadNPerM: spec.lineLoadNPerM, chordM: rib.chord,
+        loadN, tabWidthM, clothLineLoadNPerM: spec.lineLoadNPerM, chordM: rib.chord, depthM,
       }),
       path: anchorLoadPath({
         anchorChordFraction: a.chordFraction,
@@ -243,6 +339,8 @@ export function checkRibStress({
         tabWidthM,
         holes,
         clothLineLoadNPerM: spec.lineLoadNPerM,
+        depthM,
+        anchorPointM,
       }),
     };
   });
@@ -260,6 +358,7 @@ export function checkRibStress({
     // Anchors whose reinforcement must run all the way to the seam.
     toSeam: toSeam.map((p) => p.name),
     allReachSeam: toSeam.length === paths.length,
+    depthAssumed: !prof,
     // Anchors whose load path crosses a hole, which is the placement mistake
     // this catches.
     throughHoles: paths.filter((p) => p.path.holeInPath).map((p) => p.name),
@@ -306,22 +405,33 @@ export function predictedTearMargin({ stress, cloth = 'Porcher Skytex 27 hard' }
  * Every rib on the wing, against its own loads and its own holes.
  *
  * The model above works on numbers handed to it. This runs it over a real
- * wing: the anchor loads from `analyseLoads`, the openings from
- * `ribOpenings`, and the chord of each rib — which is what makes the spanwise
- * rule visible, because the reach is set by the load and the room by the
- * chord, and only one of those falls outboard.
+ * wing: the anchor loads from `analyseLoads`, the openings each rib really
+ * has, and each rib's own depth at each anchor — the reach is set by the
+ * load and the room by the rib, and both fall outboard, at different rates.
+ *
+ * `plan` is the line plan. With it each anchor is taken where its line
+ * really meets the rib, which on an imported design moves along the span;
+ * without it the section's anchor positions are used for every rib.
  */
 export function checkWingRibStress({
-  wing, anchorLoads, openingsFor = null, airfoil,
+  wing, anchorLoads, openingsFor = null, airfoil, plan = null,
   cloth = 'Porcher Skytex 27 hard', tabWidthM = 0.02, designFactor = 8,
 }) {
+  const where = new Map();
+  for (const l of plan?.lines ?? []) {
+    if (l.level !== 'upper' || !Number.isFinite(l.ribIndex) || !Array.isArray(l.to)) continue;
+    const rib = wing.ribs[l.ribIndex];
+    if (!rib) continue;
+    where.set(`${l.row}|${l.ribIndex}`, toRibPlane(rib, l.to)[0] / rib.chord);
+  }
+
   const byRib = new Map();
   for (const a of anchorLoads) {
     if (!Number.isFinite(a.ribIndex)) continue;
     if (!byRib.has(a.ribIndex)) byRib.set(a.ribIndex, []);
     byRib.get(a.ribIndex).push({
-      name: `${a.row}${a.anchor}`,
-      chordFraction: airfoil.anchors?.[a.row] ?? 0.1,
+      name: a.name ?? `${a.row}${a.anchor}`,
+      chordFraction: where.get(`${a.row}|${a.ribIndex}`) ?? airfoil?.anchors?.[a.row] ?? 0.1,
       loadN: a.loadN,
     });
   }
@@ -336,22 +446,36 @@ export function checkWingRibStress({
     }));
   }
 
-  const toSeam = ribs.filter((r) => r.allReachSeam);
+  // A rib needs tape to the seam where ANY of its anchors does. This counted
+  // a rib only when all of them did, so a rib whose D anchor ran out of room
+  // was reported as having room.
+  const toSeam = ribs.filter((r) => r.toSeam.length);
+  const anchorsToSeam = toSeam.flatMap((r) => r.toSeam.map((name) => ({ ribIndex: r.ribIndex, name })));
   const withHoles = ribs.filter((r) => r.throughHoles.length);
-
-  // Where along the span the rule changes, which is the number a builder
-  // needs: inboard of it the tape can stop, outboard it cannot.
-  let crossover = null;
-  for (let i = 0; i < ribs.length; i++) {
-    if (ribs[i].allReachSeam) { crossover = ribs[i].ribIndex; break; }
+  const anchorCount = ribs.reduce((n, r) => n + r.paths.length, 0);
+  // The anchor that needs the longest reinforcement anywhere on the wing.
+  let longest = null;
+  for (const r of ribs) {
+    if (!longest || r.longest.reach.reachM > longest.reachM) {
+      longest = {
+        ribIndex: r.ribIndex, name: r.longest.name, loadN: r.longest.loadN,
+        reachM: r.longest.reach.reachM, depthM: r.longest.reach.availableM,
+      };
+    }
   }
+
+  // The first rib out from the centre where it happens, if it does.
+  const crossover = toSeam.length ? toSeam[0].ribIndex : null;
 
   return {
     ribs,
     ribCount: ribs.length,
+    anchorCount,
     ribsNeedingTapeToSeam: toSeam.length,
+    anchorsToSeam,
     ribsWithHolesInLoadPath: withHoles.map((r) => r.ribIndex),
     crossoverRib: crossover,
+    longest,
     designFactor,
     cloth,
     // The whole-wing check is what the interface calls, so it is the one
@@ -360,9 +484,10 @@ export function checkWingRibStress({
     // honesty measure that was itself not wired.
     clothProvenance: RIB_CLOTH.provenance,
     note: crossover === null
-      ? 'every rib has room for the reinforcement to stop inside it'
-      : `inboard of rib ${crossover} the reinforcement can stop; outboard of `
-        + 'it the tape must run to the surface seam',
+      ? 'every anchor\'s reinforcement can stop inside its rib'
+      : `${anchorsToSeam.length} of ${anchorCount} anchors, on ${toSeam.length} of `
+        + `${ribs.length} ribs, need their reinforcement run to the upper seam: `
+        + 'the rib is not deep enough there for the load to spread',
   };
 }
 
@@ -488,11 +613,20 @@ export function panelStress({
 }
 
 /**
- * Every panel on the wing, from the loads the wing actually carries.
+ * Every panel on the wing, at a dynamic pressure and a load factor.
  *
- * The pressure comes from the flight state rather than being supplied: it is
- * the same chordwise loading the rest of the project uses, at the same
- * dynamic pressure.
+ * `dynamicPressurePa` is the wing's own at 1 g — its wing loading over its
+ * lift coefficient, about 70 Pa for a 95 kg wing of 22 m2 — and
+ * `designFactor` the load case, which multiplies it. `peakCp` is the
+ * pressure difference across the cloth in units of that: the cell at close
+ * to stagnation pressure inside, suction outside.
+ *
+ * The first use of this put 400 Pa in and multiplied by eight. That is a
+ * wing at 92 km/h pulling 8 g, and what it "found" — that a 12-cell wing's
+ * root panels exceed their seams, and that this is why real wings have
+ * closer ribs in the middle — was the input, not the wing. At the wing's own
+ * pressure the widest panel is at a seventh of its seam at 8 g, and real
+ * wings have their WIDEST cells in the middle.
  */
 export function checkWingPanelStress({
   wing, dynamicPressurePa, peakCp = 1.5,
@@ -532,9 +666,8 @@ export function checkWingPanelStress({
     failing,
     ok: failing.length === 0,
     worst,
-    // The root cell is the widest and carries the most, which is why wings
-    // are built with closer ribs in the middle than a constant spacing would
-    // give.
+    // Tension goes with the width of the cell, so the widest cell — the
+    // centre one, on a wing whose cells narrow with its chord — is the worst.
     seamLimited: panels.filter((p) => p.limitedBy === 'seam').length,
     clothLimited: panels.filter((p) => p.limitedBy === 'cloth').length,
     designFactor,

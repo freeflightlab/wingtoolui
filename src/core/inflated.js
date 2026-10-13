@@ -52,12 +52,20 @@ export function billowedSurface({ spacingM, excessRatio, arcFn }) {
   }
 
   // `solveArc(S, L)` takes the ARC LENGTH and the CHORD it spans, and returns
-  // the radius `R` and the rise `f` as a fraction of the chord. Passing it an
-  // options object instead gave NaN thickness on every wing — the arc solved
-  // fine and the fields simply were not the ones being read.
+  // the radius `R` and the rise `f` IN THE UNITS IT WAS GIVEN — metres here.
+  //
+  // Two mistakes have been made at this line. Passing it an options object
+  // gave NaN thickness on every wing: the arc solved fine and the fields
+  // simply were not the ones being read. And then, for as long as this module
+  // has existed, the note above read "as a fraction of the chord" and the
+  // rise was multiplied by the spacing a second time. A cell is a few tenths
+  // of a metre wide, so every bulge came out a few tenths of its depth, and
+  // went with the SQUARE of the cell width: halve the cells and the section
+  // thickened fourfold. A 6% excess is a bulge 15% of the cell wide — 73 mm
+  // on a 480 mm cell, where this gave 35.
   const arcLength = spacingM * (1 + excessRatio);
   const arc = arcFn(arcLength, spacingM);
-  const heightM = arc.f * spacingM;
+  const heightM = arc.f;
   // Mean height of a circular arc above its chord, which is what adds to the
   // section rather than the peak.
   const meanRise = (2 / 3) * heightM;
@@ -66,7 +74,7 @@ export function billowedSurface({ spacingM, excessRatio, arcFn }) {
     spacingM,
     excessRatio,
     heightM,
-    radiusM: arc.R * spacingM,
+    radiusM: arc.R,
     arcLengthM: spacingM * (1 + excessRatio),
     addedLengthM: spacingM * excessRatio,
     meanRiseM: meanRise,

@@ -51,6 +51,8 @@ export function buildSize(base, k, {
   projectedRatio = 0.87,
   alphaDeg = 6,
   ovalAmount = 0.06,
+  // The riser is hardware and is not scaled: half a metre unless told.
+  riserLengthM = 0.5,
   panels: wantPanels = true,
 } = {}) {
   const inputs = scaleDesignInputs(base, k);
@@ -62,12 +64,27 @@ export function buildSize(base, k, {
     zRotation: 'auto', alphaDeg,
   });
 
-  // Line length does not scale with the canopy; it is supplied per size.
+  // The line height goes with the wing, unless a size gives its own. (This
+  // said "line length does not scale with the canopy" over a line of code
+  // that scales it. The code was right: `docs/scaling.md`, section 1.)
   const lineLength = lineLengthM ?? base.lineLengthM * k;
   const mass = allUpMassKg ?? base.allUpMassKg * k * k;
 
+  // Without a line height or a mass nothing downstream is a number, and
+  // nothing downstream said so: the family table came out with NaN for the
+  // line length, the speed and the glide on every row, and 0 g of line.
+  if (!(Number.isFinite(lineLength) && lineLength > 0)) {
+    throw new Error(`buildSize: ${name ? `size ${name}` : 'this size'} has no line height. `
+      + 'Give `lineLengthM` — the distance from the karabiner to the canopy — '
+      + 'on the base or on the size.');
+  }
+  if (!(Number.isFinite(mass) && mass > 0)) {
+    throw new Error(`buildSize: ${name ? `size ${name}` : 'this size'} has no all-up mass. `
+      + 'Give `allUpMassKg` on the base or on the size.');
+  }
+
   const plan = buildLinePlan({
-    wing, airfoil, layout, everyNthRib: 2, lineLengthM: lineLength,
+    wing, airfoil, layout, everyNthRib: 2, lineLengthM: lineLength, riserLengthM,
   });
 
   const loads = analyseLoads({
@@ -76,9 +93,15 @@ export function buildSize(base, k, {
   });
   const selection = selectLines(loads.tensions, {});
 
+  // The pilot hangs below the lines AND the riser: the same depth the line
+  // plan puts the karabiner at. The balance was given the lines alone, half
+  // a metre short, so each size's plan and its trim described two different
+  // pilots — the fault the interface's own balance had, and was cured of.
+  const hangDepthM = lineLength + riserLengthM;
   const balance = solveEquilibrium({
     area: metrics.area, span: planform.span, chord: inputs.rootChord,
-    lineLength, pilotMass: mass - (wingMassKg ?? 0), wingMass: wingMassKg ?? 4,
+    lineLength: hangDepthM,
+    pilotMass: mass - (wingMassKg ?? 0), wingMass: wingMassKg ?? 4,
     alphaDeg, cxLines: loads.drag ? loads.drag.cxLines : undefined,
   });
 
@@ -115,6 +138,8 @@ export function buildSize(base, k, {
       aspectRatio: metrics.aspectRatio,
       allUpMassKg: mass,
       lineLengthM: lineLength,
+      riserLengthM,
+      hangDepthM,
       speedKMH: balance.speedKMH,
       glideRatio: balance.glideRatio,
       fabricM: fabric ? fabric.linearMetres : null,
@@ -134,16 +159,23 @@ export function buildSize(base, k, {
 /**
  * Build every size in a family.
  *
- * `sizes` gives the per-size quantities that do not scale — line length, all-up
- * mass, and anything else a maker sets by hand. Where they are omitted the
- * canopy scale factor is used, which is wrong for line length and is flagged.
+ * `sizes` gives what a maker sets by hand at each size.
+ *
+ * The all-up mass above all. Left out, a size is flown at the base's wing
+ * loading (mass x k^2), and no family in the reference set is: each is loaded
+ * 11 to 34% harder at its largest size than its smallest. So that default is
+ * a place to start from.
+ *
+ * The line height where it departs from scale. Left out, it is the base's
+ * times k, which is what the measured families do to within half a per cent
+ * — except at the sizes a maker chose to make differently.
  */
 export function buildFamily(base, sizes, opts = {}) {
   // The base's declared area must match its own geometry.
   //
   // Every size is scaled by `sqrt(flatArea / base.flatArea)`, so a base whose
   // declared area is wrong scales the whole family by the same wrong factor.
-  // A base declared at 22.5 m2 whose planform actually measures 22.1 put
+  // A base declared at 22.5 m2 whose planform actually measures 22.91 put
   // every size 1.8% over what was asked for — consistently, quietly, and in
   // the direction that makes a wing bigger than its label.
   //
@@ -173,6 +205,8 @@ export function buildFamily(base, sizes, opts = {}) {
     lineLengthM: s.lineLengthM ?? null,
     allUpMassKg: s.allUpMassKg ?? null,
     wingMassKg: s.wingMassKg ?? null,
+    // A size may hang from its own riser: makers keep two lengths.
+    ...(s.riserLengthM != null ? { riserLengthM: s.riserLengthM } : {}),
   }));
 
   const summaries = built.map((b) => b.summary);
@@ -197,8 +231,11 @@ export function buildFamily(base, sizes, opts = {}) {
 
 /** A family summary table, in the shape a spec sheet uses. */
 export function familyTable(family) {
+  // "line length" is the lines alone, wing to riser top; the pilot hangs a
+  // riser's length below that, and the riser has a column of its own because
+  // it is the one length here that does not go with the size.
   const head = [
-    'size', 'flat area', 'flat span', 'AR', 'all-up', 'line length',
+    'size', 'flat area', 'flat span', 'AR', 'all-up', 'line length', 'riser',
     'speed', 'glide', 'fabric', 'line mass', 'load-sized',
   ];
   const rows = family.summaries.map((s) => [
@@ -208,6 +245,7 @@ export function familyTable(family) {
     s.aspectRatio.toFixed(2),
     `${s.allUpMassKg.toFixed(0)} kg`,
     `${s.lineLengthM.toFixed(2)} m`,
+    `${(s.riserLengthM * 1000).toFixed(0)} mm`,
     `${s.speedKMH.toFixed(1)} km/h`,
     s.glideRatio.toFixed(2),
     s.fabricM != null ? `${s.fabricM.toFixed(1)} m` : '-',

@@ -103,9 +103,24 @@ of them hid the bug.
 ## 4. What this does not settle
 
 The geometry reproduces exactly, which validates the importer and the
-planform arithmetic. It does **not** validate the aerodynamics, the load
-model, or the panel development against this wing — the design publishes its
-own line loads and 3D surfaces, and comparing those is the obvious next step.
+planform arithmetic. It was followed by the comparison this section named as
+the next step: the design publishes its own line geometry, loads and 3D
+surfaces, and the suite now holds the tool to all of them —
+
+| | against the program's own output | worst |
+| --- | --- | --- |
+| all 93 lines' lengths, cut lengths and types | `lep-out.txt` | 0.046 mm, 0.049 mm, none differ |
+| every line's load | `lep-out.txt` | 0.0049 kg |
+| the A anchors | the program's 3D DXF | 0.0060 mm |
+| every rib's placement, and undoing it for cutting | the program's geometry | 1e-12 mm |
+| φ and χ on every rib | `lep-out.txt`, section 12 | 0.005° |
+| rib contour lengths | `lep-out.txt`, section 6 | 0.007 mm |
+| karabiner position, angle of attack 4.32°, assiette 1.39° | `lep-out.txt` | to the printed figure |
+| lineset weight 0.468 kg, frontal area 0.426 m² | the program's totals | to the printed figure |
+
+What it still does **not** settle is the panel development against the
+Swoop2's own cutting file, which section 5 explains, and the aerodynamics: the
+design publishes no polar to compare a polar with.
 
 ---
 
@@ -145,25 +160,32 @@ size of that wedge depends on how far the panel sits from the origin, which
 is why the ratio varied.
 
 ```
-nested    17.996100 m2
-from DXF  17.996101 m2      0.000005%
+nested    23.192465 m2
+from DXF  23.192464 m2      0.000003%
 ```
+
+(That is the suite's round trip, on its 12-cell test wing. The figure here was
+17.9961 m², from a wing this page did not name and no set-up now reproduces.)
 
 **The export was correct all along.** The cutting files this project has
 produced are fine; the reader written to check them was not. Worth stating
 plainly, because for a while there was a number on the table suggesting the
 tool's cutting files were three times wrong, and they never were.
 
-The reader now runs against every DXF the interface exports, in the interface
-test — verified by breaking the writer and watching it fail.
+The reader runs against the three DXFs the interface exports — ribs, panels
+and diagonals — in the interface test. (For a while that block read nothing:
+the files it looked for had been cleared by later steps, and it printed "0
+exported DXF files read back and valid" as a pass. It captures them at the
+first sweep now, and fails if any of the three is missing.)
 
 ### Rebuilding outlines from loose segments
 
 `outlinesFromSegments` puts closed outlines back together from unordered
 `LINE` entities: endpoints snapped to a tolerance, an adjacency built, loops
 walked out of it. Exact on a shuffled square and triangle, and exact on this
-project's own 50 panels exploded into 2,400 shuffled segments and rebuilt —
-same count, same area to nine decimal places.
+project's own panels exploded into shuffled segments and rebuilt: in the suite,
+the test wing's 24 panels from 1,920 segments, 24 of 24 with the area to
+1e-9 m²; on a wing of the Swoop2's 25 cells a side, 50 of 50 from 2,400.
 
 Where more than two segments meet, the walk **stops rather than guessing**. A
 junction is where two outlines touch, and guessing there is how a

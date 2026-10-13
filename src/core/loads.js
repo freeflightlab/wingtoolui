@@ -30,6 +30,8 @@
 
 import { liftingLine } from './aero.js';
 import { rowSharesFromPressure } from './pressure.js';
+import { lineFamilyOf, fibreOf } from './trimdrift.js';
+import { planPaths } from './lineplan.js';
 
 /* --------------------------------------------------------------- loading -- */
 
@@ -129,7 +131,7 @@ export const LOAD_ROW_SHARES = { A: 0.35, B: 0.35, C: 0.20, D: 0.10 };
  *
  * `pressure` derives the split from thin-aerofoil theory for the actual
  * section, anchors and angle of attack. On a NACA 4415 with the default
- * anchors at 6 degrees it gives A 38.0 / B 24.7 / C 20.5 / D 16.8.
+ * anchors at 6 degrees it gives A 37.9 / B 24.8 / C 20.6 / D 16.8.
  *
  * The two agree closely on A and C and disagree on B and D. That gap is worth
  * understanding rather than averaging away: thin-aerofoil theory describes a
@@ -235,7 +237,6 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
   const loads = [];
   for (const [, group] of rowsAt) {
     const rows = group.rows;
-    const sample = group.lines[0];
     const ribIndex = group.ribIndex;
     const rib = spanLoad.stations.find((s) => s.index === ribIndex)
       ?? spanLoad.stations[Math.min(ribIndex, spanLoad.stations.length - 1)];
@@ -248,12 +249,19 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
     // by half.
     const share = assignment.get(ribIndex) ?? 0;
 
+    // Each load is its own line's: the line's name, and its number in ITS
+    // row. Every row at a rib was given the number of the FIRST row's line
+    // there, which is the same number only while every row has the same
+    // anchor count. On a wing with A:19 B:11 C:6 thirteen top lines then
+    // found no load under their own name, and an eighth of the weight never
+    // reached the risers.
     const present = rows.reduce((s, r) => s + (rowShares[r] ?? 0), 0) || 1;
-    for (const row of rows) {
-      const frac = (rowShares[row] ?? 0) / present;
+    for (const l of group.lines) {
+      const frac = (rowShares[l.row] ?? 0) / present;
       loads.push({
-        row,
-        anchor: sample?.index ?? ribIndex,
+        row: l.row,
+        anchor: l.index ?? ribIndex,
+        name: l.name,
         ribIndex,
         station: rib?.station ?? 0,
         loadN: share * frac,
@@ -274,29 +282,66 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
  * the anchors down to the risers accumulates that exactly — no distribution
  * assumption is needed at this step, which is worth saying because it is the
  * one part of the chain that is not an estimate.
+ *
+ * That is what this comment said while the code did something else: it added
+ * up, for each line, the loads of its own row at the anchor numbers listed on
+ * it. Two kinds of plan have lines for which that is not everything hanging
+ * from them:
+ *
+ *   - a MERGED cascade. A main line serving the A and B rows is listed under
+ *     row A, so it was given the A row's load alone — 73 N where it carries
+ *     146 — and the risers of a wing merged AB and CD added up to 55 % of
+ *     the pilot. Every merged line was sized for about half its load.
+ *
+ *   - rows of different anchor counts, where an anchor's load was filed
+ *     under another row's number (see `anchorLoads`).
+ *
+ * So it walks the tree now (`planPaths`): each top line's load goes into
+ * every line between it and the riser.
  */
 export function lineTensions(plan, loads) {
-  const loadByAnchor = new Map();
-  for (const l of loads) loadByAnchor.set(`${l.row}${l.anchor}`, l.loadN);
+  const loadOf = new Map();
+  for (const l of loads) {
+    loadOf.set(`${l.row}${l.anchor}`, l.loadN);
+    if (l.name != null) loadOf.set(`name:${l.name}`, l.loadN);
+  }
 
-  const tension = new Map();
-  for (const line of plan.lines) {
-    const carried = (line.anchors || []).reduce(
-      (s, a) => s + (loadByAnchor.get(`${line.row}${a}`) ?? 0), 0,
-    );
-    tension.set(line.name, carried);
+  const tension = new Map(plan.lines.map((l) => [l.name, 0]));
+  const served = new Map(plan.lines.map((l) => [l.name, 0]));
+  // A plan with its geometry is walked; one without (lines that carry no
+  // end points) falls back on the anchors each line lists, for every row it
+  // says it serves.
+  const jointed = plan.lines.length > 0
+    && plan.lines.every((l) => Array.isArray(l.from) && Array.isArray(l.to));
+  if (jointed) {
+    for (const p of planPaths(plan)) {
+      const n = loadOf.get(`name:${p.name}`) ?? loadOf.get(`${p.row}${p.index}`) ?? 0;
+      for (const name of p.names) {
+        tension.set(name, tension.get(name) + n);
+        served.set(name, served.get(name) + 1);
+      }
+    }
+  } else {
+    for (const line of plan.lines) {
+      const rows = line.rows ?? [line.row];
+      let carried = 0;
+      for (const row of rows) {
+        for (const a of line.anchors || []) carried += loadOf.get(`${row}${a}`) ?? 0;
+      }
+      tension.set(line.name, carried);
+      served.set(line.name, (line.anchors || []).length * rows.length);
+    }
   }
 
   const out = plan.lines.map((l) => ({
     ...l,
     tensionN: tension.get(l.name) ?? 0,
-    anchorCount: (l.anchors || []).length,
+    anchorCount: served.get(l.name) ?? 0,
   }));
 
-  // What a riser carries is everything that meets its maillon — which is not
-  // the same as everything at 'riser' level. A cascaded row (D on a
-  // three-riser wing) reaches the maillon while still numbered as middle
-  // lines, so selecting on level alone drops that row's load entirely.
+  // What a riser carries is everything that meets its maillon. Asked of the
+  // geometry rather than of the level names, so that it holds for an
+  // imported plan and for a split riser too.
   const maillonOf = new Map((plan.risers || []).map((r) => [r.name, key3(r.maillon)]));
   const riserTension = {};
   for (const l of out) {
@@ -328,6 +373,15 @@ const key3 = (p) => (Array.isArray(p) ? p.map((v) => v.toFixed(6)).join(',') : S
  * Sizing on the new figure under-sizes by nearly a factor of two on exactly
  * the lines a designer is most tempted to make thin.
  *
+ * Both of those are aramid, and the loss is the fibre's. Across the table
+ * the 48 aramid lines keep 38 to 70 % of their strength kinked (53 % in the
+ * middle) and the four Vectran 30 to 66 %; the 26 Dyneema lines keep 59 to
+ * 114 %, 22 of them 85 % or more. A service workshop gives the same account
+ * of the bending test in EN 926-1: "Dyneema retains 80 % – 90 %", "Kevlar
+ * falls to 50 % – 60 %". Each line carries its `fibre`, from the family it
+ * belongs to (`LINE_FAMILIES`), and the table sorts by it almost without
+ * overlap — one Dyneema line under 70 %, no aramid line over it.
+ *
  * So selection uses the kinked strength by default. `strengthBasis: 'new'`
  * is available for comparison but should not be used to build anything.
  *
@@ -353,16 +407,17 @@ export const DEFAULT_LINE_TABLE = [
   m('DC40', 0.50, 47.4, 41.0, 0.20, 0.18, 0.04),
   m('DC60', 0.60, 60.0, 43.2, 0.28, 0.25, 0.04),
   m('DC100', 0.80, 89.0, 71.1, 0.50, 0.45, 0.04),
-  m('PPSLS 125', 1.05, 107.0, 107.0, 0.87, 1.05, 0.05, true),
-  m('PPSLS 180', 1.25, 200.0, 194.4, 1.23, 1.48, 0.05, true),
-  m('PPSLS 260', 1.58, 280.0, 259.4, 1.96, 2.35, 0.05, true),
-  m('PPSL200', 1.42, 200.0, 211.8, 1.58, 1.90, 0.05, true),
-  m('PPSL275', 1.90, 275.0, 250.0, 2.84, 3.41, 0.05, true),
+  m('PPSLS 125', 1.05, 107.0, 107.0, 0.87, 0.85, 0.05, true),
+  m('PPSLS 180', 1.25, 200.0, 194.4, 1.23, 1.21, 0.05, true),
+  m('PPSLS 260', 1.58, 280.0, 259.4, 1.96, 1.92, 0.05, true),
+  m('PPSL200', 1.42, 200.0, 211.8, 1.58, 1.55, 0.05, true),
+  m('PPSL275', 1.90, 275.0, 250.0, 2.84, 2.78, 0.05, true),
 ];
 
 /** Table row helper. Weight is estimated from cross-section where the
- *  supplier's figure is not to hand: sheathed lines run heavier per area. */
+ *  supplier's figure is not to hand (`LINE_WEIGHT_PER_AREA`). */
 function m(code, diameterMM, newDaN, kinkedDaN, areaMM2, gramsPerM, elong, sheathed = false) {
+  const family = lineFamilyOf(code);
   return {
     name: code,
     code,
@@ -372,7 +427,10 @@ function m(code, diameterMM, newDaN, kinkedDaN, areaMM2, gramsPerM, elong, sheat
     areaMM2,
     gramsPerM,
     elongationAtRated: elong,
-    sheathed,
+    sheathed: family ? family.cover != null : sheathed,
+    // What carries the load: 'aramid' for the U- lines (Edelrid 8000-U),
+    // 'dyneema' for the DC and PPSL lines.
+    fibre: fibreOf(code),
     // Strength per unit diameter is the figure of merit for line drag: drag
     // goes with diameter, so for a given load the line with the highest
     // value here costs the least drag.
@@ -432,6 +490,28 @@ export function materialBrands(materials) {
     .map(([name, count]) => ({ name, count }));
 }
 
+/**
+ * Line weight from its cross-section, in g/m per mm² of nominal area, for a
+ * line whose supplier's figure is not to hand.
+ *
+ * Sheathed: Edelrid's data sheets for the 7343, 6843, 7850 and 7950 give
+ * diameter and weight for 26 sizes, and they come to 0.98 on average (0.81
+ * to 1.10) — aramid core or Dyneema alike, since the cover is the same
+ * polyester and the nominal diameter is the cover's. The Swoop2's own file
+ * gives its three sheathed Dyneema lines at 0.80, 0.87 and 0.96.
+ *
+ * This was 1.2, "sheathed lines run heavier per area": a fifth to a half
+ * more than any of those 29 lines weighs.
+ *
+ * Unsheathed: 0.9, an estimate with no data sheet behind it here.
+ */
+export const LINE_WEIGHT_PER_AREA = {
+  sheathed: 0.98,
+  unsheathed: 0.9,
+  source: 'sheathed: Edelrid data sheets, 26 sizes '
+    + '(data/reference/line-materials-suppliers.tsv); unsheathed: estimated',
+};
+
 export function parseMaterialsTable(tsv) {
   const out = [];
   for (const line of tsv.split(/\r?\n/).slice(1)) {
@@ -441,6 +521,12 @@ export function parseMaterialsTable(tsv) {
     const diameterMM = Number(d) / 100;   // stored in hundredths of a mm
     const kinked = Number(sk);
     if (!code || !Number.isFinite(diameterMM) || !Number.isFinite(kinked)) continue;
+    // The family says what the line is made of and whether it has a cover.
+    // These were three patterns on the code, and they had the Technora
+    // lines without a cover (LTC, TCR) as sheathed and Edelrid's sheathed
+    // aramid (7343, 6843) as bare.
+    const family = lineFamilyOf({ name, code });
+    const sheathed = family ? family.cover != null : false;
     out.push({
       name: name.trim(),
       code: code.trim(),
@@ -448,9 +534,12 @@ export function parseMaterialsTable(tsv) {
       strengthNewDaN: Number(sn),
       strengthKinkedDaN: kinked,
       areaMM2: Number(a),
-      gramsPerM: Number(a) * (/PPSL|TSL|DSL/.test(code) ? 1.2 : 0.9),
-      elongationAtRated: /PPSL|TSL|DSL|DFL/.test(code) ? 0.05 : 0.035,
-      sheathed: /PPSL|TSL|DSL|DFL|LTC|TCR/.test(code),
+      gramsPerM: Number(a) * (sheathed
+        ? LINE_WEIGHT_PER_AREA.sheathed : LINE_WEIGHT_PER_AREA.unsheathed),
+      elongationAtRated: sheathed ? 0.05 : 0.035,
+      sheathed,
+      fibre: fibreOf({ name, code }),
+      family: family ? `${family.maker} ${family.family}` : null,
       efficiencyPerDiameter: kinked / diameterMM,
       note: (f[6] || '').trim(),
     });
@@ -473,9 +562,11 @@ export function parseMaterialsTable(tsv) {
  * model that keeps sizing downward past it produces a lineset no one would
  * build.
  *
- * This is why most of a real lineset is *not* load-sized. Measured against the
- * 1 g load, PHI's own choices sit at 28x on the C riser and 108x on the tip D
- * lines. The riser end is load-driven; the tip end is at the floor.
+ * This is why most of a real lineset is *not* load-sized. Against the load
+ * this file gives each of them in level flight (`publishedCascadeLoads`),
+ * PHI's own choices run from 9 times, on the outer C main line, to several
+ * hundred on the tip lines. The riser end is load-driven; the tip end is at
+ * the floor.
  */
 export const PRACTICAL_FLOOR = {
   diameterMM: 0.50,
@@ -513,8 +604,14 @@ export function selectLines(tensions, {
   // Order by diameter, not strength: diameter is what costs drag, and among
   // lines that carry the load the thinnest is the one to want. Ordering by
   // strength alone can pick a thicker line that happens to be weaker.
+  //
+  // Between two lines of ONE diameter the stronger comes first: it costs the
+  // same drag and the same weight. They were taken weakest first, so of the
+  // two 0.50 mm lines in the catalogue every lightly loaded line got the one
+  // rated 25 daN kinked (a Vectran) and not the one rated 41 (Liros DC 40) —
+  // 98 of the default wing's 114 lines, where PHI's own lineset uses DC 40.
   const sorted = [...table].sort((a, b) => (preferLowDrag
-    ? a.diameterMM - b.diameterMM || rated(a) - rated(b)
+    ? a.diameterMM - b.diameterMM || rated(b) - rated(a)
     : rated(a) - rated(b)));
 
   const chosen = tensions.lines.map((l) => {
@@ -1183,15 +1280,101 @@ export function gustLoadFactor({
 /* ------------------------------------------------- asymmetric and collapse -- */
 
 /**
+ * The load in every line of a published cascade, in level flight.
+ *
+ * A maker's line sheet says which lines there are, which anchor each path
+ * starts from and what every line is made of. It does not say what each
+ * carries. This does, with the model the rest of this file uses: the span
+ * loading of the planform, shared between the rows present at each rib, and
+ * summed down each path.
+ *
+ * `anchors` are `{ row, rib, path }`, the path a list of line names; `rib` is
+ * counted from the centre, `halfCells` to the tip, and the ribs are taken as
+ * evenly spaced — which is the planform's doing, not the sheet's.
+ *
+ * What comes out is this model's load on that maker's lines, not a
+ * measurement. Its use is the ratio: strength over load, line by line, says
+ * what the maker sized for.
+ */
+export function publishedCascadeLoads({
+  anchors, planform, halfCells, allUpKg,
+  rowShares = LOAD_ROW_SHARES, alphaDeg = 5, gravity = 9.80665,
+}) {
+  const ribs = [...new Set(anchors.map((a) => a.rib))].sort((x, y) => x - y);
+  const stations = ribs.map((r) => (r / halfCells) * planform.halfSpan);
+  const span = spanLoadDistribution({
+    planform, stations, totalLoadN: allUpKg * gravity, alphaDeg,
+  });
+
+  const lineLoadN = new Map();
+  const loaded = [];
+  for (const [i, rib] of ribs.entries()) {
+    const here = anchors.filter((a) => a.rib === rib);
+    // The rows that are at this rib share its load; a row that is not there
+    // takes none of it.
+    const present = here.reduce((t, a) => t + (rowShares[a.row] ?? 0), 0);
+    for (const a of here) {
+      const loadN = present > 0
+        ? (span.stations[i].loadN * (rowShares[a.row] ?? 0)) / present : 0;
+      loaded.push({ ...a, loadN });
+      for (const name of a.path) lineLoadN.set(name, (lineLoadN.get(name) || 0) + loadN);
+    }
+  }
+  return {
+    anchors: loaded,
+    lineLoadN,
+    halfLoadN: span.totalHalfLoadN,
+    anchorLoadN: loaded.reduce((t, a) => t + a.loadN, 0),
+    ribs,
+  };
+}
+
+/**
+ * Strength over load, for each line of a cascade: the factor it was built to.
+ *
+ * `lines` are `{ name, type }`, `lineLoadN` the 1 g loads, `materials` the
+ * catalogue the types are looked up in. Sorted with the hardest-worked line
+ * first. A type the catalogue does not have is listed in `unknown`, and the
+ * line is left out rather than given a strength.
+ */
+export function strengthFactors({ lines, lineLoadN, materials, basis = 'kinked' }) {
+  const key = (c) => String(c || '').replace(/\s+/g, '').toUpperCase();
+  const byCode = new Map(materials.map((m) => [key(m.code), m]));
+  const rows = [];
+  const unknown = [];
+  for (const l of lines) {
+    const loadN = lineLoadN.get(l.name);
+    if (!(loadN > 0)) continue;
+    const mat = byCode.get(key(l.type));
+    if (!mat) { unknown.push(l); continue; }
+    const strengthDaN = basis === 'new' ? mat.strengthNewDaN : mat.strengthKinkedDaN;
+    rows.push({
+      name: l.name,
+      type: l.type,
+      diameterMM: mat.diameterMM,
+      loadDaN: loadN / 10,
+      strengthDaN,
+      factor: strengthDaN / (loadN / 10),
+    });
+  }
+  rows.sort((a, b) => a.factor - b.factor);
+  const f = rows.map((r) => r.factor);
+  return {
+    rows,
+    unknown,
+    basis,
+    lowest: rows[0] ?? null,
+    median: f.length ? f[Math.floor(f.length / 2)] : null,
+    highest: rows[rows.length - 1] ?? null,
+    below: (x) => f.filter((v) => v < x).length,
+  };
+}
+
+/**
  * Load cases that are not symmetric steady flight.
  *
- * Everything above assumes the wing is flying level and intact. Certification
- * tests to 8 g symmetrically, and that is the case the whole load chain has
- * been built around — but it is not what breaks lines. Lines break in
- * collapses, where part of the wing stops lifting and the rest carries the
- * load through fewer paths, with a dynamic overshoot on top.
- *
- * Two mechanisms, both computed from the span loading rather than assumed:
+ * Everything above assumes the wing is flying level and intact. Two cases in
+ * which it is not, both computed from the span loading rather than assumed:
  *
  * **Asymmetric collapse.** A fraction of one side stops producing lift. The
  * pilot's weight has not changed, so what remains must carry it — and it
@@ -1208,6 +1391,28 @@ export function gustLoadFactor({
  * The dynamic factor covers the surge and re-inflation that follow, and is
  * the least defensible number here — it is a stand-in for a transient the
  * static model cannot represent. It is stated as an input rather than buried.
+ *
+ * ---------------------------------------------------------------------------
+ * What these cases are multiples OF
+ * ---------------------------------------------------------------------------
+ * Of the load in level flight. Half a wing gone, with the surge, puts 2.5
+ * times its 1 g load into the lines that are left. The symmetric case this
+ * file sizes to is 8 g. A collapse in level flight is a third of that.
+ *
+ * This comment used to say that the 8 g case "is not what breaks lines.
+ * Lines break in collapses", and `designEnvelope` put the collapse multiplier
+ * ON TOP of the 8 g: 8 x 1.5 x 2.54 = 30 times the level-flight load, in
+ * every line, "which is what a line schedule should be built from". A wing
+ * cannot be pulling 8 g with half of itself folded — the half that is left
+ * would be at 16 — and the check that was offered for the figure, "28x on
+ * PHI's most load-critical line", was a load worked out by hand that left
+ * the D row off the main line it hangs from. Computed from PHI's sheet
+ * (`publishedCascadeLoads`), that wing's hardest-worked line is at 9 times
+ * its level-flight load on kinked strength and 16 on new, and half its 62
+ * lines are under 30.
+ *
+ * So each case carries its own load factor now, and a collapse governs a line
+ * only if the wing is collapsed at more than about 3 g: `governingCollapseG`.
  */
 export function asymmetricCollapse({
   spanLoad, plan, loads, collapsedSpanFraction = 0.5,
@@ -1288,40 +1493,65 @@ export function frontalCollapse({
 }
 
 /**
- * The full design envelope: symmetric flight across the bar, plus the
- * collapse cases, with each line sized for the worst it ever sees.
+ * The design envelope: the symmetric limit case and the collapse cases, each
+ * at the load factor it happens at, and every line sized for the worst.
  *
- * This is what a line schedule should be built from. The symmetric envelope
- * alone understates the rear rows in a frontal collapse and every row in an
- * asymmetric one.
+ * A case's tensions are given at 1 g. The symmetric case is flown to
+ * `loadCase.limitG`; a collapse case to its own `atG`, or `collapseAtG` — 1
+ * unless told otherwise, which is a wing collapsing in level flight.
+ *
+ * `governingCollapseG` is the answer to "when would a collapse size this
+ * lineset?": the load factor above which the worst collapse case overtakes
+ * the symmetric one on some line. For half the span gone with a dynamic
+ * factor of 1.5 it is a little over 3 g.
  */
 export function designEnvelope({
   symmetric, collapseCases = [], loadCase = DEFAULT_LOAD_CASE, table = DEFAULT_LINE_TABLE,
+  collapseAtG = 1,
 }) {
   const worst = new Map();
-  const record = (caseName, lines) => {
+  const base = new Map(symmetric.tensions.lines.map((l) => [l.name, l.tensionN]));
+  // How hard each line is worked in a collapse case, against level flight.
+  let worstRatio = 0;
+  const record = (caseName, lines, atG) => {
     for (const l of lines) {
+      const limitTensionN = l.tensionN * atG;
       const prev = worst.get(l.name);
-      if (!prev || l.tensionN > prev.tensionN) {
-        worst.set(l.name, { ...l, governingCase: caseName });
+      if (!prev || limitTensionN > prev.limitTensionN) {
+        worst.set(l.name, {
+          ...l, limitTensionN, governingCase: caseName, governingG: atG,
+        });
+      }
+      if (caseName !== 'symmetric' && base.get(l.name) > 0) {
+        worstRatio = Math.max(worstRatio, l.tensionN / base.get(l.name));
       }
     }
   };
 
-  record('symmetric', symmetric.tensions.lines);
-  for (const c of collapseCases) record(c.case, c.tensions.lines);
+  record('symmetric', symmetric.tensions.lines, loadCase.limitG);
+  for (const c of collapseCases) record(c.case, c.tensions.lines, c.atG ?? collapseAtG);
 
   const lines = [...worst.values()];
   const byCase = {};
   for (const l of lines) byCase[l.governingCase] = (byCase[l.governingCase] || 0) + 1;
 
   return {
-    tensions: { lines },
+    // `tensionN` is the LIMIT tension from here on: the 1 g tension of the
+    // governing case times that case's load factor.
+    tensions: { lines: lines.map((l) => ({ ...l, tensionN: l.limitTensionN })) },
     governingCases: byCase,
-    // A design in which no collapse case governs anything has either very
-    // generous margins or a load model that is not doing its job.
+    collapseAtG,
     collapseGoverns: Object.keys(byCase).some((k) => k !== 'symmetric'),
-    selection: selectLines({ lines }, { loadCase, table }),
+    // The hardest any line is worked by a collapse, as a multiple of level
+    // flight, and the load factor at which that reaches the symmetric limit.
+    worstCollapseMultiple: worstRatio || null,
+    governingCollapseG: worstRatio > 0 ? loadCase.limitG / worstRatio : null,
+    // The limit is already in the tensions, so the selection applies only
+    // the margin on top of it.
+    selection: selectLines(
+      { lines: lines.map((l) => ({ ...l, tensionN: l.limitTensionN })) },
+      { loadCase: { ...loadCase, limitG: 1 }, table },
+    ),
   };
 }
 
@@ -1646,4 +1876,41 @@ export function optimiseLineSet(tensions, {
       + `${(100 * (perLineFloor > 0 ? totalCost / perLineFloor - 1 : 0)).toFixed(1)}% `
       + `more ${minimise} than a different line at every anchor`,
   };
+}
+
+/**
+ * The direction each riser has to point: along the resultant of the tensions
+ * in the lines at its top.
+ *
+ * A riser is webbing and carries only tension, so it lies along whatever pulls
+ * on its top. A plan places its riser tops before any load is known — at the
+ * weighted centre of each riser's anchors, as LEparagliding does — and this
+ * closes the loop: build the plan, solve the loads, point each riser along its
+ * resultant, build again. One pass is enough; the resultant moves by a
+ * fraction of a degree when the geometry it came from does.
+ *
+ * On the demo wing the centroid construction leans the risers 19.8 degrees
+ * outboard where the lifting-line loads put the resultant at 14.2: this model
+ * loads the tips less than chord-weighting does.
+ */
+export function riserResultants(plan, tensions) {
+  const T = new Map((tensions?.lines ?? []).map((t) => [t.name, t.tensionN]));
+  const out = {};
+  for (const r of plan.risers ?? []) {
+    const top = r.maillon;
+    if (!top) continue;
+    let R = [0, 0, 0];
+    for (const l of plan.lines) {
+      if (l.row === 'K') continue;
+      if (Math.hypot(l.from[0] - top[0], l.from[1] - top[1], l.from[2] - top[2]) > 1e-9) continue;
+      const t = T.get(l.name) ?? 0;
+      const d = [l.to[0] - l.from[0], l.to[1] - l.from[1], l.to[2] - l.from[2]];
+      const n = Math.hypot(d[0], d[1], d[2]);
+      if (!(n > 0)) continue;
+      R = [R[0] + (t * d[0]) / n, R[1] + (t * d[1]) / n, R[2] + (t * d[2]) / n];
+    }
+    const m = Math.hypot(R[0], R[1], R[2]);
+    if (m > 0) out[r.name] = [R[0] / m, R[1] / m, R[2] / m];
+  }
+  return out;
 }

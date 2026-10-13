@@ -35,21 +35,43 @@ import { rad } from './num.js';
  * Returns A0 at zero incidence plus the An series; A0 at a given angle is
  * `alpha + a0Base`.
  */
-export function camberSeries(airfoil, { terms = 4, n = 400 } = {}) {
+export function camberSeries(airfoil, {
+  terms = 4, n = 400,
+  // Ahead of this chord fraction the mean line is taken as straight.
+  //
+  // The line is the vertical average of the two surfaces, and at a rounded
+  // nose that average is not a camber line at all: the upper surface climbs
+  // the nose radius faster than the lower falls, so the "mean" leaps up in
+  // the first thousandth of chord. Its slope there is in the tens, and A0 and
+  // every An weight the nose fully — so on a measured section the whole
+  // series was that spike. The Swoop2's reflex section came out with an
+  // ideal angle of attack of 9.5 degrees and four An of about 0.3; held
+  // straight over the first 1% it is 1.7 degrees and 0.06, and the answer
+  // moves by a quarter of a degree for any cut-off between 0.5% and 3%.
+  //
+  // The zero-lift angle and Cm0 never showed it — their weights vanish at
+  // the nose — which is why the lift this integrates to was always right.
+  noseCut = 0.01,
+} = {}) {
   // Mean camber line, sampled in theta so the integrals are uniform there.
   const { upper, lower } = splitByX(airfoil);
+  const z = (x) => camberAt(upper, lower, x);
+  // Slope over a fixed step of chord, not between neighbouring theta
+  // samples: those are 1e-5 of chord apart at the nose, where a difference
+  // of two interpolated ordinates is mostly the interpolation.
+  const h = 2e-3;
+  const slopeAtX = (x) => {
+    const a = Math.max(noseCut, x - h);
+    const b = Math.min(1, Math.max(noseCut, x) + h);
+    return (z(b) - z(a)) / ((b - a) || 1e-12);
+  };
   const dz = [];
   for (let i = 0; i <= n; i++) {
     const th = (Math.PI * i) / n;
     const x = (1 - Math.cos(th)) / 2;
-    dz.push({ th, x, z: camberAt(upper, lower, x) });
+    dz.push({ th, x, z: z(x), s: slopeAtX(x) });
   }
-  // Slope by central difference in x.
-  const slope = (i) => {
-    const a = dz[Math.max(0, i - 1)];
-    const b = dz[Math.min(dz.length - 1, i + 1)];
-    return (b.z - a.z) / ((b.x - a.x) || 1e-12);
-  };
+  const slope = (i) => dz[i].s;
 
   const integrate = (f) => {
     let s = 0;

@@ -1,3 +1,31 @@
+# Size families: one row a size. These are the figures the scaling laws, the
+# family comparisons and the reference wings are measured against.
+# Sources: the published specification tables of Ozone, PHI, BGD and
+#   Skywalk and, for total_line_m, the makers'
+#   own line sheets where this folder holds them.
+# Retrieved: not recorded when this table was first written. The unit suite
+#   checks it against a separate transcription of the makers' tables,
+#   published-specs.tsv, and against the line sheets.
+# measure: as-published, except total_line_m as below
+#
+# total_line_m is the cord in the lineset — both sides, risers not included:
+#
+#   Ozone (Ultralite 5, Geo 7, Alpina 5, Zeno 2)
+#       summed from the line sheet of each size in this folder: quantity x
+#       sewn length over every row. line_pieces is the count.
+#   BGD Lynx 2
+#       summed from BGD's production line sheets for the S, M, ML and L: twice
+#       the 121 lines of one side. No XS sheet is held, so that cell is blank.
+#   PHI Allegro light, Skywalk SAGE
+#       the maker's published figure. No line sheet for these is held, so
+#       nothing here checks it.
+#
+# BGD also publish a "Total line length" — 209, 226, 247, 268 and 290 m — and
+# until 2026-10-06 this column held it. It is in published-specs.tsv now. It
+# is 10.7 m for every square metre of flat area at all five sizes, so it goes
+# with the SQUARE of the scale factor BGD state, where their line sheets, and
+# the line height they publish beside it, go with the factor itself. At the L
+# it says 290 m, and the sheet adds up to 262.7 m.
 family	size	cells	flat_span_m	flat_area_m2	flat_AR	proj_span_m	proj_area_m2	root_chord_m	mass_kg	weight_lo_kg	weight_hi_kg	total_line_m	line_pieces	application	certification	aspect_class
 PHI Allegro light	XS	72	11.09	20.40	6.03	8.81	17.49	2.29	3.00	50	75	235.0		performance XC	C	high
 PHI Allegro light	S	72	11.55	22.11	6.03	9.14	18.91	2.39	3.35	65	85	238.5		performance XC	C	high
@@ -27,11 +55,11 @@ Ozone Alpina 5	MS	65	11.76	22.8	6.07	9.41	19.4	2.45	3.96	75	95	221.5	236	perform
 Ozone Alpina 5	ML	65	12.16	24.4	6.07	9.73	20.7	2.53	4.15	85	105	229.7	236	performance XC	C	high
 Ozone Alpina 5	L	65	12.53	25.9	6.07	10.03	22.04	2.61	4.35	95	115	237.4	236	performance XC	C	high
 Ozone Alpina 5	XL	65	13.0	27.8	6.07	10.4	23.7	2.71	4.62	110	130	246.6	236	performance XC	C	high
-BGD Lynx 2	XS	65	10.9	19.5	6.2	8.7	16.5	2.2	3.2	60	75	209		performance XC	C	high
-BGD Lynx 2	S	65	11.3	21.0	6.2	9.0	17.8	2.3	3.4	70	85	226		performance XC	C	high
-BGD Lynx 2	M	65	11.8	23.0	6.2	9.5	19.5	2.4	3.7	75	95	247	242	performance XC	C	high
-BGD Lynx 2	ML	65	12.3	25.0	6.2	9.9	21.2	2.5	4.0	88	108	268	242	performance XC	C	high
-BGD Lynx 2	L	65	12.8	27.0	6.2	10.3	22.9	2.6	4.3	100	120	290	242	performance XC	C	high
+BGD Lynx 2	XS	65	10.9	19.5	6.2	8.7	16.5	2.2	3.2	60	75			performance XC	C	high
+BGD Lynx 2	S	65	11.3	21.0	6.2	9.0	17.8	2.3	3.4	70	85	229.7	242	performance XC	C	high
+BGD Lynx 2	M	65	11.8	23.0	6.2	9.5	19.5	2.4	3.7	75	95	241.6	242	performance XC	C	high
+BGD Lynx 2	ML	65	12.3	25.0	6.2	9.9	21.2	2.5	4.0	88	108	252.4	242	performance XC	C	high
+BGD Lynx 2	L	65	12.8	27.0	6.2	10.3	22.9	2.6	4.3	100	120	262.7	242	performance XC	C	high
 Skywalk SAGE	75	68	11.34	20.26	6.4	9.22	17.29	2.2	3.5	55	75	202		performance XC	C	high
 Skywalk SAGE	85	68	11.65	21.38	6.4	9.48	18.24	2.26	3.65	65	85	208		performance XC	C	high
 Skywalk SAGE	95	68	12.01	22.7	6.4	9.76	19.37	2.33	3.8	75	95	215		performance XC	C	high

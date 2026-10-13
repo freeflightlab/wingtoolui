@@ -13,17 +13,27 @@ things.
 
 ## 1. What changes
 
-At 6% billow on the upper surface and 2% on the lower:
+At 6% billow on the upper surface and 2% on the lower, on the suite's test
+wing:
 
-| | change |
-| --- | --- |
-| wetted area | **+4.0%** |
-| section thickness | +0.82% of chord |
-| camber line | +0.11% of chord |
+| cells a side | wetted area | section thickness | camber line |
+| --- | --- | --- | --- |
+| 12 | **+4.0%** | +3.3% of chord | +0.44% of chord |
+| 16 | +4.0% | +2.5% | +0.33% |
+| 24 | +4.0% | +1.6% | +0.22% |
+| 30 | +4.0% | +1.3% | +0.18% |
 
 **Area goes up** because a scalloped surface holds more cloth across the same
 span. Projected area does not change — the ribs still sit where they sit — but
-wetted area does, and that is what carries the skin friction.
+wetted area does, and that is what carries the skin friction. It does not
+depend on how many cells there are: the billow is a fraction of each cell's
+width, however wide.
+
+**How far the section moves does.** Six per cent more cloth than the cell is
+wide makes a bulge 15% of the cell deep at its middle, and two thirds of that
+on average. So the thickness added goes with the cell width: twice the cells,
+half as much. On a 15% section, +3.3% of chord is a section a fifth thicker in
+flight than the rib it was cut from.
 
 **Thickness goes up and camber moves**, and they are separate effects. The
 bulge adds to both surfaces, which thickens the section; the upper bulges
@@ -68,12 +78,23 @@ wing, and the result carries `source: 'geometry'` so nothing downstream can
 mistake it. Phase 5 items are research; this one produces numbers a person
 might trust, so it says plainly where they come from.
 
-## 5. An error worth recording
+## 5. Two errors worth recording, at one line
 
-`solveArc(S, L)` takes the **arc length and the chord it spans**, returning
-the radius `R` and rise `f` as fractions. I called it with an options object
-and read fields that do not exist, which gave `NaN` thickness on every wing
-while the wetted area — computed separately — came out fine.
+`solveArc(S, L)` takes the **arc length and the chord it spans**, and returns
+the radius `R` and the rise `f` in the units it was given.
 
-A half-NaN result is more dangerous than a fully broken one: three of the four
-numbers looked right.
+I called it with an options object first and read fields that do not exist,
+which gave `NaN` thickness on every wing while the wetted area — computed
+separately — came out fine. A half-NaN result is more dangerous than a fully
+broken one: three of the four numbers looked right.
+
+Then I fixed the call, wrote beside it that the rise comes back "as a fraction
+of the chord", and multiplied it by the cell width. It was already in metres.
+Every bulge came out a few tenths of its depth — a cell is a few tenths of a
+metre wide — and went with the *square* of the cell width. Section 1 said
+"+0.82% of chord" for a long time, of a wing of some sixteen cells a side; it
+is +2.5%. Every check on it was of the form "billowing thickens the section",
+which a number three times too small does as well as the right one.
+
+The suite now holds it to a case with an exact answer: a half-circle of cloth
+over a 400 mm cell rises 200 mm.

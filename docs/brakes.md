@@ -78,10 +78,13 @@ which is the one a pilot feels first.
 
 ## 4. Not yet covered
 
-- **Pulley geometry.** The handle position and pulley are parameters, not
-  derived. Riser travel under speedbar moves the pulley, which changes brake
-  length in accelerated flight — the reason wings have brake travel
-  compensation.
+- **The handle.** It is placed, not derived: 0.55 m below and 0.35 m aft of
+  the hang point unless a position is given. The pulley is no longer on this
+  list — in a generated plan it is the top of the rear riser, taken from the
+  plan, and `brakeSlackUnderBar` gives the slack the bar adds: none with the
+  pulley on the rear riser, which the bar does not move, and what the riser
+  travels with it on one that does (90 mm in the test, double if the line is
+  roved through the pulley).
 - **The PHI brake block** still is not decoded: it lists each upper line
   twice, plain and with the spanwise distribution added, so its columns do not
   map one-to-one onto names.

@@ -49,24 +49,26 @@ most tempted to make thin.
 **Selection therefore uses the kinked strength by default.** `strengthBasis:
 'new'` exists for comparison and should not be used to build anything.
 
-### A consequence worth knowing
+### What the loss belongs to
 
-Ranked by kinked strength per millimetre of diameter — the figure of merit,
-since drag goes with diameter:
+The fibre, not the sheath. The 8000-U lines (the U-135) are aramid, TSL is
+aramid under a polyester cover, PPSLS and DC are Dyneema with and without one:
 
-| line | diameter | kinked | daN per mm |
-| --- | --- | --- | --- |
-| PPSLS 260 (sheathed) | 1.58 mm | 259.4 | **164** |
-| PPSLS 180 (sheathed) | 1.25 mm | 194.4 | **156** |
-| DC40 | 0.50 mm | 41.0 | 82 |
-| U-135 (unsheathed) | 1.10 mm | 85.6 | 78 |
-| U-050 (unsheathed) | 0.61 mm | 23.5 | 39 |
+| kinked | fibre | sheathed | keeps | daN per mm² |
+| --- | --- | --- | --- | --- |
+| DC40 | Dyneema | no | 86% | **209** |
+| PPSLS 180 | Dyneema | yes | 97% | 158 |
+| U-135 | aramid | no | 53% | 90 |
+| TSL 140 | aramid | yes | 48% | 48 |
 
-Sheathed Liros lines *beat* unsheathed Dyneema per millimetre once kinked,
-because they barely lose strength when bent. On the new-strength figure the
-ranking reverses. This is exactly what the reference wing does: PPSLS for the
-long lower gallery where lines are thick anyway, thin DC and U lines for the
-uppers where loads are small.
+The catalogue's 48 aramid lines keep 38 to 70% kinked, its 26 Dyneema lines
+59 to 114%. Per square millimetre bare Dyneema carries the most and a
+sheathed aramid the least, the cover being diameter, and drag, that carries
+nothing — which is what the reference wing does: bare Dyneema in the thin,
+numerous top lines, aramid in the middle, sheathed Dyneema on the handled mains.
+
+(This ranked lines per mm of *diameter*, "sheathed Liros beat unsheathed
+Dyneema", with the aramid U-135 for Dyneema: a ranking of sizes, not fibres.)
 
 ---
 
@@ -85,8 +87,10 @@ the difference is not academic:
 
 | | glide ratio | line share of drag |
 | --- | --- | --- |
-| assumed 0.020 | 9.37 | 28.7% |
-| computed 0.0097 | **11.00** | 16.3% |
+| assumed 0.020 | 8.48 | 27.7% |
+| computed 0.0055 | **10.62** | 9.6% |
+
+(The test wing, 46 lines a side.)
 
 That is most of why modern wings glide better than the handbook's example.
 `equilibriumInputsFrom` hands the computed drag and the lineset's own mass
@@ -111,7 +115,13 @@ maillon while still numbered as middle lines, so the D row's load never
 reached a riser. Fixed by summing what meets each maillon, not what is
 labelled.
 
-Closure is now exact to 0.01%.
+Two more, found later. With **rows merged**, a shared line carried only the
+first row's load: an A+B main took 73 N of its 146, and under A+B and C+D the
+risers held 55% of the pilot. And with **different anchor counts per row**,
+loads were keyed by anchor number, so 13 top lines of an A19 B11 C6 plan
+carried nothing and up to 13% of the weight was lost. Tension is summed down
+each anchor's own path now, keyed by its own line. Closure is to the step of
+the span integration: 0.024% at worst over the 55 published sizes.
 
 ---
 
@@ -126,10 +136,10 @@ Swept across the bar on a wing with 180 mm of travel:
 
 | bar | α | A | B | C | D |
 | --- | --- | --- | --- | --- | --- |
-| 0% | 6.00° | 38.0 | 24.7 | 20.5 | 16.8 |
-| 25% | 3.81° | 33.6 | 25.5 | 22.2 | 18.7 |
-| 50% | 1.62° | 26.1 | 26.8 | 25.1 | 22.1 |
-| 63% | 0.5° | ~20 | ~28 | ~28 | ~25 |
+| 0% | 6.00° | 37.9 | 24.8 | 20.6 | 16.8 |
+| 25% | 3.85° | 33.6 | 25.5 | 22.2 | 18.6 |
+| 50% | 1.71° | 26.3 | 26.8 | 25.0 | 21.8 |
+| 63% | 0.65° | 20.3 | 27.9 | 27.3 | 24.4 |
 
 ![Chordwise load distribution at three angles of attack](chordwise-load.svg)
 
@@ -138,10 +148,10 @@ wing is strongly front-loaded at high incidence and much flatter at low, which
 is why the split between the rows is not the same at trim and at speed.*
 
 The rear rows gain steadily as the front row sheds load. Worst tension over
-the flyable range, against trim: **A +0%, B +12%, C +33%, D +46%**.
+the flyable range, against trim: **A +0%, B +13%, C +39%, D +46%**.
 
-The consequence is concrete. **78 of 104 lines are governed by a bar position
-other than trim**, and six of them need a thicker line than trim-only sizing
+The consequence is concrete. **54 of 73 lines are governed by a bar position
+other than trim**, and three of them need a thicker line than trim-only sizing
 would choose.
 
 `loadEnvelope` sweeps the bar and sizes each line for the worst case it sees
@@ -193,10 +203,8 @@ For a 25 m² wing at 95 kg with a 7.5 m/s gust:
 A strong gust at trim lands close to the **8 g** the EN 926-1 load test uses,
 which is a useful cross-check on both. At speed the same gust exceeds it —
 which is why a wing is certified to a factor it will not see in calm air, and
-why the speed range is where line strength earns its keep.
-
-This is the sharp-edged form, with no gust alleviation factor. That is
-conservative, which is the right direction for a line that has to hold.
+why the speed range is where line strength earns its keep. This is the
+sharp-edged form; section 12 adds the alleviation, which changes the answer.
 
 ---
 
@@ -211,19 +219,20 @@ line | length | | loop length | cutting length | material | colour
 a1   |   295  | |         130 |            425 | DC 120   | Red
 ```
 
-`cutting length = length + loop length`, and the allowance is **a constant per
-wing, not a fraction of length** — 130 mm on the Meru 2 whether the line is
-250 mm or 4 m long.
+`cutting length = length + loop length`, and the allowance is **a constant
+for each kind of line, not a fraction of its length**. On the Meru 2 it is
+130 mm on every canopy and middle line, whether 220 mm long or 1.2 m, 200 mm
+on the upper mains, 260 mm on the mains and 300 mm on the brake main.
 
 ![Loop allowance against line length](loop-allowance.svg)
 
 *Every line on a Meru 2 size M, shortest at the top. The magenta band is the
-loop allowance: a fixed width on every bar, so it is a sliver of a main line
-and a third of a top line.*
+loop allowance: much the same width on every bar, so it is a sliver of a main
+line and a third of a top line.*
 
-The consequence, on their own numbers: 106 m of finished line becomes **122 m
-of material**, +15%. Loops are **13% of everything cut**, and **37% of the
-shortest line**.
+The consequence, on their own numbers: 112 m of finished line in 108 lines
+becomes **128 m of material**, +14%. Loops are **12% of everything cut**, and
+**37% of the shortest line**.
 
 `stretchCorrection` now takes `loopAllowanceMM` and reports finished length
 and cut length separately. A model that returns only one of them is either
@@ -287,8 +296,7 @@ The **brake block** is parsed structurally but flagged rather than guessed at.
 Brakes run a deeper cascade and list each upper line twice — once plain and
 once with the spanwise distribution added, offset by exactly the `A-dist`
 column — so the level columns do not line up one-to-one with the names.
-Decoding it properly needs the brake and pulley geometry, which is the next
-roadmap item.
+Decoding it needs the brake and pulley geometry, and is not done.
 
 ---
 
@@ -307,25 +315,25 @@ that wake"**. Those give very different answers:
 
 | criterion | lines shielded |
 | --- | --- |
-| any line within 50 mm laterally, ahead | 67 of 88 |
-| inside the wake, half-width `0.25·√(x·d)` | **16 of 88** |
+| any line within 50 mm laterally, ahead | 34 of 46 |
+| inside the wake, half-width `0.25·√(x·d)` | **14 of 46** |
 
 The first is how a small effect gets reported as a large one, and both are
 asserted so the distinction cannot quietly collapse.
 
-With the width taken properly: mean deficit 5.3%, worst 9.0%. Drag goes as
-velocity **squared**, so a 9% deficit is a 17% reduction on that one line —
+With the width taken properly: mean deficit 5.0%, worst 9.7%. Drag goes as
+velocity **squared**, so a 9.7% deficit is an 18% reduction on that one line —
 and across the wing:
 
 ```
-Cx lines   0.00735 -> 0.00715    -2.7%
-glide      9.596   -> 9.628      +0.03
+Cx lines   0.00540 -> 0.00513    -5.0%
+glide      10.64   -> 10.69      +0.05
 ```
 
 Real, small, and now measured rather than either ignored or assumed large.
 
 It is **off by default**. The wake model is first-order — a single upstream
-shielder, no wake merging, no unsteadiness — and a 2.7% correction from a
+shielder, no wake merging, no unsteadiness — and a 5% correction from a
 first-order model should be offered, not imposed.
 
 ---
@@ -341,9 +349,9 @@ checking — and the shift is **aft**, not forward:
 
 | alpha | A | B | C | D |
 | --- | --- | --- | --- | --- |
-| 12° (slow) | 43.9% | 23.7% | 18.3% | 14.2% |
-| 6° (trim) | 38.0% | 24.7% | 20.5% | 16.8% |
-| 2° (bar) | 27.7% | 26.5% | 24.4% | 21.3% |
+| 12° (slow) | 43.8% | 23.7% | 18.3% | 14.2% |
+| 6° (trim) | 37.9% | 24.8% | 20.6% | 16.8% |
+| 2° (bar) | 27.6% | 26.6% | 24.5% | 21.3% |
 
 Taking the bar lowers the angle of attack, the centre of pressure moves aft,
 and the rear rows take more. The A row **sheds 27% of its share** between trim
@@ -351,7 +359,7 @@ and full bar while D gains a quarter.
 
 That is why rear-riser steering works accelerated and why the C and D lines
 have to be sized for the bar rather than for trim. In anchor loads on the test
-wing: A falls 177 → 129 N while D rises 78 → 100 N.
+wing: A falls 177 → 129 N while D rises 78 → 99 N.
 
 Now asserted, including that the shares sum to one at every angle.
 
@@ -388,8 +396,9 @@ change. The factor here is **10.2x**.
 
 The sharp-edged figure of 11.13 **exceeds the 8 g certification case**, which
 would say gusts govern the design. Alleviated, it is 2.00 — well under. So the
-8 g case is not gust-driven, and collapse dynamics remain the thing that
-actually breaks lines.
+8 g case is not gust-driven. Nor is it collapse-driven: half the span folded
+in level flight, with a dynamic factor of 1.5, works the lines that are left
+2.5 times as hard as level flight does (`docs/validation.md` §5.2).
 
 That is where a large part of the conservatism in the 8 g case comes from, and
 it is worth knowing rather than assuming the margin is spent on gusts.
@@ -471,18 +480,17 @@ drag, the mass and the bill of materials:
 
 | table | lines available | sized | line drag |
 | --- | --- | --- | --- |
-| every brand | 78 | 76/76 | **0.00685** |
-| Edelrid | 38 | 76/76 | 0.00810 |
-| Liros | 24 | 76/76 | 0.00935 |
-| Cousin | 4 | **74/76** | 0.00688 |
+| every brand | 78 | 46/46 | **0.00485** |
+| DC | 12 | 46/46 | 0.00490 |
+| Edelrid | 38 | 46/46 | 0.00592 |
+| Liros | 24 | 46/46 | 0.00610 |
+| Cousin | 4 | **43/46** | 0.00410, of the 43 |
 
-Buying from one supplier costs **18 to 36% more line drag**, because the
-sizing has fewer diameters to choose from and must round up more often. And a
-catalogue of four materials **cannot size every line** — reported rather than
-left as two lines quietly missing from the bill.
-
-Both are things a designer should decide with the number in front of them
-rather than discover afterwards.
+Buying from one supplier costs **from 1% to 26% more line drag** on the test
+wing, depending on the supplier, because the sizing has fewer diameters to
+choose from and must round up more often. And a catalogue of four materials
+**cannot size every line** — reported rather than left as three lines quietly
+missing from the bill.
 
 ### In the tool
 

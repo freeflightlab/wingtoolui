@@ -46,6 +46,10 @@ export function buildBOM({
   nested = null,
   wing = null,
   ribHoles = null,
+  // The ribs laid out on their own roll: `{ rollMetres, rollWidth,
+  // utilisation }` for the whole wing. Without it the rib cloth is given by
+  // area only, and the total says the ribs are not in the roll to order.
+  ribRoll = null,
   vribs = null,
   linePlan = null,
   lineSelection = null,
@@ -53,10 +57,28 @@ export function buildBOM({
   cloth = {},
   rollWidth = 1.4,
   gap = 0.03,
+  // The seam allowance the panels were handed over with, in millimetres: 0
+  // when they are finished outlines. The sail is then weighed at its cut
+  // size, and what is still not weighed is said accordingly.
+  seamAllowanceMM = 0,
   riserCount = 3,
   brakeHandles = 2,
   reinforcement = null,
   tabs = null,
+  // Rods: `{ count, lengthM, massKg, byDiameter, note }` for the whole wing.
+  // A design that states its rods without a diameter has a length and no
+  // mass, and says so.
+  rods = null,
+  // Riser webbing: `{ count, lengthM }` for both sides.
+  risers = null,
+  // What the wing is set to weigh, to say how much of it this accounts for.
+  wingMassKg = null,
+  wingMassSource = null,
+  // How much of the upper surface, by area, is cut from the leading-edge
+  // cloth (`cloth.leadingEdge`).
+  noseFraction = 0,
+  // Things about the choices made that a reader of the bill should see.
+  notes = [],
   name = 'wing',
 } = {}) {
   const C = { ...DEFAULT_CLOTH, ...cloth };
@@ -68,22 +90,50 @@ export function buildBOM({
   // ---- sail panels -------------------------------------------------------
   if (panels && panels.length) {
     const est = fabricEstimate(panels, { rollWidth, gap, nested });
+    // The panels are one half of the wing, so each is cut twice — except a
+    // centre cell's, which is one piece spanning both halves and was being
+    // counted as two.
+    const copies = (p) => (p.centre ? 1 : 2);
     const upperArea = panels.filter((p) => p.surface === 'upper')
-      .reduce((s, p) => s + panelArea(p), 0) * 2;
+      .reduce((s, p) => s + panelArea(p) * copies(p), 0);
     const lowerArea = panels.filter((p) => p.surface === 'lower')
-      .reduce((s, p) => s + panelArea(p), 0) * 2;
+      .reduce((s, p) => s + panelArea(p) * copies(p), 0);
 
+    // The nose of the upper surface in its own, harder cloth, when the
+    // schedule gives one: `noseFraction` of the upper surface, by area.
+    const noseArea = Number.isFinite(C.leadingEdge) && noseFraction > 0
+      ? upperArea * Math.min(1, noseFraction) : 0;
+    const distinct = new Set([C.upperSail, C.lowerSail, ...(noseArea ? [C.leadingEdge] : [])]);
     fabric.push({
       item: 'Sail cloth',
       // The roll length is for one side; a wing needs both.
       rollMetres: est.linearMetres * 2,
       rollWidth,
       panelAreaM2: upperArea + lowerArea,
+      upperAreaM2: upperArea,
+      lowerAreaM2: lowerArea,
+      noseAreaM2: noseArea,
       utilisation: est.utilisation,
       // What is bought but not sewn.
       offcutM2: est.linearMetres * 2 * rollWidth - (upperArea + lowerArea),
-      massKg: upperArea * C.upperSail + lowerArea * C.lowerSail,
-      note: 'ordered by roll length; the offcut is bought either way',
+      massKg: (upperArea - noseArea) * C.upperSail
+        + (noseArea ? noseArea * C.leadingEdge : 0)
+        + lowerArea * C.lowerSail,
+      note: `upper ${upperArea.toFixed(2)} m2`
+        + (noseArea
+          ? `, of which ${noseArea.toFixed(2)} m2 at the nose in the leading-edge cloth`
+          : '')
+        + `; lower ${lowerArea.toFixed(2)} m2`
+        + (seamAllowanceMM > 0
+          ? ` — as cut, with the ${seamAllowanceMM} mm seam allowance.`
+          : ' — finished size, with no seam allowance.')
+        + ' Ordered by roll length; the offcut is bought either way.'
+        // One layout, one roll. With more than one cloth that is not how it
+        // is cut, and the bill should not pretend the length holds.
+        + (distinct.size > 1
+          ? ' Both surfaces are nested on one roll here: cut from different cloths, each needs '
+            + 'its own layout, and the nose its own seam — the roll length is then only a guide.'
+          : ''),
     });
   } else missing.push('sail panels');
 
@@ -91,15 +141,25 @@ export function buildBOM({
   if (ribHoles) {
     fabric.push({
       item: 'Rib cloth',
+      ...(ribRoll && ribRoll.rollMetres > 0
+        ? { rollMetres: ribRoll.rollMetres, rollWidth: ribRoll.rollWidth ?? rollWidth, utilisation: ribRoll.utilisation }
+        : {}),
       panelAreaM2: ribHoles.ribAreaM2 - ribHoles.holeAreaM2,
       solidAreaM2: ribHoles.ribAreaM2,
       removedFraction: ribHoles.removedFraction,
       massKg: ribHoles.holedMassKg,
-      note: `${(ribHoles.removedFraction * 100).toFixed(0)}% removed as lightening holes`,
+      count: ribHoles.ribCount ?? null,
+      note: ribHoles.holeAreaM2 > 0
+        ? `${(ribHoles.removedFraction * 100).toFixed(0)}% of ${ribHoles.ribAreaM2.toFixed(2)} m2 `
+          + `removed as openings${ribHoles.source ? ` (${ribHoles.source})` : ''}`
+        : 'solid ribs, no openings',
     });
-  } else if (wing) {
-    missing.push('rib holes (rib area counted solid)');
-  } else missing.push('ribs');
+  } else {
+    // Said as what it is. This read "rib holes (rib area counted solid)" when
+    // only the holes were missing — and was printed when the ribs were not
+    // in the bill at all.
+    missing.push('ribs');
+  }
 
   // ---- diagonals ---------------------------------------------------------
   if (vribs && vribs.count) {
@@ -110,8 +170,9 @@ export function buildBOM({
       rollWidth,
       panelAreaM2: vribs.totalAreaM2 * 2,
       utilisation: est.utilisation,
+      count: vribs.count * 2,
       massKg: vribs.totalAreaM2 * 2 * C.diagonal,
-      note: 'usually a lighter cloth than the sail, so ordered separately',
+      note: 'nested and ordered on their own, apart from the sail',
     });
   }
 
@@ -159,9 +220,28 @@ export function buildBOM({
       count: tabs.count,
       panelAreaM2: tabs.totalAreaM2,
       massKg: tabs.massKg,
-      note: `${tabs.floorSized} at minimum width, ${tabs.loadSized} sized by load`,
+      note: `${tabs.floorSized} at minimum width, ${tabs.loadSized} sized by load`
+        + (tabs.cappedSized ? `, ${tabs.cappedSized} at the maximum width` : ''),
     });
   } else missing.push('attachment tabs');
+
+  // ---- rods --------------------------------------------------------------
+  const rodItems = [];
+  if (rods && rods.count) {
+    rodItems.push({
+      item: 'Nylon rods',
+      count: rods.count,
+      lengthM: rods.lengthM,
+      massKg: Number.isFinite(rods.massKg) ? rods.massKg : null,
+      byDiameter: rods.byDiameter ?? null,
+      note: rods.note ?? null,
+    });
+  }
+
+  // ---- riser webbing -----------------------------------------------------
+  const webbing = risers && risers.count
+    ? { item: 'Riser webbing', count: risers.count, lengthM: risers.lengthM }
+    : null;
 
   // ---- hardware ----------------------------------------------------------
   if (linePlan) {
@@ -173,22 +253,49 @@ export function buildBOM({
 
   const fabricMass = fabric.reduce((s, f) => s + (f.massKg || 0), 0);
   const lineMass = lines.reduce((s, l) => s + (l.massG || 0), 0) / 1000;
+  const rodMass = rodItems.reduce((s, r) => s + (r.massKg || 0), 0);
+  const accounted = fabricMass + lineMass + rodMass;
+
+  // What no part of this bill weighs, whatever was passed in. Named, so the
+  // total is not read as the weight of a wing.
+  const neverWeighed = [
+    'riser webbing and its hardware (maillons, pulleys, handles)',
+    'thread',
+    // This said "seam allowances folded under" whatever it had been given,
+    // under a sail that had been weighed with its allowance on.
+    seamAllowanceMM > 0
+      ? 'the seam allowance on ribs and diagonals (the sail is weighed as cut)'
+      : 'seam allowances folded under',
+    'labels and the stuff a wing is delivered with',
+  ];
+  if (rodItems.some((r) => r.massKg == null)) {
+    neverWeighed.unshift('the rods (the design states their length, not their diameter)');
+  }
 
   return {
     name,
     fabric,
     lines,
+    rods: rodItems,
+    webbing,
     hardware,
     missing,
+    neverWeighed,
     totals: {
       fabricMassKg: fabricMass,
       lineMassKg: lineMass,
+      rodMassKg: rodMass,
       lineMetres: lines.reduce((s, l) => s + l.metres, 0),
       rollMetres: fabric.reduce((s, f) => s + (f.rollMetres || 0), 0),
-      // Cloth and line only. A finished wing also carries reinforcement,
-      // rods, risers and tapes, which this does not attempt to count.
+      // Kept under its old name: cloth of every kind, and line.
       clothAndLineKg: fabricMass + lineMass,
+      accountedKg: accounted,
     },
+    // Against what the wing is set to weigh.
+    wingMassKg,
+    wingMassSource,
+    notes: notes.slice(),
+    accountedFraction: wingMassKg > 0 ? accounted / wingMassKg : null,
     complete: missing.length === 0,
   };
 }
@@ -196,6 +303,7 @@ export function buildBOM({
 /** The bill as text, in the shape a workshop order takes. */
 export function bomText(bom) {
   const out = [`Bill of materials — ${bom.name}`, ''];
+  const g = (kg) => `${(kg * 1000).toFixed(0)} g`;
 
   out.push('FABRIC');
   for (const f of bom.fabric) {
@@ -204,7 +312,11 @@ export function bomText(bom) {
       out.push(`    ${f.rollMetres.toFixed(1)} m of ${f.rollWidth} m roll`
         + `  (${(f.utilisation * 100).toFixed(0)}% used)`);
     }
-    out.push(`    ${f.panelAreaM2.toFixed(2)} m2 sewn, ${(f.massKg * 1000).toFixed(0)} g`);
+    const what = [];
+    if (f.count != null) what.push(`${f.count} pieces`);
+    if (f.lengthM != null) what.push(`${f.lengthM.toFixed(1)} m`);
+    if (f.panelAreaM2 != null) what.push(`${f.panelAreaM2.toFixed(2)} m2`);
+    out.push(`    ${what.join(', ')}, ${g(f.massKg)}`);
     if (f.note) out.push(`    ${f.note}`);
   }
 
@@ -214,22 +326,70 @@ export function bomText(bom) {
       + `  ${String(l.count).padStart(4)} pieces  ${l.diameterMM.toFixed(2)} mm`
       + `  ${l.massG.toFixed(0)} g`);
   }
+  if (bom.lines.length) {
+    out.push(`  ${bom.lines[0].note === 'finished length'
+      ? 'finished lengths: no loop allowance'
+      : 'lengths to cut, with the loops'}`);
+  }
+
+  if ((bom.rods && bom.rods.length) || bom.webbing) {
+    out.push('', 'RODS AND WEBBING');
+    for (const r of bom.rods ?? []) {
+      out.push(`  ${r.item.padEnd(20)} ${String(r.count).padStart(4)} pieces  `
+        + `${r.lengthM.toFixed(1).padStart(6)} m  ${r.massKg != null ? g(r.massKg) : 'mass not stated'}`);
+      for (const [d, x] of Object.entries(r.byDiameter ?? {})) {
+        out.push(`    ${Number(d).toFixed(1)} mm: ${x.count} pieces, ${x.lengthM.toFixed(1)} m, ${x.massG.toFixed(0)} g`);
+      }
+      if (r.note) out.push(`    ${r.note}`);
+    }
+    if (bom.webbing) {
+      out.push(`  ${bom.webbing.item.padEnd(20)} ${String(bom.webbing.count).padStart(4)} pieces  `
+        + `${bom.webbing.lengthM.toFixed(1).padStart(6)} m  not weighed`);
+      // What the figure is of, since a riser set has more webbing in it
+      // than this.
+      out.push('    the straps from the karabiner to the lines; a speed system\'s own webbing is not in it');
+    }
+  }
 
   out.push('', 'HARDWARE');
   for (const h of bom.hardware) out.push(`  ${h.item.padEnd(34)} ${h.count}`);
 
   out.push('', 'TOTALS');
-  out.push(`  cloth ${(bom.totals.fabricMassKg * 1000).toFixed(0)} g`
-    + `  + line ${(bom.totals.lineMassKg * 1000).toFixed(0)} g`
-    + `  = ${bom.totals.clothAndLineKg.toFixed(3)} kg`);
-  out.push(`  roll to order: ${bom.totals.rollMetres.toFixed(1)} m`);
+  out.push(`  cloth, film and tape ${g(bom.totals.fabricMassKg)}`
+    + `  + line ${g(bom.totals.lineMassKg)}`
+    + (bom.totals.rodMassKg > 0 ? `  + rods ${g(bom.totals.rodMassKg)}` : '')
+    + `  = ${bom.totals.accountedKg.toFixed(3)} kg`);
+  // What the roll length covers, said: the ribs were left out of it without
+  // a word, a quarter of the cloth in the wing.
+  const onRoll = bom.fabric.filter((f) => f.rollMetres);
+  const offRoll = bom.fabric.filter((f) => !f.rollMetres && f.panelAreaM2 > 0.5);
+  out.push(`  roll to order: ${bom.totals.rollMetres.toFixed(1)} m`
+    + (onRoll.length ? ` (${onRoll.map((f) => `${f.item.toLowerCase()} ${f.rollMetres.toFixed(1)}`).join(', ')})` : '')
+    + (offRoll.length
+      ? `; not laid out on a roll: ${offRoll.map((f) => `${f.item.toLowerCase()}, ${(f.solidAreaM2 ?? f.panelAreaM2).toFixed(1)} m2`).join('; ')}`
+      : ''));
+  if (onRoll.length) {
+    out.push('    as this tool lays the pieces out, with the gap asked for between them: a');
+    out.push('    nest worked over by hand or by a production nester is tighter, and needs less');
+  }
+  if (bom.accountedFraction != null) {
+    out.push(`  that is ${(bom.accountedFraction * 100).toFixed(0)}% of the `
+      + `${bom.wingMassKg.toFixed(2)} kg the wing is set to weigh`
+      + (bom.wingMassSource ? ` (${bom.wingMassSource})` : ''));
+  }
 
+  if (bom.notes && bom.notes.length) {
+    out.push('', 'TO LOOK AT');
+    for (const n of bom.notes) out.push(`  ${n}`);
+  }
   if (bom.missing.length) {
-    out.push('', 'NOT COUNTED');
+    out.push('', 'NOT IN THIS BILL');
     for (const m of bom.missing) out.push(`  ${m}`);
   }
-  out.push('', 'Cloth and line only. Reinforcement, rods, risers, tapes and');
-  out.push('thread are not counted, and a finished wing weighs appreciably more.');
+  out.push('', 'NOT WEIGHED');
+  for (const m of bom.neverWeighed ?? []) out.push(`  ${m}`);
+  out.push('', 'The total is what is listed above and no more: a finished wing');
+  out.push('weighs more by everything under NOT WEIGHED.');
   return out.join('\n');
 }
 

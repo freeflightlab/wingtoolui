@@ -1,0 +1,59 @@
+# Cell counts of the designs whose line sheets are on file
+# Sources: the makers' own specification pages, except where noted
+#   OZ-SWIFT6   https://flyozone.com/paragliders/products/gliders/swift-6
+#   OZ-LYGHT    https://flyozone.com/paragliders/products/gliders/lyght
+#   OZ-MAGNUM4  https://flyozone.com/paragliders/products/gliders/magnum-4
+#   OZ-VIBEGT   https://flyozone.com/paragliders/products/gliders/vibe-gt
+#   NV-TAKOO6   https://niviuk.com/biblioteca/items/2380_A/tech_data_takoo_6_tandem_niviuk_paragliders.pdf
+#   NV-IKUMA3   https://406paragliding.com/product/niviuk-ikuma-3/ and
+#               https://www.freedom-parapente.fr/en/shop/niviuk-ikuma (two dealers; they agree)
+#   UP-MAKALU5  https://www-alt.up-paragliders.com/en/products/paragliders/makalu-5
+#   UP-MERU2    https://www.up-paragliders.com/en/products/paragliders/meru-2
+#   UP-SUMMITX  https://www.up-paragliders.com/paragliders/summit-x
+#   UP-TORRE    https://www.up-paragliders.com/paragliders/torre
+#   UP-K25      https://www.up-paragliders.com/paragliders/k2-5
+# Retrieved: 2026-10-12
+# measure: as-published
+#
+# Why this file exists. How densely a real wing is attached on its front row
+# (its front-row anchors over the ribs of a half-wing) needs the cell count,
+# and eleven of the twenty designs with line sheets here had none on file.
+# The anchor search was bounded by "0.56 to 0.91", measured on six Ozone
+# designs, and three of those six rib counts were wrong (34, 33 and 27 ribs
+# for wings of 65, 71 and 62 cells). The twenty designs run 0.28 to 0.94.
+#
+# Every size of every design here has the same number of cells, so one count
+# stands for the family.
+#
+# The nine designs already in size-families.tsv or niviuk-spec.tsv are listed
+# with that file as their source. The unit suite holds the two to each other,
+# so this file cannot drift from them.
+#
+# Ribs on a half-wing are floor(cells / 2) + 1: an even count puts a rib on
+# the centreline, which both halves share, and an odd count puts a cell
+# across it (the Alpina 5, Lynx 2, Hook 6, Lyght, Vibe GT, Summit X, Torre).
+#
+# The PHI sheet is the Allegro X-Alps 21; the count is the Allegro light's,
+# from the same maker's table. The line sheet's own rib numbers (2 to 36 on
+# the A row) agree with 37 ribs a side.
+design	family	cells	flat_AR	source
+alpina5	Ozone Alpina 5	65	6.07	size-families.tsv
+geo7	Ozone Geo 7	48	5.16	size-families.tsv
+ultralite5	Ozone Ultralite 5	34	4.56	size-families.tsv
+zeno2	Ozone Zeno 2	78	6.9	size-families.tsv
+bgd-lynx2	BGD Lynx 2	65	6.2	size-families.tsv
+phi-allegro-xalps	PHI Allegro light	72	6.03	size-families.tsv
+niviuk-artikr2	Niviuk Artik R 2	68	6.5	niviuk-spec.tsv
+niviuk-hook6	Niviuk Hook 6	47	5.3	niviuk-spec.tsv
+niviuk-skin4p	Niviuk Skin 4 P	39	4.9	niviuk-spec.tsv
+swift6	Ozone Swift 6	62	5.7	OZ-SWIFT6
+lyght	Ozone Lyght	71	6.5	OZ-LYGHT
+magnum4	Ozone Magnum 4	54	5.45	OZ-MAGNUM4
+vibegt	Ozone Vibe GT	55	5.45	OZ-VIBEGT
+niviuk-takoo6	Niviuk Takoo 6	54	5.5	NV-TAKOO6
+niviuk-ikuma3	Niviuk Ikuma 3	62	5.7	NV-IKUMA3
+up-makalu5	UP Makalu 5	46	5.3	UP-MAKALU5
+up-meru2	UP Meru 2	84	6.9	UP-MERU2
+up-summitx	UP Summit X	55	5.87	UP-SUMMITX
+up-torre	UP Torre	67	6.45	UP-TORRE
+up-k25	UP K2 5	56	5.7	UP-K25

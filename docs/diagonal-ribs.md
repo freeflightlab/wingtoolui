@@ -1,228 +1,305 @@
 # Diagonal ribs
 
-Chapter 7 of the handbook is figures without text, so this is a reconstruction
-from the drawings and from what the geometry has to do.
+Chapter 7 of the handbook is figures and one paragraph, so this is a
+reconstruction from the drawings, from what the geometry has to do, and from
+the one complete design in the repository — the Swoop2, which states its own.
+
+> "Diagonal ribs (V-rib) are used primarily to reduce the number of anchors
+> in the sail ... joining the intrados surface with the extrados surface of
+> adjacent ribs." — handbook, 7.1
 
 ---
 
-## 1. The project already needed them
+## 1. Why they exist
 
 Every line attachment is a point of drag and a point of load, so modern wings
-attach lines to every second or third rib rather than to all of them. The line
-plans here already do exactly that — `everyNthRib: 2` has been the default
-since line plans were built.
+attach lines to every second or third rib rather than to all of them.
 
-That left a problem the line plan quietly assumed away. **The ribs with no line
-on them still carry lift**, and it has to reach the lineset somehow. A diagonal
-rib is what carries it: a triangular panel from the attachment point on a
-loaded rib, diagonally across the cell, to a line along the upper surface of
-the unloaded rib beside it. Load spreads from a line of fabric down to a point.
+**The ribs with no line on them still carry lift**, and it has to reach the
+lineset somehow. A diagonal rib is what carries it: a triangular gusset from
+the anchor on a rib that has a line, across the cell, to a run of the upper
+seam of the rib beside it that has none.
 
-So diagonals are not an optional refinement. Without them, a wing whose lines
-attach every second rib has half its span hanging on nothing — and the tool was
-modelling exactly that wing.
+Without them, a wing whose lines attach every second rib has half its span
+hanging on nothing. With the diagonals turned off the tool now says so — the
+status line counts the ribs "with no load path" — where it used to report no
+problem at all.
 
 ![Diagonal ribs carrying the load from unattached ribs](diagonal-ribs.svg)
 
 *Cyan ribs carry a line; grey ribs do not. Each pink triangle runs from an
-attachment point on a loaded rib up to the upper surface of its unloaded
+attachment point on a loaded rib up to the upper seam of its unloaded
 neighbour. Generated from the tool's own geometry by `tools/make-diagrams.mjs`.*
 
 ---
 
-## 2. The flat pattern is exact
+## 2. Where they go: where the lines are
+
+A diagonal hangs from a line. So where they go is the line plan's to say, row
+by row: `planAnchorRibs` reads the ribs each row's lines actually attach to,
+and `buildVRibs` takes them as `anchorRibsByRow`.
+
+**The interface did not do this.** It built the diagonals before the plan
+existed and gave them every second rib, whatever plan was then drawn. That is
+the default plan and no other:
+
+- a written cascade spreads each row's anchors at its own spacing;
+- the Swoop2 attaches on ribs 2-3, 6-7, 10-11 … of its 26 — and was drawn
+  with 50 invented diagonals a side, 22 of them hanging from ribs that carry
+  no line at all;
+- "Diagonal reach" could not do anything, because by construction every free
+  rib had a lined one beside it. `tools/dead-controls.cjs` found it.
+
+Rows are the designer's choice ("Diagonals on rows"); the default is every row
+that has lines. It was B and C only, which left the A anchors — the most
+loaded row — spreading nothing to the ribs between them.
+
+### A design that states its own
+
+LEP section 12 gives the Swoop2 39 diagonals a side, and the tool places those
+(`parseHVRibs`, `lepDiagonalPieces`, then `buildVRibs` with `placed`): which
+rib, which row, which neighbour. See section 9 for what is and is not read.
+
+The rule, given the Swoop2's own lines, reproduces **37 of its 39** — all
+thirteen on row A, twelve of thirteen on B and on C. The two it misses are at
+the tip, where the designer hangs a B and a C diagonal from a rib that carries
+only an A line. That is the test of the rule.
+
+---
+
+## 3. The flat pattern is exact
 
 A diagonal is a fan: one apex, and a base curve on the neighbouring rib's
-surface. That is a cone, and **a cone is developable** — it flattens with no
-distortion at all, unlike the wing's own panels, whose development is only
-approximate and has to have its error measured.
-
-The development follows directly. Place the apex, lay each base point at its
-true distance from it, and take the angle between successive base points from
-the triangle they form:
+edge. That is a cone, and **a cone is developable** — it flattens with no
+distortion, unlike the wing's own panels.
 
 ```
 cos(dφ) = (r_k² + r_k₊₁² − s²) / (2 · r_k · r_k₊₁)
 ```
 
-Every radius and every base segment then comes out exact. Measured on a
-synthetic fan and on a real diagonal from a built wing, the worst error is
-**4.4 × 10⁻¹⁶ m** — machine precision, and the tolerance is set there rather
-than at something discovered empirically. If it ever drifts, the fan is not
-being treated as the developable surface it is.
+Every radius and every base segment comes out exact: the worst error on a real
+diagonal is of the order of 10⁻¹⁵ m (`fanDevelopmentError`), and the
+flat-pattern area equals the surface area to the same precision.
+
+**Every stitch is on a seam.** The apex is a point on the lower seam of the
+rib with the line; the base is a run of the upper seam of the rib it holds.
+Two gussets from one anchor, to the ribs either side, are the V: one bottom
+seam to two top seams. (A section here used to say the base landed "in the
+middle of a panel". It never did, and a test now holds every base point to
+the neighbouring rib's own edge. `buildSeamDiagonals` gives the same V as two
+straight legs, for when a length is wanted rather than a pattern.)
 
 ---
 
-## 3. Half the load travels diagonally
+## 4. Half the load travels diagonally
 
-Every unloaded rib's lift must reach an attachment point, and the diagonals are
-the only route. With lines on every second rib, **half the half-wing's load
-travels diagonally**.
+Every unloaded rib's lift must reach an attachment point, and the diagonals
+are the only route. With lines on every second rib, **half the half-wing's
+load travels diagonally** (`vribLoads`). That number is a check, not an
+output: anything other than 50% means load is being lost or counted twice.
 
-That number is a check, not an output. A first implementation returned 25%,
-because it applied a row share on top of an already-normalised proximity
-weight — dividing the load twice and losing half of it. The load has to arrive
-somewhere, so anything other than 50% at `everyNthRib: 2` means it is being
-lost or counted twice.
+### The trade-off
 
-`vribLoads` also reports **load per metre of seam**, which is what decides
-whether a seam needs reinforcing: about 2 daN/m on the test wing, rising to
-4 daN/m when attachments are spread further apart.
+Fewer attachments means less line drag, paid for in fabric and seam load. On
+a 25-rib half wing, rows B and C, base 18% of chord:
 
----
+| lines every | reach | lined ribs | diagonals | fabric | via diagonals | peak seam | left with |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 rib | — | 25 | 0 | 0 | 0% | — | — |
+| 2 ribs | 1 cell | 13 | 96 | 6.22 m² | 50% | 1.7 daN/m | nothing |
+| 3 ribs | 1 cell | 9 | 64 | 4.15 m² | 67% | 3.3 daN/m | 16 straps wanted |
+| 4 ribs | 1 cell | 7 | 48 | 3.11 m² | 50%, a quarter with no path | 3.3 daN/m | **6 ribs unsupported** |
+| 3 ribs | 2 cells | 9 | 128 | 10.52 m² | 67% | 2.2 daN/m | nothing |
+| 4 ribs | 2 cells | 7 | 96 | 7.89 m² | 75% | 3.3 daN/m | 24 held from one side |
 
-## 4. The trade-off, made visible
-
-Fewer attachments means less line drag and fewer anchor points, paid for in
-fabric, weight and seam loading:
-
-| lines every | reach | attach ribs | diagonals | extra fabric | load via diagonals | peak seam |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 rib | — | 25 | 0 | 0.00 m² | 0% | — |
-| 2 ribs | 1 cell | 13 | 48 | 2.68 m² | 50% | 2.1 daN/m |
-| 3 ribs | 1 cell | 9 | 32 | 1.79 m² | 67% | 4.1 daN/m |
-| 4 ribs | 1 cell | 7 | 24 | 1.34 m² | **50%** | 4.1 daN/m |
-| 3 ribs | 2 cells | 9 | 64 | 4.82 m² | 67% | 2.8 daN/m |
-| 4 ribs | 2 cells | 7 | 48 | 3.62 m² | 75% | 4.1 daN/m |
-
-The row that matters is **every 4th rib with single-cell diagonals**. It looks
-cheapest — fewest diagonals, least fabric — and it is not buildable: a
-single-cell diagonal cannot reach the middle of a three-cell gap, so six ribs
-end up carrying no load path at all. `unsupportedRibs` names them.
-
-That is a genuine rigging constraint rather than a modelling limit, and it is
-where a designer finds out that spreading attachments further requires longer
-diagonals. Reaching two cells fixes it and costs 2.7× the fabric of the
-unbuildable version.
+Every fourth rib with single-cell diagonals looks cheapest and is not
+buildable: a one-cell diagonal cannot reach the middle of a three-cell gap.
+`unsupportedRibs` names the ribs, and the status line counts them.
 
 ---
 
-## 5. Cutting them
+## 5. Held from both sides, or a strap
 
-Diagonals cost fabric and have to be cut like anything else. `vribsToDXF`
-nests them and writes R12, and they appear in the interface as their own
-export.
+A diagonal pulls the rib it holds **down and sideways** — towards its anchor.
+Two of them, one from each side, cancel sideways. One on its own does not: the
+rib is drawn towards the anchor, and the cell beside it is pulled wide unless
+something across the top holds it back.
 
-They nest **separately from the panels**, for a practical reason: diagonals
-are usually cut from a different, lighter cloth than the sail, so mixing them
-into one layout produces a cutting file nobody can use.
+`diagonalBalance` finds the ribs held from one side only, and pairs those that
+face each other:
 
-They also nest differently. A sail panel is long and narrow and wants to lie
-along the roll; a fan is a wedge. The existing nester copes without changes
-because it searches orientations against the real outline rather than the
-bounding box, so a wedge turned through 180 degrees interlocks with its
-neighbour. On the test wing, 48 diagonals take 4.28 m of a 1.4 m roll at 45%
-utilisation.
+- lines on every second rib: every free rib is held from both sides;
+- lines on pairs of ribs with two free between (the Swoop2): each free rib is
+  held from one side, and a **strap across the top** between the two carries
+  each pull against the other.
 
-One number is worth checking every time: the **flat-pattern area equals the
-surface area exactly**. A cone develops with no change of area, so 2.68 m² of
-diagonal becomes 2.68 m² of pattern. On the wing's own panels that equality is
-only approximate. Here it is exact, and it is the same developability property
-appearing a third way — after the radii and the base segments.
-
-## 6. In the interface
-
-The **Rib** tab draws the diagonals that touch the selected rib, and a builder
-needs both marks: the point where a diagonal's apex lands on a loaded rib, and
-the line along which its base is sewn to an unloaded one. The caption counts
-both — how many leave this rib, and how many land on it.
-
-`unsupportedRibs` is surfaced in the status bar as a warning, so a rigging
-choice that leaves span with no load path is visible while it is being made
-rather than discovered later.
+On the Swoop2 the statics wants 15 straps — five pairs of ribs, three rows —
+and **the file states 15 pieces between exactly those pairs** (4-5, 8-9,
+12-13, 16-17, 20-21 in its numbering). Neither reading was fitted to the
+other. The tool reports them; it does not yet draw or cut them (section 9).
 
 ---
 
-## 7. Not covered
+## 6. What loads a diagonal
 
-- **VH-ribs.** LEP section 12 carries all three types; the V and H forms are
-  generated, the combined VH form is not.
-- **Diagonal ribs as structure.** They are treated as load paths and cut
-  patterns, not as members with stiffness. Whether a diagonal is in tension
-  across its whole width, or slack over part of it, is not modelled.
-- **The effect on the rib itself.** A diagonal pulls on the rib it lands on,
-  and that load is carried by the rib fabric and its reinforcement. The rib
-  cut is unchanged here.
-- **Collision checking between internal parts.** Diagonals, cross-ports and
-  lightening holes are each generated correctly and independently, and nothing
-  checks that two of them are not asked for on the same part of a rib.
-  `checkTabClearance` does exactly this for tabs against lightening holes; the
-  equivalent for diagonals does not exist.
+The rib it **holds**. A rib with no line is lifted by the air on the panels
+either side, and the diagonal sewn along its upper seam is what stops it
+rising. The load enters along the base, acting the way that rib's lift acts —
+along the rib, lower seam to upper — and leaves at the apex.
 
----
+Two earlier versions had this wrong:
 
-## 8. What the H form exposed
+- **Along the diagonal's own axis.** By construction every fibre came out
+  aligned. A check whose load is defined by the thing it checks finds nothing.
+- **Along the line, towards the riser.** Nearer, and for an arc whose ribs
+  point roughly at the pilot it gives much the same answer — but it is the
+  wrong force. The line reacts what the diagonal brings to the anchor; it does
+  not load it. Taken per anchor, a diagonal on the side its line leans towards
+  read as slack when it carries its neighbour's lift like any other.
 
-The H-rib was implemented expecting it to show a development distortion the V
-form does not, since a strip between two curves is not generally developable
-while a cone always is.
+`buildVRibs` records the held rib's direction on each piece (`liftDirection`)
+and `diagonalTension` uses it. Cloth can only pull, so a fibre works when it
+opposes the load; on a diagonal that rises from a lower seam to an upper one
+every fibre does. What varies is how well each is aimed.
 
-It showed none. Nor, on investigation, did the sail panels it was being
-compared against — at any rib spacing from 0.23 m to 4.1 m, on a wing with 9
-degrees of washin and a strongly arced lobe. Surfaces that are certainly not
-developable were reporting machine precision.
-
-The measure was at fault, not the geometry. Each unrolling step preserves five
-of the quadrilateral's six lengths, including **both** diagonals, and
-`developmentError` was comparing one of those diagonals. It could not return
-anything but zero, and had been doing so since Phase 1 — through the status
-line, through the test suite's loose `< 1%` tolerance, and through every
-validation run.
-
-Measuring the fourth side instead — the one length the construction actually
-gives up — reports 0.0034% on a normal wing, exactly zero on a cylinder and a
-cone, and a figure that grows with the twist of a ruled surface. The H form
-does carry a small distortion after all, and the V form genuinely carries none.
-
-The test is now two-sided. A measure that only ever returns zero passes any
-one-sided check, so it has to be shown reporting something where something is
-there.
-
----
-
-## 9. Is the diagonal actually in tension?
-
-`vribLoads` says where a diagonal's load **goes**: from the anchor at the apex
-to the rib along the base. It does not say how the cloth **carries** it, and
-that is a different question.
-
-Fabric carries tension and nothing else — no compression, no bending. So load
-flows only along lines from the apex that are being pulled. A part of the
-triangle whose fibres are not in tension carries nothing at all: it is sewn
-in, it adds weight, and it does no work.
-
-### The limit is the angle
-
-A fibre from the apex to a point on the base carries a share of the load
-proportional to the cosine of its angle from the load direction. **Past 90
-degrees that share is negative** — the fibre would have to push — so it goes
-slack. Asserted in both directions: every slack fibre is past 90°, every taut
-one is not.
-
-### Width is the lever
-
-| base spread | area | fully taut | worst | max angle |
+| base width | area each | aimed (1 = straight back) | of its best fibre | pull that is sideways |
 | --- | --- | --- | --- | --- |
-| 8% chord | 0.057 m² | **20 of 20** | 100% taut | 11° |
-| 18% | 0.128 m² | 16 of 20 | 75% | 130° |
-| 30% | 0.214 m² | 15 of 20 | 67% | 140° |
-| 45% | 0.325 m² | 14 of 20 | 58% | 143° |
+| 8% of chord | 0.047 m² | 0.61 | 99% | 0.79 |
+| 18% | 0.107 m² | 0.59 | 96% | 0.79 |
+| 30% | 0.179 m² | 0.56 | 92% | 0.80 |
+| 45% | 0.273 m² | 0.52 | 84% | 0.80 |
 
-A narrow diagonal works across its whole width. A wide one is carrying on a
-fraction of itself while paying for all of it — nearly six times the fabric at
-45% for a triangle that works on 58% of its base.
+A wider base spreads into fabric further from the best direction: nearly six
+times the cloth at 45% for a piece that is aimed 15% worse. That is the cost
+of spreading the load along more of the rib, and it is a trade.
 
-`checkDiagonalTension` reports the slack area directly, because that is the
-number a designer can act on: it is either too wide or anchored in the wrong
-place, and both are things they can change.
+**What does improve the aim is narrower cells**, which rise more steeply for
+the same reach:
 
-### A parameter that was silently ignored
+| cells | rise in the cell | aimed | pull that is sideways |
+| --- | --- | --- | --- |
+| 20 | 31° | 0.53 | 0.84 |
+| 40 | 50° | 0.74 | 0.63 |
+| 60 | 61° | 0.83 | 0.48 |
 
-My first run gave identical results for every width, because the option is
-`baseSpread` and I passed `spread`. The extra key was accepted and dropped,
-so four different calls built the same diagonal and the model looked
-insensitive to the thing it was measuring.
+A designer whose diagonals are poorly aimed should add cells, not adjust the
+base.
 
-Same shape as the `demoWing({ cells: 40 })` error two rounds ago and the
-`thinAirfoil` one before that: a call that looks right, runs clean, and does
-nothing.
+---
+
+## 7. Are they buildable?
+
+`diagonalGeometry` flags a piece that is too short to sew, too long to
+support, too shallow to carry load up into the upper surface, or lopsided
+against its opposite number. The Structure view marks those apexes in red.
+
+**Rise is measured in the piece's own cell** (`riseDeg`): from the cell's
+floor, the lower surface running to the neighbouring rib's lower seam. It was
+measured from the horizon, and the arc tilts a cell near the tip by fifty or
+sixty degrees — by that measure 28 of the default wing's 96 diagonals a side
+lie flat, for no reason but where on the arc they are. In their cells they
+rise 28° to 57°, the rear row least.
+
+Sizes follow the cells. On the default wing, 24 cells a side:
+
+| row | pieces a side | length | rise in the cell |
+| --- | --- | --- | --- |
+| A | 24 | 243–390 mm | 33–50° |
+| B | 24 | 247–465 mm | 46–57° |
+| C | 24 | 202–414 mm | 43–53° |
+| D | 24 | 174–307 mm | 28–35° |
+
+All 96 are a sensible size and angle, and every rib they hold is held from
+both sides. The two legs from one rib differ as the cells either side do, by
+a few per cent: 629 against 618 mm at rib 2 of a 12-cell test wing, 464
+against 425 mm at rib 10. On that coarser wing the four inboard pieces of row
+B are over 600 mm and are flagged as too long to hold their shape — a wing
+with half-metre cells wants more cells, not longer diagonals.
+
+`minLengthM` ("Skip diagonals shorter than") leaves out the small ones. On the
+default wing:
+
+| limit | placed a side | skipped | sizes | left with |
+| --- | --- | --- | --- | --- |
+| 0 | 96 | 0 | 174–465 mm | nothing |
+| 200 mm | 93 | 3 | 202–465 mm | 1 rib held from one side |
+| 250 mm | 83 | 13 | 250–465 mm | 3 held from one side |
+| 350 mm | 42 | 54 | 351–465 mm | **2 ribs unsupported** |
+
+It defaults to 0: turning it on changes a design without being asked, and
+pushed far enough it leaves ribs with nothing holding them, which
+`unsupportedRibs` reports.
+
+### What this document used to say
+
+That the outboard leg "collapses towards the tip" — 675 mm one way and 75 mm
+the other from the same rib, a 9 to 1 spread — because "a rib on an arc is
+tilted, so its thickness has a spanwise component". Three sections explained
+it and a fourth blamed sweep.
+
+**It was the canopy being built inside out.** Each section was tilted the
+wrong way about its chord, so the upper surface lay inside the arc; one leg
+gained the offset and the other lost it. With the placement corrected the
+asymmetry went, and so did the slack fibres and the "4.3 to 1" legs recorded
+as properties of diagonals. They were properties of the bug.
+
+---
+
+## 8. Cutting them, and in the interface
+
+`vribsToDXF` nests the diagonals and writes R12, apart from the sail: 48
+gussets take 6.72 m of a 1.4 m roll at 33%. The bill of materials lists them
+in the rib cloth, by count, area and mass.
+
+The **Rib** tab and the rib pattern file carry both marks a builder needs: an
+X where a diagonal hangs from this rib (`B>1,3` in the file: row B, to ribs 1
+and 3, counted from 0 at the centre), and the run along which one is sewn on
+(`B<0,2`). The **Structure** tab draws them
+from the front, one row at a time if asked, with a stub of the line each hangs
+from. What they come to — how many, the cloth, whether each is in tension,
+buildable and held from both sides — is in the Internal structure panel, and
+is re-evaluated on every rebuild.
+
+---
+
+## 9. LEP section 12, and what is not read
+
+The Swoop2's section 12 holds 124 pieces of three kinds, each with its own
+row layout (`parseHVRibs`):
+
+| type | count | what it is | read |
+| --- | --- | --- | --- |
+| 11 | 70 | a strap from an anchor row on one rib to the same row on the next | counted |
+| 15 | 39 | a diagonal from an anchor, to the rib before or after | **placed** |
+| 16 | 15 | a piece between two ribs at a chord position | counted |
+
+**Left is towards the centre.** That is not from a manual; it is what the
+file's own lines say. Read that way all 39 diagonals run from a rib with a
+line to a rib with none. Read the other way, every one of them would join two
+lined ribs — the one place a diagonal is never wanted.
+
+Not established, and so kept as written rather than used:
+
+- the four numbers that close a type-15 row (`60.0 28.0 85. 2.` on every one)
+  — they give the piece its shape, so **the base width is the tool's setting,
+  not the design's**;
+- the numbers after each position on a type-16 row;
+- whether a type-11 width is centimetres or percent of chord.
+
+The LEparagliding manual would settle all three and could not be reached when
+this was written. Until it is, the straps and the pieces between two ribs are
+named in the import note and the bill, and not drawn or cut.
+
+---
+
+## 10. Not covered
+
+- **Straps.** Wanted ones are counted (section 5); none is built.
+- **Diagonals as structure.** They are load paths and cut patterns, not
+  members with stiffness.
+- **The effect on the rib itself.** A diagonal pulls on the rib it lands on;
+  the rib cut is unchanged here.
+- **Collisions between internal parts.** A diagonal's base and a nose rod can
+  want the same run of the same seam, and nothing checks it. `checkRibInternals`
+  does this for holes, ports and tabs.
+- **Seam allowance on the gussets.** The diagonal file is finished outlines.

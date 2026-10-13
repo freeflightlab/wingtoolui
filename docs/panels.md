@@ -21,9 +21,9 @@ not go together flat, and no accuracy anywhere else rescues it.
 
 | seam | worst mismatch |
 | --- | --- |
-| panel edge against its rib, upper surface | 0.0034 mm |
-| panel edge against its rib, lower surface | 0.0057 mm |
-| adjacent panels along a shared seam | 0.0057 mm |
+| panel edge against its rib, upper surface | 0.0002 mm |
+| panel edge against its rib, lower surface | 0.0002 mm |
+| adjacent panels along a shared seam | 0.0002 mm |
 
 Asserted for every panel on both surfaces.
 
@@ -33,7 +33,8 @@ Asserted for every panel on both surfaces.
 
 I read it as zero-indexed, compared each panel against the rib one along from
 the one it is actually sewn to, and got a worst mismatch of **137 mm** — a
-wing that could not be built. The real figure is 0.006 mm.
+wing that could not be built. The real figure was a few thousandths of a
+millimetre.
 
 The convention is invisible until someone guesses it wrong, so it is pinned as
 a test of its own.

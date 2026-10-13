@@ -193,8 +193,34 @@ export function splitSurfaces(af) {
   return { upper, lower };
 }
 
-/** Resample a surface polyline to n points, evenly spaced in arc length. */
-export function resampleSurface(poly, n) {
+/**
+ * Resample a surface polyline to n points along its length.
+ *
+ * `spacing` says how the n points are shared out along the surface, which
+ * runs from the leading edge to the trailing edge:
+ *
+ *   'uniform'  evenly along the surface
+ *   'cosine'   clustered at both ends
+ *   'nose'     clustered at the leading edge only, where the curvature is
+ *
+ * It matters because a rib is CUT along these points and a panel is
+ * developed along them. On a 2.6 m chord at 50 points a surface, even
+ * spacing puts a point every 55 mm — round a nose whose radius is 64 mm. The
+ * outline then cuts the corner off the leading edge by 5.3 mm and comes out
+ * 3.1 mm short round its perimeter; clustered at the nose the same 50 points
+ * hold the section to 0.5 mm and 0.3 mm. (Measured on a NACA 4415 and on the
+ * Swoop2's own section, which behave alike.)
+ *
+ * The default here is still 'uniform', for callers that resample something
+ * other than an aerofoil surface; `buildWing` asks for 'nose'. It used not
+ * to, and the reason recorded here was that clustering "changed how
+ * ovalization eases the two seams of a panel — the two deltas stopped being
+ * opposite in sign". Opposite signs turned out to be a property of a canopy
+ * that was being built inside out; on the corrected wing both seams lengthen
+ * under any distribution, and a test holds two distributions to the same
+ * ease. The reason went and the coarse nose stayed.
+ */
+export function resampleSurface(poly, n, { spacing = 'uniform' } = {}) {
   const cum = [0];
   for (let i = 1; i < poly.length; i++) {
     cum.push(cum[i - 1] + Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]));
@@ -202,7 +228,11 @@ export function resampleSurface(poly, n) {
   const total = cum[cum.length - 1];
   const out = [];
   for (let k = 0; k < n; k++) {
-    const s = (k / (n - 1)) * total;
+    const u = n > 1 ? k / (n - 1) : 0;
+    const t = spacing === 'cosine' ? (1 - Math.cos(u * Math.PI)) / 2
+      : spacing === 'nose' ? 1 - Math.cos((u * Math.PI) / 2)
+        : u;
+    const s = t * total;
     if (s <= 0) { out.push(poly[0].slice()); continue; }
     if (s >= total) { out.push(poly[poly.length - 1].slice()); continue; }
     let i = 1;

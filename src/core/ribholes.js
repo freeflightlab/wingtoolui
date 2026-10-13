@@ -33,6 +33,8 @@
  * always yields something buildable.
  */
 
+import { toRibPlane, ribCopies } from './wing3d.js';
+
 /** Defaults in fractions of chord or of local rib thickness. */
 export const DEFAULT_HOLE_RULES = {
   // Chordwise band the holes may occupy.
@@ -48,6 +50,13 @@ export const DEFAULT_HOLE_RULES = {
   // the weight saved.
   minWidth: 0.035,
   cornerRadius: 0.25,    // as a fraction of the hole's half-height
+  // Clear of a rod by this fraction of chord, and never by less than
+  // `rodClearanceMinM`: a rod's pocket is sewn to the rib, and has to have
+  // rib to be sewn to. The Swoop2's own holes keep 1.28% of chord from its
+  // own rods on every rib — 27 mm at the root, 10 mm at its outermost rod,
+  // which is the smallest gap in that design and the floor here.
+  rodClearance: 0.013,
+  rodClearanceMinM: 0.010,
 };
 
 /**
@@ -57,9 +66,15 @@ export const DEFAULT_HOLE_RULES = {
  * and the DXF rib export use, so a hole drawn on screen is the hole that
  * gets cut.
  */
-export function buildRibHoles(rib, airfoil, rules = {}) {
+export function buildRibHoles(rib, airfoil, rules = {}, { rods = null } = {}) {
   const R = { ...DEFAULT_HOLE_RULES, ...rules };
   const chord = rib.chord;
+  // Rods on this rib, as they lie in its plane (metres): the openings are
+  // shaped to keep clear of them. Placed without knowing about the rods, the
+  // first opening came within 7 mm of the end of a nose rod at the root and
+  // 2.5 mm at the tip, where the one real design here keeps 27 and 10.
+  const keepClear = rods && rods.length
+    ? { rods, distanceM: Math.max(R.rodClearance * chord, R.rodClearanceMinM) } : null;
 
   // Rib profile in its own plane: chordwise x from the leading edge, and the
   // upper and lower ordinates.
@@ -91,7 +106,7 @@ export function buildRibHoles(rib, airfoil, rules = {}) {
     const a = lo + R.webWidth / 2;
     const b = hi - R.webWidth / 2;
     if (b - a < R.minWidth) continue;
-    holes.push(makeHole(prof, a, b, R, chord));
+    holes.push(makeHole(prof, a, b, R, chord, keepClear));
   }
 
   const ribArea = profileArea(prof) * chord * chord;
@@ -113,10 +128,44 @@ export function buildRibHoles(rib, airfoil, rules = {}) {
 }
 
 /** One hole, as a rounded polygon following the section's own shape. */
-function makeHole(prof, x0, x1, R, chord) {
-  const n = 24;
+function makeHole(prof, x0, x1, R, chord, keepClear = null) {
+  // More stations where the edge has to turn round the end of a rod.
+  const n = keepClear ? 48 : 24;
   const top = [];
   const bottom = [];
+  // Rods as closely spaced points, so the clearance can be taken as a
+  // distance: the hole's edge keeps `distanceM` from every one of them,
+  // which rounds it off about the end of a rod instead of stepping.
+  const rodPoints = [];
+  if (keepClear) {
+    const step = keepClear.distanceM / 6;
+    for (const rod of keepClear.rods) {
+      for (let k = 1; k < rod.length; k++) {
+        const a = rod[k - 1];
+        const b = rod[k];
+        const m = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
+        for (let q = k === 1 ? 0 : 1; q <= m; q++) {
+          rodPoints.push([a[0] + ((b[0] - a[0]) * q) / m, a[1] + ((b[1] - a[1]) * q) / m]);
+        }
+      }
+    }
+  }
+  // How high the edge may go under the rods above this station, and how low
+  // over the rods below it.
+  const limits = (xM, midM) => {
+    let above = Infinity;
+    let below = -Infinity;
+    if (!keepClear) return { above, below };
+    const D = keepClear.distanceM;
+    for (const [u, v] of rodPoints) {
+      const dx = Math.abs(u - xM);
+      if (dx >= D) continue;
+      const reach = Math.sqrt(D * D - dx * dx);
+      if (v >= midM) above = Math.min(above, v - reach);
+      else below = Math.max(below, v + reach);
+    }
+    return { above, below };
+  };
   for (let i = 0; i <= n; i++) {
     const t = i / n;
     const x = x0 + (x1 - x0) * t;
@@ -127,8 +176,17 @@ function makeHole(prof, x0, x1, R, chord) {
     // rather than cut square into the web.
     const ends = Math.sin(Math.PI * t) ** R.cornerRadius;
     const h = half * (1 - R.surfaceMargin) * ends;
-    top.push([x * chord, (mid + h) * chord]);
-    bottom.push([x * chord, (mid - h) * chord]);
+    let yTop = (mid + h) * chord;
+    let yBottom = (mid - h) * chord;
+    if (keepClear) {
+      const lim = limits(x * chord, mid * chord);
+      yTop = Math.min(yTop, lim.above);
+      yBottom = Math.max(yBottom, lim.below);
+      // Nothing left between two rods at this station: the hole closes here.
+      if (yTop < yBottom) { yTop = (yTop + yBottom) / 2; yBottom = yTop; }
+    }
+    top.push([x * chord, yTop]);
+    bottom.push([x * chord, yBottom]);
   }
   const outline = top.concat(bottom.slice().reverse());
   return {
@@ -140,17 +198,17 @@ function makeHole(prof, x0, x1, R, chord) {
   };
 }
 
-function ribProfile(rib) {
-  const xLE = rib.xLE;
-  const b = (rib.betaDeg * Math.PI) / 180;
-  const oy = rib.lobePoint[0];
-  const oz = rib.lobePoint[1];
-  const flat = ([x, y, z]) => [
-    (x - xLE) / rib.chord,
-    (-(y - oy) * Math.sin(b) + (z - oz) * Math.cos(b)) / rib.chord,
-  ];
-  const upper = rib.upper.map(flat);
-  const lower = rib.lower.map(flat);
+/** A rib's own outline in chord units: `{ upper, lower, at(x) -> { up, lo } }`. */
+export function ribProfile(rib) {
+  // The section as cut, in chord units. This inverted the dihedral by hand,
+  // with the sign the placement used to have; once the placement was
+  // corrected, the holes it placed landed up to 30 mm outside the rib.
+  const c = rib.chord;
+  const own = (poly3, poly2) => (poly2
+    ? poly2.map(([u, v]) => [u / c, v / c])
+    : poly3.map((p) => toRibPlane(rib, p).map((v) => v / c)));
+  const upper = own(rib.upper, rib.section?.upper);
+  const lower = own(rib.lower, rib.section?.lower);
   const at = (x) => ({ up: interp(upper, x), lo: interp(lower, x) });
   return { upper, lower, at };
 }
@@ -241,20 +299,80 @@ export function checkRibHoles(set, airfoil) {
  * surfaces, so this is not a rounding error: a wing with 50 ribs at a metre
  * of chord carries several square metres of rib.
  */
-export function buildAllRibHoles(wing, airfoil, { rules = {}, ribCloth = 0.040 } = {}) {
-  const sets = wing.ribs.map((rib) => buildRibHoles(rib, airfoil, rules));
-  const ribArea = sets.reduce((s, x) => s + x.ribAreaM2, 0) * 2;
-  const holeArea = sets.reduce((s, x) => s + x.holeAreaM2, 0) * 2;
+export function buildAllRibHoles(wing, airfoil, { rules = {}, ribCloth = 0.040, rodsByRib = null } = {}) {
+  const sets = wing.ribs.map((rib, i) => buildRibHoles(rib, airfoil, rules,
+    { rods: rodsByRib ? rodsByRib[i] ?? null : null }));
+  // The whole wing: every rib twice, except one on the centreline, which the
+  // wing has once. Doubling the half counted the centre rib — the largest
+  // rib there is — as two.
+  const ribArea = sets.reduce((s, x, i) => s + x.ribAreaM2 * ribCopies(wing, i), 0);
+  const holeArea = sets.reduce((s, x, i) => s + x.holeAreaM2 * ribCopies(wing, i), 0);
   return {
     sets,
     ribAreaM2: ribArea,
     holeAreaM2: holeArea,
     removedFraction: ribArea > 0 ? holeArea / ribArea : 0,
-    // kg, both sides of the wing.
+    // kg, the whole wing.
     solidMassKg: ribArea * ribCloth,
     holedMassKg: (ribArea - holeArea) * ribCloth,
     massSavedKg: holeArea * ribCloth,
     ribClothKgPerM2: ribCloth,
+  };
+}
+
+/**
+ * The rib cloth of the whole wing, with the openings the wing actually has.
+ *
+ * What a bill of materials needs: every rib's area, less what is cut out of
+ * it — this tool's own openings, a design's own holes when it states them
+ * (`ownHoles`, a map from rib index to outlines in the rib's plane, metres),
+ * or nothing at all when the ribs are left solid.
+ *
+ * The interface's bill asked for this under a name nothing ever set, so it
+ * had no ribs in it at all: fifty ribs of a metre and a half each, missing,
+ * under a line that said only that their holes had not been counted.
+ */
+export function ribClothTotals(wing, airfoil, {
+  ribCloth = 0.040, openings = true, ownHoles = null, rules = {}, rodsByRib = null,
+} = {}) {
+  const polygonArea = (pts) => {
+    let a = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+    }
+    return Math.abs(a / 2);
+  };
+  let ribArea = 0;
+  let holeArea = 0;
+  let holeCount = 0;
+  let ribCount = 0;
+  wing.ribs.forEach((rib, i) => {
+    const copies = ribCopies(wing, i);
+    const set = buildRibHoles(rib, airfoil, rules,
+      { rods: rodsByRib ? rodsByRib[i] ?? null : null });
+    ribCount += copies;
+    ribArea += set.ribAreaM2 * copies;
+    if (!openings) return;
+    if (ownHoles) {
+      const own = ownHoles.get(rib.index) ?? [];
+      holeArea += own.reduce((t, h) => t + polygonArea(h.outline), 0) * copies;
+      holeCount += own.length * copies;
+    } else {
+      holeArea += set.holeAreaM2 * copies;
+      holeCount += set.holes.length * copies;
+    }
+  });
+  return {
+    ribCount,
+    holeCount,
+    ribAreaM2: ribArea,
+    holeAreaM2: holeArea,
+    removedFraction: ribArea > 0 ? holeArea / ribArea : 0,
+    solidMassKg: ribArea * ribCloth,
+    holedMassKg: (ribArea - holeArea) * ribCloth,
+    massSavedKg: holeArea * ribCloth,
+    ribClothKgPerM2: ribCloth,
+    source: !openings ? 'solid' : ownHoles ? 'the design\'s own holes' : 'this tool\'s openings',
   };
 }
 
@@ -439,9 +557,9 @@ function scalePolygon(pts, k) {
  * That is the case this reports.
  */
 export function ribOpenings(rib, neighbour, airfoil, {
-  rules = {}, speedMS = 11, rho = 1.225,
+  rules = {}, speedMS = 11, rho = 1.225, rods = null,
 } = {}) {
-  const holes = buildRibHoles(rib, airfoil, rules);
+  const holes = buildRibHoles(rib, airfoil, rules, { rods });
   const volume = neighbour ? cellVolume(rib, neighbour) : 0;
   const need = crossPortRequirement(volume, { speedMS, rho, rules });
 
@@ -568,8 +686,10 @@ export function checkRibInternals({
 }
 
 export function allRibOpenings(wing, airfoil, opts = {}) {
+  const { rodsByRib = null, ...rest } = opts;
   const sets = wing.ribs.map((rib, i) => ribOpenings(
-    rib, wing.ribs[i + 1] ?? null, airfoil, opts,
+    rib, wing.ribs[i + 1] ?? null, airfoil,
+    { ...rest, rods: rodsByRib ? rodsByRib[i] ?? null : null },
   ));
   const short = sets.filter((s) => !s.ventilates && s.ventilationRequiredM2 > 0);
   const ratios = sets
@@ -584,6 +704,7 @@ export function allRibOpenings(wing, airfoil, opts = {}) {
     worstMarginRatio: ratios.length ? Math.min(...ratios) : Infinity,
     medianMarginRatio: ratios.length
       ? ratios.slice().sort((a, b) => a - b)[Math.floor(ratios.length / 2)] : Infinity,
-    holeAreaM2: sets.reduce((a, s) => a + s.holeAreaM2, 0) * 2,
+    // The whole wing: each rib twice, but one on the centreline once.
+    holeAreaM2: sets.reduce((a, s, i) => a + s.holeAreaM2 * ribCopies(wing, i), 0),
   };
 }

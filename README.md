@@ -18,16 +18,17 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**1744 tests across nine check stages**, all passing. Phases 1 and 5 are
+**2423 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
 aerofoil, arc and twist, equilibrium, line plan and risers, loads and line
 sizing, rib openings and diagonals, panel development, nesting, and DXF or
 printed patterns. It reads and writes LEparagliding files, and it is validated
-against **21 wings from six manufacturers** plus Laboratori d'envol's own
-Swoop2, whose published area, span, chord, cell and rib counts it reproduces
-exactly.
+against the line sheets of **21 wings from five manufacturers**, the published
+specifications of **55 sizes**, and Laboratori d'envol's own Swoop2, whose
+area, span, chord, cells, ribs and all 93 lines — lengths, loads and types —
+it reproduces as the design's own program computes them.
 
 What it is not: certified, tested, or flown. See **Safety** below.
 
@@ -46,7 +47,7 @@ cd wingtoolui
 
 npm run doctor      # is this checkout complete? run this first
 npm run build       # bundle src/ into dist/paraglider-design-tool.html
-npm run check       # everything, Thirteen stages, one command
+npm run check       # everything, fifteen stages, one command
 ```
 
 **Publishing to GitHub? Read [`PUBLISHING.md`](PUBLISHING.md) first.** Uploading
@@ -65,12 +66,13 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 1744 unit checks against known geometry and the sources |
+| `npm test` | 2423 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
 | `npm run test:refs` | every wing in the database against the physics |
 | `npm run check:assertions` | checks that cannot fail |
+| `npm run check:units` | names that state a unit, used in another |
 | `npm run check:references` | names in prose that point at nothing |
 | `npm run check:options` | options passed that a function never reads |
 | `npm run check:corpus` | every dataset measured, against the model's own constants |
@@ -88,11 +90,11 @@ And two tools that are not tests:
 The scripts are thin wrappers — `node tools/check.mjs` and the rest work
 directly if you prefer.
 
-`check.mjs` runs all thirteen in one command, because six commands meant five got
-skipped. The full-pipeline stage carries a **pinned baseline of 3 known
-problems**: treating them as failures would make the command red every run and
-train everyone to ignore it, while letting the number drift up silently would
-be worse. Exceeding the baseline fails.
+`check.mjs` runs all fifteen in one command, because six commands meant five got
+skipped. The full-pipeline stage carries a **pinned baseline of known
+problems**, now zero: treating known problems as failures would make the
+command red every run and train everyone to ignore it, while letting the
+number drift up silently would be worse. Exceeding the baseline fails.
 
 `phase1-audit.mjs` walks the Phase 1 roadmap rather than the modules: 81
 ## What it does
@@ -157,53 +159,66 @@ embedded — measured total line lengths, sail to harness — and selecting one
 reports two numbers that mean different things: the **mean offset**, which is
 the overall length a designer sets deliberately, and the **shape deviation**,
 which is the spread once that offset is removed and is what actually differs.
-On a Hook-6-sized design the shape deviation is about 100 mm over 40 anchors.
+A Hook 6 loaded from the picker comes out 110 to 120 mm from its own sheet in
+shape, over 44 anchors.
 
 ## Architecture
 
 ```
-src/core/          the maths — pure functions, no DOM, individually testable
+src/core/          the maths — 38 modules, pure functions, no DOM, each tested
   num.js           integration, root finding, arc-length helpers
   planform.js      ch.1  elliptical + linear edges, areas, AR, centroid
-  airfoil.js       ch.2  NACA 4-digit, three import formats, surface splitting
+  airfoil.js       ch.2  NACA 4-digit, coordinate import, surface splitting
   lobe.js          ch.3  arc types, arc-length parameterisation, washin
   wing3d.js        ch.3.4 + 2021 study: three rotations, flow-alignment angles
-  equilibrium.js   ch.4  longitudinal balance, calage, speed, glide
+  equilibrium.js   ch.4  balance, calage, speed, glide; the coupled solve
   flatdev.js       ch.5  triangle-pair unrolling of panels
   ovalization.js   ch.6  billow geometry and panel widening
-  lines.js         ch.8  weighted-centroid line cascade
-  risers.js        ch.9  speed system, trimmers, accelerated polar, brakes
-  atmosphere.js    ISA to 20 km, density, Reynolds and Mach
-  aero.js          section polar, lifting line, wing polar
-  pressure.js      chordwise loading, row load shares from the section
-  loads.js         lift to line tension, materials, sizing, stretch, drag
-  lineplan.js      risers, cascade naming, four production sheet formats
-  scaling.js       size families: isometric canopy, affine lines and mass
-  family.js        a whole family through the pipeline, sized per size
   vribs.js         ch.7  diagonal and horizontal ribs, development, load path
-  ribholes.js      lightening holes placed around margins and load paths
-  reinforcement.js mylar, dacron, tapes, rods, tabs, and the mass gap
+  lines.js         ch.8  the handbook's weighted-centroid cascade
+  lineplan.js      risers and the cascade as production wings build them;
+                   readers for five makers' sheets
+  loads.js         lift to line tension, materials, sizing, stretch, drag
+  trimdrift.js     why a lineset goes out of trim, and when to check it
+  pma.js           the PMA inspection standard, and the exchange record
+  freebody.js      the hanging wing as one body under gravity
+  risers.js        ch.9  speed system, trimmers, accelerated polar
+  atmosphere.js    US Standard Atmosphere 1976 to 86 km; Re, Mach, Kn
+  aero.js          section polar, lifting line, wing polar
+  vlm.js           a vortex lattice over the arced wing
+  pressure.js      chordwise loading, row load shares from the section
   intake.js        cell openings, placed against the stagnation point
-  ribstress.js     what rib cloth carries, and how far tape must reach
-  shaping3d.js     darts that let the nose curve in two directions
   inflated.js      the flying shape against the built one
-  compare.js       two designs side by side, with trades named as trades
+  scaling.js       size families, the reference library, line per span
+  family.js        a whole family through the pipeline, sized per size
+  ribholes.js      lightening holes and cross-ports
+  ribstress.js     what rib cloth carries, and how far tape must reach
+  reinforcement.js mylar, dacron, tapes, rods, tabs
+  shaping3d.js     darts that let the nose curve in two directions
+  fabric.js        cloth by location
   bom.js           bill of materials: roll length, cut length, hardware
+  compare.js       two designs side by side, with trades named as trades
+  lep.js           the LEparagliding file, read and written
+  leplines.js      an imported design's ribs, lines, rods and holes, as its
+                   own program computes them
   xfoil.js         export to and import from XFOIL
-  export.js        DXF R12, SVG, nesting, fabric estimation
+  export.js        DXF R12, SVG, printable patterns, OBJ, nesting, a DXF reader
   marking.js       notches, grain and labels for a buildable cutting file
   pairing.js       panel orientation, profile packing, nesting diagnosis
   viewfit.js       fitting drawings and charts to frames
 
 src/ui/            index.html + style.css + app.js
-tests/run-tests.js validation suite
-tests/benchmark.js performance, scaling and budgets
-tools/             figure generation, and a reader for legacy .xls sheets
-docs/              nine notes; see below
-data/reference/    44 production line sets from nine wings across four
-                   manufacturers, seven size families (38 sizes, five
-                   applications), a published speed-system geometry, and a
-                   measured 78-line materials table
+tests/             the unit suite, the Phase 1 audit, the full pipeline, the
+                   reference sweep, the benchmark
+tools/             the other check stages, the interface harness, figures,
+                   importers, and readers for legacy sheets
+docs/              forty notes; see below
+data/reference/    137 tables: line sheets of 21 wings from five makers, 55
+                   published sizes and the makers' own specifications to check
+                   them against, cell counts, the suppliers' line data, PHI's
+                   measured 78-line materials table, inspection records, a
+                   published riser geometry, fabric schedules and
+                   certification reports; and the Swoop2's own files
 build.py           bundler
 ```
 
@@ -253,17 +268,18 @@ speed is stated as an assumption and inverted from published data.
 
 ## Validation
 
-Thirteen stages, one command:
+fifteen stages, one command:
 
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 1744 checks |
+| unit suite | the maths, 2423 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
 | reference sweep | wings that parse but describe impossible geometry |
 | assertions | checks that cannot fail, which report success |
+| units | a value used outside the unit its name claims |
 | references | names in comments and documents that point at nothing |
 | options | calls that look right, run clean, and do nothing |
 | corpus | model constants that have drifted from their data |
@@ -278,8 +294,10 @@ validating the tool.
 
 Every dataset in `data/reference/` is measured, not merely parsed. The
 `corpus` stage checks the model's own constants against what the wings say —
-`ANCHOR_DENSITY` was six hand-entered Ozone designs when the database held 25
-across six manufacturers.
+`ANCHOR_DENSITY` was six hand-entered Ozone designs when the sheets held 19
+designs from four makers, and the anchor search was bounded by a front-row
+density range from those six that left out seven of twenty designs. Both are
+measured from the sheets now, figure for figure.
 
 ## Documentation
 
@@ -287,7 +305,7 @@ across six manufacturers.
 | --- | --- |
 | `docs/collecting-reference-data.md` | how to add a wing to the reference database |
 | `docs/full-pipeline.md` | every real wing through the whole tool, and what it found |
-| `docs/rib-stress.md` | why rib cloth never carries an anchor load |
+| `docs/rib-stress.md` | what the rib cloth carries at an anchor, how far the reinforcement must reach, and the sail |
 | `docs/intake.md` | the cell opening, and where the flow stagnates |
 | `docs/assumptions.md` | which assumptions are the user's, and the bugs found exposing them |
 | `docs/comparing.md` | putting two designs side by side, without scoring them |
@@ -301,7 +319,15 @@ across six manufacturers.
 | `docs/inflated.md` | the built shape against the flying one |
 | `docs/shaping.md` | 3D shaping of the nose, and two wrong derivations |
 | `docs/risers.md` | riser-aware line plans and split A risers |
+| `docs/rods-validated.md` | the Swoop2 rods against its own computed output |
+| `docs/free-body.md` | does the whole machine balance as a body in gravity |
+| `docs/hang-point.md` | where the wing hangs, and why the calage decides it |
 | `docs/line-plans.md` | risers, naming, topology inference |
+| `docs/reference-wings.md` | the reference wings against their published figures |
+| `docs/openglider.md` | what OpenGlider does, and what was taken from it |
+| `docs/certification.md` | what a flight test report does and does not contain |
+| `docs/cad-export.md` | the 3D model, and why OBJ rather than STEP or STL |
+| `docs/chord-fraction.md` | three places that confused array index with chord |
 | `docs/panels.md` | panel development, and whether the wing sews |
 | `docs/fabric.md` | cloth by location, and what the tool refuses |
 | `docs/line-sets.md` | choosing N line types, and whether a cascade holds trim |

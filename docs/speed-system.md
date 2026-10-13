@@ -8,11 +8,16 @@ pilot makes to the geometry in flight, and previously unmodelled.
 Covers handbook chapter 9, and LEP sections 28 (calage variation) and 33
 (detailed risers).
 
+**Where it is.** Everything on this page is in the core (`risers.js`) and held
+by the suite. The interface does not run it: its risers are the line plan's
+straps, and there is no speed bar, trimmer or accelerated polar to set or
+read there yet.
+
 ---
 
 ## 1. The geometry
 
-The risers hang from one maillon. The A row attaches near the nose, the rear
+The risers hang from one karabiner. The A row attaches near the nose, the rear
 row well aft. Shortening A by more than C tips the chord forward by
 
 ```
@@ -210,11 +215,13 @@ A pilot can apply both at once, and **the combination can leave the flyable
 envelope when neither control alone does.** On a wing with 120 mm of bar and
 60 mm of trimmer:
 
-| setting | α | flyable |
-| --- | --- | --- |
-| full bar, trimmers closed | 1.1° | yes |
-| trimmers open, no bar | 3.5° | yes |
-| both | −1.3° | **no** |
+| setting | α | Cz | flyable |
+| --- | --- | --- | --- |
+| full bar, trimmers closed | 0.2° | 0.37 | yes |
+| trimmers open, no bar | 3.1° | 0.61 | yes |
+| both | −2.7° | 0.13 | **no** |
+
+(Against a floor of Cz 0.35. Full bar alone is already close to it.)
 
 `trimEnvelope` sweeps both controls against the collapse floor and flags this
 specifically. It also distinguishes it from the case where bar alone already
@@ -223,12 +230,28 @@ the trimmer's doing.
 
 ---
 
-## 8. Not covered
+## 8. What has been added since, and what is still not covered
 
-- **Riser webbing geometry** — the split between main and speed-system
-  webbing, the B-handle heights the Alpina 5 advertises as adjustable, and
-  the C-handle steering the Geo 7 and Swift 6 carry.
-- **The collapse floor.** Inverted from published data, never predicted.
-  Predicting it needs internal pressure and rib support modelling.
-- **Structural effect of acceleration.** Line loads shift forward under bar,
-  which changes what each row carries; `loads.js` still assumes trim.
+**Rear-riser handles.** `handleGeometry` gives the angle a B or C handle pull
+makes — over the same lever the speed system works against, with the opposite
+sign — and `handleAgainstBrake` sets it beside the brake travel for the same
+change: 56 mm of riser against 165 mm of brake for the same angle, and only
+the brake deforms the section. In the core and the tests; not in the
+interface.
+
+**The webbing itself.** `buildRiserWebbing` counts the strap and the maillons
+of a riser set: for three risers a side at 520 mm, 4.78 m of strap for the
+pair — 3.12 m of it the straps to the lines, the rest the speed system's — six
+maillons, and 96 g of webbing at 20 g/m. It is in the core and the suite; the
+interface's bill counts the straps from the line plan, without the speed
+system, and does not weigh them. How a speed-system strap is split from the
+main one, and where its pulleys sit, is not modelled.
+
+**What the bar does to the lines.** The load moves **aft** on the bar, not
+forward — this page said forward. As the angle of attack falls the A row's
+share of the lift goes from 43.8% to 37.9% to 27.6%, slow to trim to fast, and
+the D row's from 14.2% to 21.3%. `loadEnvelope` sizes each line over the
+flyable range of the bar: `docs/validation.md` §5.1.
+
+**The collapse floor.** Inverted from published data, never predicted.
+Predicting it needs internal pressure and rib support modelling.
