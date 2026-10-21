@@ -26,12 +26,12 @@ const REFERENCE_LIB = ((typeof REFERENCE_WINGS !== 'undefined'
   : [
 ]).map(([family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea,
   projectedSpan = null, massKg = null, weightLo = null, weightHi = null,
-  totalLineM = null, application = null]) => {
+  totalLineM = null, application = null, projectedAR = null]) => {
   const midWeight = weightLo && weightHi ? (weightLo + weightHi) / 2 : null;
   return {
     id: `${family} ${size}`,
     family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea,
-    projectedSpan, massKg, weightLo, weightHi, midWeight, totalLineM,
+    projectedSpan, projectedAR, massKg, weightLo, weightHi, midWeight, totalLineM,
     // What kind of wing the specification says it is.
     application,
     singleSurface: /single surface/i.test(application || ''),
@@ -40,6 +40,8 @@ const REFERENCE_LIB = ((typeof REFERENCE_WINGS !== 'undefined'
       // `referenceDesignInputs` takes the arc from the projected SPAN when
       // it has one, and only falls back to the area ratio without.
       ...(projectedSpan ? { projectedSpan } : {}),
+      // Niviuk's projected aspect ratio, from which their span follows.
+      ...(projectedAR ? { projectedAR } : {}),
       ...(massKg ? { mass: massKg } : {}),
       ...(midWeight ? { midWeight } : {}),
       ...(totalLineM ? { totalLineLength: totalLineM } : {}),
@@ -109,7 +111,11 @@ const S = {
   clothLower: 'Porcher Skytex 32', clothRib: 'Porcher Skytex 40 hard',
   noseClothTo: 25,         // % of chord the leading-edge cloth runs to, on the upper surface
   useCascadeSpec: false,
-  cascadeSpec: 'A 30 14 3\nB 14  6 4\nC  8  3 2',
+  // The Ozone Geo 7 MS, line for line, on the default layout, its tip lines
+  // and its stabilo's riser as its totals show them. It was "the Zeno 2",
+  // A 30 14 3 / B 14 6 4 / C 8 3 2 — a two-liner on three risers, whose
+  // middle counts were not the Zeno 2's and were not built either.
+  cascadeSpec: 'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C',
   // N/m across the cell, which with the pressure sets how far a panel
   // bulges. The handbook's 6% of widening on a 0.25 m cell at 95 Pa is
   // 21 N/m. It was 300, at which a panel hardly bulges at all.
@@ -227,23 +233,31 @@ function applyReference() {
   const cellNote = builtTotal === r.cells
     ? null
     : `built with ${builtTotal} cells against ${r.cells} published.`;
-  // The arc is a circle through the published projected span. The ratio is
-  // only read by the circle, so a picker used while the arc was set to an
-  // ellipse loaded the size and silently kept the ellipse's span.
-  S.lobeType = 'circle';
-  S.projectedRatio = r.projectedRatio;
-  // Where the projected span is not published but the projected area is,
-  // the arc is solved to the area. Taking the area ratio as the span ratio
-  // put the Artik R 2 3% over its projected area and the Skin 4 P 3% under.
-  let arcNote = entry.projectedSpan
-    ? `arc through the published ${entry.projectedSpan} m projected span` : null;
-  if (!entry.projectedSpan && entry.projectedArea) {
+  // The arc: the handbook's ellipse through the projected span — published,
+  // or the one Niviuk's projected aspect ratio and area define
+  // (`referenceDesignInputs`). It was a circle through the same span, which
+  // projects 51 of the 55 wings that publish a projected area short of it
+  // (2.0% out on average, where the ellipse is 1.0%) and curves the middle of
+  // the wing, where the long lines are, as much as the tip. The circle's
+  // ratio is kept for a designer who switches back.
+  S.lobeType = 'ellipse';
+  S.lobeARatio = r.lobe.aRatio;
+  S.lobeBRatio = r.lobe.bRatio;
+  S.projectedRatio = Math.min(0.99, Math.max(0.7, r.projectedRatio));
+  let arcNote = null;
+  if (r.projectedSpanBasis === 'published') {
+    arcNote = `an elliptical arc through the published ${entry.projectedSpan} m projected span`;
+  } else if (r.projectedSpanBasis === 'from the published projected aspect ratio and area') {
+    arcNote = `an elliptical arc through the ${(r.projectedRatio * entry.flatSpan).toFixed(2)} m `
+      + `projected span its published projected aspect ratio (${entry.projectedAR}) and area give`;
+  } else if (entry.projectedArea) {
+    // Neither published, the projected area is: the arc is solved to it.
     const pf = planformFromDesignInputs({
       span: S.span, rootChord: S.rootChord, tipChord: S.tipChord, tipSweep: S.tipSweep,
       ellipticityLE: S.ellipticityLE, ellipticityTE: S.ellipticityTE,
     });
     const projectedFor = (ratio) => {
-      const lobe = buildLobe({ type: 'circle', projectedRatio: ratio }, pf.halfSpan);
+      const lobe = buildLobe(ellipseForProjectedRatio(ratio), pf.halfSpan);
       const n = 240;
       let area = 0;
       let prev = lobe.at(0).y;
@@ -256,14 +270,17 @@ function applyReference() {
       return 2 * area;
     };
     let lo = 0.65;
-    let hi = 0.99;
+    let hi = 0.98;
     if (entry.projectedArea >= projectedFor(lo) && entry.projectedArea <= projectedFor(hi)) {
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 30; i++) {
         const mid = (lo + hi) / 2;
         if (projectedFor(mid) < entry.projectedArea) lo = mid; else hi = mid;
       }
+      const spec = ellipseForProjectedRatio((lo + hi) / 2);
+      S.lobeARatio = spec.aRatio;
+      S.lobeBRatio = spec.bRatio;
       S.projectedRatio = Math.round(((lo + hi) / 2) * 10000) / 10000;
-      arcNote = `arc solved to the published ${entry.projectedArea} m² projected area`;
+      arcNote = `an elliptical arc solved to the published ${entry.projectedArea} m² projected area`;
     }
   }
 
@@ -284,12 +301,60 @@ function applyReference() {
   }
   S._referenceTotalLineM = entry.totalLineM ?? null;
 
+  // Its suspension. Where the maker's line sheets are on file, the wing's
+  // own: its riser layout, every row's anchors and mains, and the middle
+  // lines where the generator can build them, written out as a cascade the
+  // designer can read and edit (`DESIGN_LINES`, measured from the sheets).
+  // Where they are not, the layout the full pipeline gives a wing of this
+  // aspect ratio, and anchors solved to its line length once it is built.
+  //
+  // A wing loaded from here kept whatever layout the panel held, and its
+  // anchors on every second rib: a two-liner was built on three risers until
+  // the designer changed it, and a Zeno 2 S came out with 466 m of line
+  // against its published 186.
+  const own = designCascade(entry.family);
+  const rowsUsed = own ? new Set(own.layoutDef.flatMap((x) => x.rows)).size
+    : (entry.flatAR >= 6.2 ? 3 : 4);
+  // The chord positions the full pipeline builds these wings with.
+  Object.assign(S, rowsUsed === 3
+    ? { anchorA: 9, anchorB: 38, anchorC: 60 }
+    : { anchorA: 8.5, anchorB: 30, anchorC: 53, anchorD: 78 });
+  let linesNote;
+  if (own) {
+    S.riserLayout = own.layout;
+    S.useCascadeSpec = true;
+    const derived = Object.keys(own.cascade.anchorsPerRow).filter((r) => !(r in own.cascade.middlesPerRow));
+    S.cascadeSpec = [
+      `# ${entry.family}: its own cascade, counted from its maker's line sheet${own.sheets > 1 ? 's' : ''}.`,
+      ...(derived.length
+        ? [`# Middle lines paired on ${derived.join(', ')}: the sheet's are not a shape this builds.`] : []),
+      DESIGN_LINES[entry.family].spec,
+    ].join('\n');
+    S._solveAfterBuild = false;
+    linesNote = `its own riser layout (${own.layout}) and line counts, from its sheets`;
+  } else {
+    S.riserLayout = entry.flatAR >= 6.2 ? 'A/B+C' : 'A/B/C+D';
+    S.useCascadeSpec = false;
+    S._solveAfterBuild = true;
+    // On file but not buildable is not the same as not on file: the Skin 4 P's
+    // sheet gives nine rows on four risers.
+    const sheetLayout = DESIGN_LINES[entry.family]?.layout;
+    const why = sheetLayout
+      ? `its sheet gives ${sheetLayout}, ${sheetLayout.split(/[/+]/).length} rows on `
+        + `${sheetLayout.split('/').length} risers, which this does not build`
+      : 'no line sheet of it is on file';
+    linesNote = `${why}: ${S.riserLayout} by its aspect ratio, `
+      + `and anchors solved to ${entry.totalLineM ? `its published ${entry.totalLineM} m of line`
+        : 'what wings of its aspect ratio carry'}`;
+  }
+
   S.name = S.reference.replace(/\s+/g, '-');
   const nameField = document.getElementById('wingName');
   if (nameField) nameField.value = S.name;
   const assumed = r.derived.filter((d) => d !== 'tip chord');
   S._referenceNote = `${S.reference}: ${entry.flatArea} m² published`
     + `, with ${used.join(', ')}; ${tipNote}${arcNote ? `; ${arcNote}` : ''}. `
+    + `Lines: ${linesNote}. `
     + 'The shape is not published: '
     + `${assumed.join(', ')} are defaults, not this wing's.`
     + (cellNote ? ` ${cellNote}` : '')
@@ -473,6 +538,73 @@ function wireThemeButton() {
     applyTheme();
     rebuild();
   });
+}
+
+/**
+ * "Solve anchors to the line length" (the Lines panel), and what a published
+ * wing without line sheets on file is given once it is built.
+ *
+ * The derived plan attaches every second rib, whatever the wing. That is a
+ * real wing's density on the default wing and nothing like one on a
+ * published wing: a Zeno 2 S came out with 466 m of line against its
+ * published 186. This solves the anchor counts to a line total the way the
+ * full-pipeline validation does, inside the densities real wings use, and
+ * writes the plan it built out as a cascade the designer can see and edit.
+ */
+function solveAnchorsToLineLength() {
+  if (M.imported) { setStatus('An imported design keeps its own lines.'); return; }
+  const layout = RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'];
+  const rows = [...new Set(layout.flatMap((r) => r.rows))]
+    .filter((r) => Number.isFinite(M.airfoil?.anchors?.[r]));
+  const risers = layout.filter((r) => r.rows.length).length;
+  const published = S.reference && !M.imported ? S._referenceTotalLineM : null;
+  const target = published
+    ?? lineConsumptionEstimate({
+      aspectRatio: M.metrics.aspectRatio, flatSpan: M.metrics.span, risers,
+    }).totalLineLengthM;
+  // The stabilo is built inside each plan the solve tries, so the plan it
+  // lands on is the whole lineset. It was added afterwards, and its length
+  // was taken off the target instead.
+  const solved = anchorsForLineLength({
+    wing: M.wing, airfoil: M.airfoil, rows, targetMetres: target, layout,
+    lineLengthM: S.lineLength, risers, mainsPerRow: 3,
+    brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
+    stabilo: !!S.stabilo,
+  });
+  const basis = published
+    ? `the published ${published} m`
+    : `${target.toFixed(0)} m, what real wings of this aspect ratio and span carry`;
+  // At the edge of the range, said in the target's own terms. On three or
+  // more risers a two-liner's total is below what the layout carries at the
+  // sparsest real density, and the answer is the layout.
+  const [lo, hi] = solved.reachableRange;
+  // Within 5% of the target the edge is not worth a warning: the
+  // aspect-ratio law itself is good to about 7%, and a published total is
+  // rounded. A school wing came out 1% short of the law and was told to try
+  // two risers.
+  const missed = Math.abs(solved.error) > 0.05;
+  const edge = !missed ? null : solved.saturatedSide === 'under'
+    ? `that is less than this layout carries at the sparsest real density, ${lo.toFixed(0)} m: `
+      + 'it needs fewer rows or fewer risers, not fewer anchors'
+      + (risers > 2 ? '; a two-riser layout (A/B+C) carries less' : '')
+    : solved.saturatedSide === 'over'
+      ? `that is more than this wing carries at the densest, ${hi.toFixed(0)} m: it needs more ribs`
+      : null;
+  // The plan the solve built, line for line, so the text says what is on
+  // the page. It wrote "A 31 3" — anchors and mains — and the middle lines
+  // were whatever pairing made of them.
+  S.cascadeSpec = [
+    `# Solved to ${basis}: front density ${solved.frontFraction.toFixed(2)}.`,
+    ...(edge ? [`# ${edge[0].toUpperCase()}${edge.slice(1)}.`] : []),
+    ...cascadeSpecFor(solved.plan).trim().split('\n'),
+  ].join('\n');
+  S.useCascadeSpec = true;
+  buildControls();
+  rebuild();
+  setStatus(null, `Anchors solved to ${basis}: `
+    + rows.map((r) => `${r}${solved.anchorsPerRow[r]}`).join(' ')
+    + `, ${M.linePlan.totalLengthM.toFixed(0)} m built`
+    + (edge ? ` — ${edge}.` : ''));
 }
 
 function rebuild() {
@@ -666,7 +798,10 @@ function rebuild() {
     // Named `writtenCascade`: `cascade` in this scope is already the chapter
     // 8 weighted-centroid model, and shadowing it would have been a quiet
     // way to break the front view.
-    const writtenCascade = S.useCascadeSpec ? parseCascadeSpec(S.cascadeSpec) : null;
+    const riserLayout = RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'];
+    const writtenCascade = S.useCascadeSpec
+      ? parseCascadeSpec(S.cascadeSpec, { layout: riserLayout }) : null;
+    const written = writtenCascade && writtenCascade.ok ? writtenCascade : null;
 
     const planOptions = {
       // Hang the wing from where it BALANCES, not from an average of the
@@ -678,18 +813,30 @@ function rebuild() {
       // points of chord too far forward on a typical wing, so the model
       // pitched nose-down against the attitude it would really fly at.
       calageFraction: usableCalage(balance).ok ? balance.calageFraction : null,
-      wing, airfoil, layout: RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'],
+      wing, airfoil, layout: riserLayout,
       everyNthRib: 2, lineLengthM: S.lineLength, riserLengthM: riserM,
       mergeRows: MERGES[S.mergeRows] || null,
-      brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
+      // The brake as written, when a K row is; the brake lines checkbox still
+      // decides whether there are any.
+      brakes: S.brakeLines ? (written?.brakes ?? { anchors: 13, levelCounts: [6, 3, 1] }) : null,
       karabinerSeparationM: S.karabinerSep / 100,
-      // A written cascade overrides the rules, when the designer has one.
-      ...(writtenCascade && writtenCascade.ok
+      // A written cascade overrides the rules, when the designer has one:
+      // every count it gives, middles included. The middle counts were read
+      // and dropped, and the anchors were paired whatever the text said.
+      ...(written
         ? {
-          anchorsPerRow: writtenCascade.anchorsPerRow,
-          mainsPerRow: writtenCascade.mainsPerRow,
+          anchorsPerRow: written.anchorsPerRow,
+          middlesPerRow: written.middlesPerRow,
+          mainsPerRow: written.mainsPerRow,
+          tipAnchorsPerRow: written.tipsPerRow,
+          ...(written.stabiloRiser ? { stabiloRiser: written.stabiloRiser } : {}),
         }
         : {}),
+      // The rows' tip lines on one stabilo line to the riser that carries B,
+      // as the makers draw it. It was two more lines added after the plan, at
+      // 35% of chord on the two outermost ribs, carrying no lift, beside the
+      // tip lines every row already ended in.
+      stabilo: !!S.stabilo,
     };
     // An imported design hangs from its OWN suspension, computed as its own
     // program computes it. The Swoop2 used to be given a four-row cascade
@@ -829,8 +976,8 @@ function rebuild() {
         { halfSpanM: planform.halfSpan },
       );
 
-    // An imported plan carries its own stabilo lines.
-    if (S.stabilo && !lepPlan) addStabilo(linePlan, wing, { anchors: 2 });
+    // The stabilo is in the plan (`stabilo` above); an imported plan carries
+    // its own.
 
     // Diagonal ribs carry the span that has no line on it, to the ribs
     // that have one — so they are placed from the lines this plan actually
@@ -945,6 +1092,12 @@ function rebuild() {
     return;
   }
   draw();
+  // A published wing whose line sheets are not on file is given anchors
+  // solved to its line length as soon as there is a wing to solve them on.
+  if (S._solveAfterBuild) {
+    S._solveAfterBuild = false;
+    solveAnchorsToLineLength();
+  }
 }
 
 /** Front-view metrics recovered from an imported wing, which has no lobe curve. */
@@ -1322,12 +1475,16 @@ function buildControls() {
     // Both axes are fractions of the flat half span, so the arc keeps its
     // shape when the span changes. The arrow's lower bound is the point below
     // which the arc becomes too short to carry the span at all.
-    const minB = Math.ceil(minArrowRatio(S.lobeARatio, S.lobeType, S.bionic) * 100) / 100;
-    if (S.lobeBRatio < minB) S.lobeBRatio = minB;
+    // The least arrow exactly, not rounded up: a published wing's arc is the
+    // ellipse at that least arrow (its tip where the quarter ends), and
+    // rounding it up a hundredth here moved the tip in and took a centimetre
+    // off the projected span it had been built to.
+    const minB = minArrowRatio(S.lobeARatio, S.lobeType, S.bionic);
+    if (S.lobeBRatio < minB) S.lobeBRatio = minB * (1 + 1e-6);
     slider(L, 'lobeARatio', 'Arc width', 0.5, 1.0, 0.01, (v) => (v * 100).toFixed(0), '% of half span');
     slider(L, 'lobeBRatio', 'Arc arrow', minB, 1.2, 0.01, (v) => (v * 100).toFixed(0), '% of half span');
     if (S.lobeType === 'bionic') slider(L, 'bionic', 'Tip turn-up', 1, 3, 0.05);
-    hint(L, `Arrow must stay above ${(minB * 100).toFixed(0)}% at this width, or the arc is too short to carry the flat span.`);
+    hint(L, `Arrow must stay above ${(Math.ceil(minB * 1000) / 10).toFixed(1)}% at this width, or the arc is too short to carry the flat span.`);
   }
   slider(L, 'washinTotal', 'Washin at tip', 0, 10, 0.1, (v) => v.toFixed(1), '°');
   selectField(L, 'washinMode', 'Washin distribution', [
@@ -1415,6 +1572,9 @@ function buildControls() {
   if (!locked || !LEP.geom?.ok) {
   checkField(LN, 'brakeLines', 'Brake lines in the plan');
   checkField(LN, 'stabilo', 'Stabilo line');
+  hint(LN, 'Each row\u2019s tip lines on one line, from a junction high under the tip, '
+    + 'to the riser that carries B \u2014 as the makers draw it. Off, each tip line '
+    + 'hangs from the top of its own row\u2019s outermost main.');
 
   selectField(LN, 'riserLayout', 'Riser layout',
     Object.keys(RISER_LAYOUTS).map((k) => [k, k]));
@@ -1434,77 +1594,32 @@ function buildControls() {
   checkField(LN, 'useCascadeSpec', 'Write the cascade out, rather than deriving it');
   if (S.useCascadeSpec) {
     textAreaField(LN, 'cascadeSpec', 'Cascade', 6,
-      'A 30 14 3\nB 14  6 4\nC  8  3 2');
-    hint(LN, 'Row, then anchors, then the count at each level below — the way '
-      + 'a manufacturer sheet reads. Lines starting # are comments.');
-    liveHint(LN, () => (!M.writtenCascade ? ''
-      : M.writtenCascade.ok ? M.writtenCascade.note
-        : `Not used: ${M.writtenCascade.problems[0]}`));
-  }
-  // The derived plan attaches every second rib, whatever the wing. That is a
-  // real wing's density on the default wing (13 of 25 ribs; real wings run
-  // 0.28 to 0.94, median 0.54) and nothing like one on a published wing
-  // loaded from the picker: a Zeno 2 S came out with 466 m of line against
-  // its published 186. This solves the anchor counts to a line total the way
-  // the full-pipeline validation does, inside the densities real wings use,
-  // and writes them out as a cascade the designer can see and edit.
-  button(LN, 'Solve anchors to the line length', () => {
-    if (M.imported) { setStatus('An imported design keeps its own lines.'); return; }
-    const layout = RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'];
-    const rows = [...new Set(layout.flatMap((r) => r.rows))]
-      .filter((r) => Number.isFinite(M.airfoil?.anchors?.[r]));
-    const risers = layout.filter((r) => r.rows.length).length;
-    const published = S.reference && !M.imported ? S._referenceTotalLineM : null;
-    const target = published
-      ?? lineConsumptionEstimate({
-        aspectRatio: M.metrics.aspectRatio, flatSpan: M.metrics.span, risers,
-      }).totalLineLengthM;
-    // The stabilo lines are added to the plan after it is built, and their
-    // length hardly depends on the anchors, so they come off the target the
-    // anchors are solved to. Left in, the plan came out 5% over.
-    const stabiloM = (M.linePlan?.stabilo?.lines ?? [])
-      .reduce((a, l) => a + (2 * l.lengthMM) / 1000, 0);
-    const solved = anchorsForLineLength({
-      wing: M.wing, airfoil: M.airfoil, rows, targetMetres: target - stabiloM, layout,
-      lineLengthM: S.lineLength, risers, mainsPerRow: 3,
-      brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
+      'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C');
+    hint(LN, 'Row, anchors, middle lines, main lines, as a maker\u2019s sheet counts '
+      + 'them (A 14 6 3). A row on another row\u2019s riser hangs from its mains: '
+      + 'anchors and middles (D 14 6). Without a middle count they come in pairs. '
+      + '"tip 2" says how many of the row\u2019s anchors are tip lines, the '
+      + 'stabilo\u2019s, on the outermost ribs; without it a row that reaches the '
+      + 'tip has two and a shorter row none. "S C" hangs the stabilo on the C '
+      + 'riser (the riser that carries B without it). K is the brake (K 13 6 3). '
+      + 'Lines starting # are comments.');
+    liveHint(LN, () => {
+      const w = M.writtenCascade;
+      if (!w) return '';
+      if (!w.ok) return `Not used: ${w.problems[0]}`;
+      // What was built against what was written: a count the wing cannot
+      // take — more anchors than ribs, more middles than anchors — is built
+      // as near as it goes, and said.
+      const short = (M.linePlan?.levelShortfalls ?? [])
+        .map((f) => `${f.row} has ${f.got} ${f.level === 'anchor' ? 'anchors' : `${f.level} lines`}, not ${f.asked}`);
+      const brakeOff = w.brakes && !S.brakeLines ? ['the K row is not built: brake lines are off'] : [];
+      const notes = [...short, ...brakeOff];
+      return `${w.note}. ${notes.length ? `Built as near as it goes: ${notes.join('; ')}.` : 'Built as written.'}`;
     });
-    const basis = published
-      ? `the published ${published} m`
-      : `${target.toFixed(0)} m, what real wings of this aspect ratio and span carry`;
-    // At the edge of the range, said in the target's own terms (the solve
-    // saw it without the stabilo). On three or more risers a two-liner's
-    // total is below what the layout carries at the sparsest real density,
-    // and the answer is the layout.
-    const [lo, hi] = solved.reachableRange.map((x) => x + stabiloM);
-    // Within 5% of the target the edge is not worth a warning: the
-    // aspect-ratio law itself is good to about 7%, and a published total is
-    // rounded. A school wing came out 1% short of the law and was told to try
-    // two risers.
-    const missed = Math.abs(solved.error) > 0.05;
-    const edge = !missed ? null : solved.saturatedSide === 'under'
-      ? `that is less than this layout carries at the sparsest real density, ${lo.toFixed(0)} m: `
-        + 'it needs fewer rows or fewer risers, not fewer anchors'
-        + (risers > 2 ? '; a two-riser layout (A/B+C) carries less' : '')
-      : solved.saturatedSide === 'over'
-        ? `that is more than this wing carries at the densest, ${hi.toFixed(0)} m: it needs more ribs`
-        : null;
-    S.cascadeSpec = [
-      `# Solved to ${basis}: front density ${solved.frontFraction.toFixed(2)}.`,
-      ...(edge ? [`# ${edge[0].toUpperCase()}${edge.slice(1)}.`] : []),
-      ...rows.map((r) => {
-        const n = solved.anchorsPerRow[r];
-        return `${r} ${n} ${Math.min(3, n)}`;
-      }),
-    ].join('\n');
-    S.useCascadeSpec = true;
-    buildControls();
-    rebuild();
-    setStatus(null, `Anchors solved to ${basis}: `
-      + rows.map((r) => `${r}${solved.anchorsPerRow[r]}`).join(' ')
-      + `, ${M.linePlan.totalLengthM.toFixed(0)} m built`
-      + (edge ? ` — ${edge}.` : ''));
-  }, 'btn');
+  }
+  // The derived plan attaches every second rib: a real wing's density on the
+  // default wing (13 of 25 ribs; real wings run 0.28 to 0.94, median 0.53).
+  button(LN, 'Solve anchors to the line length', () => solveAnchorsToLineLength(), 'btn');
   numberField(LN, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
   }
   selectField(LN, 'compareTo', 'Compare against a real wing', [
@@ -3634,7 +3749,9 @@ function drawLinePlan() {
   };
   const LEVEL_WIDTH = { upper: 0.5, middle: 0.9, main: 1.4 };
 
-  const wanted = (l) => (S.lineRow === 'all' ? true : l.row === S.lineRow);
+  // The stabilo is its line and the tip lines on it, which keep their rows.
+  const wanted = (l) => (S.lineRow === 'all' ? true
+    : l.row === S.lineRow || (S.lineRow === 'S' && !!l.stabiloTip));
 
   for (const side of [1, -1]) {
     for (const l of plan.lines) {
@@ -3701,8 +3818,10 @@ function drawLinePlan() {
   if (note) {
     note.textContent = `${shown * 2} lines${S.lineRow === 'all' ? '' : ` in row ${S.lineRow}`}`
       + `, ${plan.totalLengthM.toFixed(1)} m`
-      + (pub ? ` against ${pub} m published for the ${S.reference} — the cascade `
-        + 'is generated by rule, not the real one' : '')
+      + (pub ? ` against ${pub} m published for the ${S.reference} — `
+        + (S.useCascadeSpec && M.writtenCascade?.ok
+          ? 'its counts as written, the junctions placed by rule'
+          : 'the cascade is generated by rule, not the real one') : '')
       + (M.riserSplit && M.riserSplit.moved ? `  ·  ${M.riserSplit.note}` : '')
       + '  ·  white: risers to the karabiner (red)';
   }
@@ -3732,7 +3851,8 @@ function drawCascadeTable() {
   const own = plan.source === 'LEparagliding';
 
   const rows = plan.lines
-    .filter((l) => (S.lineRow === 'all' ? true : l.row === S.lineRow))
+    .filter((l) => (S.lineRow === 'all' ? true
+      : l.row === S.lineRow || (S.lineRow === 'S' && !!l.stabiloTip)))
     .sort((a, b) => (a.row === b.row
       ? (a.level.localeCompare(b.level) || (a.index ?? 0) - (b.index ?? 0))
       : a.row.localeCompare(b.row)));
@@ -3780,20 +3900,35 @@ function drawCascadeTable() {
   // The diff, when a real wing is selected.
   if (S.compareTo && typeof REFERENCE_TOTALS === 'object'
       && REFERENCE_TOTALS[S.compareTo] && plan.totals) {
-    const cmp = comparePlans(plan.totals, REFERENCE_TOTALS[S.compareTo]);
+    // The rows that carry the wing, and the brake, each against its own
+    // offset. Makers measure a brake to different points — Niviuk's Hook 6
+    // brake is 144 mm longer than its A at the centre, Ozone's Ultralite 5's
+    // 570 — and under one offset with the rest, its difference was read as
+    // the shape of the A to D rows.
+    const ref = REFERENCE_TOTALS[S.compareTo];
+    const rowsOf = (t, brake) => Object.fromEntries(Object.entries(t ?? {})
+      .map(([a, r]) => [a, Object.fromEntries(Object.entries(r).filter(([k]) => (k === 'K') === brake))])
+      .filter(([, r]) => Object.keys(r).length));
+    const cmp = comparePlans(rowsOf(plan.totals, false), rowsOf(ref, false));
+    const cmpK = comparePlans(rowsOf(plan.totals, true), rowsOf(ref, true));
     if (!cmp.count) {
       host.append(el('div', 'muted',
         'No overlapping anchors: the real wing has a different row set.'));
     } else {
       const d = el('div', 'note');
       d.append(el('div', '', `Against ${S.compareTo.replace(/^niviuk-/, 'Niviuk ')}: `
-        + `${cmp.count} anchors compared`));
+        + `${cmp.count} anchors compared, on the rows that carry the wing`));
       d.append(el('div', 'muted',
         `mean offset ${cmp.meanOffsetMM.toFixed(0)} mm — the overall length `
         + 'difference, which a designer sets deliberately'));
       d.append(el('div', 'muted',
         `shape deviation ${cmp.meanShapeMM.toFixed(0)} mm — the spread once `
         + 'that offset is removed, which is what actually differs'));
+      if (cmpK.count) {
+        d.append(el('div', 'muted',
+          `the brake, by itself: ${cmpK.count} anchors, offset ${cmpK.meanOffsetMM.toFixed(0)} mm, `
+          + `shape ${cmpK.meanShapeMM.toFixed(0)} mm`));
+      }
       host.append(d);
     }
   }

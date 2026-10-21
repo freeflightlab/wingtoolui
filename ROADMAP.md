@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2423-test validation suite and a benchmark with regression budgets
+- [x] 2479-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -782,11 +782,12 @@ validation notes flagged.
 - [x] **The reference catalogue reads every supporting table** — 26 files
       were listed as "FAILED TO PARSE".
 - [x] **Nesting four times faster**, with identical layouts.
-- [ ] **The derived plan attaches every second rib.** A real density on the
-      default wing (13 of 25 ribs); on a published wing from the picker it is
-      not, and the solve is a button rather than the default.
-- [ ] **The picker could set each design's riser layout** — a two-liner
-      loaded from it is built on three risers until the designer changes it.
+- [x] **The derived plan attaches every second rib.** A real density on the
+      default wing (13 of 25 ribs); a published wing from the picker now
+      hangs from its own cascade, or from anchors solved to its line length
+      as soon as it is built (round of 10-19, below).
+- [x] **The picker sets each design's riser layout** — and its line counts,
+      from its sheets where they are on file.
 - [ ] **The brake lines dominate the inspection forecast**, on an estimated
       settle rate; no aged lineset has been measured.
 - [ ] **A real arc is no circle** — the Geo 7's lines fit its published
@@ -800,6 +801,64 @@ validation notes flagged.
 - [ ] **The Swoop2's 70 straps and 15 pieces between ribs** are read and
       listed, not built: the file does not say how high in the cell a strap
       sits.
+
+### Round of 2026-10-19 to 10-21: the makers' own drawings of their line plans
+
+- [x] **Six line-plan drawings transcribed** — Ozone's Vibe GT rigging
+      diagram and UP's plans of the K2 5, Makalu 5, Torre, Summit X and
+      Meru 2, line by line (`data/reference/lineplan-*.tsv`,
+      `parseStatedTopology`). Inference from lengths alone gives Ozone's
+      diagram on all 30 rows of six sizes; the drawn paths give UP's
+      published totals with one riser to a main line, within 17 mm. See
+      `docs/drawn-line-plans.md`.
+- [x] **UP's .xls sheets filed one size late** — the converter paired each
+      sheet with the next sheet's name; nineteen files renamed, contents
+      unchanged. The inconsistent folding-line sheet is the Meru 2 M's, and
+      its cutting lengths are the SM's.
+- [x] **Stabilo lines read as A and B anchors** (the Summit X's a13 to b14,
+      the Meru 2's a13 to c15), **the Makalu 5's mains read as a level above
+      them**, and **riser counts assumed** — three two-liners sat in the
+      three-riser group. The density table is keyed by layout now, and the
+      tool has the four-row two-liner, `A+B/C+D`.
+- [x] **A main in two parts is one main** — the Geo 7's C:5 is C:4, the
+      Zeno 2's B:4 is B:3.
+- [x] **A written cascade builds every count it gives** — its middles were
+      read and dropped, and the example in the panel was not the wing it named.
+- [x] **Each design's own cascade** (`DESIGN_LINES`, 19 designs, held to
+      their sheets): the pipeline builds fifteen from it — the BGD Lynx 2, a
+      three-liner, had been built as a two-liner — and so does the picker.
+- [x] **Rows end where real ones do, and the stabilo is the rows' tip
+      lines** — read off the plans that give rib positions, the rows' own
+      lines stop at 0.78 to 0.89 of the half span and the stabilo's go on to
+      the tip. Ozone, Niviuk and BGD name the stabilo's lines in their rows,
+      and the totals show which (`tipLinesFromTotals`): eight designs carry
+      "tip n" now, and a plan hangs them on one line (`stabilo`) — on the C
+      riser on the Geo 7, whose "fourth C main" is that line. Stopping the
+      rows short without that had left the outer sixth of every pipeline wing
+      with no lines.
+- [x] **The reference wings' arc is an ellipse through the projected span**
+      — a circle projects 51 of the 55 short of their published projected
+      area, 2.0% out on average against the ellipse's 1.0 — and **Niviuk's
+      projected span is the one their projected aspect ratio and area give**,
+      0.805 of the flat span on a Hook 6 where the area ratio gave 0.858.
+      Over the 28 sizes with per-anchor totals the rows' shape deviation goes
+      from 119 to 88 mm; a Hook 6 from the picker is 87 to 112 mm from its
+      sheet on its 33 load-bearing anchors, its brake compared by itself.
+- [ ] **The two-liners' bridles.** An Ozone two-liner's A row counts the
+      lines under its bridle pairs as anchors; whether the bridles of
+      neighbouring lines share ribs, no sheet or drawing on file says.
+- [ ] **Middle lines the generator cannot shape are paired** — the Zeno 2's C
+      top lines on its B middles, UP's level between middles and mains,
+      Niviuk's shared C and D middles.
+- [ ] **Built from their own counts, the two-liners and the Lynx 2 carry a
+      third more line than their sheets**; the three-liners from the Hook 6
+      to the Geo 7, 3% under to 12% over.
+- [ ] **The brake's shape** is 91 to 197 mm from the real ones across the 28
+      sizes with per-anchor totals, on either plan.
+- [ ] **Tip lines the sheets cannot show** — UP's (a row of their own), and
+      the designs with no per-anchor totals — take the default of two a row;
+      where the stabilo's own line is not found, its riser is assumed (the
+      one carrying B), and UP's plans leave it undrawn.
 
 ## Phase 3 — construction detail
 

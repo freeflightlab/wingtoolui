@@ -15,7 +15,7 @@ import {
 } from '../src/core/leplines.js';
 import { toRibPlane, hasCentreRib, ribCopies, wholeWingCounts, ribSurfacePoint } from '../src/core/wing3d.js';
 import { gridRowsFromNames, labelsForRow } from '../tools/niviuk-totals-labels.mjs';
-import { referenceLines, designOf } from '../tools/reference-files.mjs';
+import { referenceLines, designOf, statedTopologyOf } from '../tools/reference-files.mjs';
 import { figures as diagramFigures } from '../tools/make-diagrams.mjs';
 import {
   fabricSchedule, clothWeightsFor, CLOTH, LOCATIONS,
@@ -27,7 +27,7 @@ import {
 } from '../src/core/trimdrift.js';
 import { planformFromDesignInputs, analyticPlanform, planformMetrics, flatArea, ribStations, cellWidths, totalCells, planformOutline } from '../src/core/planform.js';
 import { naca4, splitSurfaces, resampleSurface, airfoilMetrics, parseAirfoilText , LIBRARY } from '../src/core/airfoil.js';
-import { buildLobe, washinAt, lobeMetrics, radiusForProjectedRatio, minArrowRatio } from '../src/core/lobe.js';
+import { buildLobe, washinAt, lobeMetrics, radiusForProjectedRatio, minArrowRatio, ellipseForProjectedRatio } from '../src/core/lobe.js';
 import { buildWing, projectedArea , ribLoops, mirrorRib } from '../src/core/wing3d.js';
 import { analyticPlanform as _ap } from '../src/core/planform.js';
 import { developPanel, developmentError, developWing } from '../src/core/flatdev.js';
@@ -115,7 +115,9 @@ import {
   buildLinePlan, comparePlans, referenceTotals, RISER_LAYOUTS, hangPointFromAnchors, usableCalage, parseCascadeSpec, cascadeSpecFor,
   parsePhiLineSheet, checkPhiSheet, phiLineLength, phiAnchorPaths,
   parseBgdLineTable, bgdCascadeTotals, bgdStatedTopology, familyLineScaling,
-  parseUpLineSheet, loopAllowanceCost,
+  parseUpLineSheet, loopAllowanceCost, parseStatedTopology, statedPathTotals, applyStatedTopology,
+  cascadeCountsOf, cascadeSpecFromSheet, DESIGN_LINES, designCascade,
+  tipLinesFromTotals, tipLinesFromPaths, withTipCounts, stabiloMainFromTotals,
   suggestAnchorsPerRow, ANCHOR_DENSITY, FRONT_DENSITY, findStabilo, addStabilo, planAnchorRibs,
   applyRiserSplit,
   detectPrefixDirection, applyPrefixDirection,
@@ -1520,6 +1522,24 @@ section('Line plan generation and reference comparison');
       cmpTight.count === 57 && cmpTight.meanShapeMM > cmpG.meanShapeMM * 1.5,
       `shape deviation ${cmpTight.meanShapeMM.toFixed(0)} mm at 0.77 against `
       + `${cmpG.meanShapeMM.toFixed(0)} mm at 0.88`);
+    // It is an ellipse: through the same published span, flatter in the
+    // middle and steep at the tip, with its own tip lines (the last two A and
+    // B and the last C, which its totals show on one line), it fits better
+    // than either circle — the one that matches its projected span and the
+    // one the generator had been fitted on.
+    const tipsG = { A: 2, B: 2, C: 1, D: 0 };
+    const shapeOn = (lobe) => comparePlans(buildLinePlan({
+      wing: buildWing({ planform: pfG, lobe, airfoil: afG, cells: 24, pointsPerSurface: 20 }),
+      airfoil: afG, layout: RISER_LAYOUTS['A/B/C+D'], lineLengthM: 6.5, riserLengthMM: 527,
+      anchorsPerRow: { A: 14, B: 14, C: 15, D: 14 }, tipAnchorsPerRow: tipsG,
+    }).totals, referenceTotals(set)).meanShapeMM;
+    const onEllipse = shapeOn(buildLobe(ellipseForProjectedRatio(8.87 / 11.52), pfG.halfSpan));
+    const onCircle88 = shapeOn(buildLobe({ type: 'circle', projectedRatio: 0.88 }, pfG.halfSpan));
+    const onCircle77 = shapeOn(buildLobe({ type: 'circle', projectedRatio: 8.87 / 11.52 }, pfG.halfSpan));
+    check('on an ellipse through its published projected span, with its own tip lines, the Geo 7\'s lines fit best',
+      onEllipse < onCircle88 && onEllipse < onCircle77 * 0.6,
+      `shape deviation ${onEllipse.toFixed(0)} mm on the ellipse at 0.77, ${onCircle88.toFixed(0)} on a circle at 0.88, `
+      + `${onCircle77.toFixed(0)} on one at 0.77`);
   }
 
   // Every reference wing must parse, not only the one used above.
@@ -2071,7 +2091,7 @@ section('UP line sheets and the loop allowance');
     // length, loop and cutting length — arithmetic that fails on every row,
     // which is how the confusion announced itself.
     const totalsSheet = parseUpLineSheet(
-      readFileSync('data/reference/up-makalu5-MAKALU_5_L.tsv', 'utf8'));
+      readFileSync('data/reference/up-makalu5-Gesamt_overall.tsv', 'utf8'));
     check('a totals sheet is not read as components',
       totalsSheet.layout === 'totals' && totalsSheet.sizes.length > 3,
       `${totalsSheet.sizes.length} sizes`);
@@ -2152,12 +2172,27 @@ section('UP line sheets and the loop allowance');
       `${(cost.worstShare * 100).toFixed(0)}% on ${cost.worstLine}`);
 
     // One sheet fails its own arithmetic, by about 3%, while the same wing's
-    // other sizes are exact. The ratio is not constant, so it is not a clean
-    // rescale, and the cause cannot be determined from the data. Flagged
-    // rather than absorbed.
+    // other sizes are exact. Flagged rather than absorbed.
+    //
+    // It was filed as the SM's, and the cause as undeterminable: the ratio is
+    // not constant, so it is no rescale. Both were the converter's doing. It
+    // wrote every sheet of UP's .xls workbooks under the NEXT sheet's name,
+    // so the file called SM held the M. Under its own name the cause is
+    // plain: the M sheet's cutting lengths are the SM's, all twenty-two to
+    // the millimetre, beside lengths of its own.
     check('a sheet inconsistent with itself is reported, not silently accepted',
-      inconsistent.length >= 1 && inconsistent.length <= 2,
+      inconsistent.join() === 'up-meru2-MERU2_M_Faltleinen_folding_line.tsv',
       inconsistent.join(', ') || 'none');
+    const foldM = parseUpLineSheet(readFileSync(
+      'data/reference/up-meru2-MERU2_M_Faltleinen_folding_line.tsv', 'utf8'));
+    const foldSM = parseUpLineSheet(readFileSync(
+      'data/reference/up-meru2-MERU2_SM_Faltleinen_folding.tsv', 'utf8'));
+    const cutOf = (sheet, nm) => sheet.lines.find((l) => l.name === nm)?.cuttingMM;
+    check("and why: its cutting lengths are the next size down's, line for line",
+      foldM.lines.length === 22 && foldM.lines.length === foldSM.lines.length && foldM.lines.every((l) =>
+        Math.abs(l.cuttingMM - cutOf(foldSM, l.name)) < 0.01
+        && l.lengthMM > foldSM.lines.find((x) => x.name === l.name).lengthMM),
+      foldM.lines.map((l) => `${l.name} ${l.cuttingMM.toFixed(0)}/${cutOf(foldSM, l.name)?.toFixed(0)}`).join(' '));
   }
 
   // The cut-length model must account for it.
@@ -2185,6 +2220,282 @@ section('UP line sheets and the loop allowance');
     Math.abs(withLoop.finishedMetres - noLoop.finishedMetres) < 1e-9);
   check('every line carries both a finished and a cut length',
     withLoop.lines.every((l) => l.cutLengthMM > l.finishedLengthMM));
+}
+
+// ---------------------------------------------------------------------------
+section("The makers' own drawings of their line plans");
+
+{
+  // Six drawings — Ozone's rigging diagram of the Vibe GT and UP's line
+  // plans of the K2 5, Makalu 5, Torre, Summit X and Meru 2 — transcribed
+  // line by line into data/reference/lineplan-*.tsv. They state what the
+  // sheets do not: which line hangs from which.
+  const DESIGNS = ['vibegt', 'up-k25', 'up-makalu5', 'up-torre', 'up-summitx', 'up-meru2'];
+  const plan = Object.fromEntries(DESIGNS.map((d) => [d, parseStatedTopology(
+    readFileSync(`data/reference/lineplan-${d}.tsv`, 'utf8'))]));
+  check('six drawings read, every line hanging from a line or a riser',
+    DESIGNS.every((d) => plan[d].ok),
+    DESIGNS.map((d) => `${d} ${plan[d].lines.length} lines, ${plan[d].canopy.length} at the canopy`
+      + (plan[d].ok ? '' : ` (${plan[d].problems[0]})`)).join('; '));
+  // What a slip in the transcription would produce is refused, not followed.
+  const slip = parseStatedTopology('line\tparent\na1\tA1\nA1\ta1\n');
+  check('a loop, or a parent that is neither a line nor a riser, is refused',
+    !slip.ok && slip.problems.some((p) => /loops/.test(p))
+    && !parseStatedTopology('line\tparent\na1\tAX\n').ok);
+
+  // Every size of each design, with its published totals.
+  const rd = (f) => readFileSync(`data/reference/${f}`, 'utf8');
+  const firstOf = (pairs) => {
+    // UP's Makalu 5 totals list st1 twice and st2 not at all; the first is
+    // kept, and the second is not quietly taken for st2.
+    const m = new Map();
+    for (const [k, v] of pairs) if (v != null && !m.has(k)) m.set(k, v);
+    return m;
+  };
+  const upTotals = (file, col) => firstOf(parseUpLineSheet(rd(file)).totals.map((x) => [x.name, x.totalsMM[col]]));
+  const splitTotals = (file) => firstOf(parseSimpleLineSheet(rd(file)).lines.map((l) => [l.name, l.lengthMM]));
+  const SX = { L: 'L_Einzelleine', M: 'M_Einzelleinen', SM: 'SM_Einzelleinen', S: 'S_Einzelleinen' };
+  const sheets = [
+    ...['38', '41', '44'].map((s) => ['up-k25', s, rd(`up-k2-5-K2_5_${s}_-_components.tsv`),
+      upTotals('up-k2-5-K2_5_-_Total_lengths.tsv', s)]),
+    ...['S', 'SM', 'M', 'L', 'XL'].map((s) => ['up-torre', s, rd(`up-torre-TORRE_${s}_-_Components.tsv`),
+      upTotals('up-torre-TORRE_-_Total_lengths.tsv', s)]),
+    ...['L', 'M', 'SM', 'S'].map((s) => ['up-makalu5', s, rd(`up-makalu5-MAKALU_5_${s}.tsv`),
+      splitTotals(`up-split-makalu-5-${s.toLowerCase()}.tsv`)]),
+    ...['L', 'M', 'SM', 'S'].map((s) => ['up-meru2', s, rd(`up-meru2-MERU2_${s}_Einzelleine_single.tsv`),
+      splitTotals(`up-split-meru-2-${s.toLowerCase()}.tsv`)]),
+    ...['L', 'M', 'SM', 'S'].map((s) => ['up-summitx', s, rd(`up-summitx-Summit_X_${SX[s]}_single.tsv`),
+      splitTotals(`up-split-summit-x-${s.toLowerCase()}.tsv`)]),
+  ].map(([d, size, body, totals]) => {
+    const sheet = parseUpLineSheet(body);
+    return { d, size, sheet, lengthOf: sheet.lengthOf, totals };
+  });
+  const vibe = ['XS', 'S', 'MS', 'ML', 'L', 'XL'].map((size) => {
+    const set = parseLineTable(rd(`vibegt-${size}.tsv`));
+    const totals = new Map();
+    for (const t of set.totals) {
+      t.lengths.forEach((v, j) => { if (v != null) totals.set(`${'ABCDK'[j]}${t.anchor}`, v); });
+    }
+    return { d: 'vibegt', size, set, lengthOf: new Map(set.lines.map((l) => [l.name, l.lengthMM])), totals };
+  });
+  const all = [...vibe, ...sheets];
+
+  // 1. The drawing and the sheet name the same lines: none drawn that the
+  // sheet does not list, none listed that the drawing does not draw.
+  const nameGaps = all.flatMap(({ d, size, lengthOf }) => {
+    const p = plan[d];
+    const drawn = new Set(p.lines.flatMap((l) => [l, p.alsoOf.get(l)].filter(Boolean)));
+    const notListed = p.lines.filter((l) => !lengthOf.has(l) && !lengthOf.has(p.alsoOf.get(l)));
+    const notDrawn = [...lengthOf.keys()].filter((n) => !drawn.has(n));
+    return notListed.length || notDrawn.length
+      ? [`${d} ${size}: drawn, not listed ${notListed.join(' ')}; listed, not drawn ${notDrawn.join(' ')}`] : [];
+  });
+  check('on all 26 sheets the drawing and the sheet name exactly the same lines',
+    all.length === 26 && nameGaps.length === 0, nameGaps.join('; ') || `${all.length} sheets`);
+
+  // 2. Ozone's sheets do not state the cascade; `inferTopology` recovers it
+  // from the lengths, and BGD's Lynx 2 was the only place it could be
+  // checked. Ozone's own diagram is a second, on the maker whose sheets it
+  // was written for: every row of every size.
+  const groupsOf = (p, re, row) => {
+    const by = new Map();
+    for (const c of p.canopy) {
+      const m = re.exec(c);
+      if (!m || m[1] !== row) continue;
+      if (!by.has(p.parentOf.get(c))) by.set(p.parentOf.get(c), []);
+      by.get(p.parentOf.get(c)).push(Number(m[2]));
+    }
+    return [...by.values()].map((v) => v.sort((a, b) => a - b)).sort((a, b) => a[0] - b[0]);
+  };
+  let exactRows = 0;
+  let vibeRows = 0;
+  for (const { set } of vibe) {
+    for (const [j, row] of [...'ABCDK'].entries()) {
+      const inf = inferTopology(set, set.totals.map((t) => t.lengths[j]), row);
+      vibeRows++;
+      if (JSON.stringify(inf.branches.map((b) => b.anchors))
+        === JSON.stringify(groupsOf(plan.vibegt, /^([A-K])(\d+)$/, row))) exactRows++;
+    }
+  }
+  check("inference from lengths alone reproduces Ozone's rigging diagram, every row of every size",
+    vibeRows === 30 && exactRows === 30, `${exactRows} of ${vibeRows} rows`);
+  // On UP's wings, where lines of one length are common, it merges branches
+  // it cannot tell apart, as it says it may: on the K2 5 Amain1 and Amain2
+  // are both 5151 mm, and on the Makalu 5 the three A mains are all 5041.
+  // What it must not do is split a branch the drawing joins. On the load-
+  // bearing rows it never does. On the K2 5's brakes it does: their totals
+  // scatter by up to 35 mm against the 12 it allows (see the riser check
+  // below), and no other wing's do.
+  let upRows = 0;
+  let upExact = 0;
+  const splits = [];
+  const brakeMisses = new Set();
+  for (const { d, size, lengthOf, totals } of sheets) {
+    for (const pre of ['a', 'b', 'c', 'd', 'e', 'br']) {
+      const re = new RegExp(`^(${pre})(\\d+)$`);
+      const canopy = plan[d].canopy.filter((c) => re.test(c));
+      if (!canopy.length) continue;
+      const idx = (c) => Number(re.exec(c)[2]);
+      const set = { lines: canopy.map((c) => ({ row: 'X', level: 'upper', index: idx(c), lengthMM: lengthOf.get(c) })) };
+      const inf = inferTopology(set,
+        Array.from({ length: Math.max(...canopy.map(idx)) }, (_, i) => totals.get(`${pre}${i + 1}`) ?? null), 'X');
+      const drawn = groupsOf(plan[d], re, pre);
+      upRows++;
+      const exact = JSON.stringify(inf.branches.map((b) => b.anchors)) === JSON.stringify(drawn);
+      if (exact) upExact++;
+      if (pre === 'br') { if (!exact) brakeMisses.add(d); continue; }
+      for (const g of drawn) {
+        if (!inf.branches.some((b) => g.every((a) => b.anchors.includes(a)))) splits.push(`${d} ${size} ${pre}${g.join(',')}`);
+      }
+    }
+  }
+  check('on UP wings it merges what it cannot tell apart, and never splits a load-bearing branch',
+    upRows === 103 && splits.length === 0 && [...brakeMisses].join() === 'up-k25',
+    `${upExact} of ${upRows} rows exact; ${splits.length ? `split: ${splits.slice(0, 4).join('; ')}`
+      : 'no load-bearing branch split'}; brakes differ on ${[...brakeMisses].join(', ') || 'none'}`);
+
+  // 3. The published totals, from the drawn paths. What a total leaves once
+  // its path is summed is the riser it hangs from: one length for every path
+  // through the same main line, if the drawing, the sheet and the totals
+  // agree. 600 mm Am3-0 on the K2 5 and the Summit X's 80 mm b-ris are
+  // pieces between a main and its riser, and are taken with the main.
+  const LINK = /-0$|^[a-e]-ris$/;
+  const mainKey = (p) => (p.lines.length > 1 && LINK.test(p.lines.at(-1)) ? p.lines.at(-2) : p.lines.at(-1));
+  const spreadOf = (topo, lengthOf, totals) => {
+    const res = statedPathTotals(topo, lengthOf, { totals });
+    const groups = {};
+    for (const p of res.paths) if (p.leftMM != null) (groups[`${p.end}|${mainKey(p)}`] ||= []).push(p.leftMM);
+    const worst = { load: 0, stabilo: 0, brake: 0 };
+    for (const [k, v] of Object.entries(groups)) {
+      const kind = /^handle/.test(k) ? 'brake' : (/^riser S/.test(k) ? 'stabilo' : 'load');
+      worst[kind] = Math.max(worst[kind], Math.max(...v) - Math.min(...v));
+    }
+    return { worst, res };
+  };
+  const worst = { load: 0, stabilo: 0, brake: 0 };
+  const unsummed = [];
+  for (const { d, size, lengthOf, totals } of all) {
+    const { worst: w, res } = spreadOf(plan[d], lengthOf, totals);
+    for (const k of Object.keys(worst)) worst[k] = Math.max(worst[k], w[k]);
+    for (const p of res.paths) if (p.leftMM == null) unsummed.push(`${d} ${size} ${p.canopy}`);
+  }
+  check('the drawn paths reproduce every published total, one riser to a main line within 17 mm',
+    worst.load <= 17 && worst.stabilo <= 21,
+    `load-bearing ${worst.load} mm, stabilo ${worst.stabilo} mm; brakes ${worst.brake} mm, `
+    + 'which end at the handle rather than a riser');
+  check("and the one total that cannot be summed is UP's: st2 on the Makalu 5, which its totals sheet lists as st1 twice",
+    unsummed.length === 4 && unsummed.every((u) => /^up-makalu5 \S+ st2$/.test(u)), unsummed.join(', '));
+  // A check that cannot fail checks nothing. On the K2 5, a7 put under A5
+  // (another main) or A1 (a middle line 30 mm shorter than its own, A3)
+  // shows as a riser that disagrees with itself. Under a middle line of the
+  // same length it could not show, and nothing in the totals could.
+  {
+    const k25 = readFileSync('data/reference/lineplan-up-k25.tsv', 'utf8');
+    const k41 = sheets.find((x) => x.d === 'up-k25' && x.size === '41');
+    const moved = (to) => spreadOf(parseStatedTopology(k25.replace(/^a7\tA3$/m, `a7\t${to}`)),
+      k41.lengthOf, k41.totals).worst.load;
+    check('one canopy line put under the wrong line shows',
+      moved('A5') > 150 && moved('A1') > worst.load,
+      `${moved('A5').toFixed(0)} mm under A5, ${moved('A1').toFixed(0)} under A1, where the drawing gives at most ${worst.load}`);
+  }
+
+  // 4. What the drawings correct in the reading of the sheets.
+  //
+  // UP's roman numerals are a level above the main on the Torre and the
+  // Meru 2, and the main itself where a row has no Xmain line: the Makalu
+  // 5's AI to CIII, and the stabilo's STI on all five wings.
+  const levelSlips = [];
+  for (const { d, size, sheet } of sheets) {
+    const p = plan[d];
+    const byName = new Map(sheet.lines.map((l) => [l.name, l]));
+    const look = (n) => byName.get(n) ?? byName.get(p.alsoOf.get(n));
+    for (const path of p.paths) {
+      const read = path.lines.map(look).filter(Boolean);
+      read.forEach((l, i) => {
+        if ((i === read.length - 1) !== (l.level === 'main')) levelSlips.push(`${d} ${size} ${l.name} ${l.level}`);
+        if ((i === 0) !== (l.level === 'upper')) levelSlips.push(`${d} ${size} ${l.name} ${l.level}`);
+      });
+    }
+  }
+  check("the reader's main lines are the ones the drawings put on the risers, and its canopy lines theirs",
+    levelSlips.length === 0, [...new Set(levelSlips)].slice(0, 6).join(', ') || '20 UP sheets');
+  check('including the Makalu 5, whose roman numerals are its mains',
+    sheets.find((s) => s.d === 'up-makalu5').sheet.atRiser.filter((n) => n !== 'STI').join() === 'AI,AII,AIII,BI,BII,BIII,CI,CII,CIII');
+  // A canopy line that hangs from the stabilo line is a stabilo line,
+  // whatever it is called. The Summit X's a13 to a15, b13 and b14 were
+  // counted in its A and B rows, and the Meru 2's component sheets name its
+  // stabilo lines a13 to c15 where the drawing and the totals call them sa1
+  // to sb3.
+  const rowsOf = (lines) => {
+    const out = {};
+    for (const l of lines.filter((x) => x.level === 'upper' && /^[A-I]$/.test(x.row))) out[l.row] = (out[l.row] || 0) + 1;
+    return Object.keys(out).sort().map((r) => `${r}${out[r]}`).join(' ');
+  };
+  const sxM = referenceLines('up-summitx-Summit_X_M_Einzelleinen_single.tsv', rd('up-summitx-Summit_X_M_Einzelleinen_single.tsv'));
+  const meruM = referenceLines('up-meru2-MERU2_M_Einzelleine_single.tsv', rd('up-meru2-MERU2_M_Einzelleine_single.tsv'));
+  const meruTotals = referenceLines('up-meru2-Gesamt_overall.tsv', rd('up-meru2-Gesamt_overall.tsv'));
+  check('the lines that hang from the stabilo line are read as stabilo lines',
+    sxM.movedToStabilo.join() === 'a13,a14,a15,b13,b14' && rowsOf(sxM.lines) === 'A12 B12 C10 D8'
+    && meruM.movedToStabilo.length === 6 && rowsOf(meruM.lines) === rowsOf(meruTotals.lines),
+    `Summit X ${rowsOf(sxM.lines)}; Meru 2 components ${rowsOf(meruM.lines)}, totals ${rowsOf(meruTotals.lines)}`);
+
+  // 5. Risers. The names suggest three on every four-row UP wing; the
+  // drawings say two on the Torre and the Meru 2, where a and b anchors
+  // share the A mains and c and d the C mains, and four on the K2 5.
+  const risersOf = (d) => plan[d].risers.filter((r) => r !== 'S' && r !== 'A2').length;
+  check('the drawings give the risers the names do not: two on the Torre and the Meru 2',
+    risersOf('up-torre') === 2 && risersOf('up-meru2') === 2 && risersOf('up-makalu5') === 3
+    && risersOf('up-summitx') === 3 && risersOf('up-k25') === 4 && risersOf('vibegt') === 3
+    && plan.vibegt.risers.includes('A2'),
+    DESIGNS.map((d) => `${d} ${plan[d].risers.join('/')}`).join('; '));
+  // And the sheets agree with them: the rows with main lines.
+  const mainRowsOf = (lines) => [...new Set(lines.filter((l) => l.level === 'main' && /^[A-I]$/.test(l.row))
+    .map((l) => l.row))].sort().join('');
+  check('the sheets say the same, by their main lines',
+    sheets.every(({ d, sheet }) => mainRowsOf(sheet.lines).length === risersOf(d))
+    && vibe.every(({ set }) => mainRowsOf(set.lines) === 'ABC'),
+    [...new Set(sheets.map(({ d, sheet }) => `${d} ${mainRowsOf(sheet.lines)}`))].join(', '));
+
+  // 6. Each design's own cascade, as the pipeline and the picker build it.
+  // The corpus stage holds DESIGN_LINES to every sheet; this holds the parts.
+  const geoTable = parseLineTable(rd('geo7-MS.tsv'));
+  // With its tip lines and its stabilo's own line, which its totals show
+  // (`tipLinesFromTotals`, `stabiloMainFromTotals`).
+  const geoTips = tipLinesFromTotals(geoTable.lines, referenceTotals(geoTable));
+  const geoOwn = cascadeSpecFromSheet(geoTable.lines,
+    { stabiloMain: stabiloMainFromTotals(geoTable.lines, referenceTotals(geoTable), geoTips) });
+  const geoTipped = withTipCounts(geoOwn.spec, geoTips.tips);
+  check("a sheet's cascade is written as the generator builds it: the Geo 7 MS, line for line",
+    geoOwn.layout === 'A/B/C+D' && geoTipped === DESIGN_LINES['Ozone Geo 7'].spec
+    && geoOwn.derivedMiddles.length === 0, `${geoOwn.layout}: ${geoTipped.replace(/\n/g, ' / ')}`);
+  // A main in two parts is one main: CRL4 at the riser and CRU4 above it.
+  check('a main in two parts counts once', cascadeCountsOf(parseLineTable(rd('geo7-MS.tsv')).lines).C.mains === 4);
+  // The Zeno 2's C top lines hang on its B middles, a shape the generator
+  // does not build, so its middles are paired and the text says so.
+  const zenoOwn = designCascade('Ozone Zeno 2');
+  check("and where the sheet's shape is not the generator's, its middles are left to be paired",
+    zenoOwn && zenoOwn.layout === 'A/B+C' && Object.keys(zenoOwn.cascade.middlesPerRow).length === 0
+    && zenoOwn.cascade.anchorsPerRow.A === 30 && zenoOwn.cascade.mainsPerRow.B === 3);
+  // The Lynx 2 has A, B and C mains on all four of its sheets. The aspect-ratio
+  // rule alone — two-liner at 6.2 and above — built it as a two-liner.
+  check('the BGD Lynx 2 is a three-liner by its own sheets, at the aspect ratio that made it a two-liner',
+    designCascade('BGD Lynx 2')?.layout === 'A/B/C+D');
+  check('and a layout the generator does not have is not offered: the Skin 4 P, the five-row tandems',
+    ['Niviuk Skin 4 P', 'Niviuk Takoo 6', 'Ozone Magnum 4', 'UP K2 5'].every((f) => DESIGN_LINES[f] && !designCascade(f))
+    && Object.keys(DESIGN_LINES).filter((f) => designCascade(f)).length === 15);
+  // A two-liner on four rows, as the Torre, the Meru 2 and the Artik R 2 are:
+  // the B row hangs from the A mains and the D row from the C mains.
+  const artik = designCascade('Niviuk Artik R 2');
+  const pairedPlan = buildLinePlan({
+    wing: demoWing(), airfoil: (() => { const a = naca4('4415'); a.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 }; return a; })(),
+    layout: RISER_LAYOUTS['A+B/C+D'], anchorsPerRow: { A: 12, B: 8, C: 12, D: 10 }, mainsPerRow: { A: 3, C: 3 },
+    lineLengthM: 6.4,
+  });
+  const mainsIn = (row) => pairedPlan.lines.filter((l) => l.row === row && l.level === 'main').length;
+  check('a two-liner on four rows builds, its B and D rows on the A and C mains',
+    artik?.layout === 'A+B/C+D' && mainsIn('A') === 3 && mainsIn('C') === 3 && mainsIn('B') === 0 && mainsIn('D') === 0
+    && new Set(pairedPlan.lines.filter((l) => l.level === 'main' && l.row !== 'K').map((l) => l.riser)).size === 2,
+    `mains A ${mainsIn('A')} B ${mainsIn('B')} C ${mainsIn('C')} D ${mainsIn('D')}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -6095,22 +6406,19 @@ section('Line plans against real line tables');
 
   // ---------------------------------------------------------------------
   // Main lines per row are FIXED on a real wing, not scaled with its size.
-  // The Geo 7 carries A:3 B:3 C:5 in XS, MS and L alike; the Alpina 5 carries
-  // A:4 B:4 in every size. Grouping by a constant chunk size instead made the
-  // main count grow with the anchor count — 16 against a real 10.
+  // The Geo 7 carries A:3 B:3 C:4 in XS, MS and L alike, the fourth C main in
+  // two parts (CRL4 and CRU4), which is one main. Grouping by a constant
+  // chunk size instead made the main count grow with the anchor count.
   const realMains = (f) => {
     const t2 = parseLineTable(readFileSync(`data/reference/${f}.tsv`, 'utf8'));
-    const byRow = {};
-    for (const l of t2.lines.filter((x) => x.level === 'main')) {
-      byRow[l.row] = (byRow[l.row] || 0) + 1;
-    }
-    return byRow;
+    return Object.fromEntries(Object.entries(cascadeCountsOf(t2.lines)).map(([r, c]) => [r, c.mains]));
   };
   const xs = realMains('geo7-XS');
   const ms = realMains('geo7-MS');
   const lg = realMains('geo7-L');
   check('a family has the same main count in every size',
-    JSON.stringify(xs) === JSON.stringify(ms) && JSON.stringify(ms) === JSON.stringify(lg),
+    JSON.stringify(xs) === JSON.stringify(ms) && JSON.stringify(ms) === JSON.stringify(lg)
+    && JSON.stringify(ms) === JSON.stringify({ A: 3, B: 3, C: 4, D: 0 }),
     JSON.stringify(ms));
 
   const fixed = mk(11.52, 2.84, 48,
@@ -6276,22 +6584,32 @@ section('Line plans against real line tables');
   // figure for figure, and this holds it to its own arithmetic.
   check('so the sample is the design count, measured not asserted',
     ANCHOR_DENSITY.sampleDesigns === 19 && ANCHOR_DENSITY.sampleSheets === 88
-    && Object.values(ANCHOR_DENSITY.ratioByRisers).reduce((n, g) => n + g.n, 0)
+    && Object.values(ANCHOR_DENSITY.ratioByLayout).reduce((n, g) => n + g.n, 0)
       === ANCHOR_DENSITY.sampleDesigns
     && /not independent/.test(ANCHOR_DENSITY.note),
-    `${ANCHOR_DENSITY.sampleDesigns} designs, `
-    + Object.entries(ANCHOR_DENSITY.ratioByRisers).map(([k, g]) => `${g.n} on ${Number(k) + 1} rows`).join(', '));
+    `${ANCHOR_DENSITY.sampleDesigns} designs: `
+    + Object.entries(ANCHOR_DENSITY.ratioByLayout).map(([k, g]) => `${g.n} on ${k}`).join(', '));
 
-  // The front-to-rear ratio separates by riser count, but the ranges nearly
-  // touch — 2.13 against 2.58 — so it distinguishes the two classes and
-  // would not settle a marginal case.
-  check('two-liners taper much harder than three-liners',
-    ANCHOR_DENSITY.ratioByRisers[2].min > ANCHOR_DENSITY.ratioByRisers[3].max,
-    `${ANCHOR_DENSITY.ratioByRisers[2].min} against `
-    + `${ANCHOR_DENSITY.ratioByRisers[3].max}`);
+  // The front-to-rear ratio by layout — risers, then rows. It was keyed by a
+  // riser count taken as one fewer than the rows, and three of the four-row
+  // wings are two-liners (the Torre, the Meru 2, the Artik R 2). What tapers
+  // hard is a two-liner with three rows; the ranges nearly touch — 2.50
+  // against 2.58 — so it separates the classes without settling a marginal
+  // case.
+  const LAY = ANCHOR_DENSITY.ratioByLayout;
+  check('a two-liner on three rows tapers much harder than a three-liner',
+    LAY['2/3'].min > LAY['3/4'].max,
+    `${LAY['2/3'].min} against ${LAY['3/4'].max}`);
   check('but only just, and the sample size is carried with it',
-    ANCHOR_DENSITY.ratioByRisers[2].min - ANCHOR_DENSITY.ratioByRisers[3].max < 0.6
-    && ANCHOR_DENSITY.ratioByRisers[2].n === 3);
+    LAY['2/3'].min - LAY['3/4'].max < 0.6 && LAY['2/3'].n === 3);
+  check('and a two-liner on four rows does not: it pairs its rows on each riser',
+    LAY['2/4'].n === 3 && LAY['2/4'].max < LAY['3/4'].mean,
+    `${LAY['2/4'].min}-${LAY['2/4'].max} against a three-liner's mean of ${LAY['3/4'].mean}`);
+  check('so a two-riser layout on four rows is suggested from those, not from the Ozone two-liners',
+    suggestAnchorsPerRow({ rows: ['A', 'B', 'C', 'D'], ribCount: 35, risers: 2 }).layout === '2/4'
+    && suggestAnchorsPerRow({ rows: ['A', 'B', 'C'], ribCount: 35, risers: 2 }).layout === '2/3'
+    && suggestAnchorsPerRow({ rows: ['A', 'B', 'C', 'D'], ribCount: 35, risers: 4 }).layout === '4/5',
+    JSON.stringify(suggestAnchorsPerRow({ rows: ['A', 'B', 'C', 'D'], ribCount: 35, risers: 2 }).anchorsPerRow));
 
   // Three shapes, because the designs show three. A single curve fitted the
   // two-liners at 6-8% and missed the three-liners by up to 24%.
@@ -6357,11 +6675,11 @@ section('Line plans against real line tables');
     `${FRONT_DENSITY.min} to ${FRONT_DENSITY.max}, median ${FRONT_DENSITY.median}, n ${FRONT_DENSITY.n}`);
   check('and each design in it has a published cell count',
     Object.keys(FRONT_DENSITY.designs).every((k) => cellsOf.has(k)));
-  // Not an artefact of the six Ozone wings the old range came from: seven
+  // Not an artefact of the six Ozone wings the old range came from: eight
   // of the twenty are below 0.5, and none of them is an Ozone.
   const sparseDesigns = Object.entries(FRONT_DENSITY.designs).filter(([, v]) => v < 0.5);
   check('the sparse designs are from other makers',
-    sparseDesigns.length === 7 && sparseDesigns.every(([k]) => !/^Ozone/.test(k)),
+    sparseDesigns.length === 8 && sparseDesigns.every(([k]) => !/^Ozone/.test(k)),
     sparseDesigns.map(([k, v]) => `${k} ${v}`).join(', '));
   // And the default is their median, not the middle of the old range.
   check('the default front density is the median of the designs',
@@ -6389,8 +6707,8 @@ section('Line plans against real line tables');
     dense.anchorsPerRow.A > sparse.anchorsPerRow.A * 1.4,
     `${sparse.anchorsPerRow.A} against ${dense.anchorsPerRow.A}`);
   check('and the caveat says so', /design/.test(taper.caveat) || /input/.test(taper.caveat));
-  check('every suggestion names the evidence behind it',
-    [taper, flat, step].every((x) => x.source && /liner|Swift/i.test(x.source)),
+  check('every suggestion names the evidence behind it: how many designs, on which layout',
+    [taper, flat, step].every((x) => x.source && /\d+ designs on \d risers and \d rows|Swift/.test(x.source)),
     [taper, flat, step].map((x) => x.source).join(' | '));
 
   // Two-liners do not. With the C row hung from the B mains, as a real
@@ -8040,7 +8358,7 @@ section('Niviuk: a sixth manufacturer, out of sample');
   // its name did not end in a size: the UP Torre was six.
   check('a design is its maker and model, whatever the sheet is called',
     [['up-torre-TORRE_L_-_Components.tsv', 'up-torre'], ['up-torre-TORRE_-_Total_lengths.tsv', 'up-torre'],
-      ['up-split-makalu-5-sm.tsv', 'up-makalu5'], ['up-makalu5-sheet5.tsv', 'up-makalu5'],
+      ['up-split-makalu-5-sm.tsv', 'up-makalu5'], ['up-makalu5-Gesamt_overall.tsv', 'up-makalu5'],
       ['up-k2-5-K2_5_41_-_components.tsv', 'up-k25'], ['up-summitx-Summit_X_M_Einzelleinen_single.tsv', 'up-summitx'],
       ['geo7-MS.tsv', 'geo7'], ['vibegt-ML.tsv', 'vibegt'], ['magnum4-38.tsv', 'magnum4'],
       ['niviuk-hook6-24-totals.tsv', 'niviuk-hook6'], ['niviuk-hook6-20.tsv', 'niviuk-hook6'],
@@ -8063,8 +8381,8 @@ section('Niviuk: a sixth manufacturer, out of sample');
       'up-makalu5-MAKALU_5_M.tsv', 'up-torre-TORRE_M_-_Components.tsv']
       .every((f) => referenceLines(f, readFileSync(`data/reference/${f}`, 'utf8')).reader === 'up')
     // and the folding lines fitted for the collapse tests are not a row F
-    && referenceLines('up-meru2-sheet9.tsv',
-      readFileSync('data/reference/up-meru2-sheet9.tsv', 'utf8')) === null);
+    && referenceLines('up-meru2-MERU2_S_Faltleinen_folding_line.tsv',
+      readFileSync('data/reference/up-meru2-MERU2_S_Faltleinen_folding_line.tsv', 'utf8')) === null);
 
   // The tandem single-surface is the extreme of the same effect.
   const biskin = nv['Niviuk Bi Skin 2 P'][0];
@@ -8915,10 +9233,11 @@ section('Multi-size sheets');
 {
   // UP publish some sheets with a column per size: a line name, then its
   // length in the L, M, SM and S wings across the row. Read as a single wing
-  // it mixes an L with an XS, which is what produced "st1 appears twice" and
-  // "uppers longer than mains" when the reference sweep first met them.
+  // it mixes an L with an XS, which is what produced "uppers longer than
+  // mains" when the reference sweep first met them. ("st1 appears twice" is
+  // UP's own: the Makalu 5's sheet lists st1 twice and st2 not at all.)
   const makaluRaw = readFileSync(
-    'data/reference/up-makalu5-MAKALU_5_L.tsv', 'utf8');
+    'data/reference/up-makalu5-Gesamt_overall.tsv', 'utf8');
   const split = splitMultiSizeSheet(makaluRaw);
 
   check('four sizes come out of one sheet',
@@ -10234,9 +10553,9 @@ section('Magnum 4, Vibe GT and Enzo 3');
       .includes('E')));
 
   // It joins the four-riser group in the corpus, which had two designs.
-  check('the anchor-density table now has three four-riser designs',
-    ANCHOR_DENSITY.ratioByRisers['4'].n === 3,
-    `n=${ANCHOR_DENSITY.ratioByRisers['4'].n}`);
+  check('the anchor-density table now has three designs on four risers and five rows',
+    ANCHOR_DENSITY.ratioByLayout['4/5'].n === 3,
+    `n=${ANCHOR_DENSITY.ratioByLayout['4/5'].n}`);
 
   // The Enzo 3 sheet is not a cut list. It is a PMA-style inspection record:
   // reference length, the specimen as measured, and the difference — which
@@ -10799,28 +11118,57 @@ section('Writing a cascade down');
   // and wrong for describing: a designer copying a real wing, or specifying
   // one for a builder, knows the shape they want and could not say it.
   //
-  // The format is how every manufacturer sheet reads — anchors, then the
-  // count at each level below:
-  //
-  //     A  30 14 3
-  //     B  14  6 4
-  //     C   8  3 2
-  const spec = parseCascadeSpec(`
-    # the Ozone Zeno 2, from its own plan
-    A 30 14 3
-    B 14  6 4
-    C  8  3 2
-  `);
+  // The format is how every manufacturer sheet counts — anchors, then the
+  // lines at each level below: middles, then mains; a row on another row's
+  // riser hangs from its mains, so it has anchors and middles; K is the
+  // brake. This is the Ozone Geo 7 MS, with the Vibe GT's brake:
+  const GEO7 = `
+    # the Ozone Geo 7 MS, counted from its sheet
+    A 14 6 3
+    B 14 6 3
+    C 15 6 4
+    D 14 6
+    # and the brake as Ozone draw the Vibe GT's: K1-K14 on KMU1-7, on
+    # KML1-3, on KRU1 and KRL1 to the handle
+    K 14 7 3
+  `;
+  const layout = RISER_LAYOUTS['A/B/C+D'];
+  const spec = parseCascadeSpec(GEO7, { layout });
   check('a spec parses', spec.ok, spec.note);
-  check('and gives the anchor counts',
-    spec.anchorsPerRow.A === 30 && spec.anchorsPerRow.C === 8);
-  check('and the main counts, which differ by row',
-    spec.mainsPerRow.A === 3 && spec.mainsPerRow.B === 4,
-    JSON.stringify(spec.mainsPerRow));
-  check('comments and blank lines are ignored', spec.rowNames.length === 3);
+  check('and gives every count it writes: anchors, middles, mains and the brake',
+    spec.anchorsPerRow.A === 14 && spec.anchorsPerRow.C === 15 && spec.middlesPerRow.D === 6
+    && spec.mainsPerRow.C === 4 && !('D' in spec.mainsPerRow)
+    && spec.brakes.anchors === 14 && spec.brakes.levelCounts.join() === '7,3,1',
+    JSON.stringify({ middles: spec.middlesPerRow, mains: spec.mainsPerRow, brakes: spec.brakes }));
+  check('comments and blank lines are ignored', spec.rowNames.length === 5);
+
+  // It is the Geo 7's own, not an example made up to look like one: counted
+  // from the sheet, the sheet says the same. (The example here was "the
+  // Ozone Zeno 2, from its own plan: A 30 14 3, B 14 6 4, C 8 3 2", and the
+  // Zeno 2's sheet has nine A middles, thirteen B middles carrying the C
+  // row's top lines too, and no C main.)
+  const countsOf = (lines, rows = /^[A-DK]$/) => {
+    const by = {};
+    for (const l of lines) {
+      if (l.shared || !rows.test(l.row)) continue;
+      const r = (by[l.row] ||= { upper: 0, middle: 0, main: 0 });
+      if (l.level in r) r[l.level] += 1;
+    }
+    return Object.keys(by).sort().map((r) => `${r} ${by[r].upper} ${by[r].middle} ${by[r].main}`).join(' | ');
+  };
+  const WANT = 'A 14 6 3 | B 14 6 3 | C 15 6 4 | D 14 6 0 | K 14 7 3';
+  // Counted from the sheet the way a written cascade counts: a main in two
+  // parts is one main — the Geo 7's fourth C main is CRL4, 970 mm at the
+  // riser, with CRU4 above it. (Ozone's brakes count two levels of middle
+  // line, KMU and KML, where the tool's has one and its lines to the pulley,
+  // so the brake is the Vibe GT's drawing, above, not this sheet.)
+  const geoCounts = cascadeCountsOf(parseLineTable(readFileSync('data/reference/geo7-MS.tsv', 'utf8')).lines);
+  const geoSheet = Object.entries(geoCounts).map(([r, c]) => `${r} ${c.anchors} ${c.middles} ${c.mains}`).join(' | ');
+  check("and its rows are the Geo 7 MS sheet's own count, row by row",
+    geoSheet === WANT.replace(/ \| K.*$/, ''), geoSheet);
 
   // Typos a person makes, caught rather than built.
-  const bad = (t) => parseCascadeSpec(t).problems[0] ?? '';
+  const bad = (t, opts) => parseCascadeSpec(t, opts).problems[0] ?? '';
   check('a row that does not exist is refused',
     /is not a row/.test(bad('QQ 8 3')));
   check('a cascade that widens is refused',
@@ -10829,11 +11177,19 @@ section('Writing a cascade down');
     /whole positive counts/.test(bad('A 8 0')));
   check('a row given twice is refused',
     /appears twice/.test(bad('A 8 3\nA 9 3')));
-  check('and rows at different depths are flagged',
+  check('without a layout, rows at different depths are flagged',
     /different depths/.test(bad('A 30 14 3\nB 14 6')));
+  // And, given the layout, what could not be built as written.
+  check('a row that hangs from another row\'s mains, given mains of its own, is refused',
+    /hangs from the C mains/.test(bad('A 14 6 3\nD 14 6 2', { layout })));
+  check('a row on none of the risers is refused',
+    /on none of the A\/B\/C\+D risers/.test(bad('A 14 6 3\nE 8 4', { layout })));
+  check('a level more than the generator builds is refused',
+    /builds two/.test(bad('A 12 8 6 3', { layout })));
+  check('and a row left out is said to be derived',
+    parseCascadeSpec('A 14 6 3\nB 14 6 3\nC 15 6 5', { layout }).warnings.some((w) => /D not written/.test(w)));
 
-  // The spec has to actually build what it says.
-  const wingC = demoWing();
+  // The spec has to build what it says: every count, the middles included.
   const afC = naca4('4415');
   afC.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
   const bigWing = buildWing({
@@ -10843,46 +11199,199 @@ section('Writing a cascade down');
     lobe: buildLobe({ type: 'circle', projectedRatio: 0.86 }, 5.8),
     airfoil: afC, cells: 32, pointsPerSurface: 20,
   });
-  const plan = buildLinePlan({
-    wing: bigWing, airfoil: afC, layout: RISER_LAYOUTS['A/B/C/D'],
-    anchorsPerRow: spec.anchorsPerRow, mainsPerRow: spec.mainsPerRow,
-    lineLengthM: 6.5,
+  const buildSpec = (sp, lay = layout) => buildLinePlan({
+    wing: bigWing, airfoil: afC, layout: lay,
+    anchorsPerRow: sp.anchorsPerRow, middlesPerRow: sp.middlesPerRow, mainsPerRow: sp.mainsPerRow,
+    brakes: sp.brakes ?? { anchors: 13, levelCounts: [6, 3, 1] }, lineLengthM: 6.5,
   });
-  const built = {};
-  for (const l of plan.lines) {
-    (built[l.row] ||= {})[l.level] = ((built[l.row] || {})[l.level] || 0) + 1;
-  }
-  for (const row of ['A', 'B', 'C']) {
-    check(`row ${row} builds the cascade the spec asked for`,
-      built[row].upper === spec.rows[row].anchors
-      && built[row].main === spec.mainsPerRow[row],
-      `${built[row].upper} ${built[row].middle} ${built[row].main} against `
-      + `${spec.rows[row].anchors} ${spec.rows[row].levels.join(' ')}`);
-  }
+  const plan = buildSpec(spec);
+  check('built, every count is the one written, the brake and the middles included',
+    countsOf(plan.lines) === WANT && plan.levelShortfalls.length === 0, countsOf(plan.lines));
+  // The middle count was parsed and dropped: the anchors were paired, so the
+  // K2 5's own "A 18 6 3" came out with eight middle lines.
+  const k25 = parseCascadeSpec('A 18 6 3\nB 18 6 3\nC 18 6 3\nD 12 6', { layout });
+  const k25Plan = buildSpec(k25);
+  check("the K2 5's eighteen anchors on six middle lines build six, not the eight pairing makes",
+    k25.ok && k25Plan.lines.filter((l) => l.row === 'A' && l.level === 'middle').length === 6,
+    countsOf(k25Plan.lines));
+  // A count the wing cannot take is built as near as it goes, and said.
+  const tooMany = buildSpec(parseCascadeSpec('A 40 6 3\nB 14 6 3\nC 15 6 5\nD 14 6', { layout }));
+  check('more anchors than ribs is built one a rib, and reported',
+    tooMany.levelShortfalls.some((f) => f.row === 'A' && f.level === 'anchor' && f.asked === 40
+      && f.got === bigWing.ribs.length),
+    JSON.stringify(tooMany.levelShortfalls));
 
   // `mainsPerRow` said per row and was one integer for every row, so a spec
   // asking A:3 B:4 C:2 could not be built at all.
-  check('main counts really do differ between rows',
-    new Set(['A', 'B', 'C'].map((r) => built[r].main)).size > 1,
-    ['A', 'B', 'C'].map((r) => `${r}:${built[r].main}`).join(' '));
-
-  // And the chunking has to produce the number of groups asked for. A fixed
-  // chunk size of ceil(n/g) gives g-1 groups whenever the division is
-  // inexact: six middles into four came back as three.
   const four = buildLinePlan({
     wing: bigWing, airfoil: afC, layout: RISER_LAYOUTS['A/B/C/D'],
     anchorsPerRow: { A: 30, B: 14, C: 8 }, mainsPerRow: { A: 3, B: 4, C: 2 },
     lineLengthM: 6.5,
   });
-  const bMains = four.lines.filter((l) => l.row === 'B' && l.level === 'main').length;
-  check('six middles into four mains gives four, not three',
-    bMains === 4, `${bMains} mains`);
+  const mainsBy = (p) => ['A', 'B', 'C'].map((r) => p.lines.filter((l) => l.row === r && l.level === 'main').length);
+  check('main counts really do differ between rows', mainsBy(four).join() === '3,4,2', mainsBy(four).join(' '));
+  // And the chunking has to produce the number of groups asked for. A fixed
+  // chunk size of ceil(n/g) gives g-1 groups whenever the division is
+  // inexact: six middles into four came back as three.
+  check('six middles into four mains gives four, not three', mainsBy(four)[1] === 4);
 
-  // A plan can be written back out and read again.
-  const round = parseCascadeSpec(cascadeSpecFor(plan));
-  check('a built plan round-trips through the spec format',
-    round.ok && round.anchorsPerRow.A === spec.anchorsPerRow.A,
-    round.note);
+  // A plan can be written back out and read again, and builds the same.
+  const round = parseCascadeSpec(cascadeSpecFor(plan), { layout });
+  check('a built plan round-trips through the spec format, count for count',
+    round.ok && countsOf(buildSpec(round).lines) === WANT, cascadeSpecFor(plan).trim().split('\n').slice(1).join(' / '));
+}
+
+// ---------------------------------------------------------------------------
+section('Where a row ends, and the stabilo');
+
+{
+  // The stabilo's top lines are named in their rows on Ozone's, Niviuk's and
+  // BGD's sheets. Below its top line every canopy line's path is its total
+  // less that top line, and lines of different rows on one remainder share
+  // everything below their top lines: one line.
+  const geoTips = ['XS', 'S', 'MS', 'ML', 'L'].map((z) => {
+    const body = readFileSync(`data/reference/geo7-${z}.tsv`, 'utf8');
+    return tipLinesFromTotals(parseLineTable(body).lines, referenceTotals(parseLineTable(body)));
+  });
+  const ms = geoTips[2];
+  check('the Geo 7\'s last two A and B lines and its last C share one path to the riser, in every size',
+    geoTips.every((t) => t.ok && JSON.stringify(t.tips) === '{"A":2,"B":2,"C":1,"D":0}'
+      && t.groups.length === 1 && t.groups[0].rows.join('') === 'ABC')
+    && ms.groups[0].remainderMM === 5092,
+    `${ms.groups[0].remainderMM} mm below the top lines on the MS; ${geoTips.map((t) => t.groups[0]?.remainderMM).join(', ')} mm by size`);
+  // A check that cannot fail checks nothing: twenty millimetres on one of
+  // them and it is no longer on that line.
+  {
+    const body = readFileSync('data/reference/geo7-MS.tsv', 'utf8');
+    const totals = referenceTotals(parseLineTable(body));
+    totals[13] = { ...totals[13], A: totals[13].A + 20 };
+    const moved = tipLinesFromTotals(parseLineTable(body).lines, totals);
+    check('and twenty millimetres on A13 takes it off that line', moved.tips.A === 1 && moved.tips.B === 2,
+      JSON.stringify(moved.tips));
+  }
+  const niv = (f) => {
+    const out = {};
+    for (const l of readFileSync(`data/reference/${f}`, 'utf8').split('\n').filter((x) => /^\d/.test(x))) {
+      const [a, row, mm] = l.split('\t');
+      (out[a] ||= {})[row] = Number(mm);
+    }
+    return out;
+  };
+  const hook = tipLinesFromTotals(parseSimpleLineSheet(readFileSync('data/reference/niviuk-hook6-20.tsv', 'utf8')).lines,
+    niv('niviuk-hook6-20-totals.tsv'));
+  check('the Hook 6\'s are a10, b10 and its ninth C, which Niviuk call c10 — matched in order, not by number',
+    JSON.stringify(hook.tips) === '{"A":1,"B":1,"C":1,"D":0}' && hook.groups[0].remainderMM === 4337,
+    `${JSON.stringify(hook.tips)}, ${hook.groups[0]?.remainderMM} mm`);
+  const artik = tipLinesFromTotals(parseSimpleLineSheet(readFileSync('data/reference/niviuk-artikr2-20.tsv', 'utf8')).lines,
+    niv('niviuk-artikr2-20-totals.tsv'));
+  check('the Artik R 2\'s A13 and C13 — by number, its sheet having fourteen A lines and its totals thirteen',
+    artik.tips.A === 1 && artik.tips.C === 1 && artik.tips.B === 0 && artik.tips.D === 0, JSON.stringify(artik.tips));
+  const swiftBody = readFileSync('data/reference/swift6-MS.tsv', 'utf8');
+  const swift = tipLinesFromTotals(parseLineTable(swiftBody).lines, referenceTotals(parseLineTable(swiftBody)));
+  check('two rows ending inboard on one middle line are a cascade, not a stabilo: the Swift 6\'s eight C and D',
+    swift.tips.A === 1 && swift.tips.B === 1 && swift.tips.C === 0 && swift.tips.D === 0, JSON.stringify(swift.tips));
+  const lynx = tipLinesFromPaths(parseBgdLineTable(readFileSync('data/reference/bgd-lynx2-M.tsv', 'utf8')).lines);
+  check('BGD state the Lynx 2\'s: a15 to a17 and b16 to b18 on BR4, a main on the B riser',
+    lynx.tips.A === 3 && lynx.tips.B === 3 && lynx.tips.C === 0 && lynx.groups[0]?.main === 'BR4', JSON.stringify(lynx));
+  // And the stabilo's own line: the main the tip lines' path is, once the
+  // riser the front rows leave is taken off.
+  const stabMain = (f) => {
+    const body = readFileSync(`data/reference/${f}.tsv`, 'utf8');
+    const t = parseLineTable(body);
+    const tot = referenceTotals(t);
+    return stabiloMainFromTotals(t.lines, tot, tipLinesFromTotals(t.lines, tot));
+  };
+  const geoStab = ['geo7-XS', 'geo7-MS', 'geo7-L'].map(stabMain);
+  const vibeStab = stabMain('vibegt-MS');
+  check('the Geo 7\'s tip lines hang on its "fourth C main", CRU4 on CRL4, in every size: its stabilo\'s line',
+    geoStab.every((m) => m && m.row === 'C' && m.index === 4 && m.names.sort().join() === 'CRL4,CRU4'),
+    geoStab.map((m) => (m ? `${m.names.join('+')} ${m.lengthMM} mm` : 'none')).join('; '));
+  check('the same test finds the Vibe GT\'s BRU4 on BRL4, which Ozone\'s diagram draws to the B riser',
+    vibeStab && vibeStab.row === 'B' && vibeStab.index === 4
+    && statedTopologyOf('vibegt').parentOf.get('A13') === 'BRU4' && statedTopologyOf('vibegt').parentOf.get('BRL4') === 'riser B',
+    vibeStab ? vibeStab.names.join('+') : 'none');
+  check('and nothing on a sheet whose tip path is no one main (the Ultralite 5, the Swift 6)',
+    stabMain('ultralite5-19') === null && stabMain('swift6-MS') === null);
+  check('the designs\' own cascades carry them, on the eight designs whose sheets show them',
+    Object.entries(DESIGN_LINES).filter(([, v]) => /\btip\b/.test(v.spec)).map(([k]) => k).sort().join(', ')
+    === 'BGD Lynx 2, Niviuk Artik R 2, Niviuk Hook 6, Niviuk Skin 4 P, Ozone Geo 7, Ozone Swift 6, Ozone Ultralite 5, Ozone Vibe GT'
+    && designCascade('Ozone Geo 7').cascade.tipsPerRow.C === 1
+    && withTipCounts('A 14 6 3\nD 14 6', { A: 2, D: 0 }) === 'A 14 6 3 tip 2\nD 14 6 tip 0');
+
+  // Written down, and refused where it cannot be.
+  const layout = RISER_LAYOUTS['A/B/C+D'];
+  const w = parseCascadeSpec('A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 4 tip 1\nD 14 6 tip 0', { layout });
+  check('"tip 2" is read as the row\'s tip lines', w.ok && JSON.stringify(w.tipsPerRow) === '{"A":2,"B":2,"C":1,"D":0}',
+    JSON.stringify(w.tipsPerRow));
+  const bad = (t) => parseCascadeSpec(t, { layout }).problems[0] ?? '';
+  check('"S C" says the stabilo hangs on the C riser, and a riser the layout lacks is refused',
+    parseCascadeSpec('A 14 6 3\nS C', { layout }).stabiloRiser === 'C'
+    && /has none/.test(bad('A 14 6 3\nS E')), bad('A 14 6 3\nS E'));
+  check('a brake with tip lines, and more tip lines than anchors, are refused',
+    /no tip lines to count/.test(bad('A 14 6 3\nK 13 6 3 tip 1')) && /not 4 tip lines/.test(bad('A 3 tip 4')),
+    `${bad('A 14 6 3\nK 13 6 3 tip 1')}; ${bad('A 3 tip 4')}`);
+
+  // Where they go.
+  const af = naca4('4415');
+  af.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const pfT = planformFromDesignInputs({ span: 11.5, rootChord: 2.8, tipChord: 0.65, tipSweep: 1.5 });
+  const wing = buildWing({
+    planform: pfT, lobe: buildLobe(ellipseForProjectedRatio(0.77), 5.75), airfoil: af, cells: 24, pointsPerSurface: 20,
+  });
+  const last = wing.ribs.length - 1;
+  const build = (opts) => buildLinePlan({
+    wing, airfoil: af, layout, lineLengthM: 6.5, anchorsPerRow: w.anchorsPerRow,
+    middlesPerRow: w.middlesPerRow, mainsPerRow: w.mainsPerRow, tipAnchorsPerRow: w.tipsPerRow, ...opts,
+  });
+  const plan = build({});
+  const ribsOf = (p, row, pick = () => true) => p.lines.filter((l) => l.row === row && l.level === 'upper' && pick(l))
+    .map((l) => l.ribIndex).sort((a, b) => a - b);
+  const reach = Math.round(0.84 * last);
+  check('a row\'s own lines stop at the front reach and its tip lines go on to the tip ribs, as the makers draw them',
+    ['A', 'B', 'C', 'D'].every((r) => Math.max(...ribsOf(plan, r, (l) => !l.direct)) <= Math.max(reach, w.anchorsPerRow[r] - w.tipsPerRow[r] - 1))
+    && ribsOf(plan, 'A', (l) => l.direct).every((i) => i >= Math.round(0.92 * last))
+    && ribsOf(plan, 'C', (l) => l.direct).length === 1 && ribsOf(plan, 'D', (l) => l.direct).length === 0,
+    `A ${ribsOf(plan, 'A').join(',')}; D ${ribsOf(plan, 'D').join(',')} of ${last}`);
+  const none = build({ tipAnchorsPerRow: 0 });
+  check('and with no tip lines anywhere, nothing goes past the rows, so they run to the tip',
+    Math.max(...ribsOf(none, 'A')) === last, `A ${ribsOf(none, 'A').join(',')}`);
+  const short = buildLinePlan({ wing, airfoil: af, layout, lineLengthM: 6.5, anchorsPerRow: { A: 14, B: 14, C: 8, D: 4 } });
+  check('a row with fewer anchors than the front row ends inboard on its ribs, and has no tip lines',
+    ribsOf(short, 'D').join() === ribsOf(short, 'A', (l) => !l.direct).slice(0, 4).join()
+    && ribsOf(short, 'C', (l) => l.direct).length === 0 && ribsOf(short, 'A', (l) => l.direct).length === 2,
+    `D ${ribsOf(short, 'D').join(',')}; A ${ribsOf(short, 'A').join(',')}`);
+
+  // On one stabilo line.
+  const stab = build({ stabilo: true });
+  const sr = stab.lines.filter((l) => l.row === 'S');
+  const tips = stab.lines.filter((l) => l.stabiloTip);
+  check('with a stabilo, the tip lines hang from one line to the riser that carries B',
+    sr.length === 1 && sr[0].riser === 'B' && tips.length === 5 && tips.every((l) => l.from === sr[0].to)
+    && tips.map((l) => l.name).sort().join() === 'A13,A14,B13,B14,C15' && stab.stabilo?.anchors === 5,
+    `${sr.map((l) => `${l.name} on ${l.riser}, ${l.lengthMM} mm`).join('')}; tips ${tips.map((l) => `${l.name} ${l.lengthMM}`).join(' ')}`);
+  check('its junction is high, as the Geo 7\'s is: tip lines of about a metre on a long stabilo line',
+    tips.every((l) => l.lengthMM > 500 && l.lengthMM < 2000) && sr[0].lengthMM > 3000,
+    `tips ${Math.min(...tips.map((l) => l.lengthMM))} to ${Math.max(...tips.map((l) => l.lengthMM))} mm, line ${sr[0].lengthMM} mm`);
+  const loadsOf = (p) => analyseLoads({ plan: p, planform: pfT, stations: wing.stations, totalMassKg: 95, alphaDeg: 6 });
+  const lp = loadsOf(plan);
+  const ls = loadsOf(stab);
+  const tipLoad = ls.anchorLoads.filter((a) => tips.some((t) => t.name === a.name)).reduce((s, a) => s + a.loadN, 0);
+  near('the lift still all reaches the risers', ls.closureError, lp.closureError, 1e-9);
+  check('the tip lines carry the tip\'s lift, and take it to the B riser',
+    tipLoad > 0 && Math.abs((ls.tensions.riserTension.B - lp.tensions.riserTension.B)
+      - (tipLoad - ls.anchorLoads.filter((a) => a.row === 'B' && tips.some((t) => t.name === a.name)).reduce((s, a) => s + a.loadN, 0))) < 1e-6,
+    `${(tipLoad / 10).toFixed(1)} daN on the tip lines; B riser ${(lp.tensions.riserTension.B / 10).toFixed(1)} -> ${(ls.tensions.riserTension.B / 10).toFixed(1)} daN`);
+  const written = parseCascadeSpec(cascadeSpecFor(stab), { layout });
+  check('written back out, the plan says its tip lines, and reads back the same',
+    written.ok && JSON.stringify(written.tipsPerRow) === JSON.stringify(w.tipsPerRow),
+    cascadeSpecFor(stab).trim().split('\n').filter((x) => !x.startsWith('#')).join(' / '));
+  const onC = build({ stabilo: true, stabiloRiser: 'C' });
+  check('and on the riser it is given, as the Geo 7\'s is on its C riser',
+    onC.lines.find((l) => l.row === 'S')?.riser === 'C' && onC.lines.find((l) => l.row === 'S').from === onC.riserTops.C
+    && /\nS  C\n$/.test(cascadeSpecFor(onC)));
+  const merged = build({ stabilo: true, mergeRows: [['A', 'B']] });
+  check('rows merged below their top lines leave the tip lines on the stabilo',
+    merged.lines.filter((l) => l.stabiloTip).every((l) => l.from === merged.lines.find((x) => x.row === 'S').to));
 }
 
 // ---------------------------------------------------------------------------
@@ -11082,6 +11591,62 @@ section('The arc against every published projected span');
     'reading at(s)[0] gives undefined, and NaN one step later');
   near('at the flat half-span the ratio is what was asked for',
     lobeX.at(5).y / 5, 0.85, 1e-6);
+
+  // A published wing's arc is the handbook's ellipse through its projected
+  // span, the tip where the quarter ends. The published projected AREA is
+  // the check, independent of the span it was built through: a circle
+  // through the same span curves the middle of the wing as much as the tip,
+  // and projects every one of these wings short.
+  const ellipseSpans = [];
+  const areaErr = { circle: [], ellipse: [] };
+  for (const sizes of Object.values(fams)) {
+    for (const z of sizes) {
+      const rec = referenceDesignInputs(z);
+      if (!rec || !(z.projectedArea > 0) || rec.projectedSpanBasis === 'the projected area ratio, no span published'
+        || rec.projectedSpanBasis.startsWith('assumed')) continue;
+      const pf = planformFromDesignInputs(rec.inputs);
+      const cells = Math.max(8, Math.round(z.cells / 2));
+      for (const [kind, spec] of [['circle', { type: 'circle', projectedRatio: rec.projectedRatio }], ['ellipse', rec.lobe]]) {
+        const lobe = buildLobe(spec, pf.halfSpan);
+        if (kind === 'ellipse') {
+          ellipseSpans.push({ err: Math.abs(lobe.at(pf.halfSpan).y / pf.halfSpan / rec.projectedRatio - 1),
+            tipDeg: lobeMetrics(lobe, pf.halfSpan).tipDihedralDeg });
+        }
+        const w = buildWing({ planform: pf, lobe, airfoil: naca4('4415'), cells, pointsPerSurface: 16, zRotation: 'auto', alphaDeg: 6 });
+        areaErr[kind].push((projectedArea(w) - z.projectedArea) / z.projectedArea);
+      }
+    }
+  }
+  const meanAbs = (v) => v.reduce((a, b) => a + Math.abs(b), 0) / v.length;
+  check('the ellipse is the reference wings\' arc, through the projected span exactly, its tip vertical',
+    ellipseSpans.length >= 50 && Math.max(...ellipseSpans.map((e) => e.err)) < 1e-6
+    && Math.min(...ellipseSpans.map((e) => e.tipDeg)) > 89.5,
+    `${ellipseSpans.length} sizes, tip ${Math.min(...ellipseSpans.map((e) => e.tipDeg)).toFixed(2)} deg or steeper`);
+  // The circle is the nearer only on the Artik R 2, by a tenth of a percent,
+  // and the single-surface Skin 4 P, built with a lower surface it does not
+  // have.
+  const nearer = areaErr.ellipse.filter((e, i) => Math.abs(e) < Math.abs(areaErr.circle[i])).length;
+  check('and it lands nearer their published projected area than a circle through the same span, which falls short on nearly all',
+    meanAbs(areaErr.ellipse) < 0.012 && Math.max(...areaErr.ellipse.map(Math.abs)) < 0.025
+    && areaErr.circle.filter((e) => e < 0).length >= areaErr.circle.length - 4
+    && meanAbs(areaErr.circle) > 0.018 && nearer >= areaErr.ellipse.length - 10,
+    `ellipse ${(meanAbs(areaErr.ellipse) * 100).toFixed(1)}% on average (${(Math.min(...areaErr.ellipse) * 100).toFixed(1)} to `
+    + `${(Math.max(...areaErr.ellipse) * 100).toFixed(1)}%), circle ${(meanAbs(areaErr.circle) * 100).toFixed(1)}% `
+    + `(${(Math.min(...areaErr.circle) * 100).toFixed(1)} to ${(Math.max(...areaErr.circle) * 100).toFixed(1)}%, short on `
+    + `${areaErr.circle.filter((e) => e < 0).length}); the ellipse nearer on ${nearer} of ${areaErr.ellipse.length} sizes`);
+
+  // Niviuk publish no projected span, and their projected aspect ratio and
+  // area define it. The area ratio stood in for it.
+  const hook24 = fams['Niviuk Hook 6'].find((z) => z.name === '24');
+  const r24 = referenceDesignInputs(hook24);
+  near('a Hook 6 24\'s projected span is what its projected aspect ratio (4) and area (20.59 m2) give',
+    r24.projectedRatio * hook24.flatSpan, Math.sqrt(4 * 20.59), 1e-9, ' m');
+  check('and it says where the span came from, and is a twentieth less flat than the area ratio made it',
+    r24.projectedSpanBasis === 'from the published projected aspect ratio and area'
+    && hook24.projectedArea / hook24.flatArea - r24.projectedRatio > 0.05,
+    `${r24.projectedRatio.toFixed(3)} against the area ratio ${(hook24.projectedArea / hook24.flatArea).toFixed(3)}`);
+  check('every Niviuk size has its projected aspect ratio on file',
+    Object.entries(fams).filter(([k]) => k.startsWith('Niviuk')).flatMap(([, v]) => v).every((z) => z.projectedAR > 3));
 }
 
 // ---------------------------------------------------------------------------
@@ -12224,12 +12789,25 @@ section('Diagonals follow the lines');
     && !linedDefault.byRow.B.includes(wingD.ribs.length - 2),
     `ribs with a line: ${linedDefault.all.join(' ')}`);
 
-  // A written cascade spreads each row at its own spacing.
+  // A written cascade spreads each row at its own spacing. Spread to the tip
+  // here (`alignRearRows: false`), so the sparse row is four cells apart.
   const planWritten = buildLinePlan({
     wing: wingD, airfoil: afD, layout: RISER_LAYOUTS['A/B/C+D'],
-    lineLengthM: 6.5, anchorsPerRow: { A: 7, B: 5, C: 5, D: 4 }, mainsPerRow: 2,
+    lineLengthM: 6.5, anchorsPerRow: { A: 7, B: 5, C: 5, D: 4 }, mainsPerRow: 2, alignRearRows: false,
   });
   const linedWritten = planAnchorRibs(planWritten);
+  // As a real wing builds it, a sparser row takes the front row's ribs from
+  // the centre out and stops; the front row's own lines stop short of the
+  // tip, and its two tip lines go on to the outermost ribs.
+  const aligned = planAnchorRibs(buildLinePlan({
+    wing: wingD, airfoil: afD, layout: RISER_LAYOUTS['A/B/C+D'],
+    lineLengthM: 6.5, anchorsPerRow: { A: 7, B: 5, C: 5, D: 4 }, mainsPerRow: 2,
+  })).byRow;
+  const lastD = wingD.ribs.length - 1;
+  check('a sparser row takes the front row\'s ribs from the centre, and the front row stops short of the tip but for its tip lines',
+    aligned.D.join() === aligned.A.slice(0, 4).join() && aligned.B.join() === aligned.A.slice(0, 5).join()
+    && aligned.A[4] === Math.round(0.84 * lastD) && aligned.A.slice(5).every((i) => i > Math.round(0.84 * lastD)),
+    `A ${aligned.A.join(' ')} | D ${aligned.D.join(' ')} on ${wingD.ribs.length} ribs`);
   check('a written cascade puts each row on its own ribs',
     linedWritten.byRow.A.length === 7 && linedWritten.byRow.D.length === 4
     && linedWritten.byRow.A.join() !== linedWritten.byRow.B.join(),

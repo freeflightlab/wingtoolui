@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2423 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2479 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -66,7 +66,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2423 unit checks against known geometry and the sources |
+| `npm test` | 2479 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -159,8 +159,12 @@ embedded — measured total line lengths, sail to harness — and selecting one
 reports two numbers that mean different things: the **mean offset**, which is
 the overall length a designer sets deliberately, and the **shape deviation**,
 which is the spread once that offset is removed and is what actually differs.
-A Hook 6 loaded from the picker comes out 110 to 120 mm from its own sheet in
-shape, over 44 anchors.
+The rows that carry the wing and the brake are compared each against its own
+offset, because makers measure a brake to different points. A Hook 6 loaded
+from the picker — its own counts and tip lines, on the ellipse its published
+figures give — comes out 87 to 112 mm from its own sheet in shape on its 33
+load-bearing anchors (112 to 150 on every second rib), and its brake 94 to
+112 mm.
 
 ## Architecture
 
@@ -212,8 +216,9 @@ tests/             the unit suite, the Phase 1 audit, the full pipeline, the
                    reference sweep, the benchmark
 tools/             the other check stages, the interface harness, figures,
                    importers, and readers for legacy sheets
-docs/              forty notes; see below
-data/reference/    137 tables: line sheets of 21 wings from five makers, 55
+docs/              forty-one notes; see below
+data/reference/    143 tables: line sheets of 21 wings from five makers, six
+                   of their line-plan drawings transcribed line by line, 55
                    published sizes and the makers' own specifications to check
                    them against, cell counts, the suppliers' line data, PHI's
                    measured 78-line materials table, inspection records, a
@@ -273,7 +278,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2423 checks |
+| unit suite | the maths, 2479 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -297,7 +302,8 @@ Every dataset in `data/reference/` is measured, not merely parsed. The
 `ANCHOR_DENSITY` was six hand-entered Ozone designs when the sheets held 19
 designs from four makers, and the anchor search was bounded by a front-row
 density range from those six that left out seven of twenty designs. Both are
-measured from the sheets now, figure for figure.
+measured from the sheets now, figure for figure, and so is each design's own
+cascade: its riser layout, its counts, its tip lines and its stabilo's line.
 
 ## Documentation
 
@@ -323,6 +329,7 @@ measured from the sheets now, figure for figure.
 | `docs/free-body.md` | does the whole machine balance as a body in gravity |
 | `docs/hang-point.md` | where the wing hangs, and why the calage decides it |
 | `docs/line-plans.md` | risers, naming, topology inference |
+| `docs/drawn-line-plans.md` | the makers' own line-plan drawings, each wing's own cascade, where rows end, the stabilo |
 | `docs/reference-wings.md` | the reference wings against their published figures |
 | `docs/openglider.md` | what OpenGlider does, and what was taken from it |
 | `docs/certification.md` | what a flight test report does and does not contain |
@@ -372,9 +379,10 @@ d'envol**, published freely at laboratoridenvol.com, whose software is released
 under the GNU GPL. The later rotation and equilibrium studies are by the same
 author.
 
-Production line data was supplied for validation and belongs to its
-manufacturers — Ozone, PHI and BGD. It is used here to check calculations, not
-redistributed as design material.
+Production line data and line-plan drawings were supplied for validation and
+belong to their manufacturers — Ozone, PHI, BGD and UP; Niviuk's and Skywalk's
+figures are from their published manuals. They are used here to check
+calculations, not redistributed as design material.
 
 This project is an independent implementation. Where it departs from a source
 it says so in a comment, and `docs/validation.md` collects those departures in

@@ -70,11 +70,24 @@ quantities and both are used.
 ### d. Line plan / rigging diagram
 
 A drawing showing which upper lines join which middles, and which middles
-join which mains. Describe it in text if the image cannot be attached:
+join which mains. Transcribe it one line a row, with the line it hangs from,
+as `data/reference/lineplan-<design>.tsv` (`parseStatedTopology`):
 
 ```
-A row: a1 a2 -> AM1;  a3 a4 -> AM2;  AM1 AM2 -> AS1
+# convention: up
+line    parent     also
+a1      A1
+A1      Amain1
+Amain1  riser A
+sa1     ST1        a13
 ```
+
+A parent that is not a line is where the cascade ends — `riser X`, `handle`
+for the brake, `riser S` where the drawing does not say which riser the
+stabilo is on. `also` is another sheet's name for the same line. If the
+drawing numbers its ribs, note where each row's last line and the stabilo's
+lines are: that is the only evidence for where rows end
+(`docs/drawn-line-plans.md`, section 5).
 
 ### e. Riser geometry
 
@@ -134,12 +147,18 @@ upper-case name (`C1`) is read as the level below, and a number in front
 
 ### Specification
 
-One file, one row per size:
+One file, one row per size, with the column names the reader takes
+(`parseSizeFamilies`; a name it does not know is not read, and this example
+gave nine of them wrongly until 2026-10-21):
 
 ```
-family	size	cells	flat_span	flat_area	flat_ar	projected_span	projected_area	max_chord	mass_kg	weight_min	weight_max	line_consumption_m	riser_mm	application	certification
-Ozone Rush 6	S	57	10.60	21.50	5.22	8.55	18.30	2.55	4.55	70	90	230		XC	EN B
+family	size	cells	flat_span_m	flat_area_m2	flat_AR	proj_span_m	proj_area_m2	root_chord_m	mass_kg	weight_lo_kg	weight_hi_kg	total_line_m	line_pieces	application	certification	aspect_class	proj_AR
+Ozone Rush 6	S	57	10.60	21.50	5.22	8.55	18.30	2.55	4.55	70	90	230		XC	EN B	mid
 ```
+
+Where a maker publishes the projected aspect ratio and not the projected span,
+as Niviuk do, put it in `proj_AR` as printed and leave `proj_span_m` blank: the
+tool derives the span from it and the projected area, and says so.
 
 ### Naming files
 

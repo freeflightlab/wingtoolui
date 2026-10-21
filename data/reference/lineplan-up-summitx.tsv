@@ -1,0 +1,111 @@
+# UP Summit X: the line map, line by line.
+# Source: UP International, "Summit X Linemap" (Summit_X_linemap_20230302.pdf,
+#   one page), supplied by the user 2026-09-29.
+# Transcribed 2026-10-19 from the drawing: each line and the line it hangs
+#   from. A parent that is not a line is where the cascade ends: a riser, or
+#   the brake handle. The drawing does not say which riser the stabilo line
+#   is fixed to, so it ends at "riser S".
+# The map draws each row's cascade apart from the wing, and two things in it
+#   are not in the names: a13 to a15, b13 and b14 hang from the stabilo line
+#   STI, not from an A or B main; and b9, b10, c9 and c10 reach the B riser
+#   through bc9 and bc10, one line for a b and a c anchor. b-ris, 80 mm, is
+#   drawn on its own; the published totals put it under all three B mains.
+# convention: up
+line	parent
+a1	A1
+a2	A1
+a3	A2
+a4	A2
+A1	Amain1
+A2	Amain1
+Amain1	riser A
+a5	A3
+a6	A3
+a7	A4
+a8	A4
+A3	Amain2
+A4	Amain2
+Amain2	riser A
+a9	A5
+a10	A5
+a11	A6
+a12	A6
+A5	Amain3
+A6	Amain3
+Amain3	riser A
+b1	B1
+b2	B1
+b3	B2
+b4	B2
+B1	Bmain1
+B2	Bmain1
+Bmain1	b-ris
+b5	B3
+b6	B3
+b7	B4
+b8	B4
+B3	Bmain2
+B4	Bmain2
+Bmain2	b-ris
+b9	bc9
+c9	bc9
+b10	bc10
+c10	bc10
+bc9	B5
+bc10	B5
+b11	B6
+b12	B6
+B5	Bmain3
+B6	Bmain3
+Bmain3	b-ris
+b-ris	riser B
+c1	C1
+d1	C1
+c2	C1
+d2	C1
+c3	C2
+d3	C2
+c4	C2
+d4	C2
+C1	Cmain1
+C2	Cmain1
+Cmain1	riser C
+c5	C3
+d5	C3
+c6	C3
+d6	C3
+c7	C4
+d7	C4
+c8	C4
+d8	C4
+C3	Cmain2
+C4	Cmain2
+Cmain2	riser C
+a13	STI
+a14	STI
+a15	STI
+b13	STI
+b14	STI
+STI	riser S
+br1	BR1
+br2	BR1
+br3	BR2
+br4	BR2
+BR1	BRI
+BR2	BRI
+br5	BR3
+br6	BR3
+br7	BR4
+br8	BR4
+BR3	BRII
+BR4	BRII
+br9	BR5
+br10	BR5
+br11	BR6
+br12	BR6
+BR5	BRIII
+BR6	BRIII
+BRI	BRmain
+BRII	BRmain
+BRIII	BRmain
+BRmain	handle

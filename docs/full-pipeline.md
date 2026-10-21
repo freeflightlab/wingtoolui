@@ -28,7 +28,12 @@ connects the two. On the PHI Allegro light the published span ratio is 0.794
 and the rooted area ratio is 0.926.
 
 **Wrong on every wing in the database, by up to 19.5%.** Now 0.00% on every
-size that publishes a projected span.
+size that publishes a projected span, and Niviuk's is the one their projected
+aspect ratio and area give. The arc through it was a circle, which projects
+51 of the 55 wings short of their published projected area; it is the
+handbook's ellipse now, 1.0% out on average against the circle's 2.0, −2.0 to
++2.1% on every size, and the run flags a wing more than 3% out
+(`docs/reference-wings.md`).
 
 ## 2. Anchor density was driven by cell count, inverting the real relationship
 
@@ -50,26 +55,26 @@ FAIL  higher aspect ratio has less line drag  (0.00914 vs 0.01242)
 
 Higher aspect ratio was coming out with **more** line drag — the opposite of
 why high-aspect wings exist. The pipeline now builds each wing one of two
-ways: a design whose line sheets are on file with its own rows, riser count
-and anchor counts; any other with `anchorsForLineLength`, which solves the
+ways: a design whose line sheets are on file with its own cascade
+(`DESIGN_LINES`: riser layout, anchors, mains, and middles where the generator
+can build them); any other with `anchorsForLineLength`, which solves the
 anchor density to the published line total inside the densities real wings
 use (0.28 to 0.94 of the ribs on the front row, measured on twenty designs).
-The relationship holds: 0.00864 of line drag for the three lowest aspect
-ratios against 0.00782 for the three highest.
+The relationship holds: 0.00902 of line drag for the three lowest aspect
+ratios against 0.00804 for the three highest.
 
-**The interface was not part of that fix.** Its derived plan still attaches
-every second rib. On its own default wing that is a real wing's density — 13
-anchors on 25 ribs, against a measured median of 0.54 — and 316 m of line
-against the 273 m real wings of its span and aspect ratio carry. On a
-published wing loaded from the picker it is not: a Zeno 2 S came out with
-425 m of line against its published 186. The Lines panel now has **Solve
-anchors to the line length**, which runs the same solve against the
-published total (or, on a wing of the designer's own, against the
-aspect-ratio law), and writes the counts out as a cascade the designer can
-read and edit. On a Geo 7 MS it gives 263 m against 263.5; on an Alpina 5 ML
-on two risers, 230 against 229.7. Under a three-riser layout a two-liner's
-total is below anything a real density gives, and the solve says so and names
-the layout as the cause rather than the ribs.
+**The interface was not part of that fix.** Its derived plan attaches every
+second rib: on its own default wing a real wing's density — 13 anchors on 25
+ribs, against a measured median of 0.53 — and nothing like one on a published
+wing, where a Zeno 2 S came out with 425 m of line against its published 186.
+A wing from the picker now hangs from its own cascade where its sheets are on
+file, and from anchors solved to its published total where they are not
+(`docs/drawn-line-plans.md`). **Solve anchors to the line length**, in the
+Lines panel, runs the same solve on any wing and writes the plan it built out
+as a cascade: on a Geo 7 MS 259 m against 263.5, on an Alpina 5 ML on two
+risers 231 against 229.7. Under a three-riser layout a two-liner's total is
+below anything a real density gives, and the solve says so and names the
+layout as the cause rather than the ribs.
 
 ## 3. Anchor loads were grouped by anchor index, not by rib
 
@@ -106,16 +111,24 @@ neither a default nor a sentinel can tell an omission from an explicit
 
 | | wings | mean | range |
 | --- | --- | --- | --- |
-| all | 55 | +7% | −21 to +43% |
-| own rows and anchors, three risers | 12 | +4% | −7 to +13% |
-| own rows and anchors, two risers | 10 | +35% | +30 to +43% |
-| density solved, three risers | 17 | +1% | −21 to +8% |
-| density solved, two risers | 16 | 0% | −2 to +2% |
+| all | 55 | +15% | −21 to +46% |
+| own cascade, three risers | 23 | +10% | −3 to +40% |
+| own cascade, two risers | 16 | +36% | +30 to +46% |
+| density solved, three risers | 11 | −1% | −21 to +9% |
+| density solved, two risers | 5 | −1% | −1 to −1% |
 
-Twelve of the 33 density-solved wings are still over at the sparsest a real
-wing is, and five under at the densest. The five are Niviuk's single-skins,
-the Skin 4 P and the Bi Skin 2 P, built here as four rows where the real wings
-have nine.
+By family, from their own cascades: Hook 6 +1 to +2%, Ultralite 5 −3 to +7%,
+Geo 7 +9 to +12%, Alpina 5 +30 to +31%, Lynx 2 +30 to +40%, Artik R 2 +36%,
+Zeno 2 +46%. Every line set here has its stabilo in it, as the published
+totals do: each row's tip lines on one line, to the riser its sheets say — the
+Geo 7's "fourth C main" is its stabilo's line, so its C row has three — or to
+the B (`docs/drawn-line-plans.md`, section 5). The Lynx 2 and the Artik R 2 were density-solved until
+2026-10-21, the Lynx 2 on two risers it does not have; built as themselves
+they carry a third more line than their sheets. Six of the 16 density-solved
+wings are still over at the sparsest a real wing is — the Allegro light, on
+the three risers its aspect ratio gives — and five under at the densest:
+Niviuk's single-skins, the Skin 4 P and the Bi Skin 2 P, built here as four
+rows where the real wings have nine.
 
 What got it there, each measured:
 
@@ -197,7 +210,7 @@ reported; building the bridle level is the open item.
 SAGE 75 (0.772), the PHI Allegro light XS (0.775) and the Geo 7 XS (0.780).
 None is under the 0.7 floor. (Two wings at 0.69 m/s were reported here when
 the polar was not capped at the usable lift coefficient.) Trim speed runs 33.2
-to 47.5 km/h, glide 9.85 to 12.29, and the lightest are the smallest sizes
+to 47.5 km/h, glide 9.78 to 12.23, and the lightest are the smallest sizes
 of light wings at about 3 kg/m², as they should be.
 
 **Every line of every wing is sized**, from the full catalogue the interface

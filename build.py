@@ -285,7 +285,11 @@ def build():
                             float(c[idx["proj_area_m2"]]),
                             opt(c, "proj_span_m"), opt(c, "mass_kg"),
                             opt(c, "weight_lo_kg"), opt(c, "weight_hi_kg"),
-                            opt(c, "total_line_m"), text(c, "application")])
+                            opt(c, "total_line_m"), text(c, "application"),
+                            # Niviuk's projected aspect ratio, where the
+                            # projected span is not published: the span
+                            # follows from it and the projected area.
+                            opt(c, "proj_AR")])
             except (ValueError, IndexError, KeyError):
                 continue
     reference_js += ("\nconst REFERENCE_WINGS = "

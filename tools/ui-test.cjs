@@ -112,8 +112,11 @@ if (!errors.length) {
     btn.fn();
     return globalThis.__getM();
   };
+  // From the derived plan: the picker now gives a wing its own cascade, or
+  // one already solved, so the solve is pressed on every second rib here.
   const load = (ref, layout) => {
-    S2.useCascadeSpec = false; S2.reference = ref; globalThis.__rebuild(); globalThis.__controls();
+    S2.reference = ref; globalThis.__rebuild(); globalThis.__controls();
+    S2.useCascadeSpec = false;
     if (layout) S2.riserLayout = layout;
     globalThis.__rebuild();
   };
@@ -124,9 +127,10 @@ if (!errors.length) {
     const m = pressSolve();
     const pub = S2._referenceTotalLineM;
     const off = m.linePlan.totalLengthM / pub - 1;
+    // And the text it writes is the plan on the page, every count of it.
     const ok = S2.useCascadeSpec && m.writtenCascade?.ok && Math.abs(off) < 0.05
       && Math.abs(before / pub - 1) > Math.abs(off) && m.loads.closureError < 0.001
-      && m.lineSelection.lines.every((l) => l.line);
+      && m.lineSelection.lines.every((l) => l.line) && m.linePlan.levelShortfalls.length === 0;
     results.push({ ref, ok, text: `${ref} ${before.toFixed(0)} -> ${m.linePlan.totalLengthM.toFixed(0)} m against ${pub}` });
   }
   // A two-liner's total under a three-riser layout: the edge, and the layout
@@ -141,11 +145,86 @@ if (!errors.length) {
   if (bad.length) errors.push(`anchor solve: ${bad.map((r) => r.text).join('; ')}`);
   console.log(`  ${bad.length ? 'FAIL' : 'ok  '} anchors solved to the published line length: ${results.map((r) => r.text).join('; ')}`);
 }
+// A written cascade is built as written: the middle count was parsed and
+// dropped, so "A 14 7 3" built six middle lines, paired from the anchors.
+{
+  const S2 = globalThis.__S;
+  const keep = { reference: S2.reference, riserLayout: S2.riserLayout, useCascadeSpec: S2.useCascadeSpec,
+    cascadeSpec: S2.cascadeSpec, brakeLines: S2.brakeLines };
+  S2.reference = ''; S2.riserLayout = 'A/B/C+D'; S2.brakeLines = true; S2.useCascadeSpec = true;
+  const countsOf = (m) => {
+    const by = {};
+    for (const l of m.linePlan.lines) {
+      if (l.shared || l.row === 'S') continue;
+      const r = (by[l.row] ||= { upper: 0, middle: 0, main: 0 });
+      r[l.level] += 1;
+    }
+    return by;
+  };
+  S2.cascadeSpec = 'A 14 7 3\nB 14 6 3\nC 15 6 5\nD 14 5\nK 11 5 2';
+  globalThis.__rebuild();
+  const m = globalThis.__getM();
+  const c = countsOf(m);
+  const asWritten = m.writtenCascade?.ok && c.A.upper === 14 && c.A.middle === 7 && c.A.main === 3
+    && c.C.main === 5 && c.D.middle === 5 && c.D.main === 0 && c.K.upper === 11 && c.K.middle === 5 && c.K.main === 2;
+  // A row given mains it cannot have is refused, with the reason.
+  S2.cascadeSpec = 'A 14 6 3\nB 14 6 3\nC 15 6 5\nD 14 6 2';
+  globalThis.__rebuild();
+  const refused = globalThis.__getM().writtenCascade;
+  const said = !refused.ok && /hangs from the C mains/.test(refused.problems[0]);
+  Object.assign(S2, keep); globalThis.__rebuild(); globalThis.__controls();
+  if (!asWritten || !said) {
+    errors.push(`written cascade: ${JSON.stringify(c)}; D with mains: ${refused.problems[0] ?? 'accepted'}`);
+  }
+  console.log(`  ${asWritten && said ? 'ok  ' : 'FAIL'} a written cascade builds its middle counts and its brake `
+    + `(A ${c.A.upper} ${c.A.middle} ${c.A.main}, K ${c.K.upper} ${c.K.middle} ${c.K.main}), and a D row given mains is refused`);
+}
+// A wing from the picker hangs from its own suspension where its maker's
+// sheets are on file, and from anchors solved to its line length where they
+// are not. It kept whatever layout the panel held, on every second rib: a
+// two-liner was built on three risers until the designer changed it.
+{
+  const S2 = globalThis.__S;
+  const keep = { reference: S2.reference, riserLayout: S2.riserLayout, useCascadeSpec: S2.useCascadeSpec,
+    cascadeSpec: S2.cascadeSpec };
+  const got = {};
+  for (const ref of ['Ozone Geo 7 MS', 'Ozone Zeno 2 S', 'BGD Lynx 2 M', 'Niviuk Artik R 2 23',
+    'Skywalk SAGE 95', 'Niviuk Skin 4 P 16']) {
+    S2.reference = ref; globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
+    const m = globalThis.__getM();
+    got[ref] = { layout: S2.riserLayout, spec: S2.useCascadeSpec ? S2.cascadeSpec : '', ok: m.writtenCascade?.ok,
+      built: m.linePlan.levelShortfalls.length === 0, line: m.linePlan.totalLengthM, note: S2._referenceNote };
+  }
+  const g = got;
+  // Its tip lines too, as its totals show them: the last two A and B lines
+  // and the last C share one path to the riser.
+  const own = g['Ozone Geo 7 MS'].layout === 'A/B/C+D'
+    && /\nA 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C$/.test(g['Ozone Geo 7 MS'].spec)
+    && g['Ozone Geo 7 MS'].ok && g['Ozone Geo 7 MS'].built
+    && g['Ozone Zeno 2 S'].layout === 'A/B+C' && /A 30 3\nB 14 3\nC 8$/.test(g['Ozone Zeno 2 S'].spec)
+    // A three-liner at an aspect ratio of 6.2, which the rule alone made a two-liner.
+    && g['BGD Lynx 2 M'].layout === 'A/B/C+D' && g['Niviuk Artik R 2 23'].layout === 'A+B/C+D'
+    && /its own riser layout/.test(g['Ozone Geo 7 MS'].note);
+  const solvedSage = g['Skywalk SAGE 95'].layout === 'A/B+C' && /^# Solved to the published 215 m/.test(g['Skywalk SAGE 95'].spec)
+    && Math.abs(g['Skywalk SAGE 95'].line / 215 - 1) < 0.05 && /no line sheet of it is on file/.test(g['Skywalk SAGE 95'].note);
+  const skin = /its sheet gives A\+B\/C\+D\+E\/F\+G\/H\+I, 9 rows on 4 risers/.test(g['Niviuk Skin 4 P 16'].note);
+  Object.assign(S2, keep); globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
+  if (!own || !solvedSage || !skin) {
+    errors.push(`picker suspension: own ${own}, SAGE solved ${solvedSage}, Skin 4 P said ${skin}: `
+      + JSON.stringify(Object.fromEntries(Object.entries(g).map(([k, v]) => [k, `${v.layout} ${v.spec.split('\n').filter((x) => !x.startsWith('#')).join(' / ')}`]))));
+  }
+  console.log(`  ${own && solvedSage && skin ? 'ok  ' : 'FAIL'} the picker gives a wing its own suspension where its sheets are on file `
+    + `(Geo 7 ${g['Ozone Geo 7 MS'].layout}, Lynx 2 ${g['BGD Lynx 2 M'].layout}, Artik R 2 ${g['Niviuk Artik R 2 23'].layout}), `
+    + `and anchors solved to the line length where they are not (SAGE 95 ${g['Skywalk SAGE 95'].line.toFixed(0)} m against 215)`);
+}
 // A change read against the design before it: `compareDesigns` was in the
 // core and the suite and nowhere in the interface.
 {
   const S2 = globalThis.__S;
   const keepCells = S2.cells;
+  // On the derived plan, where more cells means more lines.
+  const keepSpec = S2.useCascadeSpec;
+  S2.useCascadeSpec = false;
   const pressText = (text) => {
     globalThis.__buttons.length = 0; globalThis.__controls();
     const btn = globalThis.__buttons.find((x) => x.text === text);
@@ -185,7 +264,8 @@ if (!errors.length) {
   pressText('Forget the remembered design');
   globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
   const gone = rowsOf(document.getElementById('compareTable')).length === 0;
-  S2.cells = keepCells; globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
+  S2.cells = keepCells; S2.useCascadeSpec = keepSpec;
+  globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
   if (!okShown || !gone) errors.push(`comparison: shown ${okShown}, forgotten ${gone}: ${shown.slice(0, 200)}`);
   console.log(`  ${okShown && gone ? 'ok  ' : 'FAIL'} a remembered design is compared with the one on the page, `
     + `and forgotten on request (${cellsRow.trim().replace(/\s+/g, ' ')})`);
@@ -1244,7 +1324,9 @@ try {
   {
     const Sd = globalThis.__S;
     const keep = {};
-    for (const k of ['vribs', 'vribRows', 'vribReach', 'useCascadeSpec', 'cascadeSpec']) keep[k] = Sd[k];
+    for (const k of ['vribs', 'vribRows', 'vribReach', 'useCascadeSpec', 'cascadeSpec', 'riserLayout']) keep[k] = Sd[k];
+    // On four rows and three risers, whatever the wing before it hung from.
+    Sd.riserLayout = 'A/B/C+D';
     const fail = (what) => { console.log(`  FAIL ${what}`); process.exit(1); };
     const linedOf = (m) => {
       const by = {};
@@ -1268,9 +1350,10 @@ try {
     if (!m0.vribs.count || strays(m0).length) {
       fail(`${strays(m0).length} of ${m0.vribs.count} diagonals do not hang from a line on the default plan`);
     }
-    // A cascade written with two free ribs between the lined ones.
+    // A cascade written with two free ribs between the lined ones. The D row
+    // hangs from the C mains on this layout, so it is written without mains.
     Sd.useCascadeSpec = true;
-    Sd.cascadeSpec = 'A 9 4 2\nB 9 4 2\nC 9 4 2\nD 9 4 2';
+    Sd.cascadeSpec = 'A 9 4 2\nB 9 4 2\nC 9 4 2\nD 9 4';
     globalThis.__rebuild();
     const m1 = globalThis.__getM();
     if (!m1.writtenCascade || !m1.writtenCascade.ok) fail('the written cascade was not accepted');
@@ -1301,11 +1384,14 @@ try {
       return out;
     };
     const accepted = globalThis.__getM().writtenCascade.note;
-    if (!hints().includes(accepted)) fail('the panel does not say the written cascade is in use');
+    if (!hints().some((t) => t.startsWith(accepted) && /Built as written\.$/.test(t))) {
+      fail('the panel does not say the written cascade is in use, and built as written: '
+        + JSON.stringify(hints().slice(-2)));
+    }
     Sd.cascadeSpec = 'A nine four';
     globalThis.__rebuild();                 // what leaving the text box does; the panel is NOT rebuilt
     const after = hints();
-    if (after.includes(accepted) || !after.some((t) => /^Not used: /.test(t))) {
+    if (after.some((t) => t.startsWith(accepted)) || !after.some((t) => /^Not used: /.test(t))) {
       fail('a rejected cascade is still shown as in use: ' + JSON.stringify(after.slice(-2)));
     }
     console.log(`  ok   diagonals hang from the plan's own lines (${m0.vribs.count} a side by default, `
@@ -1388,7 +1474,9 @@ try {
       // name, flat m2, projected m2, projected span m (or null), weight range, mass kg
       ['Ozone Geo 7 XS', 22.2, 18.7, 8.23, [55, 70], 3.34],
       ['Ozone Alpina 5 S', 21.1, 17.9, 9.05, [65, 85], 3.75],
-      ['Niviuk Hook 6 20', 20.0, 17.15, null, [55, 70], 3.97],
+      // Niviuk publish no projected span: their projected aspect ratio (4)
+      // and area (17.15 m2) define it.
+      ['Niviuk Hook 6 20', 20.0, 17.15, Math.sqrt(4 * 17.15), [55, 70], 3.97],
       ['Ozone Ultralite 5 13', 12.9, 11.4, 6.3, [55, 90], 1.44],
     ];
     // On the equations as published. The cases above leave "match the 2012
@@ -1408,9 +1496,10 @@ try {
       if (projSpan !== null && Math.abs(m.lobeM.projectedSpan - projSpan) > 0.006) {
         fail(`projected span ${m.lobeM.projectedSpan.toFixed(3)} m, published ${projSpan}`);
       }
-      // Solved to the area where the span is not published; within what a
-      // circle through the published span gives where it is.
-      const projTol = projSpan === null ? 0.005 : 0.04;
+      // The ellipse through the projected span lands within 2.1% of the
+      // published projected area on every wing on file; the circle it
+      // replaced was up to 3.7% short, so this allowed 4%.
+      const projTol = 0.025;
       if (Math.abs(m.projArea / proj - 1) > projTol) {
         fail(`projected area ${m.projArea.toFixed(2)} m2, published ${proj}`);
       }

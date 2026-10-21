@@ -2354,6 +2354,30 @@ function minArrowRatio(aRatio, type = 'ellipse', exponent = 1.6) {
   return hi;
 }
 
+/**
+ * The handbook's ellipse (3.1(c)) through a projected span: semi-axis `a` the
+ * projected half span, and the arrow `b` the least that carries the flat half
+ * span, so the tip is where the quarter ends — vertical, as a stabilo is.
+ *
+ * A real wing's arc is flatter in the middle and steeper at the tip than a
+ * circle, and the published projected AREA says so independently of the
+ * lines: through the published projected span, this ellipse projects the 55
+ * sizes of ten families that publish one to within 1.0% of it on average
+ * (−2.0 to +2.1%), and a circle through the same span to within 2.0% (−3.7 to
+ * +0.4%), short on 51 of them, because a circle curves the middle of the
+ * wing, where the chord is, as much as its tip. The circle is the nearer only
+ * on the Artik R 2, by a tenth of a percent, and the single-surface Skin 4 P,
+ * which this tool builds with a lower surface it does not have.
+ */
+function ellipseForProjectedRatio(ratio) {
+  if (!(ratio > 0.5 && ratio < 1)) {
+    throw new Error(`ellipseForProjectedRatio: a projected ratio between 0.5 and 1 (got ${ratio})`);
+  }
+  // A millionth over the least arrow, so the arc is never a rounding short of
+  // the span it has to carry.
+  return { type: 'ellipse', aRatio: ratio, bRatio: minArrowRatio(ratio, 'ellipse') * (1 + 1e-6) };
+}
+
 /** Circle radius that turns a flat half-span into a given projected fraction. */
 function radiusForProjectedRatio(halfSpan, ratio) {
   // Projected half span = R * sin(halfSpan/R). Solve R*sin(s/R)/s = ratio.
@@ -4966,6 +4990,191 @@ function inferRiserLength(lineSet, topology, row) {
   return best;
 }
 
+/* ------------------------------------------------------ stated topology -- */
+
+/**
+ * A line plan as its maker draws it: each line, and the line it hangs from.
+ *
+ * Ozone's sheets do not say which canopy line hangs from which middle line,
+ * so `inferTopology` recovers it from the lengths, and until now the only
+ * place its answer could be checked was BGD's sheet, which states it. A
+ * maker's line-plan drawing states it too. Six are transcribed under
+ * `data/reference/lineplan-*.tsv`, one row a line:
+ *
+ *     line    parent     also
+ *     a1      A1
+ *     A1      Amain1
+ *     Amain1  riser A
+ *     sa1     ST1        a13
+ *
+ * A parent that is not itself a line is where the cascade ends — `riser X`,
+ * or `handle` for the brake. `also` is another sheet's name for the same
+ * line: the Meru 2's component sheets call its stabilo lines a13 to c15
+ * where the drawing and the totals call them sa1 to sb3.
+ *
+ * What a drawing states, the names cannot: on the Summit X a13 to a15 hang
+ * from the stabilo line, and on the Torre and the Meru 2 there is no B main —
+ * two risers, where the names suggest three.
+ */
+function parseStatedTopology(text) {
+  if (typeof text !== 'string') {
+    throw new Error('parseStatedTopology needs the table as text');
+  }
+  const parentOf = new Map();
+  const alsoOf = new Map();
+  const alias = new Map();
+  const problems = [];
+  let convention = null;
+  let header = null;
+  for (const raw of text.split(/\r?\n/)) {
+    if (/^\s*#/.test(raw)) {
+      const m = /^#\s*convention:\s*(\S+)/i.exec(raw);
+      if (m) convention = m[1].toLowerCase();
+      continue;
+    }
+    if (!raw.trim()) continue;
+    const cells = raw.split('\t').map((c) => c.trim());
+    if (!header) { header = cells.map((c) => c.toLowerCase()); continue; }
+    const [line, parent, also] = cells;
+    if (!line || !parent) {
+      problems.push(`"${raw.trim()}" needs a line and the line it hangs from`);
+      continue;
+    }
+    if (parentOf.has(line)) { problems.push(`${line} is listed twice`); continue; }
+    parentOf.set(line, parent);
+    if (also) { alsoOf.set(line, also); alias.set(also, line); }
+  }
+  if (!header || header[0] !== 'line' || header[1] !== 'parent') {
+    problems.push('the header must be "line<TAB>parent", with "also" optional');
+  }
+
+  const isEnd = (p) => /^riser\b/i.test(p) || /^handle$/i.test(p);
+  const childrenOf = new Map();
+  for (const [line, parent] of parentOf) {
+    if (!parentOf.has(parent) && !isEnd(parent)) {
+      problems.push(`${line} hangs from ${parent}, which is neither a line here nor a riser`);
+    }
+    if (!childrenOf.has(parent)) childrenOf.set(parent, []);
+    childrenOf.get(parent).push(line);
+  }
+
+  // Each line walked down to where its cascade ends. A loop is a slip in the
+  // transcription, and is reported rather than followed for ever.
+  const pathOf = new Map();
+  for (const line of parentOf.keys()) {
+    const lines = [line];
+    const seen = new Set(lines);
+    let p = parentOf.get(line);
+    while (parentOf.has(p)) {
+      if (seen.has(p)) { problems.push(`the path from ${line} loops at ${p}`); break; }
+      seen.add(p);
+      lines.push(p);
+      p = parentOf.get(p);
+    }
+    pathOf.set(line, { lines, end: p });
+  }
+
+  const canopy = [...parentOf.keys()].filter((l) => !childrenOf.has(l));
+  const ends = [...new Set([...pathOf.values()].map((x) => x.end))].sort();
+  return {
+    convention,
+    lines: [...parentOf.keys()],
+    parentOf,
+    childrenOf,
+    alsoOf,
+    alias,
+    // The lines at the canopy: those nothing hangs from.
+    canopy,
+    // Every canopy line's path, canopy first, down to the riser or handle.
+    paths: canopy.map((c) => ({ canopy: c, ...pathOf.get(c) })),
+    // How many lines lie between a line and where its cascade ends, itself
+    // included: 1 for a line on the riser.
+    stepsToEnd: (line) => pathOf.get(line)?.lines.length ?? null,
+    endOf: (line) => pathOf.get(line)?.end ?? null,
+    ends,
+    risers: ends.filter((e) => /^riser\b/i.test(e)).map((e) => e.replace(/^riser\s*/i, '')),
+    problems,
+    ok: problems.length === 0,
+  };
+}
+
+/**
+ * What a drawing settles about a sheet's lines, applied to them.
+ *
+ * Each line the drawing names (or names under `also`) is given the line it
+ * hangs from and the riser its path ends on. A canopy line whose path ends on
+ * the stabilo's riser is a stabilo line, whatever its name: the Summit X's
+ * a13 to a15, b13 and b14 hang from STI, and so do the six lines the Meru 2's
+ * component sheets call a13 to a15 and c13 to c15 — counted until now among
+ * the A, B and C anchors.
+ *
+ * Returns new line objects; the sheet's own are not touched. `nameRow` keeps
+ * the row the name gave, where the drawing moved it.
+ */
+function applyStatedTopology(lines, topology) {
+  const nameIn = (l) => (topology.parentOf.has(l.name) ? l.name : topology.alias.get(l.name) ?? null);
+  const moved = [];
+  const out = lines.map((l) => {
+    const n = nameIn(l);
+    if (n == null) return l;
+    const end = topology.endOf(n);
+    const next = { ...l, statedParent: topology.parentOf.get(n), statedEnd: end };
+    const isCanopy = !topology.childrenOf.has(n);
+    if (isCanopy && end === 'riser S' && l.row !== 'S') {
+      next.nameRow = l.row;
+      next.row = 'S';
+      next.isStabilo = true;
+      moved.push(l.name);
+    }
+    return next;
+  });
+  return { lines: out, movedToStabilo: moved };
+}
+
+/**
+ * A stated plan summed along each path, against the published totals.
+ *
+ * `lengthOf` gives each line's length on one size's sheet; `totals`, where
+ * there are any, the maker's own canopy-to-riser total for each canopy line.
+ * What a total leaves over once its path is summed is the riser it hangs
+ * from, and that is one length for every path that ends on that riser —
+ * when the drawing, the sheet and the totals agree. A canopy line put under
+ * the wrong middle line shows as a riser that disagrees with itself, by the
+ * difference between the two middles.
+ */
+function statedPathTotals(topology, lengthOf, { totals = null } = {}) {
+  const look = (map, name) => {
+    if (!map) return null;
+    if (map.has(name)) return map.get(name);
+    const also = topology.alsoOf.get(name);
+    return also != null && map.has(also) ? map.get(also) : null;
+  };
+  const paths = topology.paths.map((p) => {
+    const lengths = p.lines.map((n) => look(lengthOf, n));
+    const missing = p.lines.filter((n, i) => lengths[i] == null);
+    const sumMM = missing.length ? null : lengths.reduce((a, b) => a + b, 0);
+    const totalMM = look(totals, p.canopy);
+    return {
+      canopy: p.canopy, end: p.end, lines: p.lines, sumMM, missing, totalMM,
+      leftMM: totalMM != null && sumMM != null ? totalMM - sumMM : null,
+    };
+  });
+  const byEnd = {};
+  for (const p of paths) if (p.leftMM != null) (byEnd[p.end] ||= []).push(p.leftMM);
+  const ends = {};
+  for (const [end, v] of Object.entries(byEnd)) {
+    const min = Math.min(...v);
+    const max = Math.max(...v);
+    ends[end] = { n: v.length, meanMM: v.reduce((a, b) => a + b, 0) / v.length, minMM: min, maxMM: max, spreadMM: max - min };
+  }
+  return {
+    paths,
+    ends,
+    missing: [...new Set(paths.flatMap((p) => p.missing))],
+    worstSpreadMM: Math.max(0, ...Object.values(ends).map((e) => e.spreadMM)),
+  };
+}
+
 /**
  * How the linesets of a family go with the wing, measured from the sheets.
  *
@@ -5120,6 +5329,14 @@ const RISER_LAYOUTS = {
     { name: 'B', rows: ['B'] },
     { name: 'C', rows: ['C', 'D'] },
   ],
+  // A two-liner on four rows: the B row hangs from the A mains and the D row
+  // from the C mains. UP's line plans of the Torre and the Meru 2 draw it so,
+  // and Niviuk's Artik R 2 has A and C mains and no others: three of the six
+  // two-liners in the reference set.
+  'A+B/C+D': [
+    { name: 'A', rows: ['A', 'B'] },
+    { name: 'C', rows: ['C', 'D'] },
+  ],
 };
 
 /**
@@ -5145,6 +5362,8 @@ function applyRiserSplit(plan, layout, { halfSpanM = null } = {}) {
   let moved = 0;
   for (const l of plan.lines) {
     if (!rule.rows.includes(l.row)) continue;
+    // A tip line on the stabilo hangs from the stabilo's riser, not this one.
+    if (l.stabiloTip) continue;
     // The anchor end of an upper line is what sits on the span.
     const y = l.to ? Math.abs(l.to[1]) : null;
     if (y === null) continue;
@@ -5306,18 +5525,60 @@ function buildLinePlanInner({
   // the way to the riser — twelve metres a side that no wing has.
   shareRiserMains = true,
   loadMode = 1,
+  // The tip lines a row ends in: the outermost anchors, on one long line each
+  // to the top of the row's outermost main. They are the stabilo's lines on
+  // a real wing — the Geo 7's A13, A14, B13, B14 and C15, 1.0 to 1.2 m long
+  // against 0.3 to 0.6 m inboard, share one path to the riser to the
+  // millimetre in every size (`tipLinesFromTotals`). Two on every row unless
+  // a row's own count is given (`tipAnchorsPerRow`).
   tipDirectAnchors = 2,
+  // Tip lines per row, one number or a count per row, where a design's own
+  // are known: the Geo 7's are A 2, B 2, C 1, D 0; the Hook 6's one each on
+  // A, B and C. With `anchorsPerRow`, a row with fewer anchors than the front
+  // row ends inboard and has none unless given.
+  tipAnchorsPerRow = null,
+  // Where the tip lines go when anchors are given per row: on the ribs this
+  // far out, as fractions of the half wing's. The stabilo's lines on four of
+  // UP's line plans and BGD's sheet start 0.87 to 0.93 of the way out (0.98
+  // on the Vibe GT's diagram) and end at 0.97 to 1.0.
+  tipReach = [0.92, 0.99],
+  // Hang the tip lines from one stabilo line instead of each from its own
+  // row's outermost main. That is what the makers' plans draw: the Vibe GT's
+  // A13, A14, B13 and B14 on BRU4 and BRL4 to the B riser, the Lynx 2's
+  // a15-a17 and b16-b18 on BR4 to the same, and the Geo 7's and the Hook 6's
+  // sharing one path to the millimetre. The junction is four fifths of the
+  // way up, as the Geo 7's 4.6 m stabilo line has it under tip lines of 1.0
+  // to 1.2 m, and the line goes to `stabiloRiser` where a design's sheets
+  // show it — the Geo 7's is CRU4 on CRL4, to its C riser — and otherwise to
+  // the riser that carries B (the rearmost, where B shares the front riser).
+  stabilo = false,
+  stabiloRiser = null,
+  stabiloJunctionFraction = 0.8,
   // Main lines per row.
   //
   // A real wing has a *fixed* number of mains regardless of size. The Geo 7
-  // carries A:3 B:3 C:5 in XS, MS and L alike; the Alpina 5 carries A:4 B:4
-  // in every size. Grouping by a constant chunk size instead makes the main
-  // count scale with the anchor count, which produced 16 mains against a
-  // real 10 on the Alpina and 19 against 7 on the Zeno.
+  // carries A:3 B:3 C:3 in XS, MS and L alike, with its stabilo's line on the
+  // C riser beside them, and the Alpina 5 A:3 B:3 in every size (a main in
+  // two parts, CRL4 and CRU4, is one line; counted as lines they read C:5 and
+  // A:4 B:4). Grouping by a constant chunk size instead makes the main count
+  // scale with the anchor count.
   //
   // Null keeps the old behaviour, because a design that has not said how many
   // mains it wants should not silently get three.
   mainsPerRow = null,
+  // Middle lines per row, one number or a count per row. Unset, the anchors
+  // are paired (`groupSize`). A written cascade gives it: "A 18 6 3" was
+  // built with eight middle lines, because nothing read the six.
+  middlesPerRow = null,
+  // With `anchorsPerRow`, a row with fewer anchors than the front row takes
+  // the front row's ribs from the centre out, as real wings' rear rows do,
+  // and each row's tip lines go out to the tip ribs (`tipReach`). Off spreads
+  // every row's anchors evenly to the tip, as it was.
+  alignRearRows = true,
+  // How far out the front row's own lines reach — the anchors before its tip
+  // lines — as a fraction of the ribs of a half wing, when anchors are given
+  // per row: 0.78 to 0.89 on the six plans that show it, median 0.84.
+  frontReach = 0.84,
   // Attachment density, per row.
   //
   // `everyNthRib` is one integer applied to every row, and real wings do not
@@ -5425,9 +5686,33 @@ function buildLinePlanInner({
   const lines = [];
   const risers = [];
   const shortfalls = [];
+  // Every row's tip anchors, when they hang from one stabilo line.
+  const tipGroup = [];
 
   const junction = (parent, centroid, fraction, tops) => fanJunction(
     parent, centroid, fraction, tops, maxFanAngleDeg, maxLineAngleDeg);
+
+  // Where anchors given per row go (below, at each row).
+  const front = anchorsPerRow && alignRearRows ? frontRowOf(anchorsPerRow) : null;
+  const lastRib = wing.ribs.length - 1;
+  const spread = (count, reach) => Array.from({ length: count },
+    (_, k) => Math.round((k * reach) / Math.max(1, count - 1)));
+  const frontN = front ? Math.min(anchorsPerRow[front], wing.ribs.length) : 0;
+  const tipCountOf = (r, count) => {
+    const given = tipAnchorsPerRow != null && typeof tipAnchorsPerRow === 'object'
+      ? tipAnchorsPerRow[r] : tipAnchorsPerRow;
+    if (given != null) return Math.max(0, Math.min(given, count));
+    // A row that ends inboard has no tip lines of its own.
+    return r !== front && count < frontN ? 0 : Math.min(tipDirectAnchors, count);
+  };
+  // Every row stops short of the tip where tip lines go on beyond — the
+  // Lynx 2's C row too, which has none, at its rib 28 of 33 with its A and
+  // B. Where no row has any, there is nothing past them, and the rows run to
+  // the tip.
+  const anyTips = front != null && layout.some((r) => (r.rows ?? [])
+    .some((row) => anchorsPerRow[row] > 0 && tipCountOf(row, Math.min(anchorsPerRow[row], wing.ribs.length)) > 0));
+  const inboardReach = (count) => (anyTips
+    ? Math.min(lastRib, Math.max(Math.round(frontReach * lastRib), count - 1)) : lastRib);
 
   for (const riser of layout) {
     const carried = [];
@@ -5448,8 +5733,53 @@ function buildLinePlanInner({
         // every nth. A fractional spacing is exactly what the real wings
         // show, and it cannot be reached by an integer stride.
         const n = Math.max(1, Math.min(want, wing.ribs.length));
-        for (let k = 0; k < n; k++) {
-          const i = Math.round((k * (wing.ribs.length - 1)) / Math.max(1, n - 1));
+        // One anchor a rib at most, on a row: a count over the ribs is built
+        // as one on every rib, and said so.
+        if (n !== want) shortfalls.push({ row, level: 'anchor', asked: want, got: n });
+        // Where they go. Real wings end their rows in two ways at once, and
+        // both are on the makers' own plans:
+        //
+        //  - A row with fewer anchors than the front row is not spread to the
+        //    tip: it takes the front row's ribs, from the centre out, and
+        //    stops. The Hook 6's four D anchors end level with its fourth A of
+        //    ten, the Swift 6's eight C and D near its eighth of seventeen;
+        //    UP's Makalu 5, Torre, Meru 2 and Summit X, BGD's Lynx 2 and
+        //    Ozone's Vibe GT draw or list theirs that way. (The K2 5's D and
+        //    E rows are the exception: every second rib, as far as its A.)
+        //    Spread to the tip, they were lines where the wing has none.
+        //  - The rows' own lines stop short of the tip — the front row's on
+        //    the rib 0.78 to 0.89 of the way out on the six plans that show
+        //    it (`frontReach`) — and the tip ribs beyond carry the stabilo's:
+        //    each row's tip lines (`tipAnchorsPerRow`), on the ribs from 0.92
+        //    to 0.99 of the way out (`tipReach`). The Lynx 2's C row, with no
+        //    tip lines, stops at its rib 28 of 33 with its A and B.
+        //
+        // Stopping the rows short without the tip lines going on out left the
+        // outer sixth of the wing with no lines at all.
+        let ribIndices = null;
+        if (front) {
+          const tipN = tipCountOf(row, n);
+          const inner = n - tipN;
+          const frontInner = frontN - tipCountOf(front, frontN);
+          const inboard = row !== front && inner <= frontInner
+            ? spread(frontInner, inboardReach(frontInner)).slice(0, inner)
+            : spread(inner, inboardReach(inner));
+          const last = inboard.length ? inboard[inboard.length - 1] : -1;
+          const lo = Math.min(lastRib, Math.max(last + 1, Math.round(tipReach[0] * lastRib)));
+          const hi = Math.min(lastRib, Math.max(lo, Math.round(tipReach[1] * lastRib)));
+          if (tipN <= hi - lo + 1) {
+            const tips = tipN === 1 ? [Math.round((lo + hi) / 2)] : spread(tipN, hi - lo).map((k) => lo + k);
+            ribIndices = inboard.concat(tips);
+            anchors.tipCount = tipN;
+          }
+          // A wing with too few ribs for a tip zone is spread to the tip, as
+          // it was.
+        }
+        if (!ribIndices) {
+          ribIndices = spread(n, lastRib);
+          anchors.tipCount = front ? tipCountOf(row, n) : null;
+        }
+        for (const i of ribIndices) {
           const rib = wing.ribs[i];
           anchors.push({
             anchor: anchors.length + 1,
@@ -5478,14 +5808,23 @@ function buildLinePlanInner({
       // around 300-500 mm, and they have no middle line above them. Forcing
       // every anchor through all three levels makes the tip lines far too
       // long and the tip trim wrong.
-      const direct = tipDirectAnchors > 0 ? anchors.slice(-tipDirectAnchors) : [];
-      const cascaded = tipDirectAnchors > 0 ? anchors.slice(0, -tipDirectAnchors) : anchors;
+      const tipN = anchors.tipCount != null ? anchors.tipCount : tipDirectAnchors;
+      const direct = tipN > 0 ? anchors.slice(-tipN) : [];
+      const cascaded = tipN > 0 ? anchors.slice(0, -tipN) : anchors;
 
       // Build downward from the maillon: first the riser-level junctions,
       // then the middle ones, then the upper lines out to the anchors. Going
       // this way each junction is placed along the path to the centre of
       // gravity of everything above it, which is the handbook's construction.
-      const groups = chunkBy(cascaded, groupSize);
+      // Middle lines: a count where one is written, pairs where not.
+      const wantMiddles = middlesPerRow && typeof middlesPerRow === 'object'
+        ? middlesPerRow[row] ?? null : middlesPerRow;
+      const groups = wantMiddles ? chunkInto(cascaded, wantMiddles) : chunkBy(cascaded, groupSize);
+      if (wantMiddles && groups.length !== wantMiddles) {
+        shortfalls.push({
+          row, level: 'middle', asked: wantMiddles, got: groups.length, anchors: cascaded.length,
+        });
+      }
       // Either a fixed number of mains, or the old constant-chunk grouping.
       // `chunkInto` caps at the number of groups available, so a row with few
       // anchors cannot reach the requested main count: 9 anchors make 5
@@ -5498,7 +5837,7 @@ function buildLinePlanInner({
       // Its name says per row and it was a single integer applied to all of
       // them, so a cascade spec asking for A:3 B:4 C:2 could not be built —
       // the A row came back with seven mains. Real plans differ by row: the
-      // Zeno 2's own is A:3 B:4, which one number cannot express.
+      // Lynx 2's own is A:3 B:3 C:2, which one number cannot express.
       // A row that shares its riser with the row before it hangs from that
       // row's main lines, and has none of its own.
       const dependent = shareRiserMains && hostNodes != null && hostNodes.length > 0;
@@ -5512,7 +5851,7 @@ function buildLinePlanInner({
         : chunkBy(groups, groupSize);
       if (!dependent && wantMains && riserGroups.length !== wantMains) {
         shortfalls.push({
-          row, asked: wantMains, got: riserGroups.length,
+          row, level: 'main', asked: wantMains, got: riserGroups.length,
           anchors: cascaded.length, middles: groups.length,
         });
       }
@@ -5602,8 +5941,11 @@ function buildLinePlanInner({
       });
       void unusedMidNodes;
 
-      // The direct tip anchors join the outermost riser node.
-      if (direct.length && riserNodes.length) {
+      // The direct tip anchors join the outermost riser node — or, with a
+      // stabilo, its one line, built when every row is in.
+      if (stabilo && direct.length) {
+        for (const a of direct) tipGroup.push({ ...a, row });
+      } else if (direct.length && riserNodes.length) {
         const host = riserNodes[riserNodes.length - 1];
         for (const a of direct) {
           lines.push({
@@ -5648,6 +5990,31 @@ function buildLinePlanInner({
       carried.push(row);
     }
     risers.push({ name: riser.name, rows: carried, maillon });
+  }
+
+  // The stabilo: the rows' tip lines on one junction, and one line from it to
+  // its riser. Its top lines keep their rows — they are the A13s and B14s of
+  // the makers' sheets, and they carry the tip's lift like any anchor.
+  let stabiloLines = null;
+  if (tipGroup.length) {
+    const withB = layout.find((r) => (r.rows ?? []).includes('B'));
+    const sName = stabiloRiser
+      ?? (withB && layout.indexOf(withB) > 0 ? withB.name : layout[layout.length - 1]?.name);
+    const sTop = riserTops[sName] ?? (risers.length ? risers[risers.length - 1].maillon : karabiner);
+    const points = tipGroup.map((a) => a.point);
+    const node = junction(sTop, weightedCentroid(tipGroup, loadMode), stabiloJunctionFraction, points);
+    stabiloLines = tipGroup.map((a) => ({
+      row: a.row, level: 'upper', index: a.anchor, name: `${a.row}${a.anchor}`,
+      riser: sName, ribIndex: a.ribIndex, direct: true, stabiloTip: true,
+      from: node, to: a.point, lengthMM: mm(node, a.point), anchors: [a.anchor],
+    }));
+    stabiloLines.push({
+      row: 'S', rows: [...new Set(tipGroup.map((a) => a.row))], level: 'main', index: 1,
+      name: 'SR1', riser: sName, isStabilo: true,
+      from: sTop, to: node, lengthMM: mm(sTop, node),
+      anchors: [], carries: tipGroup.map((a) => ({ row: a.row, anchor: a.anchor })),
+    });
+    lines.push(...stabiloLines);
   }
 
   // `maillon` stays as the first riser's top, for code that wants one point;
@@ -5729,12 +6096,16 @@ function buildLinePlanInner({
     plan.riserLengthM = riserLengthM;
   }
 
+  if (stabiloLines) {
+    plan.stabilo = { lines: stabiloLines, anchors: tipGroup.length, riser: stabiloLines[0].riser, fromRows: true };
+  }
   plan.totals = planTotals(plan);
   plan.totalLengthM = plan.lines.reduce((s, l) => s + (l.lengthMM * 2) / 1000, 0);
   plan.mergedRows = mergeRows || [];
-  // A row that could not be given the mains it asked for.
-  plan.mainShortfalls = shortfalls;
-  plan.mainsAsRequested = shortfalls.length === 0;
+  // A row that could not be given the middles or the mains it asked for.
+  plan.levelShortfalls = shortfalls;
+  plan.mainShortfalls = shortfalls.filter((f) => f.level === 'main');
+  plan.mainsAsRequested = plan.mainShortfalls.length === 0;
   return plan;
 }
 
@@ -5758,7 +6129,8 @@ function mergeCascades(plan, groups, levelFractions, junction = lerp3) {
     const rows = group.filter((r) => plan.lines.some((l) => l.row === r));
     if (rows.length < 2) continue;
 
-    const tops = plan.lines.filter((l) => rows.includes(l.row) && l.level === 'upper');
+    // The stabilo's tip lines stay on the stabilo.
+    const tops = plan.lines.filter((l) => rows.includes(l.row) && l.level === 'upper' && !l.stabiloTip);
     if (!tops.length) continue;
 
     const below = plan.lines.filter((l) => rows.includes(l.row) && l.level !== 'upper');
@@ -6026,6 +6398,12 @@ function fanJunction(parent, centroid, fraction, tops, maxFanDeg = 0, maxVertica
     node = lerp3(parent, centroid, f);
   }
   return node;
+}
+
+/** The front row of a set of anchor counts: the first load-bearing one. */
+function frontRowOf(anchorsPerRow) {
+  if (!anchorsPerRow) return null;
+  return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'].find((r) => anchorsPerRow[r] > 0) ?? null;
 }
 
 function chunkBy(arr, n) {
@@ -6674,7 +7052,10 @@ function buildBrakePlan({
       anchors: rg.map((p) => p.anchor),
     });
 
-    const perRiser = Math.max(1, Math.round(nMid / nRiser));
+    // The middle lines shared out over the risers so that there are as many
+    // as asked: it was round(nMid / nRiser) on each, and 5 over 2 made 6.
+    const perRiser = Math.max(1, Math.floor(nMid / riserGroups.length)
+      + (r < nMid % riserGroups.length ? 1 : 0));
     const midGroups = chunkInto(rg, perRiser);
     midGroups.forEach((mg) => {
       midIndex += 1;
@@ -6891,9 +7272,20 @@ function parseUpLineSheet(text) {
   // They were dropped without a word, the stabilo's main line among them.
   const unparsed = [];
   const recovered = [];
+  // Every length on a component sheet by its name, whether or not the name
+  // can be read: a drawn path runs through Am3-0, STI-0 and b-ris as much as
+  // through anything with a row and a level.
+  const lengthOf = new Map();
   for (const r of rows) {
     const name = (r[0] || '').trim();
     if (!name) continue;
+    if (isComponents && !/\s/.test(name)) {
+      const len = Number(r[1]);
+      const loop = Number(r[3]);
+      const cut = Number(r[4]);
+      if (Number.isFinite(len) && len > 0) lengthOf.set(name, len);
+      else if (Number.isFinite(loop) && Number.isFinite(cut) && cut > loop) lengthOf.set(name, cut - loop);
+    }
     // In UP's own scheme: lowercase at the canopy, uppercase below it.
     const parsed = parseLineName(name, { convention: 'up' });
     if (!parsed) {
@@ -6936,6 +7328,26 @@ function parseUpLineSheet(text) {
     }
   }
 
+  // Where a row has no `main` line, its roman-numeral lines are the ones on
+  // the riser.
+  //
+  // A roman numeral is UP's level between the middle lines and the mains on
+  // the Torre and the Meru 2, and that is how a name alone reads. UP's own
+  // line plans show it is not always so: on the Makalu 5 there is no Amain,
+  // and AI to CIII go to the risers (its sheets mark them "loop on
+  // maillon"); on all five wings STI is the stabilo's line to the riser.
+  // Read by name, the Makalu 5 had no main line in any row.
+  const atRiser = [];
+  for (const row of [...new Set(lines.map((l) => l.row))]) {
+    const own = lines.filter((l) => l.row === row);
+    if (own.some((l) => l.level === 'main')) continue;
+    for (const l of own.filter((x) => x.level === 'upper-main')) {
+      l.level = 'main';
+      l.nameLevel = 'upper-main';
+      atRiser.push(l.name);
+    }
+  }
+
   const withLoop = lines.filter((l) => l.loopMM != null);
   const loopValues = [...new Set(withLoop.map((l) => l.loopMM))];
 
@@ -6944,6 +7356,9 @@ function parseUpLineSheet(text) {
     lines,
     totals,
     sizes,
+    lengthOf,
+    // Roman-numeral lines read as mains because their row has no other.
+    atRiser,
     unparsed,
     // Lines whose length was taken from cutting less loop.
     recovered,
@@ -7092,38 +7507,38 @@ const ANCHOR_DENSITY = {
     { name: 'Ozone Swift 6', risers: 3, rows: { A: 17, B: 17, C: 8, D: 8 }, ribs: 32 },
     { name: 'Ozone Ultralite 5', risers: 3, rows: { A: 16, B: 16, C: 16, D: 16 }, ribs: 18 },
   ],
-  // Front-to-rear ratio, by riser count. Ranges, not a fit.
+  // Front-to-rear ratio, by layout: risers, then load-bearing rows. Ranges,
+  // not a fit.
   //
-  // The key is the riser count taken as one fewer than the load-bearing
-  // rows — the rearmost row cascading into the riser ahead of it, which is
-  // what the two- and three-riser wings in the corpus do. For five rows and
-  // for nine it is a key and nothing more: nobody counted those risers.
-  ratioByRisers: {
-    // Measured across the whole corpus by `tools/corpus-learnings.mjs`, not
-    // hand-entered, and held to it figure for figure by the corpus stage of
-    // the check.
-    //
-    // These were six Ozone designs, chosen when the database held only
-    // Ozone. The corpus is 19 designs from four makers now, and it agrees
-    // with them where it overlaps: the two-riser group is the same three
-    // wings, and the three-riser group has gone from three designs to twelve
-    // and its mean from 1.38 to 1.62.
-    //
-    // It said "27 designs" and "n = 20" here for a while. The measurement
-    // counted a file as a design whenever its name did not end in a size, so
-    // the UP Torre was six designs and the Makalu 5, Meru 2 and Summit X two
-    // each; and it read the Torre's component sheets, and Niviuk's Artik R 2,
-    // with the lines UNDER the canopy lines counted as canopy lines — A 20
-    // on a wing whose own totals sheet says 12. One design is one entry now,
-    // and its sheets are held against each other.
-    //
-    // Two categories the six-design table had no examples of: five-row
-    // wings (two of them tandems), and the nine-row single-surface layout
-    // where every attachment gets its own row.
-    2: { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
-    3: { mean: 1.62, min: 1.00, max: 2.50, n: 12 },
-    4: { mean: 1.65, min: 1.33, max: 1.82, n: 3 },
-    8: { mean: 3.00, min: 3.00, max: 3.00, n: 1 },
+  // Measured across the whole corpus by `tools/corpus-learnings.mjs`, not
+  // hand-entered, and held to it figure for figure by the corpus stage of the
+  // check.
+  //
+  // This was keyed by riser count, and the riser count was not measured: it
+  // was taken as one fewer than the rows, the rearmost row cascading into the
+  // riser ahead. Three of the four-row wings are two-liners. UP's own line
+  // plans show it for the Torre and the Meru 2 — a and b anchors share the
+  // A mains, c and d the C mains, and there is no B or D main — and Niviuk's
+  // Artik R 2 has A and C mains and no others. All three sat in the
+  // three-riser group, and the "two-liners taper much harder" that the table
+  // was quoted for is true only of the two-liners with three rows. The four-
+  // row ones pair their rows instead, and taper less than most three-liners.
+  //
+  // The risers are counted from each design's own main lines now, and the
+  // drawings settle two more things the names could not: the Summit X's a13
+  // to a15, b13 and b14 hang from the stabilo line, so its A row is 12, not
+  // 15; and the Makalu 5's roman-numeral lines are its mains.
+  //
+  // The history before that: six Ozone designs, chosen when the database held
+  // only Ozone; then "27 designs" and "n = 20", from a measurement that
+  // counted a file as a design whenever its name did not end in a size, and
+  // read the Torre's and the Artik R 2's middle lines as canopy lines.
+  ratioByLayout: {
+    '2/3': { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
+    '2/4': { mean: 1.37, min: 1.20, max: 1.50, n: 3 },
+    '3/4': { mean: 1.67, min: 1.00, max: 2.50, n: 9 },
+    '4/5': { mean: 1.65, min: 1.33, max: 1.82, n: 3 },
+    '4/9': { mean: 3.00, min: 3.00, max: 3.00, n: 1 },
   },
   sampleDesigns: 19,
   // Line sheets read to get them: several sizes, and sometimes several kinds
@@ -7135,16 +7550,24 @@ const ANCHOR_DENSITY = {
 /**
  * Suggest per-row anchor counts for a wing.
  *
- * Takes the shape of the distribution from the designs of the same riser
- * count and scales it to this wing's rib count. It is a starting point drawn
- * from six wings, not a law — `source` says so, and `anchorsPerRow` accepts
- * an explicit set for anyone who knows better.
+ * Takes the shape of the distribution from the designs of the same layout —
+ * risers and rows — and scales it to this wing's rib count. It is a starting
+ * point drawn from nineteen designs, not a law — `source` says so, and
+ * `anchorsPerRow` accepts an explicit set for anyone who knows better.
  */
 function suggestAnchorsPerRow({
   rows, ribCount, risers = null, frontFraction = null, shape = null,
 }) {
   const n = risers ?? Math.min(3, Math.max(2, rows.length - 1));
-  const group = ANCHOR_DENSITY.ratioByRisers[n] ?? ANCHOR_DENSITY.ratioByRisers[3];
+  // The designs of this layout, risers and rows; where none has been
+  // measured, the nearest in row count on the same risers; then three
+  // risers on four rows, the commonest.
+  const layouts = ANCHOR_DENSITY.ratioByLayout;
+  const rowsOf = (k) => Number(k.split('/')[1]);
+  const layoutKey = layouts[`${n}/${rows.length}`] ? `${n}/${rows.length}`
+    : (Object.keys(layouts).filter((k) => k.startsWith(`${n}/`))
+      .sort((a, b) => Math.abs(rowsOf(a) - rows.length) - Math.abs(rowsOf(b) - rows.length))[0] ?? '3/4');
+  const group = layouts[layoutKey];
 
   // Front density: real designs run 0.28 to 0.94 of their ribs
   // (`FRONT_DENSITY`) and it does not track riser count or aspect ratio, so
@@ -7157,7 +7580,13 @@ function suggestAnchorsPerRow({
   const out = {};
   // Three shapes, because the reference designs show three and averaging
   // them fits none. Flat is the default for a three-liner because two of the
-  // three are flat — but the Swift 6 steps, and forcing it flat is 36% out.
+  // first three measured were flat — but the Swift 6 steps, and forcing it
+  // flat is 36% out. Of the nine three-riser designs now measured only those
+  // two are flat; seven keep A and B alike and attach the D row less (ratio
+  // 1.25 to 2.50). Even so flat fits them better than a taper at the
+  // group's ratio: 57 anchors out against 59 on their totals, and 59 against
+  // 73 row by row, summed over the nine. So the default stands, and `shape`
+  // takes the others.
   const form = shape ?? (n <= 2 ? 'taper' : 'flat');
 
   rows.forEach((row, i) => {
@@ -7176,16 +7605,20 @@ function suggestAnchorsPerRow({
     out[row] = Math.max(2, Math.round(ribCount * front * factor));
   });
 
+  const [lr, lrows] = layoutKey.split('/');
   return {
     anchorsPerRow: out,
     risers: n,
     shape: form,
     ratio: form === 'flat' ? 1 : ratio,
     frontFraction: front,
+    layout: layoutKey,
     source: form === 'taper'
-      ? `${group.n} two-liners, ratio ${group.min}-${group.max}`
+      ? `${group.n} designs on ${lr} risers and ${lrows} rows, ratio ${group.min}-${group.max}`
       : (form === 'step' ? 'the Swift 6, the one stepped design'
-        : '3 three-liners, two of them flat'),
+        : `${group.n} designs on ${lr} risers and ${lrows} rows, ratio `
+          + `${group.min}-${group.max}; flat, as two of them are (the Geo 7 and `
+          + 'the Ultralite 5) — the others attach their rear row less'),
     shapes: ['taper', 'flat', 'step'],
     // Absolute density is a design choice, not a prediction.
     caveat: `front density is an input: real designs run ${FRONT_DENSITY.min} to `
@@ -7203,27 +7636,91 @@ function suggestAnchorsPerRow({
  *
  * This was "0.56 to 0.91", from six Ozone designs, and three of those six
  * had the wrong rib count. Twenty designs from five makers run 0.28 to 0.94.
- * It does not follow aspect ratio (r = -0.31 across the twenty) or riser
- * count; it goes with the maker more than anything. Ozone's run 0.50 to
- * 0.94, UP's 0.28 to 0.62 and PHI's Allegro attaches one rib in three.
+ * It does not follow aspect ratio across the twenty or riser count; it goes
+ * with the maker more than anything. Ozone's run 0.50 to 0.94, UP's 0.28 to
+ * 0.62 and PHI's Allegro attaches one rib in three.
  */
 const FRONT_DENSITY = {
   designs: {
     'UP Meru 2': 0.28, 'PHI Allegro light': 0.32, 'UP Torre': 0.35,
     'Niviuk Artik R 2': 0.40, 'Niviuk Hook 6': 0.42, 'UP Makalu 5': 0.42,
+    // 12 A lines, not 15: UP's line map hangs a13 to a15 from the stabilo
+    // line, and the sheets' names alone counted them in the A row.
+    'UP Summit X': 0.43,
     'Niviuk Ikuma 3': 0.44, 'Ozone Vibe GT': 0.50, 'BGD Lynx 2': 0.52,
-    'Ozone Swift 6': 0.53, 'UP Summit X': 0.54, 'Ozone Geo 7': 0.56,
+    'Ozone Swift 6': 0.53, 'Ozone Geo 7': 0.56,
     'Niviuk Takoo 6': 0.57, 'UP K2 5': 0.62, 'Ozone Magnum 4': 0.71,
     'Ozone Zeno 2': 0.75, 'Ozone Lyght': 0.81, 'Ozone Ultralite 5': 0.89,
     'Niviuk Skin 4 P': 0.90, 'Ozone Alpina 5': 0.94,
   },
   n: 20,
   min: 0.28,
-  median: 0.54,
+  median: 0.53,
   max: 0.94,
   source: 'front-row anchors from the line sheets in data/reference, ribs '
     + 'from the cell counts in data/reference/published-cells.tsv',
 };
+
+/**
+ * Each design's own cascade, from its line sheets, as far as the generator
+ * can build it (`cascadeSpecFromSheet`): its riser layout, every row's
+ * anchors, every riser row's mains, and the middle lines where the row has
+ * the generator's shape.
+ *
+ * Measured by `tools/corpus-learnings.mjs` on every component sheet of every
+ * design — they agree, size for size — and held to it figure for figure by
+ * the corpus stage of the check. A main in two parts is one main: the Geo 7's
+ * fourth C main is CRL4, 970 mm at the riser, and CRU4 above it — its
+ * stabilo's line, below — and the Zeno 2's third B main is BR3, 611 mm, and
+ * BRU3 — counted as lines they made "C:5" and "B:4".
+ *
+ * "tip n" is how many of a row's anchors are tip lines — the stabilo's, which
+ * Ozone, Niviuk and BGD name in the rows they sit outboard of — where the
+ * sheets show them (`tipLinesFromTotals`, `tipLinesFromPaths`): on eight
+ * designs. UP name the stabilo's lines as a row of their own, and a sheet
+ * without per-anchor totals cannot show them, so those rows take the
+ * generator's default. "S C" is the riser the stabilo hangs on, where the
+ * sheet shows its line (`stabiloMainFromTotals`): the Geo 7's "fourth C
+ * main", CRU4 on CRL4, is it, and so is the Vibe GT's fourth B main and the
+ * Lynx 2's BR4 — none of them their rows' own.
+ *
+ * The full pipeline and the wing picker build a design from this where its
+ * layout is one of `RISER_LAYOUTS`. Five rows on four risers, and the Skin 4
+ * P's nine on four, are not.
+ */
+const DESIGN_LINES = {
+  'BGD Lynx 2': { layout: 'A/B/C+D', spec: 'A 17 3 tip 3\nB 18 3 tip 3\nC 17 2 tip 0\nD 8 tip 0\nS B', sheets: 4 },
+  'Niviuk Artik R 2': { layout: 'A+B/C+D', spec: 'A 14 3 tip 1\nB 8 tip 0\nC 14 3 tip 1\nD 10 4 tip 0', sheets: 1 },
+  'Niviuk Hook 6': { layout: 'A/B/C+D', spec: 'A 10 3 tip 1\nB 10 2 tip 1\nC 9 2 tip 1\nD 4 tip 0', sheets: 1 },
+  'Niviuk Ikuma 3': { layout: 'A/B/C+D', spec: 'A 14 6 3\nB 14 6 3\nC 13 2\nD 8', sheets: 1 },
+  'Niviuk Skin 4 P': { layout: 'A+B/C+D+E/F+G/H+I', spec: 'A 18 3 tip 1\nB 16 tip 1\nC 6 3 tip 0\nD 6 tip 0\nE 6 tip 0\nF 6 3 tip 0\nG 6 tip 0\nH 6 3 tip 0\nI 6 tip 0', sheets: 1 },
+  'Niviuk Takoo 6': { layout: 'A/B/C/D+E', spec: 'A 16 8 3\nB 16 3\nC 16 2\nD 14 3\nE 12', sheets: 1 },
+  'Ozone Alpina 5': { layout: 'A/B+C', spec: 'A 31 3\nB 19 3\nC 12 4', sheets: 6 },
+  'Ozone Geo 7': { layout: 'A/B/C+D', spec: 'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C', sheets: 5 },
+  'Ozone Lyght': { layout: 'A/B+C', spec: 'A 29 3\nB 13 3\nC 8', sheets: 5 },
+  'Ozone Magnum 4': { layout: 'A/B/C/D+E', spec: 'A 20 6 2\nB 20 6 3\nC 20 6 4\nD 20 2\nE 11', sheets: 3 },
+  'Ozone Swift 6': { layout: 'A/B/C+D', spec: 'A 17 3 tip 1\nB 17 2 tip 1\nC 8 4 tip 0\nD 8 tip 0', sheets: 6 },
+  'Ozone Ultralite 5': { layout: 'A/B/C+D', spec: 'A 16 7 3 tip 2\nB 16 6 3 tip 2\nC 16 4 tip 2\nD 16 tip 2', sheets: 7 },
+  'Ozone Vibe GT': { layout: 'A/B/C+D', spec: 'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 12 3 tip 0\nD 8 tip 0\nS B', sheets: 6 },
+  'Ozone Zeno 2': { layout: 'A/B+C', spec: 'A 30 3\nB 14 3\nC 8', sheets: 4 },
+  'UP K2 5': { layout: 'A/B/C/D+E', spec: 'A 18 6 3\nB 18 6 3\nC 18 6 3\nD 12 3\nE 10', sheets: 3 },
+  'UP Makalu 5': { layout: 'A/B/C+D', spec: 'A 10 3\nB 10 3\nC 10 3\nD 8', sheets: 4 },
+  'UP Meru 2': { layout: 'A+B/C+D', spec: 'A 12 3\nB 9\nC 12 3\nD 8', sheets: 4 },
+  'UP Summit X': { layout: 'A/B/C+D', spec: 'A 12 6 3\nB 12 6 3\nC 10 2\nD 8', sheets: 4 },
+  'UP Torre': { layout: 'A+B/C+D', spec: 'A 12 3\nB 8\nC 12 3\nD 10', sheets: 5 },
+};
+
+/**
+ * A design's own cascade, ready to build: the layout, and the counts read
+ * against it. Null where the design is not on file, or its layout is not one
+ * the generator has.
+ */
+function designCascade(family) {
+  const d = DESIGN_LINES[family];
+  if (!d || !RISER_LAYOUTS[d.layout]) return null;
+  const spec = parseCascadeSpec(d.spec, { layout: RISER_LAYOUTS[d.layout] });
+  return spec.ok ? { ...d, layoutDef: RISER_LAYOUTS[d.layout], cascade: spec } : null;
+}
 
 /* -------------------------------------------------------------- stabilo -- */
 
@@ -7422,6 +7919,9 @@ function addStabilo(plan, wing, {
 function anchorsForLineLength({
   wing, airfoil, rows, targetMetres, layout = null, lineLengthM,
   risers = null, shape = null, mainsPerRow = 3, brakes = null,
+  // The plan's stabilo, built in every plan tried, so what is solved to the
+  // target is the whole lineset.
+  stabilo = false,
   tolerance = 0.02, maxIterations = 24,
 }) {
   const ribCount = wing.ribs.length;
@@ -7452,7 +7952,7 @@ function anchorsForLineLength({
     const s = suggestAnchorsPerRow({ rows, ribCount, risers, frontFraction, shape });
     const plan = buildLinePlan({
       wing, airfoil, layout, lineLengthM,
-      anchorsPerRow: s.anchorsPerRow, mainsPerRow, brakes,
+      anchorsPerRow: s.anchorsPerRow, mainsPerRow, brakes, stabilo,
     });
     return { plan, anchorsPerRow: s.anchorsPerRow, frontFraction, shape: s.shape };
   };
@@ -7675,8 +8175,10 @@ function applyPrefixDirection(lines, direction) {
  *
  * UP publish some sheets with a column per size: a line name, then its length
  * in the L, M, SM, S and XS wings across the row. Read as a single wing it
- * mixes an L with an XS, which is what produced "st1 appears twice" and
- * "uppers longer than mains" when the reference sweep first ran over them.
+ * mixes an L with an XS, which is what produced "uppers longer than mains"
+ * when the reference sweep first ran over them. ("st1 appears twice", which
+ * it reported beside that, is UP's own: the Makalu 5's sheet lists st1 twice
+ * and st2 not at all, where its line plan and component sheets have both.)
  *
  * The columns are paired to the header positionally, left to right. On the
  * Makalu 5 the header names five sizes and the rows carry four values, with
@@ -7779,25 +8281,62 @@ function multiSizeSheetToTSV(split, size, {
  * for describing, because a designer copying a real wing — or specifying one
  * for a builder — knows the shape they want and cannot say it:
  *
- *     A  30 14 4
- *     B  14  6 3
- *     C   8  3 2
- *     K  13  6 1
+ *     A  14 6 3      anchors, middle lines, main lines
+ *     B  14 6 3
+ *     C  15 6 4      the fourth main in two parts, CRL4 and CRU4, is one
+ *     D  14 6        a row on the C riser: anchors, middle lines on the C mains
+ *     K  14 7 3      the brake: anchors, middle lines, lines to the pulley
  *
- * Anchors first, then the count at each level below, ending at the risers.
- * That is how every manufacturer sheet in this project reads, and how the
- * Ozone Zeno 2's own plan is written: A:30 B:14 C:8 with mains A:3 B:4.
+ * The four rows are the Ozone Geo 7 MS, line for line, counted the way every
+ * manufacturer sheet in this project counts; the brake is the Vibe GT's as
+ * Ozone draw it (K1-K14 on KMU1-7, on KML1-3, on one line to the handle).
+ * Its fourth C main is its stabilo's line, and its own cascade is written
+ * "C 15 6 3 tip 1" with "S C" (`DESIGN_LINES`): "tip n" says how many of a
+ * row's anchors are tip lines, and "S C" which riser the stabilo hangs on.
+ * Two numbers on a row with a riser of its own give the mains and leave the
+ * middles in pairs, as the derived plan makes them; one number gives only
+ * the anchors.
+ *
+ * Every count written is built or refused. The middle count was parsed and
+ * ignored — the branching factor decided — so "A 18 6 3" built eight middle
+ * lines; a count of mains for a row hanging from another row's mains was
+ * ignored the same way, and so was a K row. The example here said "the
+ * Ozone Zeno 2, from its own plan: A 30 14 3, B 14 6 4, C 8 3 2", and only
+ * its anchors and its A and B mains were the Zeno 2's: its sheet has nine A
+ * middles, thirteen B middles carrying the C row's top lines too, and no C
+ * main at all.
+ *
+ * Given the riser layout, a row that hangs from the row ahead on its riser
+ * (the D row on A/B/C+D) is held to anchors and middles, and a row on none of
+ * the layout's risers is refused. Without it, rows are only held to reach the
+ * same depth.
  *
  * Blank lines and anything after `#` are ignored, so a spec can be commented.
  */
-function parseCascadeSpec(text) {
+function parseCascadeSpec(text, { layout = null } = {}) {
   if (typeof text !== 'string') {
     throw new Error('parseCascadeSpec needs the spec as text');
   }
 
   const rows = {};
   const problems = [];
+  const warnings = [];
   let lineNo = 0;
+  let stabiloRiser = null;
+
+  // On the layout: which rows have a riser of their own, and which hang from
+  // the row ahead of them on it.
+  const hostOf = {};
+  const onLayout = new Set();
+  for (const r of layout ?? []) {
+    (r.rows ?? []).forEach((row, i) => {
+      onLayout.add(row);
+      if (i > 0) hostOf[row] = r.rows[0];
+    });
+  }
+  const layoutName = layout
+    ? Object.entries(RISER_LAYOUTS).find(([, v]) => v === layout)?.[0] ?? 'this layout'
+    : null;
 
   for (const raw of text.split(/\r?\n/)) {
     lineNo++;
@@ -7805,7 +8344,7 @@ function parseCascadeSpec(text) {
     if (!line) continue;
 
     const parts = line.split(/[\s,]+/);
-    const row = parts[0].toUpperCase();
+    let row = parts[0].toUpperCase();
     // A known row, not merely a plausible-looking one.
     //
     // `/^[A-Z]{1,2}$/` accepted "QQ", which is not a row on any wing. A spec
@@ -7818,9 +8357,41 @@ function parseCascadeSpec(text) {
         + `expected one of ${KNOWN.join(', ')}`);
       continue;
     }
+    // UP call the brake BR and the stabilo ST.
+    if (row === 'BR') row = 'K';
+    if (row === 'ST') row = 'S';
     if (rows[row]) {
       problems.push(`line ${lineNo}: row ${row} appears twice`);
       continue;
+    }
+
+    // "S C": the stabilo hangs on the C riser. Its lines are the rows' tip
+    // lines, so the line says only where it goes.
+    if (row === 'S' && parts.length === 2 && /^[A-I]$/i.test(parts[1])) {
+      const riserName = parts[1].toUpperCase();
+      if (layout && !layout.some((r) => r.name === riserName)) {
+        problems.push(`line ${lineNo}: the stabilo is on the ${riserName} riser, and ${layoutName} has none`);
+      } else stabiloRiser = riserName;
+      continue;
+    }
+    // "tip 2": how many of the row's anchors are its tip lines — the
+    // outermost, on the tip ribs, each on one line to the row's outermost
+    // main. Unwritten, a row that reaches the tip has two and a row that
+    // ends inboard none.
+    let tip = null;
+    const tipAt = parts.findIndex((t, i) => i > 0 && /^tips?$/i.test(t));
+    if (tipAt > 0) {
+      const v = Number(parts[tipAt + 1]);
+      if (row === 'K' || row === 'S' || row === 'Z') {
+        problems.push(`line ${lineNo}: row ${row} has no tip lines to count`);
+        continue;
+      }
+      if (!Number.isInteger(v) || v < 0) {
+        problems.push(`line ${lineNo}: "tip" takes a whole count, got "${parts[tipAt + 1] ?? ''}"`);
+        continue;
+      }
+      tip = v;
+      parts.splice(tipAt, 2);
     }
 
     const counts = parts.slice(1).map(Number);
@@ -7832,65 +8403,367 @@ function parseCascadeSpec(text) {
 
     // A cascade converges. A level with more lines than the one above it is
     // not a cascade, and is much more likely to be a typo than a design.
+    let widens = false;
     for (let i = 1; i < counts.length; i++) {
       if (counts[i] > counts[i - 1]) {
+        widens = true;
         problems.push(`line ${lineNo}: row ${row} goes ${counts[i - 1]} to `
           + `${counts[i]}, which widens rather than converging`);
       }
     }
+    if (widens) continue;
 
+    if (row === 'S' || row === 'Z') {
+      warnings.push(`row ${row} is not built from a spec: `
+        + (row === 'S' ? 'the stabilo comes from the wing\'s tip' : 'collapse lines are read, not generated'));
+      continue;
+    }
+    const levels = counts.slice(1);
+    if (row === 'K') {
+      // anchors, middles, lines to the pulley, and the one shared lower line
+      if (levels.length > 3 || (levels.length === 3 && levels[2] !== 1)) {
+        problems.push(`line ${lineNo}: the brake is built as anchors, middle lines, lines `
+          + 'to the pulley and one shared lower line, so K takes at most "13 6 3 1"');
+        continue;
+      }
+      rows.K = { row: 'K', anchors: counts[0], levels, depth: counts.length, brake: true };
+      continue;
+    }
+
+    const hangsFrom = hostOf[row] ?? null;
+    if (layout && !onLayout.has(row)) {
+      problems.push(`line ${lineNo}: row ${row} is on none of the ${layoutName} risers`);
+      continue;
+    }
+    if (hangsFrom && levels.length > 1) {
+      problems.push(`line ${lineNo}: row ${row} hangs from the ${hangsFrom} mains on `
+        + `${layoutName}, so it has no mains of its own: write "${row} ${counts[0]} ${levels[0]}"`);
+      continue;
+    }
+    if (levels.length > 2) {
+      problems.push(`line ${lineNo}: row ${row} gives ${levels.length} levels below its anchors; `
+        + 'this builds two, middle lines then main lines');
+      continue;
+    }
+    if (tip != null && tip > counts[0]) {
+      problems.push(`line ${lineNo}: row ${row} has ${counts[0]} anchors, so not ${tip} tip lines`);
+      continue;
+    }
     rows[row] = {
       row,
       anchors: counts[0],
-      levels: counts.slice(1),
+      tip,
+      levels,
       depth: counts.length,
+      hangsFrom,
+      // Two numbers on a row with its own riser are anchors and mains.
+      middles: hangsFrom ? (levels[0] ?? null) : (levels.length === 2 ? levels[0] : null),
+      mains: hangsFrom ? null : (levels.length ? levels[levels.length - 1] : null),
     };
   }
 
   const names = Object.keys(rows);
-  if (!names.length) problems.push('the spec names no rows');
+  const load = names.filter((r) => r !== 'K');
+  if (!load.length) problems.push('the spec names no load-bearing row');
 
-  // Every row should reach the same depth, or the plan has rows terminating
-  // at different levels — possible, but far more often a missing number.
-  const depths = [...new Set(names.map((r) => rows[r].depth))];
-  if (depths.length > 1) {
-    problems.push(`rows reach different depths (${depths.sort().join(', ')}); `
-      + 'if that is deliberate the plan will build, but it is usually a '
-      + 'missing count');
+  if (layout) {
+    const missing = [...onLayout].filter((r) => !rows[r]);
+    if (missing.length) {
+      warnings.push(`row${missing.length > 1 ? 's' : ''} ${missing.join(', ')} not written: derived, every second rib`);
+    }
+  } else {
+    // Without the layout, rows are held to the same depth, or the plan has
+    // rows terminating at different levels — possible, but far more often a
+    // missing number.
+    const depths = [...new Set(load.map((r) => rows[r].depth))];
+    if (depths.length > 1) {
+      problems.push(`rows reach different depths (${depths.sort().join(', ')}); `
+        + 'if that is deliberate the plan will build, but it is usually a '
+        + 'missing count');
+    }
   }
 
+  const pick = (key) => Object.fromEntries(load.filter((r) => rows[r][key] != null)
+    .map((r) => [r, rows[r][key]]));
+  const K = rows.K;
+  const totalAnchors = load.reduce((a, r) => a + rows[r].anchors, 0);
   return {
     rows,
     rowNames: names,
-    anchorsPerRow: Object.fromEntries(names.map((r) => [r, rows[r].anchors])),
-    mainsPerRow: Object.fromEntries(names.map((r) => {
-      const l = rows[r].levels;
-      return [r, l.length ? l[l.length - 1] : rows[r].anchors];
-    })),
+    anchorsPerRow: Object.fromEntries(load.map((r) => [r, rows[r].anchors])),
+    // Only the counts written: a row without one has it derived.
+    middlesPerRow: pick('middles'),
+    mainsPerRow: pick('mains'),
+    // Only the tip counts written; a row without one has the default.
+    tipsPerRow: pick('tip'),
+    stabiloRiser,
+    brakes: K ? {
+      anchors: K.anchors,
+      levelCounts: [K.levels[0] ?? 6, K.levels[1] ?? 3, 1],
+    } : null,
     problems,
+    warnings,
     ok: problems.length === 0,
     depth: Math.max(...names.map((r) => rows[r].depth), 0),
-    totalAnchors: names.reduce((a, r) => a + rows[r].anchors, 0),
+    totalAnchors,
     note: problems.length === 0
-      ? `${names.length} rows, ${names.reduce((a, r) => a + rows[r].anchors, 0)} `
-        + `anchors, ${Math.max(...names.map((r) => rows[r].depth))} levels`
+      ? `${load.length} rows, ${totalAnchors} anchors${K ? `, brake ${K.anchors}` : ''}`
+        + (warnings.length ? ` — ${warnings.join('; ')}` : '')
       : `${problems.length} problem(s) in the spec`,
   };
 }
 
-/** Write a built plan back out as a spec, so one can be edited and reused. */
+/**
+ * A sheet's cascade counted the way a written cascade counts it: for each
+ * load-bearing row, its anchors, its middle lines and its main lines.
+ *
+ * A main in two parts — the Geo 7's CRU4 and CRL4, Niviuk's 3A3 above its
+ * lower piece 4A3 — is one main: one path from the riser, not two lines.
+ * A row is `simple` when its cascade is the generator's shape: one level of
+ * middle lines, nothing above or below them that the generator does not
+ * build, and no line it shares with another row.
+ */
+function cascadeCountsOf(lines) {
+  const rows = {};
+  const rowOf = (r) => (rows[r] ||= {
+    anchors: 0, middles: new Set(), depths: new Set(), mains: new Set(), shared: false, deep: false,
+  });
+  for (const l of lines) {
+    const own = l.rows || [l.row];
+    if (!own.every((r) => /^[A-I]$/.test(r))) continue;
+    own.forEach(rowOf);
+    if (own.length > 1) { for (const r of own) rows[r].shared = true; continue; }
+    const R = rows[own[0]];
+    if (l.level === 'upper') R.anchors += 1;
+    else if (l.level === 'middle') {
+      R.middles.add(l.name);
+      R.depths.add(`${l.cascadeDepth ?? ''}${l.side ?? ''}`);
+    } else if (l.level === 'main') R.mains.add(l.index);
+    else R.deep = true;
+  }
+  return Object.fromEntries(Object.entries(rows).sort().map(([r, v]) => [r, {
+    anchors: v.anchors,
+    middles: v.middles.size,
+    mains: v.mains.size,
+    simple: !v.shared && !v.deep && v.depths.size <= 1,
+  }]));
+}
+
+/**
+ * The cascade a sheet describes, written as far as the generator can build
+ * it: the riser layout from the rows that have mains, every row's anchors,
+ * every riser row's mains, and the middle lines where the row's cascade has
+ * the generator's shape. Where it does not — the Zeno 2's C top lines hang
+ * on the B middles, UP's Torre has a level between its middles and mains,
+ * Niviuk's Hook 6 shares middles between its C and D rows — the middles are
+ * left to be paired, and `derivedMiddles` says which.
+ */
+function cascadeSpecFromSheet(lines, { stabiloMain = null } = {}) {
+  // The stabilo's own line, where it is known, is not its row's main
+  // (`stabiloMainFromTotals`): the row is written without it, and an S line
+  // says which riser the stabilo hangs on.
+  const own = stabiloMain
+    ? lines.filter((l) => !(l.level === 'main' && l.row === stabiloMain.row && l.index === stabiloMain.index))
+    : lines;
+  const c = cascadeCountsOf(own);
+  const order = Object.keys(c);
+  if (!order.some((r) => c[r].mains > 0)) return null;
+  const groups = [];
+  for (const r of order) {
+    if (c[r].mains > 0 || !groups.length) groups.push([r]);
+    else groups[groups.length - 1].push(r);
+  }
+  const out = [];
+  const derivedMiddles = [];
+  // Middles the generator can build: one level of them, each carrying a few
+  // top lines. No three-level row on file carries more than three anchors to
+  // a middle line (the K2 5's 2.7 is the most, the outboard two of a row
+  // going straight to a main); the Makalu 5's A row has one middle line for
+  // ten anchors because eight of them hang from its mains directly.
+  const ownMiddles = (r) => c[r].simple && c[r].middles > 0
+    && (c[r].anchors - 2) / c[r].middles <= 3;
+  for (const [host, ...deps] of groups) {
+    // A host's middles are its own only if every row hanging from it brings
+    // middles of its own; otherwise they carry the other row's top lines too.
+    const hostMiddles = ownMiddles(host) && deps.every(ownMiddles);
+    if (!hostMiddles) derivedMiddles.push(host);
+    out.push(`${host} ${c[host].anchors}${hostMiddles ? ` ${c[host].middles}` : ''}`
+      + `${c[host].mains ? ` ${c[host].mains}` : ''}`);
+    for (const d of deps) {
+      if (!ownMiddles(d)) derivedMiddles.push(d);
+      out.push(`${d} ${c[d].anchors}${ownMiddles(d) ? ` ${c[d].middles}` : ''}`);
+    }
+  }
+  const stabiloRiser = stabiloMain ? (groups.find((g) => g.includes(stabiloMain.row))?.[0] ?? null) : null;
+  if (stabiloRiser) out.push(`S ${stabiloRiser}`);
+  return {
+    layout: groups.map((g) => g.join('+')).join('/'),
+    risers: groups.length,
+    spec: out.join('\n'),
+    derivedMiddles,
+    counts: c,
+    stabiloRiser,
+  };
+}
+
+/**
+ * A sheet's tip lines: the outermost anchors that two or more rows hang on one
+ * path to the riser — the stabilo's lines, where a maker names them in the
+ * rows they sit outboard of.
+ *
+ * Ozone's and Niviuk's sheets do. Below its top line, every canopy line's
+ * path is its total less that top line, and on the Geo 7 the last two A and B
+ * anchors and the last C come to the same remainder to the millimetre in
+ * every size — 5092 mm on the MS, where the rows' own paths are 6262 to 6497.
+ * Lines of different rows on one remainder share every line below their top
+ * lines: one line, the stabilo's. The Hook 6's are a10, b10 and the ninth C
+ * (named c10), 4337 mm on the 20; Ozone's Vibe GT diagram draws its A13,
+ * A14, B13 and B14 on one line to the B riser.
+ *
+ * `totals` is keyed `[anchor][row]`, as `referenceTotals` gives it. A row's
+ * anchors are matched to its top lines in order where there are as many of
+ * each — the Hook 6 has no c9, and its ninth C total is c10's — and by number
+ * where there are not: the Artik R 2's sheet has fourteen A lines and its
+ * totals thirteen, and a line with no total is not counted.
+ *
+ * Only rows that reach the tip take part: two rows ending inboard on one
+ * middle line, as the Swift 6's eight C and D do at its eighth A of
+ * seventeen, are a cascade, not a stabilo.
+ *
+ * @returns {{ok: boolean, tips: Object<string, number>, groups: {rows: string[], remainderMM: number}[]}}
+ */
+function tipLinesFromTotals(lines, totals, { toleranceMM = 3, reachesTip = 0.75 } = {}) {
+  const tops = {};
+  for (const l of lines) {
+    if (l.level !== 'upper' || !/^[A-I]$/.test(l.row)) continue;
+    (tops[l.row] ||= []).push(l);
+  }
+  const anchorsIn = Object.keys(totals).map(Number).sort((a, b) => a - b);
+  const rem = {};
+  for (const [row, list] of Object.entries(tops)) {
+    list.sort((a, b) => a.index - b.index);
+    const have = anchorsIn.filter((a) => Number.isFinite(totals[a]?.[row]));
+    if (!have.length) continue;
+    const byNumber = new Map(list.map((l) => [l.index, l]));
+    const pairs = have.length === list.length
+      ? have.map((a, k) => [a, list[k]])
+      : have.filter((a) => byNumber.has(a)).map((a) => [a, byNumber.get(a)]);
+    if (pairs.length) rem[row] = pairs.map(([a, l]) => totals[a][row] - l.lengthMM);
+  }
+  const rows = Object.keys(rem).sort();
+  const tips = Object.fromEntries(rows.map((r) => [r, 0]));
+  if (rows.length < 2) return { ok: false, tips, groups: [] };
+  const frontCount = tops[rows[0]].length;
+  const outer = rows.filter((row) => tops[row].length >= reachesTip * frontCount)
+    .map((row) => ({ row, r: rem[row][rem[row].length - 1] })).sort((a, b) => a.r - b.r);
+  const groups = [];
+  for (const o of outer) {
+    const g = groups[groups.length - 1];
+    if (g && o.r - g[g.length - 1].r <= toleranceMM) g.push(o); else groups.push([o]);
+  }
+  const found = [];
+  for (const g of groups.filter((x) => x.length >= 2)) {
+    const R = g.reduce((s, o) => s + o.r, 0) / g.length;
+    for (const { row } of g) {
+      let n = 0;
+      for (let i = rem[row].length - 1; i >= 0 && Math.abs(rem[row][i] - R) <= toleranceMM; i--) n++;
+      tips[row] = n;
+    }
+    found.push({ rows: g.map((o) => o.row).sort(), remainderMM: Math.round(R) });
+  }
+  return { ok: true, tips, groups: found };
+}
+
+/**
+ * The same, from a sheet that states each canopy line's path (BGD's): the
+ * lines on the main line under the front row's outermost anchor, where that
+ * main also carries another row's outermost. The Lynx 2's a15 to a17 and b16
+ * to b18 hang on BR4, a main on the B riser.
+ */
+function tipLinesFromPaths(lines) {
+  const canopy = lines.filter((l) => l.reachesCanopy && l.statedPath && /^[A-I]$/.test(l.row));
+  const rows = [...new Set(canopy.map((l) => l.row))].sort();
+  const tips = Object.fromEntries(rows.map((r) => [r, 0]));
+  if (!rows.length) return { ok: false, tips, groups: [] };
+  const outermost = (r) => canopy.filter((l) => l.row === r)
+    .sort((a, b) => (a.ribPosition ?? a.index) - (b.ribPosition ?? b.index)).pop();
+  const lowest = (l) => l.statedPath[l.statedPath.length - 1];
+  const main = lowest(outermost(rows[0]));
+  const onIt = rows.filter((r) => lowest(outermost(r)) === main);
+  if (onIt.length < 2) return { ok: true, tips, groups: [] };
+  for (const r of onIt) tips[r] = canopy.filter((l) => l.row === r && lowest(l) === main).length;
+  return { ok: true, tips, groups: [{ rows: onIt, main }] };
+}
+
+/** A written cascade with each row's tip count added, where one is known. */
+function withTipCounts(spec, tips) {
+  if (!tips) return spec;
+  return spec.split('\n').map((line) => {
+    const row = line.trim().split(/\s+/)[0];
+    return row in tips && !/\btips?\b/.test(line) ? `${line} tip ${tips[row]}` : line;
+  }).join('\n');
+}
+
+/**
+ * The stabilo's own line on a sheet that names its tip lines in their rows:
+ * the main line, or the main in two parts, that the tip lines' path is, once
+ * the riser is taken off.
+ *
+ * The riser is what the front rows' first anchors leave below their own
+ * lines (A1, AM1, AR1 and B1, BM1, BR1, as Ozone number them), where the two
+ * agree. On the Geo 7 the tip lines' path less the riser is CRU4 and CRL4 —
+ * "the fourth C main", in two parts — within 15 mm in every size; on the
+ * Vibe GT it is BRU4 and BRL4, which Ozone's diagram draws as the stabilo's
+ * line to the B riser. So those mains are not their rows' own, and the
+ * stabilo hangs on the C riser on one wing and the B riser on the other.
+ *
+ * @returns {{row: string, index: number, names: string[], lengthMM: number}|null}
+ */
+function stabiloMainFromTotals(lines, totals, tips, { toleranceMM = 15 } = {}) {
+  if (!tips?.groups?.length) return null;
+  const L = new Map(lines.map((l) => [l.name, l.lengthMM]));
+  const riserVia = (r) => totals[1]?.[r] - (L.get(`${r}1`) ?? NaN) - (L.get(`${r}M1`) ?? NaN) - (L.get(`${r}R1`) ?? NaN);
+  const [ra, rb] = [riserVia('A'), riserVia('B')];
+  if (!Number.isFinite(ra) || !Number.isFinite(rb) || Math.abs(ra - rb) > 20) return null;
+  const riser = (ra + rb) / 2;
+  const mains = {};
+  for (const l of lines) {
+    if (l.level !== 'main' || !/^[A-I]$/.test(l.row)) continue;
+    (mains[`${l.row}${l.index}`] ||= { row: l.row, index: l.index, names: [], lengthMM: 0 });
+    mains[`${l.row}${l.index}`].names.push(l.name);
+    mains[`${l.row}${l.index}`].lengthMM += l.lengthMM;
+  }
+  const hits = Object.values(mains).filter((m) => tips.groups
+    .every((g) => Math.abs(g.remainderMM - m.lengthMM - riser) <= toleranceMM));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
+ * Write a built plan back out as a spec, so one can be edited and reused.
+ *
+ * A row with mains of its own is written as anchors, middles, mains; a row
+ * hanging from another row's mains as anchors and middles; the brake as
+ * anchors, middles and the lines to the pulley, without the one shared lower
+ * line every brake has. Read back, it builds the same counts.
+ */
 function cascadeSpecFor(plan) {
   const byRow = {};
   for (const l of plan.lines) {
-    const r = (byRow[l.row] ||= {});
-    r[l.level] = (r[l.level] || 0) + 1;
+    if (l.row === 'S' || l.row === 'Z') continue;
+    const r = (byRow[l.row] ||= { upper: 0, middle: 0, main: 0, tip: 0 });
+    if (l.shared) continue;
+    if (l.level in r) r[l.level] += 1;
+    if (l.level === 'upper' && l.direct) r.tip += 1;
   }
-  const order = ['upper', 'cascade-2', 'cascade-3', 'middle', 'cascade-4', 'main'];
-  const out = ['# row  anchors  then the count at each level below'];
-  for (const row of Object.keys(byRow).sort()) {
-    const counts = order.map((lv) => byRow[row][lv]).filter(Boolean);
-    if (counts.length) out.push(`${row}  ${counts.join(' ')}`);
+  const out = ['# row  anchors  middles  mains   (a row on another\'s mains: anchors, middles)',
+    '#   then "tip n": how many of its anchors are tip lines, on the tip ribs'];
+  for (const row of Object.keys(byRow).sort((a, b) => (a === 'K') - (b === 'K') || a.localeCompare(b))) {
+    const c = byRow[row];
+    if (!c.upper) continue;
+    const counts = [c.upper, c.middle, c.main].filter((n, i) => i === 0 || n > 0);
+    out.push(`${row}  ${counts.join(' ')}${row === 'K' ? '' : `  tip ${c.tip}`}`);
   }
+  if (plan.stabilo?.fromRows && plan.stabilo.riser) out.push(`S  ${plan.stabilo.riser}`);
   return `${out.join('\n')}\n`;
 }
 
@@ -10792,6 +11665,10 @@ function buildSize(base, k, {
   airfoil,
   layout = RISER_LAYOUTS['A/B/C+D'],
   projectedRatio = 0.87,
+  // The design's own arc, as fractions of the half span, so every size has
+  // its shape. Without it, a circle through `projectedRatio`: the family of
+  // an elliptical wing was drawn on circles.
+  lobeSpec = null,
   alphaDeg = 6,
   ovalAmount = 0.06,
   // The riser is hardware and is not scaled: half a metre unless told.
@@ -10801,7 +11678,7 @@ function buildSize(base, k, {
   const inputs = scaleDesignInputs(base, k);
   const planform = planformFromDesignInputs(inputs);
   const metrics = planformMetrics(planform);
-  const lobe = buildLobe({ type: 'circle', projectedRatio }, planform.halfSpan);
+  const lobe = buildLobe(lobeSpec ?? { type: 'circle', projectedRatio }, planform.halfSpan);
   const wing = buildWing({
     planform, lobe, airfoil, cells, pointsPerSurface,
     zRotation: 'auto', alphaDeg,
@@ -19155,6 +20032,7 @@ function riserResultants(plan, tensions) {
  * behaving wings.
  */
 
+
 /**
  * Laws fitted to one family, kept as a worked example — **not** as defaults to
  * apply to another wing.
@@ -19523,6 +20401,9 @@ function parseSizeFamilies(tsv) {
       flatAR: n('flat_AR'),
       projectedSpan: n('proj_span_m'),
       projectedArea: n('proj_area_m2'),
+      // The projected aspect ratio, where a maker publishes it and not the
+      // projected span (Niviuk): with the projected area it is the span.
+      projectedAR: n('proj_AR'),
       maxChord: n('root_chord_m'),
       minChord: null,
       mass: n('mass_kg'),
@@ -20265,6 +21146,34 @@ function referenceDesignInputs(size, { tipChordFraction = 0.22, solveTipToArea =
     }
   }
 
+  // Span ratio, which is what the arc is built from.
+  //
+  // This was the square root of the *area* ratio, and the two are not
+  // related that way. An arc shortens the span; it also loses the cosine of
+  // the local dihedral from the projected area, and those are different
+  // losses. On the PHI Allegro light the published span ratio is 0.794 and
+  // the square-rooted area ratio is 0.926 — 19.5% out at worst, on every
+  // wing in the database, which the full-pipeline run caught on all 38.
+  //
+  // Niviuk publish the projected area and the projected aspect ratio, not
+  // the span, and the span is what those two define: b = √(AR·S). The area
+  // ratio stood in for it, 0.858 on a Hook 6 24 whose own figures give
+  // 9.07 m on 11.28, 0.805 — every Niviuk wing a twentieth flatter than it is.
+  let projectedRatio = 0.87;
+  let projectedSpanBasis = 'assumed: no projected span, aspect ratio or area published';
+  if (size.projectedSpan && size.flatSpan) {
+    projectedRatio = size.projectedSpan / size.flatSpan;
+    projectedSpanBasis = 'published';
+  } else if (size.projectedAR && size.projectedArea) {
+    projectedRatio = Math.sqrt(size.projectedAR * size.projectedArea) / size.flatSpan;
+    projectedSpanBasis = 'from the published projected aspect ratio and area';
+  } else if (size.projectedArea && size.flatArea) {
+    // The last resort, used directly rather than square-rooted: across this
+    // database the area ratio is the closer of the two to the span ratio.
+    projectedRatio = size.projectedArea / size.flatArea;
+    projectedSpanBasis = 'the projected area ratio, no span published';
+  }
+
   return {
     inputs: {
       span: size.flatSpan,
@@ -20276,21 +21185,12 @@ function referenceDesignInputs(size, { tipChordFraction = 0.22, solveTipToArea =
     },
     tipChordBasis,
     cells: size.cells ?? 40,
-    // Span ratio, which is what buildLobe takes.
-    //
-    // This was the square root of the *area* ratio, and the two are not
-    // related that way. An arc shortens the span; it also loses the cosine of
-    // the local dihedral from the projected area, and those are different
-    // losses. On the PHI Allegro light the published span ratio is 0.794 and
-    // the square-rooted area ratio is 0.926 — 19.5% out at worst, on every
-    // wing in the database, which the full-pipeline run caught on all 38.
-    projectedRatio: size.projectedSpan && size.flatSpan
-      ? size.projectedSpan / size.flatSpan
-      : (size.projectedArea && size.flatArea
-        // Fall back to the area ratio only where span is not published, and
-        // use it directly rather than square-rooted: across this database the
-        // area ratio is the closer of the two to the span ratio.
-        ? size.projectedArea / size.flatArea : 0.87),
+    projectedRatio,
+    projectedSpanBasis,
+    // The arc: the handbook's ellipse through that projected span. A circle
+    // through it projects 51 of the 55 wings on file short of their published
+    // projected area, 2.0% out on average; the ellipse is 1.0% out.
+    lobe: ellipseForProjectedRatio(Math.min(0.99, Math.max(0.6, projectedRatio))),
     allUpMassKg: size.midWeight ?? null,
     lineLengthM: null,
     published: {
@@ -20306,7 +21206,7 @@ function referenceDesignInputs(size, { tipChordFraction = 0.22, solveTipToArea =
     derived: [
       size.minChord ? null : 'tip chord',
       'tip sweep', 'leading edge ellipticity', 'trailing edge ellipticity',
-      'aerofoil section', 'arc type', 'washin',
+      'aerofoil section', 'arc shape (an ellipse through the projected span)', 'washin',
     ].filter(Boolean),
     note: 'size from the published specification; shape is a neutral default',
   };
@@ -23504,6 +24404,7 @@ function lepPlanForTool(geom, { ribOffset = 1 } = {}) {
       lineLengthM: geom.lineLengthCm / 100,
     },
     mergedRows: [],
+    levelShortfalls: [],
     mainShortfalls: [],
     mainsAsRequested: true,
   };
@@ -24111,7 +25012,7 @@ function runPackage(airfoil, { reynolds, mach, nCrit = 7, alphaRange, alphaStep 
 
 const REFERENCE_TOTALS = {"niviuk-artikr2-20":{"1":{"A":6619,"B":6595,"C":6579,"D":6704},"2":{"A":6588,"B":6563,"C":6547,"D":6676},"3":{"A":6573,"B":6547,"C":6529,"D":6656},"4":{"A":6592,"B":6569,"C":6548,"D":6669},"5":{"A":6544,"B":6522,"C":6500,"D":6620},"6":{"A":6511,"B":6488,"C":6468,"D":6588},"7":{"A":6466,"B":6444,"C":6424,"D":6535},"8":{"A":6471,"B":6454,"C":6430,"D":6534},"9":{"A":6382,"C":6353,"D":6428,"K":6196},"10":{"A":6261,"C":6246,"D":6313,"K":6080},"11":{"A":6180,"C":6183,"K":6023},"12":{"A":6171,"C":6197,"K":6028},"13":{"A":6033,"C":6043,"K":6118}},"niviuk-artikr2-21":{"1":{"A":6853,"B":6828,"C":6813,"D":6944},"2":{"A":6821,"B":6795,"C":6780,"D":6915},"3":{"A":6805,"B":6779,"C":6762,"D":6895},"4":{"A":6825,"B":6802,"C":6782,"D":6908},"5":{"A":6777,"B":6754,"C":6733,"D":6860},"6":{"A":6743,"B":6720,"C":6700,"D":6826},"7":{"A":6698,"B":6676,"C":6656,"D":6774},"8":{"A":6704,"B":6686,"C":6663,"D":6773},"9":{"A":6612,"C":6579,"D":6661,"K":6430},"10":{"A":6486,"C":6468,"D":6542,"K":6311},"11":{"A":6403,"C":6405,"K":6253},"12":{"A":6393,"C":6419,"K":6259},"13":{"A":6250,"C":6260,"K":6352}},"niviuk-artikr2-23":{"1":{"A":7093,"B":7068,"C":7051,"D":7186},"2":{"A":7061,"B":7034,"C":7018,"D":7157},"3":{"A":7046,"B":7019,"C":7001,"D":7138},"4":{"A":7067,"B":7043,"C":7021,"D":7153},"5":{"A":7018,"B":6994,"C":6972,"D":7103},"6":{"A":6983,"B":6959,"C":6939,"D":7068},"7":{"A":6937,"B":6914,"C":6892,"D":7014},"8":{"A":6943,"B":6924,"C":6900,"D":7013},"9":{"A":6847,"C":6814,"D":6898,"K":6673},"10":{"A":6717,"C":6700,"D":6775,"K":6550},"11":{"A":6630,"C":6635,"K":6490},"12":{"A":6620,"C":6650,"K":6497},"13":{"A":6473,"C":6483,"K":6594}},"niviuk-artikr2-24":{"1":{"A":7331,"B":7304,"C":7286,"D":7423},"2":{"A":7297,"B":7270,"C":7253,"D":7393},"3":{"A":7284,"B":7256,"C":7237,"D":7375},"4":{"A":7306,"B":7281,"C":7259,"D":7391},"5":{"A":7255,"B":7231,"C":7209,"D":7340},"6":{"A":7219,"B":7195,"C":7174,"D":7305},"7":{"A":7172,"B":7149,"C":7128,"D":7250},"8":{"A":7179,"B":7160,"C":7136,"D":7249},"9":{"A":7081,"C":7049,"D":7133,"K":6906},"10":{"A":6946,"C":6931,"D":7006,"K":6779},"11":{"A":6857,"C":6862,"K":6718},"12":{"A":6847,"C":6877,"K":6726},"13":{"A":6694,"C":6705,"K":6826}},"niviuk-artikr2-25":{"1":{"A":7549,"B":7521,"C":7502,"D":7642},"2":{"A":7514,"B":7486,"C":7467,"D":7612},"3":{"A":7501,"B":7473,"C":7452,"D":7594},"4":{"A":7525,"B":7499,"C":7475,"D":7610},"5":{"A":7474,"B":7449,"C":7425,"D":7560},"6":{"A":7437,"B":7412,"C":7390,"D":7523},"7":{"A":7389,"B":7365,"C":7343,"D":7467},"8":{"A":7396,"B":7376,"C":7351,"D":7467},"9":{"A":7298,"C":7264,"D":7348,"K":7129},"10":{"A":7160,"C":7143,"D":7218,"K":6999},"11":{"A":7068,"C":7072,"K":6936},"12":{"A":7057,"C":7088,"K":6944},"13":{"A":6900,"C":6910,"K":7048}},"niviuk-artikr2-27":{"1":{"A":7769,"B":7741,"C":7721,"D":7865},"2":{"A":7734,"B":7705,"C":7686,"D":7833},"3":{"A":7722,"B":7693,"C":7671,"D":7816},"4":{"A":7746,"B":7720,"C":7695,"D":7834},"5":{"A":7695,"B":7669,"C":7645,"D":7783},"6":{"A":7657,"B":7631,"C":7608,"D":7746},"7":{"A":7607,"B":7583,"C":7559,"D":7687},"8":{"A":7615,"B":7595,"C":7568,"D":7687},"9":{"A":7512,"C":7480,"D":7566,"K":7349},"10":{"A":7369,"C":7356,"D":7432,"K":7215},"11":{"A":7275,"C":7284,"K":7151},"12":{"A":7265,"C":7300,"K":7160},"13":{"A":7102,"C":7113,"K":7267}},"niviuk-hook6-20":{"1":{"A":6390,"B":6289,"C":6328,"D":6436,"K":6490},"2":{"A":6347,"B":6244,"C":6288,"D":6392,"K":6279},"3":{"A":6311,"B":6256,"C":6343,"D":6444,"K":6215},"4":{"A":6275,"B":6182,"C":6235,"D":6326,"K":6212},"5":{"A":6233,"B":6134,"C":6201,"K":6065},"6":{"A":6093,"B":6040,"C":6114,"K":6014},"7":{"A":5996,"B":5996,"C":6083,"K":6065},"8":{"A":5934,"B":5991,"C":6099,"K":6054},"9":{"A":5755,"B":5730,"C":5718,"K":5928},"10":{"A":5654,"B":5653,"K":5822},"11":{"K":5733}},"niviuk-hook6-22":{"1":{"A":6700,"B":6593,"C":6635,"D":6748,"K":6787},"2":{"A":6656,"B":6546,"C":6594,"D":6703,"K":6565},"3":{"A":6618,"B":6561,"C":6652,"D":6757,"K":6498},"4":{"A":6580,"B":6484,"C":6538,"D":6633,"K":6495},"5":{"A":6536,"B":6433,"C":6502,"K":6341},"6":{"A":6389,"B":6334,"C":6410,"K":6288},"7":{"A":6286,"B":6288,"C":6377,"K":6341},"8":{"A":6220,"B":6282,"C":6393,"K":6329},"9":{"A":6032,"B":6007,"C":5993,"K":6197},"10":{"A":5926,"B":5926,"K":6091},"11":{"K":6005}},"niviuk-hook6-24":{"1":{"A":6996,"B":6882,"C":6928,"D":7046,"K":7140},"2":{"A":6950,"B":6834,"C":6885,"D":6999,"K":6909},"3":{"A":6910,"B":6851,"C":6947,"D":7057,"K":6839},"4":{"A":6870,"B":6770,"C":6827,"D":6926,"K":6835},"5":{"A":6825,"B":6717,"C":6790,"K":6674},"6":{"A":6671,"B":6614,"C":6693,"K":6619},"7":{"A":6562,"B":6565,"C":6658,"K":6674},"8":{"A":6493,"B":6559,"C":6675,"K":6662},"9":{"A":6297,"B":6269,"C":6255,"K":6525},"10":{"A":6185,"B":6184,"K":6408},"11":{"K":6310}},"niviuk-hook6-26":{"1":{"A":7280,"B":7162,"C":7210,"D":7332,"K":7468},"2":{"A":7234,"B":7114,"C":7168,"D":7286,"K":7228},"3":{"A":7194,"B":7134,"C":7234,"D":7348,"K":7155},"4":{"A":7154,"B":7050,"C":7110,"D":7214,"K":7154},"5":{"A":7108,"B":6997,"C":7072,"K":6988},"6":{"A":6948,"B":6891,"C":6972,"K":6931},"7":{"A":6837,"B":6840,"C":6937,"K":6990},"8":{"A":6765,"B":6834,"C":6955,"K":6977},"9":{"A":6559,"B":6532,"C":6516,"K":6834},"10":{"A":6443,"B":6443,"K":6714},"11":{"K":6613}},"niviuk-hook6-28":{"1":{"A":7553,"B":7428,"C":7480,"D":7607,"K":7740},"2":{"A":7507,"B":7380,"C":7438,"D":7561,"K":7491},"3":{"A":7468,"B":7405,"C":7511,"D":7629,"K":7417},"4":{"A":7427,"B":7320,"C":7383,"D":7490,"K":7417},"5":{"A":7381,"B":7266,"C":7343,"K":7245},"6":{"A":7215,"B":7156,"C":7240,"K":7187},"7":{"A":7100,"B":7105,"C":7204,"K":7248},"8":{"A":7026,"B":7099,"C":7223,"K":7236},"9":{"A":6812,"B":6783,"C":6767,"K":7088},"10":{"A":6692,"B":6690,"K":6963},"11":{"K":6859}},"niviuk-hook6-31":{"1":{"A":7944,"B":7813,"C":7868,"D":8002,"K":8161},"2":{"A":7899,"B":7766,"C":7828,"D":7957,"K":7901},"3":{"A":7861,"B":7795,"C":7907,"D":8032,"K":7824},"4":{"A":7819,"B":7707,"C":7773,"D":7886,"K":7827},"5":{"A":7773,"B":7653,"C":7733,"K":7647},"6":{"A":7599,"B":7538,"C":7625,"K":7586},"7":{"A":7479,"B":7485,"C":7588,"K":7652},"8":{"A":7402,"B":7480,"C":7608,"K":7641},"9":{"A":7176,"B":7145,"C":7128,"K":7487},"10":{"A":7049,"B":7048,"K":7356},"11":{"K":7246}},"niviuk-ikuma3-20":{"1":{"A":6544,"B":6463,"C":6544,"D":6616,"K":6869},"2":{"A":6507,"B":6428,"C":6496,"D":6571,"K":6488},"3":{"A":6463,"B":6384,"C":6457,"D":6530,"K":6356},"4":{"A":6470,"B":6391,"C":6482,"D":6548,"K":6369},"5":{"A":6389,"B":6315,"C":6405,"D":6472,"K":6164},"6":{"A":6353,"B":6281,"C":6358,"D":6424,"K":6017},"7":{"A":6290,"B":6224,"C":6300,"D":6360,"K":5965},"8":{"A":6297,"B":6232,"C":6323,"D":6364,"K":6052},"9":{"A":6199,"B":6161,"C":6221,"K":5909},"10":{"A":6109,"B":6079,"C":6139,"K":5835},"11":{"A":6014,"B":6002,"C":6049,"K":5830},"12":{"A":5997,"B":5989,"C":6036,"K":5933}},"niviuk-ikuma3-22":{"1":{"A":6877,"B":6782,"C":6870,"D":6946,"K":7228},"2":{"A":6839,"B":6746,"C":6820,"D":6900,"K":6830},"3":{"A":6796,"B":6704,"C":6782,"D":6859,"K":6693},"4":{"A":6804,"B":6713,"C":6810,"D":6879,"K":6708},"5":{"A":6715,"B":6637,"C":6732,"D":6803,"K":6496},"6":{"A":6678,"B":6601,"C":6684,"D":6752,"K":6344},"7":{"A":6614,"B":6543,"C":6625,"D":6687,"K":6291},"8":{"A":6622,"B":6553,"C":6649,"D":6692,"K":6385},"9":{"A":6521,"B":6480,"C":6543,"K":6236},"10":{"A":6427,"B":6395,"C":6459,"K":6159},"11":{"A":6328,"B":6315,"C":6366,"K":6156},"12":{"A":6312,"B":6302,"C":6352,"K":6264}},"niviuk-ikuma3-24":{"1":{"A":7188,"B":7092,"C":7191,"D":7269,"K":7562},"2":{"A":7149,"B":7055,"C":7138,"D":7221,"K":7146},"3":{"A":7104,"B":7011,"C":7099,"D":7179,"K":7004},"4":{"A":7112,"B":7020,"C":7128,"D":7201,"K":7020},"5":{"A":7025,"B":6939,"C":7046,"D":7120,"K":6797},"6":{"A":6986,"B":6902,"C":6995,"D":7068,"K":6638},"7":{"A":6919,"B":6841,"C":6933,"D":6999,"K":6584},"8":{"A":6927,"B":6852,"C":6958,"D":7004,"K":6682},"9":{"A":6801,"B":6784,"C":6847,"K":6527},"10":{"A":6703,"B":6694,"C":6758,"K":6446},"11":{"A":6599,"B":6610,"C":6660,"K":6442},"12":{"A":6582,"B":6597,"C":6646,"K":6555}},"niviuk-ikuma3-26":{"1":{"A":7483,"B":7384,"C":7486,"D":7568,"K":7899},"2":{"A":7443,"B":7346,"C":7432,"D":7518,"K":7467},"3":{"A":7398,"B":7301,"C":7392,"D":7475,"K":7319},"4":{"A":7407,"B":7311,"C":7422,"D":7498,"K":7337},"5":{"A":7318,"B":7229,"C":7338,"D":7414,"K":7107},"6":{"A":7278,"B":7191,"C":7285,"D":7359,"K":6943},"7":{"A":7208,"B":7128,"C":7221,"D":7289,"K":6886},"8":{"A":7217,"B":7139,"C":7247,"D":7294,"K":6989},"9":{"A":7085,"B":7068,"C":7132,"K":6829},"10":{"A":6983,"B":6974,"C":7039,"K":6745},"11":{"A":6875,"B":6887,"C":6938,"K":6742},"12":{"A":6857,"B":6873,"C":6923,"K":6861}},"niviuk-ikuma3-28":{"1":{"A":7766,"B":7669,"C":7770,"D":7855,"K":8215},"2":{"A":7726,"B":7629,"C":7714,"D":7804,"K":7766},"3":{"A":7680,"B":7584,"C":7675,"D":7761,"K":7614},"4":{"A":7691,"B":7595,"C":7707,"D":7784,"K":7633},"5":{"A":7599,"B":7511,"C":7620,"D":7699,"K":7395},"6":{"A":7558,"B":7472,"C":7565,"D":7643,"K":7225},"7":{"A":7487,"B":7407,"C":7500,"D":7570,"K":7168},"8":{"A":7496,"B":7419,"C":7527,"D":7576,"K":7275},"9":{"A":7363,"B":7344,"C":7408,"K":7109},"10":{"A":7257,"B":7247,"C":7312,"K":7023},"11":{"A":7145,"B":7156,"C":7206,"K":7020},"12":{"A":7127,"B":7142,"C":7190,"K":7143}},"niviuk-ikuma3-30":{"1":{"A":8039,"B":7933,"C":8034,"D":8123,"K":8513},"2":{"A":7997,"B":7893,"C":7977,"D":8070,"K":8050},"3":{"A":7951,"B":7849,"C":7937,"D":8026,"K":7892},"4":{"A":7962,"B":7860,"C":7971,"D":8051,"K":7913},"5":{"A":7869,"B":7774,"C":7882,"D":7964,"K":7668},"6":{"A":7826,"B":7734,"C":7825,"D":7906,"K":7493},"7":{"A":7753,"B":7667,"C":7758,"D":7830,"K":7434},"8":{"A":7763,"B":7680,"C":7786,"D":7837,"K":7546},"9":{"A":7629,"B":7592,"C":7661,"K":7374},"10":{"A":7519,"B":7491,"C":7561,"K":7285},"11":{"A":7403,"B":7398,"C":7452,"K":7283},"12":{"A":7385,"B":7383,"C":7436,"K":7411}},"niviuk-skin4p-14":{"1":{"A":5413,"B":5495,"C":5264,"D":5254,"E":5252,"F":5263,"G":5279,"H":5303,"I":5352},"2":{"A":5346,"B":5439,"C":5207,"D":5197,"E":5198,"F":5208,"G":5226,"H":5247,"I":5293},"3":{"A":5309,"B":5396,"C":5151,"D":5143,"E":5145,"F":5156,"G":5172,"H":5195,"I":5240},"4":{"A":5286,"B":5377,"C":5083,"D":5077,"E":5084,"F":5093,"G":5113,"H":5129,"I":5166},"5":{"A":5286,"B":5375,"C":4962,"D":4959,"E":4968,"F":4980,"G":4993,"H":5012,"I":5048},"6":{"A":5310,"B":5396,"C":4816,"D":4819,"E":4824,"F":4835,"G":4850,"H":4862,"I":4888},"7":{"A":5280,"B":5359,"K":4884},"8":{"A":5222,"B":5311,"K":4853},"9":{"A":5187,"B":5267,"K":4905},"10":{"A":5160,"B":5246},"11":{"A":5148,"B":5227},"12":{"A":5152,"B":5233},"13":{"A":5086,"B":5147}},"niviuk-skin4p-16":{"1":{"A":5782,"B":5871,"C":5630,"D":5618,"E":5617,"F":5629,"G":5646,"H":5672,"I":5724},"2":{"A":5712,"B":5812,"C":5572,"D":5562,"E":5563,"F":5574,"G":5593,"H":5615,"I":5664},"3":{"A":5674,"B":5768,"C":5516,"D":5507,"E":5509,"F":5521,"G":5538,"H":5562,"I":5610},"4":{"A":5651,"B":5749,"C":5445,"D":5439,"E":5446,"F":5456,"G":5477,"H":5494,"I":5534},"5":{"A":5652,"B":5748,"C":5317,"D":5314,"E":5323,"F":5336,"G":5349,"H":5370,"I":5408},"6":{"A":5679,"B":5772,"C":5161,"D":5165,"E":5170,"F":5181,"G":5197,"H":5210,"I":5238},"7":{"A":5653,"B":5737,"K":5221},"8":{"A":5592,"B":5687,"K":5188},"9":{"A":5555,"B":5641,"K":5246},"10":{"A":5527,"B":5619},"11":{"A":5514,"B":5600},"12":{"A":5520,"B":5607},"13":{"A":5450,"B":5516}},"niviuk-skin4p-18":{"1":{"A":6133,"B":6228,"C":5973,"D":5961,"E":5960,"F":5972,"G":5991,"H":6018,"I":6073},"2":{"A":6061,"B":6168,"C":5916,"D":5904,"E":5906,"F":5917,"G":5937,"H":5961,"I":6013},"3":{"A":6021,"B":6121,"C":5859,"D":5849,"E":5851,"F":5864,"G":5882,"H":5907,"I":5958},"4":{"A":5998,"B":6103,"C":5785,"D":5779,"E":5786,"F":5796,"G":5818,"H":5837,"I":5879},"5":{"A":6000,"B":6103,"C":5651,"D":5647,"E":5657,"F":5670,"G":5684,"H":5706,"I":5747},"6":{"A":6030,"B":6129,"C":5486,"D":5489,"E":5495,"F":5506,"G":5523,"H":5537,"I":5566},"7":{"A":6003,"B":6093,"K":5566},"8":{"A":5939,"B":6041,"K":5532},"9":{"A":5900,"B":5993,"K":5594},"10":{"A":5872,"B":5970},"11":{"A":5859,"B":5951},"12":{"A":5865,"B":5958},"13":{"A":5791,"B":5862}},"niviuk-skin4p-20":{"1":{"A":6465,"B":6567,"C":6298,"D":6285,"E":6284,"F":6297,"G":6317,"H":6345,"I":6404},"2":{"A":6390,"B":6504,"C":6240,"D":6229,"E":6230,"F":6242,"G":6263,"H":6289,"I":6343},"3":{"A":6349,"B":6456,"C":6183,"D":6172,"E":6175,"F":6188,"G":6207,"H":6234,"I":6288},"4":{"A":6326,"B":6437,"C":6107,"D":6100,"E":6108,"F":6118,"G":6141,"H":6161,"I":6205},"5":{"A":6330,"B":6439,"C":5966,"D":5962,"E":5972,"F":5986,"G":6001,"H":6024,"I":6067},"6":{"A":6362,"B":6467,"C":5793,"D":5796,"E":5802,"F":5814,"G":5831,"H":5846,"I":5877},"7":{"A":6334,"B":6430,"K":5892},"8":{"A":6267,"B":6375,"K":5858},"9":{"A":6227,"B":6325,"K":5924},"10":{"A":6198,"B":6302},"11":{"A":6185,"B":6282},"12":{"A":6192,"B":6290},"13":{"A":6115,"B":6189}},"niviuk-takoo6-38":{"1":{"A":8741,"B":8653,"C":8647,"D":8779,"E":8869},"2":{"A":8673,"B":8579,"C":8574,"D":8685,"E":8783},"3":{"A":8632,"B":8535,"C":8533,"D":8634,"E":8728},"4":{"A":8646,"B":8553,"C":8552,"D":8675,"E":8761},"5":{"A":8574,"B":8484,"C":8486,"D":8600,"E":8688},"6":{"A":8518,"B":8423,"C":8427,"D":8516,"E":8604},"7":{"A":8463,"B":8373,"C":8379,"D":8463,"E":8541},"8":{"A":8469,"B":8386,"C":8394,"D":8498,"E":8564},"9":{"A":8349,"B":8299,"C":8300,"D":8423,"E":8490},"10":{"A":8265,"B":8221,"C":8224,"D":8312,"E":8377},"11":{"A":8154,"B":8115,"C":8125,"D":8183,"E":8238},"12":{"A":8142,"B":8104,"C":8119,"D":8170,"E":8216},"13":{"A":8025,"B":8003,"C":8015,"D":8113}},"niviuk-takoo6-41":{"1":{"A":9082,"B":8989,"C":8985,"D":9120,"E":9216},"2":{"A":9012,"B":8912,"C":8910,"D":9024,"E":9127},"3":{"A":8970,"B":8868,"C":8868,"D":8972,"E":9072},"4":{"A":8985,"B":8887,"C":8889,"D":9015,"E":9106},"5":{"A":8913,"B":8817,"C":8821,"D":8939,"E":9033},"6":{"A":8854,"B":8755,"C":8760,"D":8853,"E":8946},"7":{"A":8798,"B":8704,"C":8712,"D":8799,"E":8882},"8":{"A":8805,"B":8719,"C":8727,"D":8836,"E":8906},"9":{"A":8683,"B":8629,"C":8630,"D":8760,"E":8831},"10":{"A":8596,"B":8547,"C":8551,"D":8645,"E":8713},"11":{"A":8481,"B":8439,"C":8448,"D":8512,"E":8569},"12":{"A":8469,"B":8428,"C":8442,"D":8498,"E":8546},"13":{"A":8348,"B":8322,"C":8334,"D":8440}},"niviuk-takoo6-44":{"1":{"A":9409,"B":9315,"C":9307,"D":9449,"E":9549},"2":{"A":9337,"B":9236,"C":9230,"D":9350,"E":9457},"3":{"A":9296,"B":9192,"C":9188,"D":9298,"E":9401},"4":{"A":9311,"B":9212,"C":9210,"D":9344,"E":9438},"5":{"A":9239,"B":9142,"C":9142,"D":9265,"E":9362},"6":{"A":9179,"B":9078,"C":9079,"D":9177,"E":9273},"7":{"A":9121,"B":9026,"C":9030,"D":9121,"E":9207},"8":{"A":9129,"B":9041,"C":9046,"D":9160,"E":9233},"9":{"A":9006,"B":8952,"C":8953,"D":9084,"E":9157},"10":{"A":8916,"B":8868,"C":8871,"D":8965,"E":9035},"11":{"A":8799,"B":8755,"C":8765,"D":8826,"E":8885},"12":{"A":8787,"B":8744,"C":8759,"D":8813,"E":8862},"13":{"A":8660,"B":8635,"C":8648,"D":8753}}};
 const LINE_MATERIALS_TSV = "name\tcode\tdiameter_100mm\tstrength_new_daN\tstrength_kinked_daN\tarea_mm2\tnote\nEdelrid 8000-25 (U25)\tU-025\t43.0\t25.0\t12.0\t0.15\t\nEdelrid 8000-45 (U50)\tU-050\t61.0\t56.5\t23.5\t0.29\t\nEdelrid 8000-65 (U70)\tU-070\t72.0\t66.3\t29.5\t0.41\t\nEdelrid 8000-80 (U90)\tU-090\t82.0\t97.6\t54.3\t0.53\t\nEdelrid 8000-120 (U120)\tU-120\t90.0\t115.3\t62.9\t0.64\t\nEdelrid 8000-130 (U130)\tU-130\t100.0\t122.6\t64.9\t0.79\t\nEdelrid 8000-135 (U135)\tU-135\t110.0\t160.0\t85.6\t0.95\tweniger Realwiderstand als PPSLS125!\nEdelrid 8000-160 (U190)\tU-190\t120.0\t193.0\t103.0\t1.13\t\nEdelrid 8000-160 (U200)\tU-200\t120.0\t200.0\t111.0\t1.13\t\nEdelrid 8000-200 (U230)\tU-230\t140.0\t230.0\t115.1\t1.54\t\nEdelrid 8000-280 (U280)\tU-280\t150.0\t263.8\t141.7\t1.77\t\nEdelrid 8000-360 (U360)\tU-360\t180.0\t360.0\t231.0\t2.54\t\nEdelrid 8000-430 (U430)\tU-430\t200.0\t430.0\t232.6\t3.14\t\nEdelrid 8001-50\t8001-050\t61.0\t50.0\t31.6\t0.29\t\nEdelrid 8001-70\t8001-070\t72.0\t71.1\t41.0\t0.41\t\nEdelrid 8001-90\t8001-090\t82.0\t97.6\t58.9\t0.53\t\nEdelrid 8001-130\t8001-130\t100.0\t112.1\t76.2\t0.79\t\nEdelrid 8001-135\t8001-135\t110.0\t131.8\t92.2\t0.95\t\nEdelrid 8001-190\t8001-190\t120.0\t193.0\t133.0\t1.13\t\nEdelrid 8001-230\t8001-230\t130.0\t206.4\t132.0\t1.33\t\nEdelrid 8001-280\t8001-280\t150.0\t238.4\t164.8\t1.77\t\nEdelrid 8001-340\t8001-340\t170.0\t279.5\t190.4\t2.27\t\nEdelrid 9200-30\t9200-30\t43.0\t30.0\t30.0\t0.15\t\nEdelrid 9200-70\t9200-70\t65.0\t70.0\t65.0\t0.33\t\nLiros PPSL 120\tPPSL120\t115.0\t120.0\t94.7\t1.04\t\nLiros PPSL 160\tPPSL160\t140.0\t160.0\t183.1\t1.54\t\nLiros PPSL 200\tPPSL200\t142.0\t200.0\t211.8\t1.58\t\nLiros PPSL 275\tPPSL275\t190.0\t275.0\t250.0\t2.84\t\nLiros PPSL 191\tPPSL191\t120.0\t150.0\t129.3\t1.13\t\nLiros PPSLS 65\tPPSLS 65\t76.0\t50.0\t49.95\t0.45\t\nLiros PPSLS 125\tPPSLS 125\t105.0\t107.0\t107.0\t0.87\t\nLiros PPSLS 180\tPPSLS 180\t125.0\t200.0\t194.4\t1.23\tweniger Realwiderstand als die U-190!\nLiros PPSLS 260\tPPSLS 260\t158.0\t280.0\t259.4\t1.96\t\nLiros DSL 70\tDSL70\t103.0\t73.0\t73.0\t0.83\t\nLiros DSL 70\tDSL070\t103.0\t73.0\t73.0\t0.83\t\nDC 35\tDC35\t49.0\t32.6\t33.6\t0.19\t\nDC 40\tDC40\t50.0\t47.4\t41.0\t0.2\t\nDC 60\tDC60\t60.0\t60.0\t43.2\t0.28\t\nDC 100\tDC100\t80.0\t89.0\t71.1\t0.5\t\nDC 120\tDC 120\t85.0\t117.5\t116.0\t0.57\t\nDC 160\tDC 160\t110.0\t127.9\t115.8\t0.95\t\nDC 200\tDC 200\t160.0\t258.3\t235.7\t2.01\t\nDC 300\tDC 300\t180.0\t339.3\t310.3\t2.54\t\nDC 161\tDC 161\t83.0\t145.8\t127.4\t0.54\t\nDC 201\tDC 201\t110.0\t161.3\t166.3\t0.95\t\nDC 301\tDC 301\t130.0\t228.4\t134.0\t1.33\t\nDC 401\tDC 401\t155.0\t381.2\t355.6\t1.89\t\nLiros TSL 140\tTSL140\t134.0\t140.0\t67.6\t1.41\t\nLiros TSL 190\tTSL190\t158.0\t190.0\t98.4\t1.96\t\nLiros TSL 220\tTSL220\t169.0\t220.0\t115.6\t2.24\t\nLiros TSL 280\tTSL280\t188.0\t280.0\t147.6\t2.78\t\nLiros TSL 380\tTSL380\t210.0\t380.0\t184.7\t3.46\t\nLiros DFL 115\tDFL-115\t140.0\t115.0\t115.0\t1.54\t\nLiros LTC 065\tLTC 065\t65.0\t65.0\t33.0\t0.33\t\nLiros LTC 080\tLTC 080\t70.0\t80.0\t43.0\t0.38\t\nLiros LTC 120\tLTC 120\t110.0\t120.0\t65.0\t0.95\t\nLiros LTC 160\tLTC 160\t120.0\t160.0\t75.0\t1.13\t\nLiros LTC 200\tLTC 200\t130.0\t200.0\t105.0\t1.33\t\nLiros TCR 80\tTCR 80\t66.0\t80.0\t42.0\t0.34\t\nLiros TCR 80\tTCR80\t66.0\t80.0\t42.0\t0.34\t\nCousin VLD0050\tVLD0050\t50.0\t50.0\t25.0\t0.2\t\nCousin V12-100\tV12-100\t60.0\t100.0\t30.3\t0.28\t\nCousin V16-140\tV16-140\t70.0\t140.0\t44.0\t0.38\t\nCousin V16-630\tV16-630\t100.0\t140.0\t92.7\t0.79\t\nEdelrid 7343-075\t7343-45\t100.0\t75.0\t28.7\t0.79\t\nEdelrid 7343-090\t7343-90\t120.0\t90.0\t45.7\t1.13\t\nEdelrid 7343-140\t7343-140\t130.0\t140.0\t64.3\t1.33\t\nEdelrid 7343-190\t7343-190\t150.0\t190.0\t89.8\t1.77\t\nEdelrid 7343-230\t7343-230\t170.0\t230.0\t115.9\t2.27\t\nEdelrid 7343-280\t7343-280\t180.0\t280.0\t139.0\t2.54\t\nEdelrid 7343-340\t7343-340\t200.0\t340.0\t154.3\t3.14\t\nEdelrid 7343-420\t7343-420\t220.0\t420.0\t197.9\t3.8\t\nEdelrid 6843-080\t6843-80\t120.0\t80.0\t46.0\t1.13\t\nEdelrid 6843-120\t6843-120\t130.0\t120.0\t56.1\t1.33\t\nEdelrid 6843-160\t6843-160\t160.0\t160.0\t84.2\t2.01\t\nEdelrid 6843-200\t6843-200\t190.0\t200.0\t104.6\t2.84\t\nEdelrid 6843-240\t6843-240\t210.0\t240.0\t116.2\t3.46\t\nEdelrid 6843-340\t6843-340\t250.0\t340.0\t176.3\t4.91\t\n";
-const REFERENCE_WINGS = [["Niviuk Hook 6","20",20.0,10.3,5.3,47,2.43,17.15,null,3.97,55.0,70.0,205.0,"progression"],["Niviuk Hook 6","22",22.0,10.8,5.3,47,2.55,18.87,null,4.2,60.0,80.0,215.0,"progression"],["Niviuk Hook 6","24",24.0,11.28,5.3,47,2.66,20.59,null,4.5,70.0,92.0,226.0,"progression"],["Niviuk Hook 6","26",26.0,11.74,5.3,47,2.77,22.3,null,4.8,80.0,105.0,235.0,"progression"],["Niviuk Hook 6","28",28.0,12.18,5.3,47,2.87,24.02,null,5.1,95.0,120.0,244.0,"progression"],["Niviuk Hook 6","31",31.0,12.82,5.3,47,3.02,26.59,null,5.5,110.0,135.0,258.0,"progression"],["Niviuk Artik R 2","20",19.6,11.29,6.5,68,2.19,16.76,null,4.0,60.0,75.0,183.0,"performance XC"],["Niviuk Artik R 2","21",21.0,11.68,6.5,68,2.26,17.97,null,4.2,70.0,85.0,190.0,"performance XC"],["Niviuk Artik R 2","23",22.5,12.1,6.5,68,2.34,19.26,null,4.5,80.0,95.0,197.0,"performance XC"],["Niviuk Artik R 2","24",24.0,12.49,6.5,68,2.42,20.54,null,4.8,90.0,105.0,203.0,"performance XC"],["Niviuk Artik R 2","25",25.5,12.87,6.5,68,2.49,21.83,null,4.9,100.0,115.0,210.0,"performance XC"],["Niviuk Artik R 2","27",27.0,13.25,6.5,68,2.57,23.11,null,5.4,110.0,125.0,216.0,"performance XC"],["Niviuk Skin 4 P","14",14.0,8.28,4.9,39,2.02,11.84,null,0.95,50.0,75.0,287.0,"single surface"],["Niviuk Skin 4 P","16",16.0,8.85,4.9,39,2.16,13.53,null,1.09,60.0,85.0,308.0,"single surface"],["Niviuk Skin 4 P","18",18.0,9.39,4.9,39,2.3,15.22,null,1.19,70.0,90.0,328.0,"single surface"],["Niviuk Skin 4 P","20",20.0,9.9,4.9,39,2.42,16.91,null,1.29,85.0,110.0,346.0,"single surface"],["Niviuk Bi Skin 2 P","31",31.0,13.06,5.5,39,2.94,26.17,null,3.3,130.0,190.0,522.0,"single surface tandem"],["PHI Allegro light","XS",20.4,11.09,6.03,72,2.29,17.49,8.81,3.0,50.0,75.0,235.0,"performance XC"],["PHI Allegro light","S",22.11,11.55,6.03,72,2.39,18.91,9.14,3.35,65.0,85.0,238.5,"performance XC"],["PHI Allegro light","M",23.85,12.0,6.03,72,2.48,20.4,9.49,3.57,75.0,95.0,252.5,"performance XC"],["PHI Allegro light","ML",25.02,12.29,6.03,72,2.54,21.4,9.73,3.7,83.0,103.0,258.7,"performance XC"],["PHI Allegro light","L",26.23,12.58,6.03,72,2.6,22.44,9.96,3.85,90.0,110.0,264.8,"performance XC"],["PHI Allegro light","XL",28.62,13.14,6.03,72,2.72,24.48,10.4,4.15,105.0,130.0,276.7,"performance XC"],["Ozone Geo 7","XS",22.2,10.69,5.16,48,2.63,18.7,8.23,3.34,55.0,70.0,244.6,"progression"],["Ozone Geo 7","S",24.1,11.14,5.16,48,2.74,20.3,8.57,3.59,65.0,85.0,253.0,"progression"],["Ozone Geo 7","MS",25.8,11.52,5.16,48,2.84,21.8,8.87,3.66,75.0,95.0,263.5,"progression"],["Ozone Geo 7","ML",27.3,11.85,5.16,48,2.92,23.0,9.12,3.87,85.0,105.0,274.0,"progression"],["Ozone Geo 7","L",29.0,12.22,5.16,48,3.01,24.5,9.4,4.11,95.0,115.0,284.4,"progression"],["Ozone Ultralite 5","13",12.9,7.7,4.56,34,2.1,11.4,6.3,1.44,55.0,90.0,205.3,"hike and fly"],["Ozone Ultralite 5","15",14.9,8.2,4.56,34,2.25,13.1,6.7,1.59,55.0,90.0,227.0,"hike and fly"],["Ozone Ultralite 5","17",16.9,8.8,4.56,34,2.4,14.7,7.1,1.76,55.0,90.0,241.9,"hike and fly"],["Ozone Ultralite 5","19",18.9,9.3,4.56,34,2.54,16.5,7.5,1.93,55.0,95.0,261.6,"hike and fly"],["Ozone Ultralite 5","21",20.8,9.7,4.56,34,2.66,18.1,7.9,2.07,55.0,100.0,278.9,"hike and fly"],["Ozone Ultralite 5","23",22.8,10.2,4.56,34,2.79,19.9,8.3,2.23,65.0,110.0,297.2,"hike and fly"],["Ozone Ultralite 5","25",25.1,10.7,4.56,34,2.92,21.9,8.7,2.41,75.0,120.0,316.3,"hike and fly"],["Ozone Zeno 2","S",21.0,12.0,6.9,78,2.19,17.7,9.5,4.7,75.0,90.0,186.0,"competition"],["Ozone Zeno 2","MS",22.5,12.5,6.9,78,2.26,18.9,9.8,4.92,85.0,100.0,192.9,"competition"],["Ozone Zeno 2","ML",24.1,12.9,6.9,78,2.3,20.3,10.2,5.22,95.0,110.0,200.1,"competition"],["Ozone Zeno 2","L",26.5,13.5,6.9,78,2.46,22.2,10.7,5.62,105.0,125.0,210.1,"competition"],["Ozone Alpina 5","XS",19.3,10.82,6.07,65,2.25,16.4,8.66,3.53,55.0,75.0,202.9,"performance XC"],["Ozone Alpina 5","S",21.1,11.31,6.07,65,2.35,17.9,9.05,3.75,65.0,85.0,212.8,"performance XC"],["Ozone Alpina 5","MS",22.8,11.76,6.07,65,2.45,19.4,9.41,3.96,75.0,95.0,221.5,"performance XC"],["Ozone Alpina 5","ML",24.4,12.16,6.07,65,2.53,20.7,9.73,4.15,85.0,105.0,229.7,"performance XC"],["Ozone Alpina 5","L",25.9,12.53,6.07,65,2.61,22.04,10.03,4.35,95.0,115.0,237.4,"performance XC"],["Ozone Alpina 5","XL",27.8,13.0,6.07,65,2.71,23.7,10.4,4.62,110.0,130.0,246.6,"performance XC"],["BGD Lynx 2","XS",19.5,10.9,6.2,65,2.2,16.5,8.7,3.2,60.0,75.0,null,"performance XC"],["BGD Lynx 2","S",21.0,11.3,6.2,65,2.3,17.8,9.0,3.4,70.0,85.0,229.7,"performance XC"],["BGD Lynx 2","M",23.0,11.8,6.2,65,2.4,19.5,9.5,3.7,75.0,95.0,241.6,"performance XC"],["BGD Lynx 2","ML",25.0,12.3,6.2,65,2.5,21.2,9.9,4.0,88.0,108.0,252.4,"performance XC"],["BGD Lynx 2","L",27.0,12.8,6.2,65,2.6,22.9,10.3,4.3,100.0,120.0,262.7,"performance XC"],["Skywalk SAGE","75",20.26,11.34,6.4,68,2.2,17.29,9.22,3.5,55.0,75.0,202.0,"performance XC"],["Skywalk SAGE","85",21.38,11.65,6.4,68,2.26,18.24,9.48,3.65,65.0,85.0,208.0,"performance XC"],["Skywalk SAGE","95",22.7,12.01,6.4,68,2.33,19.37,9.76,3.8,75.0,95.0,215.0,"performance XC"],["Skywalk SAGE","105",24.2,12.4,6.4,68,2.4,20.65,10.08,3.95,85.0,105.0,222.0,"performance XC"],["Skywalk SAGE","115",25.67,12.77,6.4,68,2.48,21.9,10.38,4.15,95.0,115.0,229.0,"performance XC"]];
+const REFERENCE_WINGS = [["Niviuk Hook 6","20",20.0,10.3,5.3,47,2.43,17.15,null,3.97,55.0,70.0,205.0,"progression",4.0],["Niviuk Hook 6","22",22.0,10.8,5.3,47,2.55,18.87,null,4.2,60.0,80.0,215.0,"progression",4.0],["Niviuk Hook 6","24",24.0,11.28,5.3,47,2.66,20.59,null,4.5,70.0,92.0,226.0,"progression",4.0],["Niviuk Hook 6","26",26.0,11.74,5.3,47,2.77,22.3,null,4.8,80.0,105.0,235.0,"progression",4.0],["Niviuk Hook 6","28",28.0,12.18,5.3,47,2.87,24.02,null,5.1,95.0,120.0,244.0,"progression",4.0],["Niviuk Hook 6","31",31.0,12.82,5.3,47,3.02,26.59,null,5.5,110.0,135.0,258.0,"progression",4.0],["Niviuk Artik R 2","20",19.6,11.29,6.5,68,2.19,16.76,null,4.0,60.0,75.0,183.0,"performance XC",5.02],["Niviuk Artik R 2","21",21.0,11.68,6.5,68,2.26,17.97,null,4.2,70.0,85.0,190.0,"performance XC",5.02],["Niviuk Artik R 2","23",22.5,12.1,6.5,68,2.34,19.26,null,4.5,80.0,95.0,197.0,"performance XC",5.02],["Niviuk Artik R 2","24",24.0,12.49,6.5,68,2.42,20.54,null,4.8,90.0,105.0,203.0,"performance XC",5.02],["Niviuk Artik R 2","25",25.5,12.87,6.5,68,2.49,21.83,null,4.9,100.0,115.0,210.0,"performance XC",5.02],["Niviuk Artik R 2","27",27.0,13.25,6.5,68,2.57,23.11,null,5.4,110.0,125.0,216.0,"performance XC",5.02],["Niviuk Skin 4 P","14",14.0,8.28,4.9,39,2.02,11.84,null,0.95,50.0,75.0,287.0,"single surface",3.93],["Niviuk Skin 4 P","16",16.0,8.85,4.9,39,2.16,13.53,null,1.09,60.0,85.0,308.0,"single surface",3.93],["Niviuk Skin 4 P","18",18.0,9.39,4.9,39,2.3,15.22,null,1.19,70.0,90.0,328.0,"single surface",3.93],["Niviuk Skin 4 P","20",20.0,9.9,4.9,39,2.42,16.91,null,1.29,85.0,110.0,346.0,"single surface",3.93],["Niviuk Bi Skin 2 P","31",31.0,13.06,5.5,39,2.94,26.17,null,3.3,130.0,190.0,522.0,"single surface tandem",4.12],["PHI Allegro light","XS",20.4,11.09,6.03,72,2.29,17.49,8.81,3.0,50.0,75.0,235.0,"performance XC",null],["PHI Allegro light","S",22.11,11.55,6.03,72,2.39,18.91,9.14,3.35,65.0,85.0,238.5,"performance XC",null],["PHI Allegro light","M",23.85,12.0,6.03,72,2.48,20.4,9.49,3.57,75.0,95.0,252.5,"performance XC",null],["PHI Allegro light","ML",25.02,12.29,6.03,72,2.54,21.4,9.73,3.7,83.0,103.0,258.7,"performance XC",null],["PHI Allegro light","L",26.23,12.58,6.03,72,2.6,22.44,9.96,3.85,90.0,110.0,264.8,"performance XC",null],["PHI Allegro light","XL",28.62,13.14,6.03,72,2.72,24.48,10.4,4.15,105.0,130.0,276.7,"performance XC",null],["Ozone Geo 7","XS",22.2,10.69,5.16,48,2.63,18.7,8.23,3.34,55.0,70.0,244.6,"progression",null],["Ozone Geo 7","S",24.1,11.14,5.16,48,2.74,20.3,8.57,3.59,65.0,85.0,253.0,"progression",null],["Ozone Geo 7","MS",25.8,11.52,5.16,48,2.84,21.8,8.87,3.66,75.0,95.0,263.5,"progression",null],["Ozone Geo 7","ML",27.3,11.85,5.16,48,2.92,23.0,9.12,3.87,85.0,105.0,274.0,"progression",null],["Ozone Geo 7","L",29.0,12.22,5.16,48,3.01,24.5,9.4,4.11,95.0,115.0,284.4,"progression",null],["Ozone Ultralite 5","13",12.9,7.7,4.56,34,2.1,11.4,6.3,1.44,55.0,90.0,205.3,"hike and fly",null],["Ozone Ultralite 5","15",14.9,8.2,4.56,34,2.25,13.1,6.7,1.59,55.0,90.0,227.0,"hike and fly",null],["Ozone Ultralite 5","17",16.9,8.8,4.56,34,2.4,14.7,7.1,1.76,55.0,90.0,241.9,"hike and fly",null],["Ozone Ultralite 5","19",18.9,9.3,4.56,34,2.54,16.5,7.5,1.93,55.0,95.0,261.6,"hike and fly",null],["Ozone Ultralite 5","21",20.8,9.7,4.56,34,2.66,18.1,7.9,2.07,55.0,100.0,278.9,"hike and fly",null],["Ozone Ultralite 5","23",22.8,10.2,4.56,34,2.79,19.9,8.3,2.23,65.0,110.0,297.2,"hike and fly",null],["Ozone Ultralite 5","25",25.1,10.7,4.56,34,2.92,21.9,8.7,2.41,75.0,120.0,316.3,"hike and fly",null],["Ozone Zeno 2","S",21.0,12.0,6.9,78,2.19,17.7,9.5,4.7,75.0,90.0,186.0,"competition",null],["Ozone Zeno 2","MS",22.5,12.5,6.9,78,2.26,18.9,9.8,4.92,85.0,100.0,192.9,"competition",null],["Ozone Zeno 2","ML",24.1,12.9,6.9,78,2.3,20.3,10.2,5.22,95.0,110.0,200.1,"competition",null],["Ozone Zeno 2","L",26.5,13.5,6.9,78,2.46,22.2,10.7,5.62,105.0,125.0,210.1,"competition",null],["Ozone Alpina 5","XS",19.3,10.82,6.07,65,2.25,16.4,8.66,3.53,55.0,75.0,202.9,"performance XC",null],["Ozone Alpina 5","S",21.1,11.31,6.07,65,2.35,17.9,9.05,3.75,65.0,85.0,212.8,"performance XC",null],["Ozone Alpina 5","MS",22.8,11.76,6.07,65,2.45,19.4,9.41,3.96,75.0,95.0,221.5,"performance XC",null],["Ozone Alpina 5","ML",24.4,12.16,6.07,65,2.53,20.7,9.73,4.15,85.0,105.0,229.7,"performance XC",null],["Ozone Alpina 5","L",25.9,12.53,6.07,65,2.61,22.04,10.03,4.35,95.0,115.0,237.4,"performance XC",null],["Ozone Alpina 5","XL",27.8,13.0,6.07,65,2.71,23.7,10.4,4.62,110.0,130.0,246.6,"performance XC",null],["BGD Lynx 2","XS",19.5,10.9,6.2,65,2.2,16.5,8.7,3.2,60.0,75.0,null,"performance XC",null],["BGD Lynx 2","S",21.0,11.3,6.2,65,2.3,17.8,9.0,3.4,70.0,85.0,229.7,"performance XC",null],["BGD Lynx 2","M",23.0,11.8,6.2,65,2.4,19.5,9.5,3.7,75.0,95.0,241.6,"performance XC",null],["BGD Lynx 2","ML",25.0,12.3,6.2,65,2.5,21.2,9.9,4.0,88.0,108.0,252.4,"performance XC",null],["BGD Lynx 2","L",27.0,12.8,6.2,65,2.6,22.9,10.3,4.3,100.0,120.0,262.7,"performance XC",null],["Skywalk SAGE","75",20.26,11.34,6.4,68,2.2,17.29,9.22,3.5,55.0,75.0,202.0,"performance XC",null],["Skywalk SAGE","85",21.38,11.65,6.4,68,2.26,18.24,9.48,3.65,65.0,85.0,208.0,"performance XC",null],["Skywalk SAGE","95",22.7,12.01,6.4,68,2.33,19.37,9.76,3.8,75.0,95.0,215.0,"performance XC",null],["Skywalk SAGE","105",24.2,12.4,6.4,68,2.4,20.65,10.08,3.95,85.0,105.0,222.0,"performance XC",null],["Skywalk SAGE","115",25.67,12.77,6.4,68,2.48,21.9,10.38,4.15,95.0,115.0,229.0,"performance XC",null]];
 const SWOOP2_LEP = "**************************************************************\n* LABORATORI D'ENVOL PARAGLIDING DESIGN                      *\n* Input data file 3.30p version                              *\n**************************************************************\n* 20260818 updated to 20260829\n**************************************************************\n*             1. GEOMETRY                                    *\n**************************************************************\n* Brand name\n\"Laboratori d'envol\"\n* Wing name\n\"Swoop2\"\n* Drawing scale\n1.5\n* Wing scale \n0.847342687\n* Number of cells\n\t50\n* Number of ribs\n\t51\n* Alpha wingtip, parameter, (alpha center) \n\t5.0        1         0.0\n* Paraglider type and parameter\n\"ds\" 0\n* Rib geometric parameters\n* Rib    x-rib       y-LE       y-TE         xp         z     beta      RP        Washin     z_rot     z_pos\n 1       0.00      -0.00     246.74       0.00       0.00       0.00      33.33       0.00      0.00   \t50.0\n 2      29.39       0.19     246.69      29.38       0.66       2.54      33.33       0.00\t0.19   \t50.0\n 3      58.73       0.77     246.55      58.65       2.64       5.17      33.33       0.00\t0.38   \t50.0\n 4      87.96       1.72     246.32      87.69       5.92       7.81      33.33       0.00\t0.57   \t50.0\n 5     117.06       3.06     245.99     116.43      10.48      10.25      33.33       0.00\t0.75   \t50.0\n 6     145.97       4.78     245.58     144.76      16.27      12.88      33.33       0.00\t0.94   \t50.0\n 7     174.67       6.89     245.07     172.59      23.26      15.33      33.33       0.00\t1.12   \t50.0\n 8     203.11       9.38     244.47     199.84      31.38      17.77      33.33       0.00\t1.29   \t50.0\n 9     231.26      12.25     243.79     226.42      40.64      20.58      33.33       0.00\t1.49   \t50.0\n10     259.07      15.52     243.02     252.18      51.09      23.46      33.33       0.00\t1.68   \t50.0\n11     286.50      19.18     242.17     277.05      62.68      26.34      33.33       0.00\t1.88   \t50.0\n12     313.51      23.24     241.24     300.94      75.28      29.22      33.33       0.00\t2.06   \t50.0\n13     340.07      27.71     240.23     323.79      88.81      32.11      33.33       0.00\t2.25   \t50.0\n14     366.13      32.59     239.15     345.55     103.14      34.78      33.33       0.00\t2.41   \t50.0\n15     391.65      37.90     237.99     366.18     118.15      37.45      33.33       0.00\t2.57   \t50.0\n16     416.59      43.65     236.77     385.63     133.76      40.24      33.33       0.00\t2.73   \t50.0\n17     440.90      49.88     235.49     403.69     150.03      43.71      33.33       0.00\t2.92   \t50.0\n18     464.51      56.99     234.15     420.28     166.82      47.01      33.33       0.00\t3.09   \t50.0\n19     487.32      65.13     232.77     435.37     183.93      50.16      33.33       0.00\t3.25   \t50.0\n20     509.26      74.26     231.40     448.97     201.14      53.29      33.33       0.00\t3.39   \t50.0\n21     530.25      84.35     230.20     461.09     218.28      56.47      33.33       0.00\t3.52   \t50.0\n22     550.24      95.40     229.17     471.52     235.32      60.51      33.33       0.00\t3.68   \t50.0\n23     569.15     107.44     228.30     480.27     252.08      64.36      33.33       0.00\t3.81   \t50.0\n24     586.90     120.57     227.56     487.45     268.31      67.99      33.33       0.00\t3.92   \t50.0\n25     603.40     134.98     226.95     493.20     283.77      71.23      33.33       0.00\t4.00   \t50.0\n26     618.50     151.20     226.43     499.06     303.31      74.26      33.33       0.00\t4.07   \t50.0\n**************************************************************\n*             2. AIRFOILS       \t                     *\n**************************************************************\n* Airfoil name. intake in. intake out. open. disp   rweight \n1\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n2\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n3\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n4\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n5\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n6\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n7\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n8\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n9\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n10\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n11\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n12\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n13\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n14\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n15\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n16\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n17\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n18\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n19\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n20\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n21\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n22\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n23\tgnuReflex.txt         3.0      6.0\t0\t0\t1     16\n24\tgnuReflex.txt         3.0      6.0\t0\t0\t1     16\n25\tgnuReflex.txt         3.0      6.0\t0\t0\t1     16\n26\tgnuReflex.txt         3.0      6.0\t0\t0\t1     1\n*************************************************************\n*            3. ANCHOR POINTS                               *\n*************************************************************\n* Airf\tAnch\tA     B\t    C\tD\tE\tF\n1\t3\t11    39    67\t0\t0\t0\n2\t3\t11    39    67  0\t0\t95\n3\t3\t11    39    67\t0 \t0\t95\n4\t3\t11    39    67\t0 \t0\t95\n5\t3\t11    39    67\t0 \t0\t95\n6\t3\t11    39    67\t0 \t0\t95\n7\t3\t11    39    67\t0 \t0\t95\n8\t3\t11    39    67\t0 \t0\t95\n9\t3\t11    39    67\t0 \t0\t95\n10\t3\t11    39    67\t0 \t0\t95\n11\t3\t11    39    67\t0 \t0\t95\n12\t3\t11    39    67\t0 \t0\t95\n13\t3\t11    39    67\t0 \t0\t95\n14\t3\t11    39    67\t0\t0\t95\n15\t3\t11    39    67  0\t0\t95\n16\t3\t11    39    67\t0 \t0\t95\n17\t3\t11    39    67\t0 \t0\t95\n18\t3\t11    39    67\t0 \t0\t95\n19\t3\t11    39    67\t0 \t0\t95\n20\t3\t11    39    67\t0 \t0\t95\n21\t3\t11    39    67\t0 \t0\t95\n22\t3\t11    39    67\t0 \t0\t95\n23\t3\t11    39    67\t0 \t0\t95\n24\t3\t11    39    67\t0 \t0\t95\n25\t3\t11    39    67\t0 \t0\t95\n26\t3\t5.    40    77\t0\t0\t0\n*************************************************************\n*          4. AIRFOIL HOLES                                 *\n*************************************************************\n1\n1\n25\n9\n1 15.40\t 2.42\t1.86\t5.10\t0.\t0.\t0.\t0.\n1 23.13\t 1.66\t3.30\t7.12\t0.\t0.\t0.\t0.\n1 31.39\t 1.66\t2.51\t6.15\t0.\t0.\t0.\t0.\n1 44.91\t-0.15\t1.86\t4.96\t0.\t0.\t0.\t0.\n1 52.93\t-0.15\t2.70\t4.96\t0.\t0.\t0.\t0.\n1 60.78\t-0.80\t1.86\t3.55\t0.\t0.\t0.\t0.\n1 73.15 -0.35\t1.59    2.79\t0.\t0.\t0.\t0.\n1 79.00\t-0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.53\t-0.55\t1.3\t1.3\t0.\t0.\t0.\t0.\n*************************************************************\n*           5. SKIN TENSION                                 *\n*************************************************************\nExtrados\n0.\t\t0.0\t0.\t\t0.\n7.5\t\t1.3\t10.\t\t1.33\n15.\t\t2.5\t20.\t\t2.5\n80.\t\t2.5\t80.\t\t2.5\n90.\t\t1.33\t90.\t\t1.33\n100.\t\t0.0\t100.\t\t0.\n0.0114\n1000    1.0\n*************************************************************\n*           6. SEWING ALLOWANCES                            *\n*************************************************************\n10\t10\t20\tupper panels (mm)\n10\t10\t20\tlower panels (mm)\n10\tribs (mm)\n10\tvribs (mm)\n*************************************************************\n*           7. MARKS\n*************************************************************\n25.\t0.5\t0.15\n************************************************************\n*           8. Global angle of attack estimation           *\n*************************************************************\n* Finesse GR\n\t10.0\n* Plumb point % of chord\n\t40\n* Calage %\n\t32.5\n* Risers lenght cm\n\t47\n* Line lenght cm (without risers)\n\t708\n* Karabiners cm\n\t42\n***************************************************\n*          9. SUSPENSION LINES DESCRIPTION\n***************************************************\n3\n3\n12\n4\t1 1\t2 1\t3 1\t4 1 \t1 2\n4\t1 1\t2 1\t3 1\t4 2\t1 3\n4\t1 1\t2 1\t3 2\t4 3\t1 6\n4\t1 1\t2 1\t3 2\t4 4\t1 7\n4\t1 1\t2 2\t3 3\t4 5\t1 10\n4\t1 1\t2 2\t3 3\t4 6\t1 11\n4\t1 1\t2 2\t3 4\t4 7\t1 14\n4\t1 1\t2 2\t3 4\t4 8\t1 15\n4\t1 1\t2 3\t3 5\t4 9\t1 18\n4\t1 1\t2 3\t3 5\t4 10\t1 19\n4\t1 1\t2 3\t3 6\t4 11\t1 22\n4\t1 1\t2 3\t3 6\t4 12\t1 23\n12\n4\t1 1\t2 1\t3 1\t4 1 \t2 2\n4\t1 1\t2 1\t3 1\t4 2\t2 3\n4\t1 1\t2 1\t3 2\t4 3\t2 6\n4\t1 1\t2 1\t3 2\t4 4\t2 7\n4\t1 1\t2 2\t3 3\t4 5\t2 10\n4\t1 1\t2 2\t3 3\t4 6\t2 11\n4\t1 1\t2 2\t3 4\t4 7\t2 14\n4\t1 1\t2 2\t3 4\t4 8\t2 15\n4\t1 1\t2 3\t3 5\t4 9\t2 18\n4\t1 1\t2 3\t3 5\t4 10\t2 19\n4\t1 1\t2 3\t3 6\t4 11\t2 22\n4\t1 1\t2 3\t3 6\t4 12\t2 23\n16\n4\t1 1\t2 1\t3 1\t4 1 \t3 2\n4\t1 1\t2 1\t3 1\t4 2\t3 3\n4\t1 1\t2 1\t3 2\t4 3\t3 6\n4\t1 1\t2 1\t3 2\t4 4\t3 7\n4\t1 1\t2 2\t3 3\t4 5\t3 10\n4\t1 1\t2 2\t3 3\t4 6\t3 11\n4\t1 1\t2 2\t3 4\t4 7\t3 14\n4\t1 1\t2 2\t3 4\t4 8\t3 15\n4\t1 1\t2 3\t3 5\t4 9\t3 18\n4\t1 1\t2 3\t3 5\t4 10\t3 19\n4\t1 1\t2 3\t3 6\t4 11\t3 22\n4\t1 1\t2 3\t3 6\t4 12\t3 23\n3\t1 1\t2 4\t3 7\t0 0\t1 25\n3\t1 1\t2 4\t3 8\t0 0\t1 26\n3\t1 1\t2 4\t3 9\t0 0\t2 26\n3\t1 1\t2 4\t3 10\t0 0\t3 26\n***************************************************\n*       10. BRAKES\n***************************************************\n300\n12\n4\t1 1\t2 1\t3 1\t4 1 \t6 2\n4\t1 1\t2 1\t3 1\t4 2\t6 4\n4\t1 1\t2 1\t3 2\t4 3\t6 6\n4\t1 1\t2 1\t3 2\t4 4\t6 8\n4\t1 1\t2 2\t3 3\t4 5\t6 10\n4\t1 1\t2 2\t3 3\t4 6\t6 12\n4\t1 1\t2 2\t3 4\t4 7 \t6 14\n4\t1 1\t2 2\t3 4\t4 8\t6 16\n4\t1 1\t2 3\t3 5\t4 9\t6 18\n4\t1 1\t2 3\t3 5\t4 10\t6 20\n4\t1 1\t2 3\t3 6\t4 11\t6 22\n4\t1 1\t2 3\t3 6\t4 12\t6 24\n* Brake distribution\n0\t25\t50\t80\t100\n0 \t0\t0\t0\t0\n***************************************************\n*       11. Ramification lengths\n***************************************************\n3\t180\n4\t275\t85\n3\t135\n4\t200\t80\n***************************************************\n*\t12. H V and VH ribs\n***************************************************\n124\n80\t150\n1\t11\t1 1\t2 1\t2.0\t0\t0\t0\n2\t11\t2 1\t3 1\t2.0\t0\t0\t0\n3\t11\t3 1\t4 1\t2.0\t0\t0\t0\n4\t11\t4 1\t5 1\t2.0\t0\t0\t0\n5\t11\t5 1\t6 1\t2.0\t0\t0\t0\n6\t11\t6 1\t7 1\t2.0\t0\t0\t0\n7\t11\t7 1\t8 1\t2.0\t0\t0\t0\n8\t11\t8 1\t9 1\t2.0\t0\t0\t0\n9\t11\t9 1\t10 1\t2.0\t0\t0\t0\n10\t11\t10 1\t11 1\t2.0\t0\t0\t0\n11\t11\t11 1\t12 1\t2.0\t0\t0\t0\n12\t11\t12 1\t13 1\t2.0\t0\t0\t0\n13\t11\t13 1\t14 1\t2.0\t0\t0\t0\n14\t11\t14 1\t15 1\t2.0\t0\t0\t0\n15\t11\t15 1\t16 1\t2.0\t0\t0\t0\n16\t11\t16 1\t17 1\t2.0\t0\t0\t0\n17\t11\t17 1\t18 1\t2.0\t0\t0\t0\n18\t11\t18 1\t19 1\t2.0\t0\t0\t0\n19\t11\t19 1\t20 1\t2.0\t0\t0\t0\n20\t11\t20 1\t21 1\t2.0\t0\t0\t0\n21\t11\t21 1\t22 1\t2.0\t0\t0\t0\n22\t11\t22 1\t23 1\t2.0\t0\t0\t0\n23\t11\t23 1\t24 1\t2.0\t0\t0\t0\n24\t11\t1 2\t2 2\t2.0\t0\t0\t0\n25\t11\t2 2\t3 2\t2.0\t0\t0\t0\n26\t11\t3 2\t4 2\t2.0\t0\t0\t0\n27\t11\t4 2\t5 2\t2.0\t0\t0\t0\n28\t11\t5 2\t6 2\t2.0\t0\t0\t0\n29\t11\t6 2\t7 2\t2.0\t0\t0\t0\n30\t11\t7 2\t8 2\t2.0\t0\t0\t0\n31\t11\t8 2\t9 2\t2.0\t0\t0\t0\n32\t11\t9 2\t10 2\t2.0\t0\t0\t0\n33\t11\t10 2\t11 2\t2.0\t0\t0\t0\n34\t11\t11 2\t12 2\t2.0\t0\t0\t0\n35\t11\t12 2\t13 2\t2.0\t0\t0\t0\n36\t11\t13 2\t14 2\t2.0\t0\t0\t0\n37\t11\t14 2\t15 2\t2.0\t0\t0\t0\n38\t11\t15 2\t16 2\t2.0\t0\t0\t0\n39\t11\t16 2\t17 2\t2.0\t0\t0\t0\n40\t11\t17 2\t18 2\t2.0\t0\t0\t0\n41\t11\t18 2\t19 2\t2.0\t0\t0\t0\n42\t11\t19 2\t20 2\t2.0\t0\t0\t0\n43\t11\t20 2\t21 2\t2.0\t0\t0\t0\n44\t11\t21 2\t22 2\t2.0\t0\t0\t0\n45\t11\t22 2\t23 2\t2.0\t0\t0\t0\n46\t11\t23 2\t24 2\t2.0\t0\t0\t0\n47\t11\t1 3\t2 3\t2.0\t0\t0\t0\n48\t11\t2 3\t3 3\t2.0\t0\t0\t0\n49\t11\t3 3\t4 3\t2.0\t0\t0\t0\n50\t11\t4 3\t5 3\t2.0\t0\t0\t0\n51\t11\t5 3\t6 3\t2.0\t0\t0\t0\n52\t11\t6 3\t7 3\t2.0\t0\t0\t0\n53\t11\t7 3\t8 3\t2.0\t0\t0\t0\n54\t11\t8 3\t9 3\t2.0\t0\t0\t0\n55\t11\t9 3\t10 3\t2.0\t0\t0\t0\n56\t11\t10 3\t11 3\t2.0\t0\t0\t0\n57\t11\t11 3\t12 3\t2.0\t0\t0\t0\n58\t11\t12 3\t13 3\t2.0\t0\t0\t0\n58\t11\t13 3\t14 3\t2.0\t0\t0\t0\n60\t11\t14 3\t15 3\t2.0\t0\t0\t0\n61\t11\t15 3\t16 3\t2.0\t0\t0\t0\n62\t11\t16 3\t17 3\t2.0\t0\t0\t0\n63\t11\t17 3\t18 3\t2.0\t0\t0\t0\n64\t11\t18 3\t19 3\t2.0\t0\t0\t0\n65\t11\t19 3\t20 3\t2.0\t0\t0\t0\n66\t11\t20 3\t21 3\t2.0\t0\t0\t0\n67\t11\t21 3\t22 3\t2.0\t0\t0\t0\n68\t11\t22 3\t23 3\t2.0\t0\t0\t0\n69\t11\t23 3\t24 3\t2.0\t0\t0\t0\n70\t11\t24 1\t25 1\t2.0\t0\t0\t0\n71      15       2 1     1 0    60.0    28.0    85.     2.\n72      15       2 2     1 0    60.0    28.0    85.     2.\n73      15       2 3     1 0    60.0    28.0    85.     2.\n74      15       3 1     0 1    60.0    28.0    85.     2.\n75      15       3 2     0 1    60.0    28.0    85.     2.\n76      15       3 3     0 1    60.0    28.0    85.     2.\n77      15       6 1     1 0    60.0    28.0    85.     2.\n78      15       6 2     1 0    60.0    28.0    85.     2.\n79      15       6 3     1 0    60.0    28.0    85.     2.\n80      15       7 1     0 1    60.0    28.0    85.     2.\n81      15       7 2     0 1    60.0    28.0    85.     2.\n82      15       7 3     0 1    60.0    28.0    85.     2.\n83      15      10 1     1 0    60.0    28.0    85.     2.\n84      15      10 2     1 0    60.0    28.0    85.     2.\n85      15      10 3     1 0    60.0    28.0    85.     2.\n86      15      11 1     0 1    60.0    28.0    85.     2.\n87      15      11 2     0 1    60.0    28.0    85.     2.\n88      15      11 3     0 1    60.0    28.0    85.     2.\n89      15      14 1     1 0    60.0    28.0    85.     2.\n90      15      14 2     1 0    60.0    28.0    85.     2.\n91      15      14 3     1 0    60.0    28.0    85.     2.\n92      15      15 1     0 1    60.0    28.0    85.     2.\n93      15      15 2     0 1    60.0    28.0    85.     2.\n94      15      15 3     0 1    60.0    28.0    85.     2.\n95      15      18 1     1 0    60.0    28.0    85.     2.\n96      15      18 2     1 0    60.0    28.0    85.     2.\n97      15      18 3     1 0    60.0    28.0    85.     2.\n98      15      19 1     0 1    60.0    28.0    85.     2.\n99      15      19 2     0 1    60.0    28.0    85.     2.\n100     15      19 3     0 1    60.0    28.0    85.     2.\n101     15      22 1     1 0    60.0    28.0    85.     2.\n102     15      22 2     1 0    60.0    28.0    85.     2.\n103     15      22 3     1 0    60.0    28.0    85.     2.\n104     15      23 1     0 1    60.0    28.0    85.     2.\n105     15      23 2     0 1    60.0    28.0    85.     2.\n106     15      23 3     0 1    60.0    28.0    85.     2.\n107     15      25 1     1 0    60.0    28.0    85.     2.\n108     15      25 2     1 0    60.0    28.0    85.     2.\n109     15      25 3     1 0    60.0    28.0    85.     2.\n110\t16 \t4 11. 100.  7.0 11.0 \t5 11. 100.   7.0 11.0\n111\t16 \t8 11. 100.  7.0 11.0    9 11. 100.   7.0 11.0\n112\t16     12 11. 100.  7.0 11.0   13 11. 100.   7.0 11.0\n113\t16     16 11. 100.  7.0 11.0   17 11. 100.   7.0 11.0\n114\t16     20 11. 100.  7.0 11.0   21 11. 100.   7.0 11.0\n115\t16 \t4 39. 100. 11.0 11.0 \t5 39. 100.  11.0 11.0\n116\t16 \t8 39. 100. 11.0 11.0    9 39. 100.  11.0 11.0\n117\t16     12 39. 100. 11.0 11.0   13 39. 100.  11.0 11.0\n118\t16     16 39. 100. 11.0 11.0   17 39. 100.  11.0 11.0\n119\t16     20 39. 100. 11.0 11.0   21 39. 100.  11.0 11.0\n120\t16 \t4 72. 100. 11.0 11.0 \t5 72. 100.  11.0 11.0\n121\t16 \t8 72. 100. 11.0 11.0    9 72. 100.  11.0 11.0\n122\t16     12 72. 100. 11.0 11.0   13 72. 100.  11.0 11.0\n123\t16     16 72. 100. 11.0 11.0   17 72. 100.  11.0 11.0\n124\t16     20 72. 100. 11.0 11.0   21 72. 100.  11.0 11.0\n*****************************************************\n*\t15. Extrados colors\n*****************************************************\n26\n1\t1\n1\t61.\t0.\n2\t1\n1\t61.\t0.\n3\t1\n1\t61.\t0.\n4\t1\n1\t61.\t0.\n5\t1\n1\t61.\t0.\n6\t1\n1\t61.\t0.\n7\t1\n1\t61.\t0.\n8\t1\n1\t61.\t0.\n9\t1\n1\t61.\t0.\n10\t1\n1\t61.\t0.\n11\t1\n1\t61.\t0.\n12\t1\n1\t61.\t0.\n13\t1\n1\t61.\t0.\n14\t1\n1\t61.\t0.\n15\t1\n1\t61.\t0.\n16\t1\n1\t61.\t0.\n17\t1\n1\t61.\t0.\n18\t1\n1\t61.\t0.\n19\t1\n1\t61.\t0.\n20\t1\n1\t61.\t0.\n21\t1\n1\t61.\t0.\n22\t1\n1\t61.\t0.\n23\t1\n1\t61.\t0.\n24\t1\n1\t61.\t0.\n25\t1\n1\t61.\t0.\n26\t1\n1\t61.\t0.\n*****************************************************\n*\t16. Intrados colors\n*****************************************************\n26\n1\t1\n1\t48.\t0.\n2\t1\n1\t54.46\t0.\n3\t1\n1\t61.\t0.\n4\t1\n1\t61.\t0.\n5\t1\n1\t61.\t0.\n6\t1\n1\t61.\t0.\n7\t1\n1\t61.\t0.\n8\t1\n1\t61.\t0.\n9\t1\n1\t61.\t0.\n10\t1\n1\t61.\t0.\n11\t1\n1\t61.\t0.\n12\t1\n1\t61.\t0.\n13\t1\n1\t61.\t0.\n14\t1\n1\t61.\t0.\n15\t1\n1\t61.\t0.\n16\t1\n1\t61.\t0.\n17\t1\n1\t61.\t0.\n18\t1\n1\t61.\t0.\n19\t1\n1\t61.\t0.\n20\t1\n1\t61.\t0.\n21\t1\n1\t61.\t0.\n22\t1\n1\t61.\t0.\n23\t1\n1\t61.\t0.\n24\t1\n1\t61.\t0.\n25\t1\n1\t61.\t0.\n26\t1\n1\t61.\t0.\n*****************************************************\n*       17. Aditional rib points\n*****************************************************\n0\n*****************************************************\n*       18. Elastic lines corrections\n*****************************************************\n100\n75\t25\n40\t40\t20\n35\t35\t20\t10\n35\t35\t15\t10\t5\n1\t0.08\t0.2\t0.2\t\n2\t0.08\t0.2\t0.2\n3\t0.08\t0.2\t0.2\n4\t0.08\t0.2\t0.2\n5\t0.08\t0.2\t0.2\n******************************************************\n*       19. DXF layer names\n******************************************************\n10\ngeneral         default\nline-external\tcutexternal\nline-sewing     cutinternal\npoints\t\tpoints\ncircles\t\tcircles\ntriangles       triangle\nsquare          square\ntext\t\ttext\nreference       refer\nnotes           notes\n******************************************************\n*       20. Marks types\n******************************************************\n10\ntypepoint   1  0.25  1.2     2  0.3  1.2\ntypepoint2  1  0.25  1.2     2  0.2  1.2\ntypepoint3  1  0.25  1.2     2  0.2  1.2\ntypevent    1  10.   0.0     2  2.0  0.0\ntypetab     1  10.   0.0     3  2.0  0.0\ntypejonc    1  10.   0.0     2  2.0  0.0\ntyperef     1  5.0   1.      1  2.0  0.0\ntype8       1  0.2   5.5     1  0.0  3.9\ntype9       1  0.0   7.0     1  3.2  4.5\ntype10      1  0.0   6.0     1  0.0  3.33\n*******************************************************\n*       21. JONCS DEFINITION (NYLON RODS)\n*******************************************************\n2\n2\n1 1\n1\n1 1 25\n12.0  18.5     1.5   2.0\n7.0   15.0     2.0   2.0\n0.0    9.35    6.3   9.35\n2 4\n1\n1 1 25\n23.5  29.5   1.1   2.0\n63.0  70.0   1.1   2.0\n0.0    9.35  6.3   9.35\n*******************************************************\n*       22. NOSE MYLARS DEFINITION\n*******************************************************\n0\n*******************************************************\n*       23. TAB REINFORCEMENTS\n*******************************************************\n0\n*******************************************************\n*       24. GENERAL 2D DXF OPTIONS\n*******************************************************\n1\nA_lines_color\t1     red\nB_lines_color\t30    orange\nC_lines_color\t3     green\nD_lines_color\t4     cyan\nE_lines_color   6     magenta\nF_lines_color\t5     blue\n*******************************************************\n*       25. GENERAL 3D DXF OPTIONS\n*******************************************************\n1\nA_lines_color\t1     red\nB_lines_color\t8     grey\nC_lines_color\t8     grey\nD_lines_color\t8     grey\nE_lines_color   8     grey\nF_lines_color\t30    orange\nExtrados\t0\t5       blue\nVents\t\t0\t1       red\nIntrados\t0\t3\tgreen\n*******************************************************\n*       26. GLUE VENTS\n*******************************************************\n1\n1\t-4 \t 0.0 \t 0.0\n2\t-4 \t67.0 \t 0.0\n3\t-4 \t 0.0 \t67.0\n4\t-4 \t67.0 \t 0.0\n5\t-4 \t 0.0 \t67.0\n6\t-4 \t67.0 \t 0.0\n7\t-4 \t 0.0 \t67.0\n8\t-4 \t67.0 \t 0.0\n9\t-4 \t 0.0 \t67.0\n10\t-4 \t67.0 \t 0.0\n11\t-4 \t 0.0 \t67.0\n12\t-4 \t67.0 \t 0.0\n13\t-4 \t0.0 \t67.0\n14\t-4 \t67.0 \t 0.0\n15\t-4 \t0.0 \t67.0\n16\t-4 \t67.0 \t 0.0\n17\t-4 \t0.0 \t67.0\n18\t-4 \t67.0 \t 0.0\n19\t-4 \t0.0 \t67.0\n20\t-4 \t67.0 \t 0.0\n21\t-4 \t0.0 \t67.0\n22\t-4 \t67.0 \t 0.0\n23\t-4 \t0.0    100.0\n24\t-1\n25\t-1\n26\t-1\n*******************************************************\n*       27. SPECIAL WING TIP\n*******************************************************\n1\nAngleLE 55.\nAngleTE 5.\n*******************************************************\n*       28. PARAMETERS FOR CALAGE VARIATION\n*******************************************************\n1\n3\n11. 39. 67.0  0.0  0  0\n-3.0 10 5.0 20\n*******************************************************\n*       29. 3D SHAPING\n*******************************************************\n1\n1\ngroups \t1\ngroup   1       1       26\nupper\t0\t1\nlower\t0\t1\n* Print parameters\nInter3D 0\t1\t26\t0\nOvali3D 0\t1\t26\t0\ntesse3D 0\t1\t26\t0\nexteDXF 1\t1\t26\t1\nexteSTL 1\t1\t26\t1\n*******************************************************\n*       30. AIRFOIL THICKNESS MODIFICATION\n*******************************************************\n1\n1\t1.0\n2\t1.0\n3\t1.0\n4\t1.0\n5\t1.0\n6\t1.0\n7\t1.0\n8\t1.0\n9\t1.0\n10\t1.0\n11\t1.0\n12\t1.0\n13\t1.0\n14\t1.0\n15\t1.0\n16\t1.0\n17\t1.0\n18\t1.0\n19\t1.0\n20\t1.0\n21\t1.0\n22\t1.0\n23\t1.0\n24\t1.0\n25\t1.0\n26\t0.01\n*******************************************************\n*       31. NEW SKIN TENSION MODULE\n*******************************************************\n1\n1\n* Skin tension group number \"1\" from rib 1 to 26, 14 points, type \"1\"\n1      \t1\t27\t14\t1\n1\t0.\t\t0.03\t0.\t\t0.\n2\t5.\t\t0.4\t10.\t\t0.625\n3\t10.0\t\t1.0\t20.\t\t1.25\n4\t15.\t\t1.94\t30.\t\t1.875\n5\t17.5\t\t2.93\t35\t\t2.1875\n6\t20.\t\t3.32\t40.\t\t2.5\n7\t25.\t\t3.5\t65.\t\t2.5\n8\t50.\t\t3.5\t70.\t\t2.4\n9\t55.\t\t3.33\t75.\t\t2.3\n10\t65.\t\t2.77\t80.\t\t2.0\t\n11\t70.\t\t2.35\t85.\t\t1.5\n12\t90.\t\t0.67\t90.\t\t0.9\n13\t95.\t\t0.19\t95.\t\t0.3\n14\t100.\t\t0.0\t100.\t\t0.03\n*******************************************************\n*       32. PARAMETERS FOR PARTS SEPARATION\n*******************************************************\n1\npanel_x\t\t1.2\npanel_x_min\t1.0\npanel_y\t\t0.8\nrib_x\t\t1.0\nrib_y\t\t1.0\nrib_1y\t\t0.5\njonc_x\t\t1.0\njonc_y\t\t1.0\njonc_i\t\t1.0\nnotused\t\t1.0\n*******************************************************\n*       33. DETAILED RISERS\n*******************************************************\n0\n*******************************************************\n*       34. LINES CHARACTERISTICS TABLE\n*******************************************************\n1\n6\n1  c  5.0     Riser    1000 daN  u_dyneem    10.0   g   p 12. cm  7\n2  c  1.90    Line275   275 daN  s_dyneem    2.26   g   s 12. cm  1\n3  c  1.40    Line160   160 daN  s_dyneem    1.34   g   s 10. cm  3\n4  c  1.15    Line120   120 daN  s_dyneem    1.00   g   s 10. cm  5\n5  c  0.80    Line100U  100 daN  u_dyneem    0.43   g   p 8.  cm  2\n6  c  2.00    Line200B  200 daN  s_dynemm    3.10   g   s 12. cm  6\n*******************************************************\n*       35. SOLVE EQUILIBRIUM EQUATIONS\n*******************************************************\n0\n*******************************************************\n*       36. CREATE FILES FOR XFLR5 ANALYSIS\n*******************************************************\n0\n*******************************************************\n*       37. SOME SPECIAL PARAMETERS\n*******************************************************\n1\n6\n1341    1    use CAD colors for each line type according table 34\n2000\t\"2026-08-29\" edition date\n3001\t3    6.0   0.85  use cosinuidal mini-rib transitions\n2005\t0\n2006\t0\n3002\t55   ellipse segments\n***************************************************\n*\t38. HVR HOLES\n***************************************************\n1\n3\n1\t16\t1\t5\t70.\t50.\t0.5\t0.0\t0.0\n2\t15\t1\t3\t45.\t25.\t0.6\t0.0\t0.0\n3\t 9\t1\t4\t70\t0.6    -0.15\t0.0\t0.0\t\n***************************************************\n*\t39. HVR POSITION PARAMETERS\n***************************************************\n1\n6\nvrib_type1\t0.5\t1.0\nvrib_type2\t1.0\t1.0\nvrib_type3\t1.0\t1.0\nvrib_type4\t1.0\t1.0\nvrib_type5\t0.4\t1.0\nvrib_type6\t0.4\t1.0\n\n\n\n\nNote: sections 15 and 16 causes NaN problem.\nUse noNaN script or subtitute sections 15, 16 by:\n\n*****************************************************\n*\t15. Extrados colors\n*****************************************************\n0\n*****************************************************\n*\t16. Intrados colors\n*****************************************************\n26\n\n";
 const SWOOP2_SECTIONS = {"gnuReflex.txt": "gnuReflex                                         \n 180\n 110\n   7\n  65\n 1.000000     0.000000\n 0.993538     0.001003\n 0.983052     0.002359\n 0.971425     0.003599\n 0.958609     0.004927\n 0.944821     0.006369\n 0.930241     0.007826\n 0.915007     0.009295\n 0.899393     0.010792\n 0.883695     0.012327\n 0.868094     0.013925\n 0.852688     0.015622\n 0.837494     0.017465\n 0.822421     0.019510\n 0.807310     0.021781\n 0.792027     0.024280\n 0.776476     0.026978\n 0.760631     0.029827\n 0.744554     0.032770\n 0.728363     0.035736\n 0.712095     0.038675\n 0.695723     0.041590\n 0.679265     0.044494\n 0.662774     0.047401\n 0.646302     0.050323\n 0.629877     0.053270\n 0.613491     0.056255\n 0.597112     0.059290\n 0.580697     0.062379\n 0.564225     0.065509\n 0.547714     0.068664\n 0.531225     0.071815\n 0.514821     0.074933\n 0.498526     0.077997\n 0.482349     0.080987\n 0.466294     0.083883\n 0.450330     0.086669\n 0.434399     0.089344\n 0.418446     0.091921\n 0.402444     0.094421\n 0.386429     0.096863\n 0.370508     0.099243\n 0.354842     0.101531\n 0.339545     0.103665\n 0.324644     0.105593\n 0.310122     0.107276\n 0.295946     0.108685\n 0.282079     0.109802\n 0.268488     0.110614\n 0.255151     0.111111\n 0.242054     0.111286\n 0.229183     0.111131\n 0.216528     0.110642\n 0.204087     0.109813\n 0.191859     0.108643\n 0.179841     0.107129\n 0.168039     0.105279\n 0.156476     0.103099\n 0.145179     0.100597\n 0.134173     0.097786\n 0.123489     0.094683\n 0.113167     0.091313\n 0.103261     0.087713\n 0.093825     0.083910\n 0.084887     0.079930\n 0.076471     0.075823\n 0.068606     0.071644\n 0.061313     0.067457\n 0.054603     0.063321\n 0.048468     0.059291\n 0.042889     0.055413\n 0.037841     0.051723\n 0.033296     0.048221\n 0.029217     0.044891\n 0.025558     0.041714\n 0.022276     0.038678\n 0.019327     0.035771\n 0.016679     0.032985\n 0.014305     0.030302\n 0.012177     0.027715\n 0.010267     0.025220\n 0.008552     0.022813\n 0.007013     0.020490\n 0.005633     0.018245\n 0.004398     0.016076\n 0.003312     0.013970\n 0.002378     0.011918\n 0.001597     0.009913\n 0.000967     0.007950\n 0.000498     0.006032\n 0.000186     0.004162\n 0.000017     0.002335\n 0.000000     0.000000\n 0.000170    -0.001261\n 0.000523    -0.003090\n 0.001029    -0.004956\n 0.001692    -0.006841\n 0.002529    -0.008735\n 0.003555    -0.010626\n 0.004780    -0.012505\n 0.006210    -0.014362\n 0.007845    -0.016196\n 0.009682    -0.018017\n 0.011726    -0.019829\n 0.013991    -0.021631\n 0.016477    -0.023453\n 0.019180    -0.025326\n 0.022129    -0.027234\n 0.025371    -0.029153\n 0.030000    -0.031639\n 0.032868    -0.033101\n 0.037186    -0.035154\n 0.041949    -0.037262\n 0.047209    -0.039428\n 0.053008    -0.041622\n 0.060000    -0.043936\n 0.066642    -0.045932\n 0.074561    -0.048178\n 0.083116    -0.050385\n 0.092364    -0.052449\n 0.102487    -0.054391\n 0.113519    -0.056257\n 0.125332    -0.058021\n 0.137824    -0.059655\n 0.150923    -0.061135\n 0.164543    -0.062442\n 0.178620    -0.063567\n 0.193124    -0.064517\n 0.208015    -0.065308\n 0.223247    -0.065953\n 0.238812    -0.066467\n 0.254714    -0.066880\n 0.270923    -0.067228\n 0.287356    -0.067546\n 0.303884    -0.067859\n 0.320380    -0.068180\n 0.336750    -0.068483\n 0.352951    -0.068723\n 0.368979    -0.068870\n 0.384842    -0.068900\n 0.400575    -0.068792\n 0.416242    -0.068530\n 0.431912    -0.068113\n 0.447644    -0.067549\n 0.463461    -0.066854\n 0.479357    -0.066040\n 0.495326    -0.065116\n 0.511369    -0.064087\n 0.527486    -0.062962\n 0.543673    -0.061748\n 0.559918    -0.060455\n 0.576216    -0.059086\n 0.592569    -0.057649\n 0.608959    -0.056157\n 0.625340    -0.054616\n 0.641680    -0.053023\n 0.657969    -0.051369\n 0.674220    -0.049648\n 0.690443    -0.047857\n 0.706613    -0.046000\n 0.722724    -0.044063\n 0.738818    -0.042036\n 0.754919    -0.039924\n 0.771010    -0.037735\n 0.787077    -0.035465\n 0.803125    -0.033111\n 0.819183    -0.030667\n 0.835268    -0.028139\n 0.851357    -0.025542\n 0.867423    -0.022881\n 0.883466    -0.020162\n 0.899420    -0.017422\n 0.915119    -0.014699\n 0.930386    -0.012018\n 0.945040    -0.009433\n 0.958830    -0.007006\n 0.971525    -0.004711\n 0.983045    -0.002611\n 0.993514    -0.000905\n 1.000000     0.000000\n"};
 /* app.js — UI layer. Owns the design state, renders the controls, redraws the
@@ -24142,12 +25043,12 @@ const REFERENCE_LIB = ((typeof REFERENCE_WINGS !== 'undefined'
   : [
 ]).map(([family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea,
   projectedSpan = null, massKg = null, weightLo = null, weightHi = null,
-  totalLineM = null, application = null]) => {
+  totalLineM = null, application = null, projectedAR = null]) => {
   const midWeight = weightLo && weightHi ? (weightLo + weightHi) / 2 : null;
   return {
     id: `${family} ${size}`,
     family, size, flatArea, flatSpan, flatAR, cells, maxChord, projectedArea,
-    projectedSpan, massKg, weightLo, weightHi, midWeight, totalLineM,
+    projectedSpan, projectedAR, massKg, weightLo, weightHi, midWeight, totalLineM,
     // What kind of wing the specification says it is.
     application,
     singleSurface: /single surface/i.test(application || ''),
@@ -24156,6 +25057,8 @@ const REFERENCE_LIB = ((typeof REFERENCE_WINGS !== 'undefined'
       // `referenceDesignInputs` takes the arc from the projected SPAN when
       // it has one, and only falls back to the area ratio without.
       ...(projectedSpan ? { projectedSpan } : {}),
+      // Niviuk's projected aspect ratio, from which their span follows.
+      ...(projectedAR ? { projectedAR } : {}),
       ...(massKg ? { mass: massKg } : {}),
       ...(midWeight ? { midWeight } : {}),
       ...(totalLineM ? { totalLineLength: totalLineM } : {}),
@@ -24225,7 +25128,11 @@ const S = {
   clothLower: 'Porcher Skytex 32', clothRib: 'Porcher Skytex 40 hard',
   noseClothTo: 25,         // % of chord the leading-edge cloth runs to, on the upper surface
   useCascadeSpec: false,
-  cascadeSpec: 'A 30 14 3\nB 14  6 4\nC  8  3 2',
+  // The Ozone Geo 7 MS, line for line, on the default layout, its tip lines
+  // and its stabilo's riser as its totals show them. It was "the Zeno 2",
+  // A 30 14 3 / B 14 6 4 / C 8 3 2 — a two-liner on three risers, whose
+  // middle counts were not the Zeno 2's and were not built either.
+  cascadeSpec: 'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C',
   // N/m across the cell, which with the pressure sets how far a panel
   // bulges. The handbook's 6% of widening on a 0.25 m cell at 95 Pa is
   // 21 N/m. It was 300, at which a panel hardly bulges at all.
@@ -24343,23 +25250,31 @@ function applyReference() {
   const cellNote = builtTotal === r.cells
     ? null
     : `built with ${builtTotal} cells against ${r.cells} published.`;
-  // The arc is a circle through the published projected span. The ratio is
-  // only read by the circle, so a picker used while the arc was set to an
-  // ellipse loaded the size and silently kept the ellipse's span.
-  S.lobeType = 'circle';
-  S.projectedRatio = r.projectedRatio;
-  // Where the projected span is not published but the projected area is,
-  // the arc is solved to the area. Taking the area ratio as the span ratio
-  // put the Artik R 2 3% over its projected area and the Skin 4 P 3% under.
-  let arcNote = entry.projectedSpan
-    ? `arc through the published ${entry.projectedSpan} m projected span` : null;
-  if (!entry.projectedSpan && entry.projectedArea) {
+  // The arc: the handbook's ellipse through the projected span — published,
+  // or the one Niviuk's projected aspect ratio and area define
+  // (`referenceDesignInputs`). It was a circle through the same span, which
+  // projects 51 of the 55 wings that publish a projected area short of it
+  // (2.0% out on average, where the ellipse is 1.0%) and curves the middle of
+  // the wing, where the long lines are, as much as the tip. The circle's
+  // ratio is kept for a designer who switches back.
+  S.lobeType = 'ellipse';
+  S.lobeARatio = r.lobe.aRatio;
+  S.lobeBRatio = r.lobe.bRatio;
+  S.projectedRatio = Math.min(0.99, Math.max(0.7, r.projectedRatio));
+  let arcNote = null;
+  if (r.projectedSpanBasis === 'published') {
+    arcNote = `an elliptical arc through the published ${entry.projectedSpan} m projected span`;
+  } else if (r.projectedSpanBasis === 'from the published projected aspect ratio and area') {
+    arcNote = `an elliptical arc through the ${(r.projectedRatio * entry.flatSpan).toFixed(2)} m `
+      + `projected span its published projected aspect ratio (${entry.projectedAR}) and area give`;
+  } else if (entry.projectedArea) {
+    // Neither published, the projected area is: the arc is solved to it.
     const pf = planformFromDesignInputs({
       span: S.span, rootChord: S.rootChord, tipChord: S.tipChord, tipSweep: S.tipSweep,
       ellipticityLE: S.ellipticityLE, ellipticityTE: S.ellipticityTE,
     });
     const projectedFor = (ratio) => {
-      const lobe = buildLobe({ type: 'circle', projectedRatio: ratio }, pf.halfSpan);
+      const lobe = buildLobe(ellipseForProjectedRatio(ratio), pf.halfSpan);
       const n = 240;
       let area = 0;
       let prev = lobe.at(0).y;
@@ -24372,14 +25287,17 @@ function applyReference() {
       return 2 * area;
     };
     let lo = 0.65;
-    let hi = 0.99;
+    let hi = 0.98;
     if (entry.projectedArea >= projectedFor(lo) && entry.projectedArea <= projectedFor(hi)) {
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 30; i++) {
         const mid = (lo + hi) / 2;
         if (projectedFor(mid) < entry.projectedArea) lo = mid; else hi = mid;
       }
+      const spec = ellipseForProjectedRatio((lo + hi) / 2);
+      S.lobeARatio = spec.aRatio;
+      S.lobeBRatio = spec.bRatio;
       S.projectedRatio = Math.round(((lo + hi) / 2) * 10000) / 10000;
-      arcNote = `arc solved to the published ${entry.projectedArea} m² projected area`;
+      arcNote = `an elliptical arc solved to the published ${entry.projectedArea} m² projected area`;
     }
   }
 
@@ -24400,12 +25318,60 @@ function applyReference() {
   }
   S._referenceTotalLineM = entry.totalLineM ?? null;
 
+  // Its suspension. Where the maker's line sheets are on file, the wing's
+  // own: its riser layout, every row's anchors and mains, and the middle
+  // lines where the generator can build them, written out as a cascade the
+  // designer can read and edit (`DESIGN_LINES`, measured from the sheets).
+  // Where they are not, the layout the full pipeline gives a wing of this
+  // aspect ratio, and anchors solved to its line length once it is built.
+  //
+  // A wing loaded from here kept whatever layout the panel held, and its
+  // anchors on every second rib: a two-liner was built on three risers until
+  // the designer changed it, and a Zeno 2 S came out with 466 m of line
+  // against its published 186.
+  const own = designCascade(entry.family);
+  const rowsUsed = own ? new Set(own.layoutDef.flatMap((x) => x.rows)).size
+    : (entry.flatAR >= 6.2 ? 3 : 4);
+  // The chord positions the full pipeline builds these wings with.
+  Object.assign(S, rowsUsed === 3
+    ? { anchorA: 9, anchorB: 38, anchorC: 60 }
+    : { anchorA: 8.5, anchorB: 30, anchorC: 53, anchorD: 78 });
+  let linesNote;
+  if (own) {
+    S.riserLayout = own.layout;
+    S.useCascadeSpec = true;
+    const derived = Object.keys(own.cascade.anchorsPerRow).filter((r) => !(r in own.cascade.middlesPerRow));
+    S.cascadeSpec = [
+      `# ${entry.family}: its own cascade, counted from its maker's line sheet${own.sheets > 1 ? 's' : ''}.`,
+      ...(derived.length
+        ? [`# Middle lines paired on ${derived.join(', ')}: the sheet's are not a shape this builds.`] : []),
+      DESIGN_LINES[entry.family].spec,
+    ].join('\n');
+    S._solveAfterBuild = false;
+    linesNote = `its own riser layout (${own.layout}) and line counts, from its sheets`;
+  } else {
+    S.riserLayout = entry.flatAR >= 6.2 ? 'A/B+C' : 'A/B/C+D';
+    S.useCascadeSpec = false;
+    S._solveAfterBuild = true;
+    // On file but not buildable is not the same as not on file: the Skin 4 P's
+    // sheet gives nine rows on four risers.
+    const sheetLayout = DESIGN_LINES[entry.family]?.layout;
+    const why = sheetLayout
+      ? `its sheet gives ${sheetLayout}, ${sheetLayout.split(/[/+]/).length} rows on `
+        + `${sheetLayout.split('/').length} risers, which this does not build`
+      : 'no line sheet of it is on file';
+    linesNote = `${why}: ${S.riserLayout} by its aspect ratio, `
+      + `and anchors solved to ${entry.totalLineM ? `its published ${entry.totalLineM} m of line`
+        : 'what wings of its aspect ratio carry'}`;
+  }
+
   S.name = S.reference.replace(/\s+/g, '-');
   const nameField = document.getElementById('wingName');
   if (nameField) nameField.value = S.name;
   const assumed = r.derived.filter((d) => d !== 'tip chord');
   S._referenceNote = `${S.reference}: ${entry.flatArea} m² published`
     + `, with ${used.join(', ')}; ${tipNote}${arcNote ? `; ${arcNote}` : ''}. `
+    + `Lines: ${linesNote}. `
     + 'The shape is not published: '
     + `${assumed.join(', ')} are defaults, not this wing's.`
     + (cellNote ? ` ${cellNote}` : '')
@@ -24589,6 +25555,73 @@ function wireThemeButton() {
     applyTheme();
     rebuild();
   });
+}
+
+/**
+ * "Solve anchors to the line length" (the Lines panel), and what a published
+ * wing without line sheets on file is given once it is built.
+ *
+ * The derived plan attaches every second rib, whatever the wing. That is a
+ * real wing's density on the default wing and nothing like one on a
+ * published wing: a Zeno 2 S came out with 466 m of line against its
+ * published 186. This solves the anchor counts to a line total the way the
+ * full-pipeline validation does, inside the densities real wings use, and
+ * writes the plan it built out as a cascade the designer can see and edit.
+ */
+function solveAnchorsToLineLength() {
+  if (M.imported) { setStatus('An imported design keeps its own lines.'); return; }
+  const layout = RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'];
+  const rows = [...new Set(layout.flatMap((r) => r.rows))]
+    .filter((r) => Number.isFinite(M.airfoil?.anchors?.[r]));
+  const risers = layout.filter((r) => r.rows.length).length;
+  const published = S.reference && !M.imported ? S._referenceTotalLineM : null;
+  const target = published
+    ?? lineConsumptionEstimate({
+      aspectRatio: M.metrics.aspectRatio, flatSpan: M.metrics.span, risers,
+    }).totalLineLengthM;
+  // The stabilo is built inside each plan the solve tries, so the plan it
+  // lands on is the whole lineset. It was added afterwards, and its length
+  // was taken off the target instead.
+  const solved = anchorsForLineLength({
+    wing: M.wing, airfoil: M.airfoil, rows, targetMetres: target, layout,
+    lineLengthM: S.lineLength, risers, mainsPerRow: 3,
+    brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
+    stabilo: !!S.stabilo,
+  });
+  const basis = published
+    ? `the published ${published} m`
+    : `${target.toFixed(0)} m, what real wings of this aspect ratio and span carry`;
+  // At the edge of the range, said in the target's own terms. On three or
+  // more risers a two-liner's total is below what the layout carries at the
+  // sparsest real density, and the answer is the layout.
+  const [lo, hi] = solved.reachableRange;
+  // Within 5% of the target the edge is not worth a warning: the
+  // aspect-ratio law itself is good to about 7%, and a published total is
+  // rounded. A school wing came out 1% short of the law and was told to try
+  // two risers.
+  const missed = Math.abs(solved.error) > 0.05;
+  const edge = !missed ? null : solved.saturatedSide === 'under'
+    ? `that is less than this layout carries at the sparsest real density, ${lo.toFixed(0)} m: `
+      + 'it needs fewer rows or fewer risers, not fewer anchors'
+      + (risers > 2 ? '; a two-riser layout (A/B+C) carries less' : '')
+    : solved.saturatedSide === 'over'
+      ? `that is more than this wing carries at the densest, ${hi.toFixed(0)} m: it needs more ribs`
+      : null;
+  // The plan the solve built, line for line, so the text says what is on
+  // the page. It wrote "A 31 3" — anchors and mains — and the middle lines
+  // were whatever pairing made of them.
+  S.cascadeSpec = [
+    `# Solved to ${basis}: front density ${solved.frontFraction.toFixed(2)}.`,
+    ...(edge ? [`# ${edge[0].toUpperCase()}${edge.slice(1)}.`] : []),
+    ...cascadeSpecFor(solved.plan).trim().split('\n'),
+  ].join('\n');
+  S.useCascadeSpec = true;
+  buildControls();
+  rebuild();
+  setStatus(null, `Anchors solved to ${basis}: `
+    + rows.map((r) => `${r}${solved.anchorsPerRow[r]}`).join(' ')
+    + `, ${M.linePlan.totalLengthM.toFixed(0)} m built`
+    + (edge ? ` — ${edge}.` : ''));
 }
 
 function rebuild() {
@@ -24782,7 +25815,10 @@ function rebuild() {
     // Named `writtenCascade`: `cascade` in this scope is already the chapter
     // 8 weighted-centroid model, and shadowing it would have been a quiet
     // way to break the front view.
-    const writtenCascade = S.useCascadeSpec ? parseCascadeSpec(S.cascadeSpec) : null;
+    const riserLayout = RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'];
+    const writtenCascade = S.useCascadeSpec
+      ? parseCascadeSpec(S.cascadeSpec, { layout: riserLayout }) : null;
+    const written = writtenCascade && writtenCascade.ok ? writtenCascade : null;
 
     const planOptions = {
       // Hang the wing from where it BALANCES, not from an average of the
@@ -24794,18 +25830,30 @@ function rebuild() {
       // points of chord too far forward on a typical wing, so the model
       // pitched nose-down against the attitude it would really fly at.
       calageFraction: usableCalage(balance).ok ? balance.calageFraction : null,
-      wing, airfoil, layout: RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'],
+      wing, airfoil, layout: riserLayout,
       everyNthRib: 2, lineLengthM: S.lineLength, riserLengthM: riserM,
       mergeRows: MERGES[S.mergeRows] || null,
-      brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
+      // The brake as written, when a K row is; the brake lines checkbox still
+      // decides whether there are any.
+      brakes: S.brakeLines ? (written?.brakes ?? { anchors: 13, levelCounts: [6, 3, 1] }) : null,
       karabinerSeparationM: S.karabinerSep / 100,
-      // A written cascade overrides the rules, when the designer has one.
-      ...(writtenCascade && writtenCascade.ok
+      // A written cascade overrides the rules, when the designer has one:
+      // every count it gives, middles included. The middle counts were read
+      // and dropped, and the anchors were paired whatever the text said.
+      ...(written
         ? {
-          anchorsPerRow: writtenCascade.anchorsPerRow,
-          mainsPerRow: writtenCascade.mainsPerRow,
+          anchorsPerRow: written.anchorsPerRow,
+          middlesPerRow: written.middlesPerRow,
+          mainsPerRow: written.mainsPerRow,
+          tipAnchorsPerRow: written.tipsPerRow,
+          ...(written.stabiloRiser ? { stabiloRiser: written.stabiloRiser } : {}),
         }
         : {}),
+      // The rows' tip lines on one stabilo line to the riser that carries B,
+      // as the makers draw it. It was two more lines added after the plan, at
+      // 35% of chord on the two outermost ribs, carrying no lift, beside the
+      // tip lines every row already ended in.
+      stabilo: !!S.stabilo,
     };
     // An imported design hangs from its OWN suspension, computed as its own
     // program computes it. The Swoop2 used to be given a four-row cascade
@@ -24945,8 +25993,8 @@ function rebuild() {
         { halfSpanM: planform.halfSpan },
       );
 
-    // An imported plan carries its own stabilo lines.
-    if (S.stabilo && !lepPlan) addStabilo(linePlan, wing, { anchors: 2 });
+    // The stabilo is in the plan (`stabilo` above); an imported plan carries
+    // its own.
 
     // Diagonal ribs carry the span that has no line on it, to the ribs
     // that have one — so they are placed from the lines this plan actually
@@ -25061,6 +26109,12 @@ function rebuild() {
     return;
   }
   draw();
+  // A published wing whose line sheets are not on file is given anchors
+  // solved to its line length as soon as there is a wing to solve them on.
+  if (S._solveAfterBuild) {
+    S._solveAfterBuild = false;
+    solveAnchorsToLineLength();
+  }
 }
 
 /** Front-view metrics recovered from an imported wing, which has no lobe curve. */
@@ -25438,12 +26492,16 @@ function buildControls() {
     // Both axes are fractions of the flat half span, so the arc keeps its
     // shape when the span changes. The arrow's lower bound is the point below
     // which the arc becomes too short to carry the span at all.
-    const minB = Math.ceil(minArrowRatio(S.lobeARatio, S.lobeType, S.bionic) * 100) / 100;
-    if (S.lobeBRatio < minB) S.lobeBRatio = minB;
+    // The least arrow exactly, not rounded up: a published wing's arc is the
+    // ellipse at that least arrow (its tip where the quarter ends), and
+    // rounding it up a hundredth here moved the tip in and took a centimetre
+    // off the projected span it had been built to.
+    const minB = minArrowRatio(S.lobeARatio, S.lobeType, S.bionic);
+    if (S.lobeBRatio < minB) S.lobeBRatio = minB * (1 + 1e-6);
     slider(L, 'lobeARatio', 'Arc width', 0.5, 1.0, 0.01, (v) => (v * 100).toFixed(0), '% of half span');
     slider(L, 'lobeBRatio', 'Arc arrow', minB, 1.2, 0.01, (v) => (v * 100).toFixed(0), '% of half span');
     if (S.lobeType === 'bionic') slider(L, 'bionic', 'Tip turn-up', 1, 3, 0.05);
-    hint(L, `Arrow must stay above ${(minB * 100).toFixed(0)}% at this width, or the arc is too short to carry the flat span.`);
+    hint(L, `Arrow must stay above ${(Math.ceil(minB * 1000) / 10).toFixed(1)}% at this width, or the arc is too short to carry the flat span.`);
   }
   slider(L, 'washinTotal', 'Washin at tip', 0, 10, 0.1, (v) => v.toFixed(1), '°');
   selectField(L, 'washinMode', 'Washin distribution', [
@@ -25531,6 +26589,9 @@ function buildControls() {
   if (!locked || !LEP.geom?.ok) {
   checkField(LN, 'brakeLines', 'Brake lines in the plan');
   checkField(LN, 'stabilo', 'Stabilo line');
+  hint(LN, 'Each row\u2019s tip lines on one line, from a junction high under the tip, '
+    + 'to the riser that carries B \u2014 as the makers draw it. Off, each tip line '
+    + 'hangs from the top of its own row\u2019s outermost main.');
 
   selectField(LN, 'riserLayout', 'Riser layout',
     Object.keys(RISER_LAYOUTS).map((k) => [k, k]));
@@ -25550,77 +26611,32 @@ function buildControls() {
   checkField(LN, 'useCascadeSpec', 'Write the cascade out, rather than deriving it');
   if (S.useCascadeSpec) {
     textAreaField(LN, 'cascadeSpec', 'Cascade', 6,
-      'A 30 14 3\nB 14  6 4\nC  8  3 2');
-    hint(LN, 'Row, then anchors, then the count at each level below — the way '
-      + 'a manufacturer sheet reads. Lines starting # are comments.');
-    liveHint(LN, () => (!M.writtenCascade ? ''
-      : M.writtenCascade.ok ? M.writtenCascade.note
-        : `Not used: ${M.writtenCascade.problems[0]}`));
-  }
-  // The derived plan attaches every second rib, whatever the wing. That is a
-  // real wing's density on the default wing (13 of 25 ribs; real wings run
-  // 0.28 to 0.94, median 0.54) and nothing like one on a published wing
-  // loaded from the picker: a Zeno 2 S came out with 466 m of line against
-  // its published 186. This solves the anchor counts to a line total the way
-  // the full-pipeline validation does, inside the densities real wings use,
-  // and writes them out as a cascade the designer can see and edit.
-  button(LN, 'Solve anchors to the line length', () => {
-    if (M.imported) { setStatus('An imported design keeps its own lines.'); return; }
-    const layout = RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'];
-    const rows = [...new Set(layout.flatMap((r) => r.rows))]
-      .filter((r) => Number.isFinite(M.airfoil?.anchors?.[r]));
-    const risers = layout.filter((r) => r.rows.length).length;
-    const published = S.reference && !M.imported ? S._referenceTotalLineM : null;
-    const target = published
-      ?? lineConsumptionEstimate({
-        aspectRatio: M.metrics.aspectRatio, flatSpan: M.metrics.span, risers,
-      }).totalLineLengthM;
-    // The stabilo lines are added to the plan after it is built, and their
-    // length hardly depends on the anchors, so they come off the target the
-    // anchors are solved to. Left in, the plan came out 5% over.
-    const stabiloM = (M.linePlan?.stabilo?.lines ?? [])
-      .reduce((a, l) => a + (2 * l.lengthMM) / 1000, 0);
-    const solved = anchorsForLineLength({
-      wing: M.wing, airfoil: M.airfoil, rows, targetMetres: target - stabiloM, layout,
-      lineLengthM: S.lineLength, risers, mainsPerRow: 3,
-      brakes: S.brakeLines ? { anchors: 13, levelCounts: [6, 3, 1] } : null,
+      'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C');
+    hint(LN, 'Row, anchors, middle lines, main lines, as a maker\u2019s sheet counts '
+      + 'them (A 14 6 3). A row on another row\u2019s riser hangs from its mains: '
+      + 'anchors and middles (D 14 6). Without a middle count they come in pairs. '
+      + '"tip 2" says how many of the row\u2019s anchors are tip lines, the '
+      + 'stabilo\u2019s, on the outermost ribs; without it a row that reaches the '
+      + 'tip has two and a shorter row none. "S C" hangs the stabilo on the C '
+      + 'riser (the riser that carries B without it). K is the brake (K 13 6 3). '
+      + 'Lines starting # are comments.');
+    liveHint(LN, () => {
+      const w = M.writtenCascade;
+      if (!w) return '';
+      if (!w.ok) return `Not used: ${w.problems[0]}`;
+      // What was built against what was written: a count the wing cannot
+      // take — more anchors than ribs, more middles than anchors — is built
+      // as near as it goes, and said.
+      const short = (M.linePlan?.levelShortfalls ?? [])
+        .map((f) => `${f.row} has ${f.got} ${f.level === 'anchor' ? 'anchors' : `${f.level} lines`}, not ${f.asked}`);
+      const brakeOff = w.brakes && !S.brakeLines ? ['the K row is not built: brake lines are off'] : [];
+      const notes = [...short, ...brakeOff];
+      return `${w.note}. ${notes.length ? `Built as near as it goes: ${notes.join('; ')}.` : 'Built as written.'}`;
     });
-    const basis = published
-      ? `the published ${published} m`
-      : `${target.toFixed(0)} m, what real wings of this aspect ratio and span carry`;
-    // At the edge of the range, said in the target's own terms (the solve
-    // saw it without the stabilo). On three or more risers a two-liner's
-    // total is below what the layout carries at the sparsest real density,
-    // and the answer is the layout.
-    const [lo, hi] = solved.reachableRange.map((x) => x + stabiloM);
-    // Within 5% of the target the edge is not worth a warning: the
-    // aspect-ratio law itself is good to about 7%, and a published total is
-    // rounded. A school wing came out 1% short of the law and was told to try
-    // two risers.
-    const missed = Math.abs(solved.error) > 0.05;
-    const edge = !missed ? null : solved.saturatedSide === 'under'
-      ? `that is less than this layout carries at the sparsest real density, ${lo.toFixed(0)} m: `
-        + 'it needs fewer rows or fewer risers, not fewer anchors'
-        + (risers > 2 ? '; a two-riser layout (A/B+C) carries less' : '')
-      : solved.saturatedSide === 'over'
-        ? `that is more than this wing carries at the densest, ${hi.toFixed(0)} m: it needs more ribs`
-        : null;
-    S.cascadeSpec = [
-      `# Solved to ${basis}: front density ${solved.frontFraction.toFixed(2)}.`,
-      ...(edge ? [`# ${edge[0].toUpperCase()}${edge.slice(1)}.`] : []),
-      ...rows.map((r) => {
-        const n = solved.anchorsPerRow[r];
-        return `${r} ${n} ${Math.min(3, n)}`;
-      }),
-    ].join('\n');
-    S.useCascadeSpec = true;
-    buildControls();
-    rebuild();
-    setStatus(null, `Anchors solved to ${basis}: `
-      + rows.map((r) => `${r}${solved.anchorsPerRow[r]}`).join(' ')
-      + `, ${M.linePlan.totalLengthM.toFixed(0)} m built`
-      + (edge ? ` — ${edge}.` : ''));
-  }, 'btn');
+  }
+  // The derived plan attaches every second rib: a real wing's density on the
+  // default wing (13 of 25 ribs; real wings run 0.28 to 0.94, median 0.53).
+  button(LN, 'Solve anchors to the line length', () => solveAnchorsToLineLength(), 'btn');
   numberField(LN, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
   }
   selectField(LN, 'compareTo', 'Compare against a real wing', [
@@ -27750,7 +28766,9 @@ function drawLinePlan() {
   };
   const LEVEL_WIDTH = { upper: 0.5, middle: 0.9, main: 1.4 };
 
-  const wanted = (l) => (S.lineRow === 'all' ? true : l.row === S.lineRow);
+  // The stabilo is its line and the tip lines on it, which keep their rows.
+  const wanted = (l) => (S.lineRow === 'all' ? true
+    : l.row === S.lineRow || (S.lineRow === 'S' && !!l.stabiloTip));
 
   for (const side of [1, -1]) {
     for (const l of plan.lines) {
@@ -27817,8 +28835,10 @@ function drawLinePlan() {
   if (note) {
     note.textContent = `${shown * 2} lines${S.lineRow === 'all' ? '' : ` in row ${S.lineRow}`}`
       + `, ${plan.totalLengthM.toFixed(1)} m`
-      + (pub ? ` against ${pub} m published for the ${S.reference} — the cascade `
-        + 'is generated by rule, not the real one' : '')
+      + (pub ? ` against ${pub} m published for the ${S.reference} — `
+        + (S.useCascadeSpec && M.writtenCascade?.ok
+          ? 'its counts as written, the junctions placed by rule'
+          : 'the cascade is generated by rule, not the real one') : '')
       + (M.riserSplit && M.riserSplit.moved ? `  ·  ${M.riserSplit.note}` : '')
       + '  ·  white: risers to the karabiner (red)';
   }
@@ -27848,7 +28868,8 @@ function drawCascadeTable() {
   const own = plan.source === 'LEparagliding';
 
   const rows = plan.lines
-    .filter((l) => (S.lineRow === 'all' ? true : l.row === S.lineRow))
+    .filter((l) => (S.lineRow === 'all' ? true
+      : l.row === S.lineRow || (S.lineRow === 'S' && !!l.stabiloTip)))
     .sort((a, b) => (a.row === b.row
       ? (a.level.localeCompare(b.level) || (a.index ?? 0) - (b.index ?? 0))
       : a.row.localeCompare(b.row)));
@@ -27896,20 +28917,35 @@ function drawCascadeTable() {
   // The diff, when a real wing is selected.
   if (S.compareTo && typeof REFERENCE_TOTALS === 'object'
       && REFERENCE_TOTALS[S.compareTo] && plan.totals) {
-    const cmp = comparePlans(plan.totals, REFERENCE_TOTALS[S.compareTo]);
+    // The rows that carry the wing, and the brake, each against its own
+    // offset. Makers measure a brake to different points — Niviuk's Hook 6
+    // brake is 144 mm longer than its A at the centre, Ozone's Ultralite 5's
+    // 570 — and under one offset with the rest, its difference was read as
+    // the shape of the A to D rows.
+    const ref = REFERENCE_TOTALS[S.compareTo];
+    const rowsOf = (t, brake) => Object.fromEntries(Object.entries(t ?? {})
+      .map(([a, r]) => [a, Object.fromEntries(Object.entries(r).filter(([k]) => (k === 'K') === brake))])
+      .filter(([, r]) => Object.keys(r).length));
+    const cmp = comparePlans(rowsOf(plan.totals, false), rowsOf(ref, false));
+    const cmpK = comparePlans(rowsOf(plan.totals, true), rowsOf(ref, true));
     if (!cmp.count) {
       host.append(el('div', 'muted',
         'No overlapping anchors: the real wing has a different row set.'));
     } else {
       const d = el('div', 'note');
       d.append(el('div', '', `Against ${S.compareTo.replace(/^niviuk-/, 'Niviuk ')}: `
-        + `${cmp.count} anchors compared`));
+        + `${cmp.count} anchors compared, on the rows that carry the wing`));
       d.append(el('div', 'muted',
         `mean offset ${cmp.meanOffsetMM.toFixed(0)} mm — the overall length `
         + 'difference, which a designer sets deliberately'));
       d.append(el('div', 'muted',
         `shape deviation ${cmp.meanShapeMM.toFixed(0)} mm — the spread once `
         + 'that offset is removed, which is what actually differs'));
+      if (cmpK.count) {
+        d.append(el('div', 'muted',
+          `the brake, by itself: ${cmpK.count} anchors, offset ${cmpK.meanOffsetMM.toFixed(0)} mm, `
+          + `shape ${cmpK.meanShapeMM.toFixed(0)} mm`));
+      }
       host.append(d);
     }
   }

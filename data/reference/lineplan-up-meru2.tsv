@@ -1,0 +1,124 @@
+# UP Meru 2: the line plan, line by line.
+# Source: UP International, "Meru 2 Leinenplan / Linemap"
+#   (MERU_2_Leinenplan_Linemap.pdf, one page, a scanned image), supplied by
+#   the user 2026-09-29.
+# Transcribed 2026-10-19 from the drawing: each line and the line it hangs
+#   from. A parent that is not a line is where the cascade ends: a riser, or
+#   the brake handle. The drawing does not say which riser the stabilo line
+#   is fixed to, so it ends at "riser S".
+# Two risers, as on the Torre: a and b anchors share a line, c and d anchors
+#   share a line, and there is no B or D main line.
+# The stabilo's six canopy lines are sa1 to sb3 here and on the totals sheet;
+#   UP's component sheets call them a13 to a15 and c13 to c15. "also" gives
+#   the component sheets' name, and the published totals settle which is
+#   which (each pair agrees to 2 mm, and no other pairing does).
+# convention: up
+line	parent	also
+a1	A1
+b1	A1
+a2	A2
+b2	A2
+A1	AI
+A2	AI
+a3	A3
+b3	A3
+a4	A4
+b4	A4
+A3	AII
+A4	AII
+AI	Amain1
+AII	Amain1
+Amain1	riser A
+a5	A5
+b5	A5
+a6	A6
+b6	A6
+A5	AIII
+A6	AIII
+a7	A7
+b7	A7
+a8	A8
+b8	A8
+A7	AIV
+A8	AIV
+AIII	Amain2
+AIV	Amain2
+Amain2	riser A
+a9	A9
+b9	A9
+A9	AV
+a10	AV
+a11	AVI
+a12	AVI
+AV	Amain3
+AVI	Amain3
+Amain3	riser A
+c1	C1
+d1	C1
+c2	C2
+d2	C2
+C1	CI
+C2	CI
+c3	C3
+d3	C3
+c4	C4
+d4	C4
+C3	CII
+C4	CII
+CI	Cmain1
+CII	Cmain1
+Cmain1	riser C
+c5	C5
+d5	C5
+c6	C6
+d6	C6
+C5	CIII
+C6	CIII
+c7	C7
+d7	C7
+c8	C8
+d8	C8
+C7	CIV
+C8	CIV
+CIII	Cmain2
+CIV	Cmain2
+Cmain2	riser C
+c9	CV
+c10	CV
+c11	CVI
+c12	CVI
+CV	Cmain3
+CVI	Cmain3
+Cmain3	riser C
+br1	BR1
+br2	BR1
+br3	BR2
+br4	BR2
+BR1	BRI
+BR2	BRI
+br5	BR3
+br6	BR3
+br7	BR4
+br8	BR4
+BR3	BRIII
+BR4	BRIII
+br9	BR5
+br10	BR5
+br11	BR6
+br12	BR6
+BR5	BRIV
+BR6	BRIV
+BRIII	BRII
+BRIV	BRII
+BRI	brmain
+BRII	brmain
+brmain	handle
+sa1	ST1	a13
+sa2	ST1	a14
+sb1	ST1	c13
+sb2	ST1	c14
+sa3	ST2	a15
+sb3	ST2	c15
+ST1	STI
+ST2	STI
+STI	riser S

@@ -1,0 +1,161 @@
+# UP K2 5: the line plan, line by line.
+# Source: UP International, "K2 5 Line Plan" (K2_5_Line_Plan.pdf, one page),
+#   supplied by the user 2026-09-29.
+# Transcribed 2026-10-19 from the drawing: each line and the line it hangs
+#   from. A parent that is not a line is where the cascade ends: a riser, or
+#   the brake handle. The drawing does not say which riser the stabilo line
+#   is fixed to, so it ends at "riser S". Am3-0, a 600 mm piece of D-PRO, is
+#   drawn continuing Amain3 to the riser.
+# The same in every size: the sheets up-k2-5-K2_5_38/41/44 carry these names.
+# convention: up
+line	parent
+a1	A1
+a2	A1
+a3	A1
+a4	A2
+a5	A2
+a6	A2
+A1	Amain1
+A2	Amain1
+Amain1	riser A
+a7	A3
+a8	A3
+a9	A3
+a10	A4
+a11	A4
+a12	A4
+A3	Amain2
+A4	Amain2
+Amain2	riser A
+a13	A5
+a14	A5
+a15	A5
+a16	A6
+a17	A6
+a18	A6
+A5	Amain3
+A6	Amain3
+Amain3	Am3-0
+Am3-0	riser A
+b1	B1
+b2	B1
+b3	B1
+b4	B2
+b5	B2
+b6	B2
+B1	Bmain1
+B2	Bmain1
+Bmain1	riser B
+b7	B3
+b8	B3
+b9	B3
+b10	B4
+b11	B4
+b12	B4
+B3	Bmain2
+B4	Bmain2
+Bmain2	riser B
+b13	B5
+b14	B5
+b15	B5
+b16	B6
+b17	B6
+b18	B6
+B5	Bmain3
+B6	Bmain3
+Bmain3	riser B
+c1	C1
+c2	C1
+c3	C1
+c4	C2
+c5	C2
+c6	C2
+C1	Cmain1
+C2	Cmain1
+Cmain1	riser C
+c7	C3
+c8	C3
+c9	C3
+c10	C4
+c11	C4
+c12	C4
+C3	Cmain2
+C4	Cmain2
+Cmain2	riser C
+c13	C5
+c14	C5
+c15	C5
+c16	C6
+c17	C6
+c18	C6
+C5	Cmain3
+C6	Cmain3
+Cmain3	riser C
+d1	D1
+d2	D1
+e1	E1
+e2	E1
+D1	DE1
+E1	DE1
+d3	D2
+d4	D2
+e3	E2
+e4	E2
+D2	DE2
+E2	DE2
+DE1	Dmain1
+DE2	Dmain1
+Dmain1	riser D
+d5	D3
+d6	D3
+e5	E3
+e6	E3
+D3	DE3
+E3	DE3
+d7	D4
+d8	D4
+e7	E4
+e8	E4
+D4	DE4
+E4	DE4
+DE3	Dmain2
+DE4	Dmain2
+Dmain2	riser D
+d9	D5
+d10	D5
+e9	D5
+d11	D6
+d12	D6
+e10	D6
+D5	Dmain3
+D6	Dmain3
+Dmain3	riser D
+br1	BR1
+br2	BR1
+br3	BR1
+br4	BR2
+br5	BR2
+br6	BR2
+br7	BR3
+br8	BR3
+br9	BR3
+br10	BR4
+br11	BR4
+br12	BR4
+br13	BR4
+BR1	BRmain
+BR2	BRmain
+BR3	BRmain
+BR4	BRmain
+BRmain	handle
+sa1	ST1
+sb1	ST1
+st1	ST1
+sc1	ST2
+sd1	ST2
+st2	ST2
+st3	ST2
+ST1	STI
+ST2	STI
+st4	STI
+STI	riser S

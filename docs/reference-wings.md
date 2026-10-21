@@ -131,8 +131,37 @@ published aspect ratio — by the maker's own rounding. The worst is the Lynx 2
 ML: 12.3² / 25.0 = 6.05, published as 6.2. Niviuk's figures agree with
 themselves to 0.1%.
 
-The shape is still the tool's: sweep, ellipticity, section, arc and washin are
-defaults, and the picker's note says so.
+The shape is still the tool's: sweep, ellipticity, section and washin are
+defaults, and the picker's note says so. The arc is not, below.
+
+### The arc is an ellipse through the projected span
+
+Every published wing was built on a circle through its projected span. A
+circle curves the middle of the wing, where the chord is, as much as its tip,
+and the published projected area — which checks the arc independently of the
+span it was built through — says real wings are not shaped that way:
+
+| through the published projected span | projected area against published, 55 sizes |
+| --- | --- |
+| a circle | 2.0% out on average, −3.7 to +0.4%, short on 51 |
+| the handbook's ellipse (3.1(c)), its tip where the quarter ends | 1.0% out on average, −2.0 to +2.1% |
+
+The ellipse is the nearer on 45 of the 55. The circle is the nearer only on
+the Artik R 2, by a tenth of a percent, and the Skin 4 P, a single-surface wing
+this tool builds with a lower surface it does not have. The line totals say
+the same thing from the other side (`docs/drawn-line-plans.md`, section 5).
+So the picker and the full pipeline build a published wing on that ellipse
+(`ellipseForProjectedRatio`); the circle stays under Arc for a designer who
+wants it.
+
+**Niviuk's projected span** is not published. Their projected area and
+projected aspect ratio are, and the two define it, b = √(AR·S): 9.07 m on a
+Hook 6 24. The area ratio had stood in for the span ratio, 0.858 against
+0.805, so every Niviuk wing was built a twentieth flatter than its own figures
+say. Their aspect ratios are in `niviuk-spec.tsv` now (`proj_AR`, as printed:
+4 on the Hook 6, 5.02 on the Artik R 2, 3.93 on the Skin 4 P, 4.12 on the Bi
+Skin 2 P), and `referenceDesignInputs` says which span it used
+(`projectedSpanBasis`).
 
 ### What a maker does not publish
 

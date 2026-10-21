@@ -8,7 +8,7 @@
  */
 import { readFileSync, readdirSync, writeFileSync } from 'fs';
 import { parseLineTable, summarise, parseUpLineSheet, parseBgdLineTable,
-  parsePhiLineSheet, parseSimpleLineSheet } from '../src/core/lineplan.js';
+  parsePhiLineSheet, parseSimpleLineSheet, parseStatedTopology } from '../src/core/lineplan.js';
 import { parseSizeFamilies } from '../src/core/scaling.js';
 import { parseMaterialsTable } from '../src/core/loads.js';
 
@@ -62,6 +62,13 @@ for (const f of files) {
       other.push({ f, kind: 'rods', detail: `${dataRows()} rows, as the design's own program computes them` });
     } else if (/^lep-/.test(f)) {
       other.push({ f, kind: 'LEparagliding lines', detail: `${dataRows()} lines, from lines.txt` });
+    } else if (/^lineplan-/.test(f)) {
+      // A maker's drawing of its line plan, transcribed: what hangs from what.
+      const t = parseStatedTopology(body);
+      if (!t.ok) throw new Error(t.problems[0]);
+      other.push({ f, kind: 'line plan, as drawn', detail: `${t.lines.length} lines, `
+        + `${t.canopy.length} at the canopy, on risers ${t.risers.filter((r) => r !== 'S').join(', ')}`
+        + (t.risers.includes('S') ? '; the stabilo line\'s riser is not drawn' : '') });
     } else if (f === 'size-families.tsv') {
       const fams = parseSizeFamilies(body);
       const n = Object.values(fams).reduce((a, v) => a + v.length, 0);

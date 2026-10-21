@@ -12,9 +12,9 @@ wingtoolui/
 │                          the full pipeline, the reference sweep, the benchmark
 ├── tools/                 the other check stages, the interface harness,
 │                          importers, figures, and the search tool
-├── data/reference/        137 tables of published and supplied data, and
+├── data/reference/        143 tables of published and supplied data, and
 │                          the Swoop2's own files
-├── docs/                  40 notes on what was built, and what it cost
+├── docs/                  41 notes on what was built, and what it cost
 ├── build.py               bundles src/ into dist/, with a collision guard
 ├── package.json           named scripts; no dependencies to install
 ├── MANIFEST.txt           every file, generated

@@ -851,6 +851,191 @@ export function inferRiserLength(lineSet, topology, row) {
   return best;
 }
 
+/* ------------------------------------------------------ stated topology -- */
+
+/**
+ * A line plan as its maker draws it: each line, and the line it hangs from.
+ *
+ * Ozone's sheets do not say which canopy line hangs from which middle line,
+ * so `inferTopology` recovers it from the lengths, and until now the only
+ * place its answer could be checked was BGD's sheet, which states it. A
+ * maker's line-plan drawing states it too. Six are transcribed under
+ * `data/reference/lineplan-*.tsv`, one row a line:
+ *
+ *     line    parent     also
+ *     a1      A1
+ *     A1      Amain1
+ *     Amain1  riser A
+ *     sa1     ST1        a13
+ *
+ * A parent that is not itself a line is where the cascade ends — `riser X`,
+ * or `handle` for the brake. `also` is another sheet's name for the same
+ * line: the Meru 2's component sheets call its stabilo lines a13 to c15
+ * where the drawing and the totals call them sa1 to sb3.
+ *
+ * What a drawing states, the names cannot: on the Summit X a13 to a15 hang
+ * from the stabilo line, and on the Torre and the Meru 2 there is no B main —
+ * two risers, where the names suggest three.
+ */
+export function parseStatedTopology(text) {
+  if (typeof text !== 'string') {
+    throw new Error('parseStatedTopology needs the table as text');
+  }
+  const parentOf = new Map();
+  const alsoOf = new Map();
+  const alias = new Map();
+  const problems = [];
+  let convention = null;
+  let header = null;
+  for (const raw of text.split(/\r?\n/)) {
+    if (/^\s*#/.test(raw)) {
+      const m = /^#\s*convention:\s*(\S+)/i.exec(raw);
+      if (m) convention = m[1].toLowerCase();
+      continue;
+    }
+    if (!raw.trim()) continue;
+    const cells = raw.split('\t').map((c) => c.trim());
+    if (!header) { header = cells.map((c) => c.toLowerCase()); continue; }
+    const [line, parent, also] = cells;
+    if (!line || !parent) {
+      problems.push(`"${raw.trim()}" needs a line and the line it hangs from`);
+      continue;
+    }
+    if (parentOf.has(line)) { problems.push(`${line} is listed twice`); continue; }
+    parentOf.set(line, parent);
+    if (also) { alsoOf.set(line, also); alias.set(also, line); }
+  }
+  if (!header || header[0] !== 'line' || header[1] !== 'parent') {
+    problems.push('the header must be "line<TAB>parent", with "also" optional');
+  }
+
+  const isEnd = (p) => /^riser\b/i.test(p) || /^handle$/i.test(p);
+  const childrenOf = new Map();
+  for (const [line, parent] of parentOf) {
+    if (!parentOf.has(parent) && !isEnd(parent)) {
+      problems.push(`${line} hangs from ${parent}, which is neither a line here nor a riser`);
+    }
+    if (!childrenOf.has(parent)) childrenOf.set(parent, []);
+    childrenOf.get(parent).push(line);
+  }
+
+  // Each line walked down to where its cascade ends. A loop is a slip in the
+  // transcription, and is reported rather than followed for ever.
+  const pathOf = new Map();
+  for (const line of parentOf.keys()) {
+    const lines = [line];
+    const seen = new Set(lines);
+    let p = parentOf.get(line);
+    while (parentOf.has(p)) {
+      if (seen.has(p)) { problems.push(`the path from ${line} loops at ${p}`); break; }
+      seen.add(p);
+      lines.push(p);
+      p = parentOf.get(p);
+    }
+    pathOf.set(line, { lines, end: p });
+  }
+
+  const canopy = [...parentOf.keys()].filter((l) => !childrenOf.has(l));
+  const ends = [...new Set([...pathOf.values()].map((x) => x.end))].sort();
+  return {
+    convention,
+    lines: [...parentOf.keys()],
+    parentOf,
+    childrenOf,
+    alsoOf,
+    alias,
+    // The lines at the canopy: those nothing hangs from.
+    canopy,
+    // Every canopy line's path, canopy first, down to the riser or handle.
+    paths: canopy.map((c) => ({ canopy: c, ...pathOf.get(c) })),
+    // How many lines lie between a line and where its cascade ends, itself
+    // included: 1 for a line on the riser.
+    stepsToEnd: (line) => pathOf.get(line)?.lines.length ?? null,
+    endOf: (line) => pathOf.get(line)?.end ?? null,
+    ends,
+    risers: ends.filter((e) => /^riser\b/i.test(e)).map((e) => e.replace(/^riser\s*/i, '')),
+    problems,
+    ok: problems.length === 0,
+  };
+}
+
+/**
+ * What a drawing settles about a sheet's lines, applied to them.
+ *
+ * Each line the drawing names (or names under `also`) is given the line it
+ * hangs from and the riser its path ends on. A canopy line whose path ends on
+ * the stabilo's riser is a stabilo line, whatever its name: the Summit X's
+ * a13 to a15, b13 and b14 hang from STI, and so do the six lines the Meru 2's
+ * component sheets call a13 to a15 and c13 to c15 — counted until now among
+ * the A, B and C anchors.
+ *
+ * Returns new line objects; the sheet's own are not touched. `nameRow` keeps
+ * the row the name gave, where the drawing moved it.
+ */
+export function applyStatedTopology(lines, topology) {
+  const nameIn = (l) => (topology.parentOf.has(l.name) ? l.name : topology.alias.get(l.name) ?? null);
+  const moved = [];
+  const out = lines.map((l) => {
+    const n = nameIn(l);
+    if (n == null) return l;
+    const end = topology.endOf(n);
+    const next = { ...l, statedParent: topology.parentOf.get(n), statedEnd: end };
+    const isCanopy = !topology.childrenOf.has(n);
+    if (isCanopy && end === 'riser S' && l.row !== 'S') {
+      next.nameRow = l.row;
+      next.row = 'S';
+      next.isStabilo = true;
+      moved.push(l.name);
+    }
+    return next;
+  });
+  return { lines: out, movedToStabilo: moved };
+}
+
+/**
+ * A stated plan summed along each path, against the published totals.
+ *
+ * `lengthOf` gives each line's length on one size's sheet; `totals`, where
+ * there are any, the maker's own canopy-to-riser total for each canopy line.
+ * What a total leaves over once its path is summed is the riser it hangs
+ * from, and that is one length for every path that ends on that riser —
+ * when the drawing, the sheet and the totals agree. A canopy line put under
+ * the wrong middle line shows as a riser that disagrees with itself, by the
+ * difference between the two middles.
+ */
+export function statedPathTotals(topology, lengthOf, { totals = null } = {}) {
+  const look = (map, name) => {
+    if (!map) return null;
+    if (map.has(name)) return map.get(name);
+    const also = topology.alsoOf.get(name);
+    return also != null && map.has(also) ? map.get(also) : null;
+  };
+  const paths = topology.paths.map((p) => {
+    const lengths = p.lines.map((n) => look(lengthOf, n));
+    const missing = p.lines.filter((n, i) => lengths[i] == null);
+    const sumMM = missing.length ? null : lengths.reduce((a, b) => a + b, 0);
+    const totalMM = look(totals, p.canopy);
+    return {
+      canopy: p.canopy, end: p.end, lines: p.lines, sumMM, missing, totalMM,
+      leftMM: totalMM != null && sumMM != null ? totalMM - sumMM : null,
+    };
+  });
+  const byEnd = {};
+  for (const p of paths) if (p.leftMM != null) (byEnd[p.end] ||= []).push(p.leftMM);
+  const ends = {};
+  for (const [end, v] of Object.entries(byEnd)) {
+    const min = Math.min(...v);
+    const max = Math.max(...v);
+    ends[end] = { n: v.length, meanMM: v.reduce((a, b) => a + b, 0) / v.length, minMM: min, maxMM: max, spreadMM: max - min };
+  }
+  return {
+    paths,
+    ends,
+    missing: [...new Set(paths.flatMap((p) => p.missing))],
+    worstSpreadMM: Math.max(0, ...Object.values(ends).map((e) => e.spreadMM)),
+  };
+}
+
 /**
  * How the linesets of a family go with the wing, measured from the sheets.
  *
@@ -1005,6 +1190,14 @@ export const RISER_LAYOUTS = {
     { name: 'B', rows: ['B'] },
     { name: 'C', rows: ['C', 'D'] },
   ],
+  // A two-liner on four rows: the B row hangs from the A mains and the D row
+  // from the C mains. UP's line plans of the Torre and the Meru 2 draw it so,
+  // and Niviuk's Artik R 2 has A and C mains and no others: three of the six
+  // two-liners in the reference set.
+  'A+B/C+D': [
+    { name: 'A', rows: ['A', 'B'] },
+    { name: 'C', rows: ['C', 'D'] },
+  ],
 };
 
 /**
@@ -1030,6 +1223,8 @@ export function applyRiserSplit(plan, layout, { halfSpanM = null } = {}) {
   let moved = 0;
   for (const l of plan.lines) {
     if (!rule.rows.includes(l.row)) continue;
+    // A tip line on the stabilo hangs from the stabilo's riser, not this one.
+    if (l.stabiloTip) continue;
     // The anchor end of an upper line is what sits on the span.
     const y = l.to ? Math.abs(l.to[1]) : null;
     if (y === null) continue;
@@ -1192,18 +1387,60 @@ function buildLinePlanInner({
   // the way to the riser — twelve metres a side that no wing has.
   shareRiserMains = true,
   loadMode = 1,
+  // The tip lines a row ends in: the outermost anchors, on one long line each
+  // to the top of the row's outermost main. They are the stabilo's lines on
+  // a real wing — the Geo 7's A13, A14, B13, B14 and C15, 1.0 to 1.2 m long
+  // against 0.3 to 0.6 m inboard, share one path to the riser to the
+  // millimetre in every size (`tipLinesFromTotals`). Two on every row unless
+  // a row's own count is given (`tipAnchorsPerRow`).
   tipDirectAnchors = 2,
+  // Tip lines per row, one number or a count per row, where a design's own
+  // are known: the Geo 7's are A 2, B 2, C 1, D 0; the Hook 6's one each on
+  // A, B and C. With `anchorsPerRow`, a row with fewer anchors than the front
+  // row ends inboard and has none unless given.
+  tipAnchorsPerRow = null,
+  // Where the tip lines go when anchors are given per row: on the ribs this
+  // far out, as fractions of the half wing's. The stabilo's lines on four of
+  // UP's line plans and BGD's sheet start 0.87 to 0.93 of the way out (0.98
+  // on the Vibe GT's diagram) and end at 0.97 to 1.0.
+  tipReach = [0.92, 0.99],
+  // Hang the tip lines from one stabilo line instead of each from its own
+  // row's outermost main. That is what the makers' plans draw: the Vibe GT's
+  // A13, A14, B13 and B14 on BRU4 and BRL4 to the B riser, the Lynx 2's
+  // a15-a17 and b16-b18 on BR4 to the same, and the Geo 7's and the Hook 6's
+  // sharing one path to the millimetre. The junction is four fifths of the
+  // way up, as the Geo 7's 4.6 m stabilo line has it under tip lines of 1.0
+  // to 1.2 m, and the line goes to `stabiloRiser` where a design's sheets
+  // show it — the Geo 7's is CRU4 on CRL4, to its C riser — and otherwise to
+  // the riser that carries B (the rearmost, where B shares the front riser).
+  stabilo = false,
+  stabiloRiser = null,
+  stabiloJunctionFraction = 0.8,
   // Main lines per row.
   //
   // A real wing has a *fixed* number of mains regardless of size. The Geo 7
-  // carries A:3 B:3 C:5 in XS, MS and L alike; the Alpina 5 carries A:4 B:4
-  // in every size. Grouping by a constant chunk size instead makes the main
-  // count scale with the anchor count, which produced 16 mains against a
-  // real 10 on the Alpina and 19 against 7 on the Zeno.
+  // carries A:3 B:3 C:3 in XS, MS and L alike, with its stabilo's line on the
+  // C riser beside them, and the Alpina 5 A:3 B:3 in every size (a main in
+  // two parts, CRL4 and CRU4, is one line; counted as lines they read C:5 and
+  // A:4 B:4). Grouping by a constant chunk size instead makes the main count
+  // scale with the anchor count.
   //
   // Null keeps the old behaviour, because a design that has not said how many
   // mains it wants should not silently get three.
   mainsPerRow = null,
+  // Middle lines per row, one number or a count per row. Unset, the anchors
+  // are paired (`groupSize`). A written cascade gives it: "A 18 6 3" was
+  // built with eight middle lines, because nothing read the six.
+  middlesPerRow = null,
+  // With `anchorsPerRow`, a row with fewer anchors than the front row takes
+  // the front row's ribs from the centre out, as real wings' rear rows do,
+  // and each row's tip lines go out to the tip ribs (`tipReach`). Off spreads
+  // every row's anchors evenly to the tip, as it was.
+  alignRearRows = true,
+  // How far out the front row's own lines reach — the anchors before its tip
+  // lines — as a fraction of the ribs of a half wing, when anchors are given
+  // per row: 0.78 to 0.89 on the six plans that show it, median 0.84.
+  frontReach = 0.84,
   // Attachment density, per row.
   //
   // `everyNthRib` is one integer applied to every row, and real wings do not
@@ -1311,9 +1548,33 @@ function buildLinePlanInner({
   const lines = [];
   const risers = [];
   const shortfalls = [];
+  // Every row's tip anchors, when they hang from one stabilo line.
+  const tipGroup = [];
 
   const junction = (parent, centroid, fraction, tops) => fanJunction(
     parent, centroid, fraction, tops, maxFanAngleDeg, maxLineAngleDeg);
+
+  // Where anchors given per row go (below, at each row).
+  const front = anchorsPerRow && alignRearRows ? frontRowOf(anchorsPerRow) : null;
+  const lastRib = wing.ribs.length - 1;
+  const spread = (count, reach) => Array.from({ length: count },
+    (_, k) => Math.round((k * reach) / Math.max(1, count - 1)));
+  const frontN = front ? Math.min(anchorsPerRow[front], wing.ribs.length) : 0;
+  const tipCountOf = (r, count) => {
+    const given = tipAnchorsPerRow != null && typeof tipAnchorsPerRow === 'object'
+      ? tipAnchorsPerRow[r] : tipAnchorsPerRow;
+    if (given != null) return Math.max(0, Math.min(given, count));
+    // A row that ends inboard has no tip lines of its own.
+    return r !== front && count < frontN ? 0 : Math.min(tipDirectAnchors, count);
+  };
+  // Every row stops short of the tip where tip lines go on beyond — the
+  // Lynx 2's C row too, which has none, at its rib 28 of 33 with its A and
+  // B. Where no row has any, there is nothing past them, and the rows run to
+  // the tip.
+  const anyTips = front != null && layout.some((r) => (r.rows ?? [])
+    .some((row) => anchorsPerRow[row] > 0 && tipCountOf(row, Math.min(anchorsPerRow[row], wing.ribs.length)) > 0));
+  const inboardReach = (count) => (anyTips
+    ? Math.min(lastRib, Math.max(Math.round(frontReach * lastRib), count - 1)) : lastRib);
 
   for (const riser of layout) {
     const carried = [];
@@ -1334,8 +1595,53 @@ function buildLinePlanInner({
         // every nth. A fractional spacing is exactly what the real wings
         // show, and it cannot be reached by an integer stride.
         const n = Math.max(1, Math.min(want, wing.ribs.length));
-        for (let k = 0; k < n; k++) {
-          const i = Math.round((k * (wing.ribs.length - 1)) / Math.max(1, n - 1));
+        // One anchor a rib at most, on a row: a count over the ribs is built
+        // as one on every rib, and said so.
+        if (n !== want) shortfalls.push({ row, level: 'anchor', asked: want, got: n });
+        // Where they go. Real wings end their rows in two ways at once, and
+        // both are on the makers' own plans:
+        //
+        //  - A row with fewer anchors than the front row is not spread to the
+        //    tip: it takes the front row's ribs, from the centre out, and
+        //    stops. The Hook 6's four D anchors end level with its fourth A of
+        //    ten, the Swift 6's eight C and D near its eighth of seventeen;
+        //    UP's Makalu 5, Torre, Meru 2 and Summit X, BGD's Lynx 2 and
+        //    Ozone's Vibe GT draw or list theirs that way. (The K2 5's D and
+        //    E rows are the exception: every second rib, as far as its A.)
+        //    Spread to the tip, they were lines where the wing has none.
+        //  - The rows' own lines stop short of the tip — the front row's on
+        //    the rib 0.78 to 0.89 of the way out on the six plans that show
+        //    it (`frontReach`) — and the tip ribs beyond carry the stabilo's:
+        //    each row's tip lines (`tipAnchorsPerRow`), on the ribs from 0.92
+        //    to 0.99 of the way out (`tipReach`). The Lynx 2's C row, with no
+        //    tip lines, stops at its rib 28 of 33 with its A and B.
+        //
+        // Stopping the rows short without the tip lines going on out left the
+        // outer sixth of the wing with no lines at all.
+        let ribIndices = null;
+        if (front) {
+          const tipN = tipCountOf(row, n);
+          const inner = n - tipN;
+          const frontInner = frontN - tipCountOf(front, frontN);
+          const inboard = row !== front && inner <= frontInner
+            ? spread(frontInner, inboardReach(frontInner)).slice(0, inner)
+            : spread(inner, inboardReach(inner));
+          const last = inboard.length ? inboard[inboard.length - 1] : -1;
+          const lo = Math.min(lastRib, Math.max(last + 1, Math.round(tipReach[0] * lastRib)));
+          const hi = Math.min(lastRib, Math.max(lo, Math.round(tipReach[1] * lastRib)));
+          if (tipN <= hi - lo + 1) {
+            const tips = tipN === 1 ? [Math.round((lo + hi) / 2)] : spread(tipN, hi - lo).map((k) => lo + k);
+            ribIndices = inboard.concat(tips);
+            anchors.tipCount = tipN;
+          }
+          // A wing with too few ribs for a tip zone is spread to the tip, as
+          // it was.
+        }
+        if (!ribIndices) {
+          ribIndices = spread(n, lastRib);
+          anchors.tipCount = front ? tipCountOf(row, n) : null;
+        }
+        for (const i of ribIndices) {
           const rib = wing.ribs[i];
           anchors.push({
             anchor: anchors.length + 1,
@@ -1364,14 +1670,23 @@ function buildLinePlanInner({
       // around 300-500 mm, and they have no middle line above them. Forcing
       // every anchor through all three levels makes the tip lines far too
       // long and the tip trim wrong.
-      const direct = tipDirectAnchors > 0 ? anchors.slice(-tipDirectAnchors) : [];
-      const cascaded = tipDirectAnchors > 0 ? anchors.slice(0, -tipDirectAnchors) : anchors;
+      const tipN = anchors.tipCount != null ? anchors.tipCount : tipDirectAnchors;
+      const direct = tipN > 0 ? anchors.slice(-tipN) : [];
+      const cascaded = tipN > 0 ? anchors.slice(0, -tipN) : anchors;
 
       // Build downward from the maillon: first the riser-level junctions,
       // then the middle ones, then the upper lines out to the anchors. Going
       // this way each junction is placed along the path to the centre of
       // gravity of everything above it, which is the handbook's construction.
-      const groups = chunkBy(cascaded, groupSize);
+      // Middle lines: a count where one is written, pairs where not.
+      const wantMiddles = middlesPerRow && typeof middlesPerRow === 'object'
+        ? middlesPerRow[row] ?? null : middlesPerRow;
+      const groups = wantMiddles ? chunkInto(cascaded, wantMiddles) : chunkBy(cascaded, groupSize);
+      if (wantMiddles && groups.length !== wantMiddles) {
+        shortfalls.push({
+          row, level: 'middle', asked: wantMiddles, got: groups.length, anchors: cascaded.length,
+        });
+      }
       // Either a fixed number of mains, or the old constant-chunk grouping.
       // `chunkInto` caps at the number of groups available, so a row with few
       // anchors cannot reach the requested main count: 9 anchors make 5
@@ -1384,7 +1699,7 @@ function buildLinePlanInner({
       // Its name says per row and it was a single integer applied to all of
       // them, so a cascade spec asking for A:3 B:4 C:2 could not be built —
       // the A row came back with seven mains. Real plans differ by row: the
-      // Zeno 2's own is A:3 B:4, which one number cannot express.
+      // Lynx 2's own is A:3 B:3 C:2, which one number cannot express.
       // A row that shares its riser with the row before it hangs from that
       // row's main lines, and has none of its own.
       const dependent = shareRiserMains && hostNodes != null && hostNodes.length > 0;
@@ -1398,7 +1713,7 @@ function buildLinePlanInner({
         : chunkBy(groups, groupSize);
       if (!dependent && wantMains && riserGroups.length !== wantMains) {
         shortfalls.push({
-          row, asked: wantMains, got: riserGroups.length,
+          row, level: 'main', asked: wantMains, got: riserGroups.length,
           anchors: cascaded.length, middles: groups.length,
         });
       }
@@ -1488,8 +1803,11 @@ function buildLinePlanInner({
       });
       void unusedMidNodes;
 
-      // The direct tip anchors join the outermost riser node.
-      if (direct.length && riserNodes.length) {
+      // The direct tip anchors join the outermost riser node — or, with a
+      // stabilo, its one line, built when every row is in.
+      if (stabilo && direct.length) {
+        for (const a of direct) tipGroup.push({ ...a, row });
+      } else if (direct.length && riserNodes.length) {
         const host = riserNodes[riserNodes.length - 1];
         for (const a of direct) {
           lines.push({
@@ -1534,6 +1852,31 @@ function buildLinePlanInner({
       carried.push(row);
     }
     risers.push({ name: riser.name, rows: carried, maillon });
+  }
+
+  // The stabilo: the rows' tip lines on one junction, and one line from it to
+  // its riser. Its top lines keep their rows — they are the A13s and B14s of
+  // the makers' sheets, and they carry the tip's lift like any anchor.
+  let stabiloLines = null;
+  if (tipGroup.length) {
+    const withB = layout.find((r) => (r.rows ?? []).includes('B'));
+    const sName = stabiloRiser
+      ?? (withB && layout.indexOf(withB) > 0 ? withB.name : layout[layout.length - 1]?.name);
+    const sTop = riserTops[sName] ?? (risers.length ? risers[risers.length - 1].maillon : karabiner);
+    const points = tipGroup.map((a) => a.point);
+    const node = junction(sTop, weightedCentroid(tipGroup, loadMode), stabiloJunctionFraction, points);
+    stabiloLines = tipGroup.map((a) => ({
+      row: a.row, level: 'upper', index: a.anchor, name: `${a.row}${a.anchor}`,
+      riser: sName, ribIndex: a.ribIndex, direct: true, stabiloTip: true,
+      from: node, to: a.point, lengthMM: mm(node, a.point), anchors: [a.anchor],
+    }));
+    stabiloLines.push({
+      row: 'S', rows: [...new Set(tipGroup.map((a) => a.row))], level: 'main', index: 1,
+      name: 'SR1', riser: sName, isStabilo: true,
+      from: sTop, to: node, lengthMM: mm(sTop, node),
+      anchors: [], carries: tipGroup.map((a) => ({ row: a.row, anchor: a.anchor })),
+    });
+    lines.push(...stabiloLines);
   }
 
   // `maillon` stays as the first riser's top, for code that wants one point;
@@ -1615,12 +1958,16 @@ function buildLinePlanInner({
     plan.riserLengthM = riserLengthM;
   }
 
+  if (stabiloLines) {
+    plan.stabilo = { lines: stabiloLines, anchors: tipGroup.length, riser: stabiloLines[0].riser, fromRows: true };
+  }
   plan.totals = planTotals(plan);
   plan.totalLengthM = plan.lines.reduce((s, l) => s + (l.lengthMM * 2) / 1000, 0);
   plan.mergedRows = mergeRows || [];
-  // A row that could not be given the mains it asked for.
-  plan.mainShortfalls = shortfalls;
-  plan.mainsAsRequested = shortfalls.length === 0;
+  // A row that could not be given the middles or the mains it asked for.
+  plan.levelShortfalls = shortfalls;
+  plan.mainShortfalls = shortfalls.filter((f) => f.level === 'main');
+  plan.mainsAsRequested = plan.mainShortfalls.length === 0;
   return plan;
 }
 
@@ -1644,7 +1991,8 @@ function mergeCascades(plan, groups, levelFractions, junction = lerp3) {
     const rows = group.filter((r) => plan.lines.some((l) => l.row === r));
     if (rows.length < 2) continue;
 
-    const tops = plan.lines.filter((l) => rows.includes(l.row) && l.level === 'upper');
+    // The stabilo's tip lines stay on the stabilo.
+    const tops = plan.lines.filter((l) => rows.includes(l.row) && l.level === 'upper' && !l.stabiloTip);
     if (!tops.length) continue;
 
     const below = plan.lines.filter((l) => rows.includes(l.row) && l.level !== 'upper');
@@ -1912,6 +2260,12 @@ function fanJunction(parent, centroid, fraction, tops, maxFanDeg = 0, maxVertica
     node = lerp3(parent, centroid, f);
   }
   return node;
+}
+
+/** The front row of a set of anchor counts: the first load-bearing one. */
+function frontRowOf(anchorsPerRow) {
+  if (!anchorsPerRow) return null;
+  return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'].find((r) => anchorsPerRow[r] > 0) ?? null;
 }
 
 function chunkBy(arr, n) {
@@ -2560,7 +2914,10 @@ export function buildBrakePlan({
       anchors: rg.map((p) => p.anchor),
     });
 
-    const perRiser = Math.max(1, Math.round(nMid / nRiser));
+    // The middle lines shared out over the risers so that there are as many
+    // as asked: it was round(nMid / nRiser) on each, and 5 over 2 made 6.
+    const perRiser = Math.max(1, Math.floor(nMid / riserGroups.length)
+      + (r < nMid % riserGroups.length ? 1 : 0));
     const midGroups = chunkInto(rg, perRiser);
     midGroups.forEach((mg) => {
       midIndex += 1;
@@ -2777,9 +3134,20 @@ export function parseUpLineSheet(text) {
   // They were dropped without a word, the stabilo's main line among them.
   const unparsed = [];
   const recovered = [];
+  // Every length on a component sheet by its name, whether or not the name
+  // can be read: a drawn path runs through Am3-0, STI-0 and b-ris as much as
+  // through anything with a row and a level.
+  const lengthOf = new Map();
   for (const r of rows) {
     const name = (r[0] || '').trim();
     if (!name) continue;
+    if (isComponents && !/\s/.test(name)) {
+      const len = Number(r[1]);
+      const loop = Number(r[3]);
+      const cut = Number(r[4]);
+      if (Number.isFinite(len) && len > 0) lengthOf.set(name, len);
+      else if (Number.isFinite(loop) && Number.isFinite(cut) && cut > loop) lengthOf.set(name, cut - loop);
+    }
     // In UP's own scheme: lowercase at the canopy, uppercase below it.
     const parsed = parseLineName(name, { convention: 'up' });
     if (!parsed) {
@@ -2822,6 +3190,26 @@ export function parseUpLineSheet(text) {
     }
   }
 
+  // Where a row has no `main` line, its roman-numeral lines are the ones on
+  // the riser.
+  //
+  // A roman numeral is UP's level between the middle lines and the mains on
+  // the Torre and the Meru 2, and that is how a name alone reads. UP's own
+  // line plans show it is not always so: on the Makalu 5 there is no Amain,
+  // and AI to CIII go to the risers (its sheets mark them "loop on
+  // maillon"); on all five wings STI is the stabilo's line to the riser.
+  // Read by name, the Makalu 5 had no main line in any row.
+  const atRiser = [];
+  for (const row of [...new Set(lines.map((l) => l.row))]) {
+    const own = lines.filter((l) => l.row === row);
+    if (own.some((l) => l.level === 'main')) continue;
+    for (const l of own.filter((x) => x.level === 'upper-main')) {
+      l.level = 'main';
+      l.nameLevel = 'upper-main';
+      atRiser.push(l.name);
+    }
+  }
+
   const withLoop = lines.filter((l) => l.loopMM != null);
   const loopValues = [...new Set(withLoop.map((l) => l.loopMM))];
 
@@ -2830,6 +3218,9 @@ export function parseUpLineSheet(text) {
     lines,
     totals,
     sizes,
+    lengthOf,
+    // Roman-numeral lines read as mains because their row has no other.
+    atRiser,
     unparsed,
     // Lines whose length was taken from cutting less loop.
     recovered,
@@ -2978,38 +3369,38 @@ export const ANCHOR_DENSITY = {
     { name: 'Ozone Swift 6', risers: 3, rows: { A: 17, B: 17, C: 8, D: 8 }, ribs: 32 },
     { name: 'Ozone Ultralite 5', risers: 3, rows: { A: 16, B: 16, C: 16, D: 16 }, ribs: 18 },
   ],
-  // Front-to-rear ratio, by riser count. Ranges, not a fit.
+  // Front-to-rear ratio, by layout: risers, then load-bearing rows. Ranges,
+  // not a fit.
   //
-  // The key is the riser count taken as one fewer than the load-bearing
-  // rows — the rearmost row cascading into the riser ahead of it, which is
-  // what the two- and three-riser wings in the corpus do. For five rows and
-  // for nine it is a key and nothing more: nobody counted those risers.
-  ratioByRisers: {
-    // Measured across the whole corpus by `tools/corpus-learnings.mjs`, not
-    // hand-entered, and held to it figure for figure by the corpus stage of
-    // the check.
-    //
-    // These were six Ozone designs, chosen when the database held only
-    // Ozone. The corpus is 19 designs from four makers now, and it agrees
-    // with them where it overlaps: the two-riser group is the same three
-    // wings, and the three-riser group has gone from three designs to twelve
-    // and its mean from 1.38 to 1.62.
-    //
-    // It said "27 designs" and "n = 20" here for a while. The measurement
-    // counted a file as a design whenever its name did not end in a size, so
-    // the UP Torre was six designs and the Makalu 5, Meru 2 and Summit X two
-    // each; and it read the Torre's component sheets, and Niviuk's Artik R 2,
-    // with the lines UNDER the canopy lines counted as canopy lines — A 20
-    // on a wing whose own totals sheet says 12. One design is one entry now,
-    // and its sheets are held against each other.
-    //
-    // Two categories the six-design table had no examples of: five-row
-    // wings (two of them tandems), and the nine-row single-surface layout
-    // where every attachment gets its own row.
-    2: { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
-    3: { mean: 1.62, min: 1.00, max: 2.50, n: 12 },
-    4: { mean: 1.65, min: 1.33, max: 1.82, n: 3 },
-    8: { mean: 3.00, min: 3.00, max: 3.00, n: 1 },
+  // Measured across the whole corpus by `tools/corpus-learnings.mjs`, not
+  // hand-entered, and held to it figure for figure by the corpus stage of the
+  // check.
+  //
+  // This was keyed by riser count, and the riser count was not measured: it
+  // was taken as one fewer than the rows, the rearmost row cascading into the
+  // riser ahead. Three of the four-row wings are two-liners. UP's own line
+  // plans show it for the Torre and the Meru 2 — a and b anchors share the
+  // A mains, c and d the C mains, and there is no B or D main — and Niviuk's
+  // Artik R 2 has A and C mains and no others. All three sat in the
+  // three-riser group, and the "two-liners taper much harder" that the table
+  // was quoted for is true only of the two-liners with three rows. The four-
+  // row ones pair their rows instead, and taper less than most three-liners.
+  //
+  // The risers are counted from each design's own main lines now, and the
+  // drawings settle two more things the names could not: the Summit X's a13
+  // to a15, b13 and b14 hang from the stabilo line, so its A row is 12, not
+  // 15; and the Makalu 5's roman-numeral lines are its mains.
+  //
+  // The history before that: six Ozone designs, chosen when the database held
+  // only Ozone; then "27 designs" and "n = 20", from a measurement that
+  // counted a file as a design whenever its name did not end in a size, and
+  // read the Torre's and the Artik R 2's middle lines as canopy lines.
+  ratioByLayout: {
+    '2/3': { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
+    '2/4': { mean: 1.37, min: 1.20, max: 1.50, n: 3 },
+    '3/4': { mean: 1.67, min: 1.00, max: 2.50, n: 9 },
+    '4/5': { mean: 1.65, min: 1.33, max: 1.82, n: 3 },
+    '4/9': { mean: 3.00, min: 3.00, max: 3.00, n: 1 },
   },
   sampleDesigns: 19,
   // Line sheets read to get them: several sizes, and sometimes several kinds
@@ -3021,16 +3412,24 @@ export const ANCHOR_DENSITY = {
 /**
  * Suggest per-row anchor counts for a wing.
  *
- * Takes the shape of the distribution from the designs of the same riser
- * count and scales it to this wing's rib count. It is a starting point drawn
- * from six wings, not a law — `source` says so, and `anchorsPerRow` accepts
- * an explicit set for anyone who knows better.
+ * Takes the shape of the distribution from the designs of the same layout —
+ * risers and rows — and scales it to this wing's rib count. It is a starting
+ * point drawn from nineteen designs, not a law — `source` says so, and
+ * `anchorsPerRow` accepts an explicit set for anyone who knows better.
  */
 export function suggestAnchorsPerRow({
   rows, ribCount, risers = null, frontFraction = null, shape = null,
 }) {
   const n = risers ?? Math.min(3, Math.max(2, rows.length - 1));
-  const group = ANCHOR_DENSITY.ratioByRisers[n] ?? ANCHOR_DENSITY.ratioByRisers[3];
+  // The designs of this layout, risers and rows; where none has been
+  // measured, the nearest in row count on the same risers; then three
+  // risers on four rows, the commonest.
+  const layouts = ANCHOR_DENSITY.ratioByLayout;
+  const rowsOf = (k) => Number(k.split('/')[1]);
+  const layoutKey = layouts[`${n}/${rows.length}`] ? `${n}/${rows.length}`
+    : (Object.keys(layouts).filter((k) => k.startsWith(`${n}/`))
+      .sort((a, b) => Math.abs(rowsOf(a) - rows.length) - Math.abs(rowsOf(b) - rows.length))[0] ?? '3/4');
+  const group = layouts[layoutKey];
 
   // Front density: real designs run 0.28 to 0.94 of their ribs
   // (`FRONT_DENSITY`) and it does not track riser count or aspect ratio, so
@@ -3043,7 +3442,13 @@ export function suggestAnchorsPerRow({
   const out = {};
   // Three shapes, because the reference designs show three and averaging
   // them fits none. Flat is the default for a three-liner because two of the
-  // three are flat — but the Swift 6 steps, and forcing it flat is 36% out.
+  // first three measured were flat — but the Swift 6 steps, and forcing it
+  // flat is 36% out. Of the nine three-riser designs now measured only those
+  // two are flat; seven keep A and B alike and attach the D row less (ratio
+  // 1.25 to 2.50). Even so flat fits them better than a taper at the
+  // group's ratio: 57 anchors out against 59 on their totals, and 59 against
+  // 73 row by row, summed over the nine. So the default stands, and `shape`
+  // takes the others.
   const form = shape ?? (n <= 2 ? 'taper' : 'flat');
 
   rows.forEach((row, i) => {
@@ -3062,16 +3467,20 @@ export function suggestAnchorsPerRow({
     out[row] = Math.max(2, Math.round(ribCount * front * factor));
   });
 
+  const [lr, lrows] = layoutKey.split('/');
   return {
     anchorsPerRow: out,
     risers: n,
     shape: form,
     ratio: form === 'flat' ? 1 : ratio,
     frontFraction: front,
+    layout: layoutKey,
     source: form === 'taper'
-      ? `${group.n} two-liners, ratio ${group.min}-${group.max}`
+      ? `${group.n} designs on ${lr} risers and ${lrows} rows, ratio ${group.min}-${group.max}`
       : (form === 'step' ? 'the Swift 6, the one stepped design'
-        : '3 three-liners, two of them flat'),
+        : `${group.n} designs on ${lr} risers and ${lrows} rows, ratio `
+          + `${group.min}-${group.max}; flat, as two of them are (the Geo 7 and `
+          + 'the Ultralite 5) — the others attach their rear row less'),
     shapes: ['taper', 'flat', 'step'],
     // Absolute density is a design choice, not a prediction.
     caveat: `front density is an input: real designs run ${FRONT_DENSITY.min} to `
@@ -3089,27 +3498,91 @@ export function suggestAnchorsPerRow({
  *
  * This was "0.56 to 0.91", from six Ozone designs, and three of those six
  * had the wrong rib count. Twenty designs from five makers run 0.28 to 0.94.
- * It does not follow aspect ratio (r = -0.31 across the twenty) or riser
- * count; it goes with the maker more than anything. Ozone's run 0.50 to
- * 0.94, UP's 0.28 to 0.62 and PHI's Allegro attaches one rib in three.
+ * It does not follow aspect ratio across the twenty or riser count; it goes
+ * with the maker more than anything. Ozone's run 0.50 to 0.94, UP's 0.28 to
+ * 0.62 and PHI's Allegro attaches one rib in three.
  */
 export const FRONT_DENSITY = {
   designs: {
     'UP Meru 2': 0.28, 'PHI Allegro light': 0.32, 'UP Torre': 0.35,
     'Niviuk Artik R 2': 0.40, 'Niviuk Hook 6': 0.42, 'UP Makalu 5': 0.42,
+    // 12 A lines, not 15: UP's line map hangs a13 to a15 from the stabilo
+    // line, and the sheets' names alone counted them in the A row.
+    'UP Summit X': 0.43,
     'Niviuk Ikuma 3': 0.44, 'Ozone Vibe GT': 0.50, 'BGD Lynx 2': 0.52,
-    'Ozone Swift 6': 0.53, 'UP Summit X': 0.54, 'Ozone Geo 7': 0.56,
+    'Ozone Swift 6': 0.53, 'Ozone Geo 7': 0.56,
     'Niviuk Takoo 6': 0.57, 'UP K2 5': 0.62, 'Ozone Magnum 4': 0.71,
     'Ozone Zeno 2': 0.75, 'Ozone Lyght': 0.81, 'Ozone Ultralite 5': 0.89,
     'Niviuk Skin 4 P': 0.90, 'Ozone Alpina 5': 0.94,
   },
   n: 20,
   min: 0.28,
-  median: 0.54,
+  median: 0.53,
   max: 0.94,
   source: 'front-row anchors from the line sheets in data/reference, ribs '
     + 'from the cell counts in data/reference/published-cells.tsv',
 };
+
+/**
+ * Each design's own cascade, from its line sheets, as far as the generator
+ * can build it (`cascadeSpecFromSheet`): its riser layout, every row's
+ * anchors, every riser row's mains, and the middle lines where the row has
+ * the generator's shape.
+ *
+ * Measured by `tools/corpus-learnings.mjs` on every component sheet of every
+ * design — they agree, size for size — and held to it figure for figure by
+ * the corpus stage of the check. A main in two parts is one main: the Geo 7's
+ * fourth C main is CRL4, 970 mm at the riser, and CRU4 above it — its
+ * stabilo's line, below — and the Zeno 2's third B main is BR3, 611 mm, and
+ * BRU3 — counted as lines they made "C:5" and "B:4".
+ *
+ * "tip n" is how many of a row's anchors are tip lines — the stabilo's, which
+ * Ozone, Niviuk and BGD name in the rows they sit outboard of — where the
+ * sheets show them (`tipLinesFromTotals`, `tipLinesFromPaths`): on eight
+ * designs. UP name the stabilo's lines as a row of their own, and a sheet
+ * without per-anchor totals cannot show them, so those rows take the
+ * generator's default. "S C" is the riser the stabilo hangs on, where the
+ * sheet shows its line (`stabiloMainFromTotals`): the Geo 7's "fourth C
+ * main", CRU4 on CRL4, is it, and so is the Vibe GT's fourth B main and the
+ * Lynx 2's BR4 — none of them their rows' own.
+ *
+ * The full pipeline and the wing picker build a design from this where its
+ * layout is one of `RISER_LAYOUTS`. Five rows on four risers, and the Skin 4
+ * P's nine on four, are not.
+ */
+export const DESIGN_LINES = {
+  'BGD Lynx 2': { layout: 'A/B/C+D', spec: 'A 17 3 tip 3\nB 18 3 tip 3\nC 17 2 tip 0\nD 8 tip 0\nS B', sheets: 4 },
+  'Niviuk Artik R 2': { layout: 'A+B/C+D', spec: 'A 14 3 tip 1\nB 8 tip 0\nC 14 3 tip 1\nD 10 4 tip 0', sheets: 1 },
+  'Niviuk Hook 6': { layout: 'A/B/C+D', spec: 'A 10 3 tip 1\nB 10 2 tip 1\nC 9 2 tip 1\nD 4 tip 0', sheets: 1 },
+  'Niviuk Ikuma 3': { layout: 'A/B/C+D', spec: 'A 14 6 3\nB 14 6 3\nC 13 2\nD 8', sheets: 1 },
+  'Niviuk Skin 4 P': { layout: 'A+B/C+D+E/F+G/H+I', spec: 'A 18 3 tip 1\nB 16 tip 1\nC 6 3 tip 0\nD 6 tip 0\nE 6 tip 0\nF 6 3 tip 0\nG 6 tip 0\nH 6 3 tip 0\nI 6 tip 0', sheets: 1 },
+  'Niviuk Takoo 6': { layout: 'A/B/C/D+E', spec: 'A 16 8 3\nB 16 3\nC 16 2\nD 14 3\nE 12', sheets: 1 },
+  'Ozone Alpina 5': { layout: 'A/B+C', spec: 'A 31 3\nB 19 3\nC 12 4', sheets: 6 },
+  'Ozone Geo 7': { layout: 'A/B/C+D', spec: 'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C', sheets: 5 },
+  'Ozone Lyght': { layout: 'A/B+C', spec: 'A 29 3\nB 13 3\nC 8', sheets: 5 },
+  'Ozone Magnum 4': { layout: 'A/B/C/D+E', spec: 'A 20 6 2\nB 20 6 3\nC 20 6 4\nD 20 2\nE 11', sheets: 3 },
+  'Ozone Swift 6': { layout: 'A/B/C+D', spec: 'A 17 3 tip 1\nB 17 2 tip 1\nC 8 4 tip 0\nD 8 tip 0', sheets: 6 },
+  'Ozone Ultralite 5': { layout: 'A/B/C+D', spec: 'A 16 7 3 tip 2\nB 16 6 3 tip 2\nC 16 4 tip 2\nD 16 tip 2', sheets: 7 },
+  'Ozone Vibe GT': { layout: 'A/B/C+D', spec: 'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 12 3 tip 0\nD 8 tip 0\nS B', sheets: 6 },
+  'Ozone Zeno 2': { layout: 'A/B+C', spec: 'A 30 3\nB 14 3\nC 8', sheets: 4 },
+  'UP K2 5': { layout: 'A/B/C/D+E', spec: 'A 18 6 3\nB 18 6 3\nC 18 6 3\nD 12 3\nE 10', sheets: 3 },
+  'UP Makalu 5': { layout: 'A/B/C+D', spec: 'A 10 3\nB 10 3\nC 10 3\nD 8', sheets: 4 },
+  'UP Meru 2': { layout: 'A+B/C+D', spec: 'A 12 3\nB 9\nC 12 3\nD 8', sheets: 4 },
+  'UP Summit X': { layout: 'A/B/C+D', spec: 'A 12 6 3\nB 12 6 3\nC 10 2\nD 8', sheets: 4 },
+  'UP Torre': { layout: 'A+B/C+D', spec: 'A 12 3\nB 8\nC 12 3\nD 10', sheets: 5 },
+};
+
+/**
+ * A design's own cascade, ready to build: the layout, and the counts read
+ * against it. Null where the design is not on file, or its layout is not one
+ * the generator has.
+ */
+export function designCascade(family) {
+  const d = DESIGN_LINES[family];
+  if (!d || !RISER_LAYOUTS[d.layout]) return null;
+  const spec = parseCascadeSpec(d.spec, { layout: RISER_LAYOUTS[d.layout] });
+  return spec.ok ? { ...d, layoutDef: RISER_LAYOUTS[d.layout], cascade: spec } : null;
+}
 
 /* -------------------------------------------------------------- stabilo -- */
 
@@ -3308,6 +3781,9 @@ export function addStabilo(plan, wing, {
 export function anchorsForLineLength({
   wing, airfoil, rows, targetMetres, layout = null, lineLengthM,
   risers = null, shape = null, mainsPerRow = 3, brakes = null,
+  // The plan's stabilo, built in every plan tried, so what is solved to the
+  // target is the whole lineset.
+  stabilo = false,
   tolerance = 0.02, maxIterations = 24,
 }) {
   const ribCount = wing.ribs.length;
@@ -3338,7 +3814,7 @@ export function anchorsForLineLength({
     const s = suggestAnchorsPerRow({ rows, ribCount, risers, frontFraction, shape });
     const plan = buildLinePlan({
       wing, airfoil, layout, lineLengthM,
-      anchorsPerRow: s.anchorsPerRow, mainsPerRow, brakes,
+      anchorsPerRow: s.anchorsPerRow, mainsPerRow, brakes, stabilo,
     });
     return { plan, anchorsPerRow: s.anchorsPerRow, frontFraction, shape: s.shape };
   };
@@ -3561,8 +4037,10 @@ export function applyPrefixDirection(lines, direction) {
  *
  * UP publish some sheets with a column per size: a line name, then its length
  * in the L, M, SM, S and XS wings across the row. Read as a single wing it
- * mixes an L with an XS, which is what produced "st1 appears twice" and
- * "uppers longer than mains" when the reference sweep first ran over them.
+ * mixes an L with an XS, which is what produced "uppers longer than mains"
+ * when the reference sweep first ran over them. ("st1 appears twice", which
+ * it reported beside that, is UP's own: the Makalu 5's sheet lists st1 twice
+ * and st2 not at all, where its line plan and component sheets have both.)
  *
  * The columns are paired to the header positionally, left to right. On the
  * Makalu 5 the header names five sizes and the rows carry four values, with
@@ -3665,25 +4143,62 @@ export function multiSizeSheetToTSV(split, size, {
  * for describing, because a designer copying a real wing — or specifying one
  * for a builder — knows the shape they want and cannot say it:
  *
- *     A  30 14 4
- *     B  14  6 3
- *     C   8  3 2
- *     K  13  6 1
+ *     A  14 6 3      anchors, middle lines, main lines
+ *     B  14 6 3
+ *     C  15 6 4      the fourth main in two parts, CRL4 and CRU4, is one
+ *     D  14 6        a row on the C riser: anchors, middle lines on the C mains
+ *     K  14 7 3      the brake: anchors, middle lines, lines to the pulley
  *
- * Anchors first, then the count at each level below, ending at the risers.
- * That is how every manufacturer sheet in this project reads, and how the
- * Ozone Zeno 2's own plan is written: A:30 B:14 C:8 with mains A:3 B:4.
+ * The four rows are the Ozone Geo 7 MS, line for line, counted the way every
+ * manufacturer sheet in this project counts; the brake is the Vibe GT's as
+ * Ozone draw it (K1-K14 on KMU1-7, on KML1-3, on one line to the handle).
+ * Its fourth C main is its stabilo's line, and its own cascade is written
+ * "C 15 6 3 tip 1" with "S C" (`DESIGN_LINES`): "tip n" says how many of a
+ * row's anchors are tip lines, and "S C" which riser the stabilo hangs on.
+ * Two numbers on a row with a riser of its own give the mains and leave the
+ * middles in pairs, as the derived plan makes them; one number gives only
+ * the anchors.
+ *
+ * Every count written is built or refused. The middle count was parsed and
+ * ignored — the branching factor decided — so "A 18 6 3" built eight middle
+ * lines; a count of mains for a row hanging from another row's mains was
+ * ignored the same way, and so was a K row. The example here said "the
+ * Ozone Zeno 2, from its own plan: A 30 14 3, B 14 6 4, C 8 3 2", and only
+ * its anchors and its A and B mains were the Zeno 2's: its sheet has nine A
+ * middles, thirteen B middles carrying the C row's top lines too, and no C
+ * main at all.
+ *
+ * Given the riser layout, a row that hangs from the row ahead on its riser
+ * (the D row on A/B/C+D) is held to anchors and middles, and a row on none of
+ * the layout's risers is refused. Without it, rows are only held to reach the
+ * same depth.
  *
  * Blank lines and anything after `#` are ignored, so a spec can be commented.
  */
-export function parseCascadeSpec(text) {
+export function parseCascadeSpec(text, { layout = null } = {}) {
   if (typeof text !== 'string') {
     throw new Error('parseCascadeSpec needs the spec as text');
   }
 
   const rows = {};
   const problems = [];
+  const warnings = [];
   let lineNo = 0;
+  let stabiloRiser = null;
+
+  // On the layout: which rows have a riser of their own, and which hang from
+  // the row ahead of them on it.
+  const hostOf = {};
+  const onLayout = new Set();
+  for (const r of layout ?? []) {
+    (r.rows ?? []).forEach((row, i) => {
+      onLayout.add(row);
+      if (i > 0) hostOf[row] = r.rows[0];
+    });
+  }
+  const layoutName = layout
+    ? Object.entries(RISER_LAYOUTS).find(([, v]) => v === layout)?.[0] ?? 'this layout'
+    : null;
 
   for (const raw of text.split(/\r?\n/)) {
     lineNo++;
@@ -3691,7 +4206,7 @@ export function parseCascadeSpec(text) {
     if (!line) continue;
 
     const parts = line.split(/[\s,]+/);
-    const row = parts[0].toUpperCase();
+    let row = parts[0].toUpperCase();
     // A known row, not merely a plausible-looking one.
     //
     // `/^[A-Z]{1,2}$/` accepted "QQ", which is not a row on any wing. A spec
@@ -3704,9 +4219,41 @@ export function parseCascadeSpec(text) {
         + `expected one of ${KNOWN.join(', ')}`);
       continue;
     }
+    // UP call the brake BR and the stabilo ST.
+    if (row === 'BR') row = 'K';
+    if (row === 'ST') row = 'S';
     if (rows[row]) {
       problems.push(`line ${lineNo}: row ${row} appears twice`);
       continue;
+    }
+
+    // "S C": the stabilo hangs on the C riser. Its lines are the rows' tip
+    // lines, so the line says only where it goes.
+    if (row === 'S' && parts.length === 2 && /^[A-I]$/i.test(parts[1])) {
+      const riserName = parts[1].toUpperCase();
+      if (layout && !layout.some((r) => r.name === riserName)) {
+        problems.push(`line ${lineNo}: the stabilo is on the ${riserName} riser, and ${layoutName} has none`);
+      } else stabiloRiser = riserName;
+      continue;
+    }
+    // "tip 2": how many of the row's anchors are its tip lines — the
+    // outermost, on the tip ribs, each on one line to the row's outermost
+    // main. Unwritten, a row that reaches the tip has two and a row that
+    // ends inboard none.
+    let tip = null;
+    const tipAt = parts.findIndex((t, i) => i > 0 && /^tips?$/i.test(t));
+    if (tipAt > 0) {
+      const v = Number(parts[tipAt + 1]);
+      if (row === 'K' || row === 'S' || row === 'Z') {
+        problems.push(`line ${lineNo}: row ${row} has no tip lines to count`);
+        continue;
+      }
+      if (!Number.isInteger(v) || v < 0) {
+        problems.push(`line ${lineNo}: "tip" takes a whole count, got "${parts[tipAt + 1] ?? ''}"`);
+        continue;
+      }
+      tip = v;
+      parts.splice(tipAt, 2);
     }
 
     const counts = parts.slice(1).map(Number);
@@ -3718,64 +4265,366 @@ export function parseCascadeSpec(text) {
 
     // A cascade converges. A level with more lines than the one above it is
     // not a cascade, and is much more likely to be a typo than a design.
+    let widens = false;
     for (let i = 1; i < counts.length; i++) {
       if (counts[i] > counts[i - 1]) {
+        widens = true;
         problems.push(`line ${lineNo}: row ${row} goes ${counts[i - 1]} to `
           + `${counts[i]}, which widens rather than converging`);
       }
     }
+    if (widens) continue;
 
+    if (row === 'S' || row === 'Z') {
+      warnings.push(`row ${row} is not built from a spec: `
+        + (row === 'S' ? 'the stabilo comes from the wing\'s tip' : 'collapse lines are read, not generated'));
+      continue;
+    }
+    const levels = counts.slice(1);
+    if (row === 'K') {
+      // anchors, middles, lines to the pulley, and the one shared lower line
+      if (levels.length > 3 || (levels.length === 3 && levels[2] !== 1)) {
+        problems.push(`line ${lineNo}: the brake is built as anchors, middle lines, lines `
+          + 'to the pulley and one shared lower line, so K takes at most "13 6 3 1"');
+        continue;
+      }
+      rows.K = { row: 'K', anchors: counts[0], levels, depth: counts.length, brake: true };
+      continue;
+    }
+
+    const hangsFrom = hostOf[row] ?? null;
+    if (layout && !onLayout.has(row)) {
+      problems.push(`line ${lineNo}: row ${row} is on none of the ${layoutName} risers`);
+      continue;
+    }
+    if (hangsFrom && levels.length > 1) {
+      problems.push(`line ${lineNo}: row ${row} hangs from the ${hangsFrom} mains on `
+        + `${layoutName}, so it has no mains of its own: write "${row} ${counts[0]} ${levels[0]}"`);
+      continue;
+    }
+    if (levels.length > 2) {
+      problems.push(`line ${lineNo}: row ${row} gives ${levels.length} levels below its anchors; `
+        + 'this builds two, middle lines then main lines');
+      continue;
+    }
+    if (tip != null && tip > counts[0]) {
+      problems.push(`line ${lineNo}: row ${row} has ${counts[0]} anchors, so not ${tip} tip lines`);
+      continue;
+    }
     rows[row] = {
       row,
       anchors: counts[0],
-      levels: counts.slice(1),
+      tip,
+      levels,
       depth: counts.length,
+      hangsFrom,
+      // Two numbers on a row with its own riser are anchors and mains.
+      middles: hangsFrom ? (levels[0] ?? null) : (levels.length === 2 ? levels[0] : null),
+      mains: hangsFrom ? null : (levels.length ? levels[levels.length - 1] : null),
     };
   }
 
   const names = Object.keys(rows);
-  if (!names.length) problems.push('the spec names no rows');
+  const load = names.filter((r) => r !== 'K');
+  if (!load.length) problems.push('the spec names no load-bearing row');
 
-  // Every row should reach the same depth, or the plan has rows terminating
-  // at different levels — possible, but far more often a missing number.
-  const depths = [...new Set(names.map((r) => rows[r].depth))];
-  if (depths.length > 1) {
-    problems.push(`rows reach different depths (${depths.sort().join(', ')}); `
-      + 'if that is deliberate the plan will build, but it is usually a '
-      + 'missing count');
+  if (layout) {
+    const missing = [...onLayout].filter((r) => !rows[r]);
+    if (missing.length) {
+      warnings.push(`row${missing.length > 1 ? 's' : ''} ${missing.join(', ')} not written: derived, every second rib`);
+    }
+  } else {
+    // Without the layout, rows are held to the same depth, or the plan has
+    // rows terminating at different levels — possible, but far more often a
+    // missing number.
+    const depths = [...new Set(load.map((r) => rows[r].depth))];
+    if (depths.length > 1) {
+      problems.push(`rows reach different depths (${depths.sort().join(', ')}); `
+        + 'if that is deliberate the plan will build, but it is usually a '
+        + 'missing count');
+    }
   }
 
+  const pick = (key) => Object.fromEntries(load.filter((r) => rows[r][key] != null)
+    .map((r) => [r, rows[r][key]]));
+  const K = rows.K;
+  const totalAnchors = load.reduce((a, r) => a + rows[r].anchors, 0);
   return {
     rows,
     rowNames: names,
-    anchorsPerRow: Object.fromEntries(names.map((r) => [r, rows[r].anchors])),
-    mainsPerRow: Object.fromEntries(names.map((r) => {
-      const l = rows[r].levels;
-      return [r, l.length ? l[l.length - 1] : rows[r].anchors];
-    })),
+    anchorsPerRow: Object.fromEntries(load.map((r) => [r, rows[r].anchors])),
+    // Only the counts written: a row without one has it derived.
+    middlesPerRow: pick('middles'),
+    mainsPerRow: pick('mains'),
+    // Only the tip counts written; a row without one has the default.
+    tipsPerRow: pick('tip'),
+    stabiloRiser,
+    brakes: K ? {
+      anchors: K.anchors,
+      levelCounts: [K.levels[0] ?? 6, K.levels[1] ?? 3, 1],
+    } : null,
     problems,
+    warnings,
     ok: problems.length === 0,
     depth: Math.max(...names.map((r) => rows[r].depth), 0),
-    totalAnchors: names.reduce((a, r) => a + rows[r].anchors, 0),
+    totalAnchors,
     note: problems.length === 0
-      ? `${names.length} rows, ${names.reduce((a, r) => a + rows[r].anchors, 0)} `
-        + `anchors, ${Math.max(...names.map((r) => rows[r].depth))} levels`
+      ? `${load.length} rows, ${totalAnchors} anchors${K ? `, brake ${K.anchors}` : ''}`
+        + (warnings.length ? ` — ${warnings.join('; ')}` : '')
       : `${problems.length} problem(s) in the spec`,
   };
 }
 
-/** Write a built plan back out as a spec, so one can be edited and reused. */
+/**
+ * A sheet's cascade counted the way a written cascade counts it: for each
+ * load-bearing row, its anchors, its middle lines and its main lines.
+ *
+ * A main in two parts — the Geo 7's CRU4 and CRL4, Niviuk's 3A3 above its
+ * lower piece 4A3 — is one main: one path from the riser, not two lines.
+ * A row is `simple` when its cascade is the generator's shape: one level of
+ * middle lines, nothing above or below them that the generator does not
+ * build, and no line it shares with another row.
+ */
+export function cascadeCountsOf(lines) {
+  const rows = {};
+  const rowOf = (r) => (rows[r] ||= {
+    anchors: 0, middles: new Set(), depths: new Set(), mains: new Set(), shared: false, deep: false,
+  });
+  for (const l of lines) {
+    const own = l.rows || [l.row];
+    if (!own.every((r) => /^[A-I]$/.test(r))) continue;
+    own.forEach(rowOf);
+    if (own.length > 1) { for (const r of own) rows[r].shared = true; continue; }
+    const R = rows[own[0]];
+    if (l.level === 'upper') R.anchors += 1;
+    else if (l.level === 'middle') {
+      R.middles.add(l.name);
+      R.depths.add(`${l.cascadeDepth ?? ''}${l.side ?? ''}`);
+    } else if (l.level === 'main') R.mains.add(l.index);
+    else R.deep = true;
+  }
+  return Object.fromEntries(Object.entries(rows).sort().map(([r, v]) => [r, {
+    anchors: v.anchors,
+    middles: v.middles.size,
+    mains: v.mains.size,
+    simple: !v.shared && !v.deep && v.depths.size <= 1,
+  }]));
+}
+
+/**
+ * The cascade a sheet describes, written as far as the generator can build
+ * it: the riser layout from the rows that have mains, every row's anchors,
+ * every riser row's mains, and the middle lines where the row's cascade has
+ * the generator's shape. Where it does not — the Zeno 2's C top lines hang
+ * on the B middles, UP's Torre has a level between its middles and mains,
+ * Niviuk's Hook 6 shares middles between its C and D rows — the middles are
+ * left to be paired, and `derivedMiddles` says which.
+ */
+export function cascadeSpecFromSheet(lines, { stabiloMain = null } = {}) {
+  // The stabilo's own line, where it is known, is not its row's main
+  // (`stabiloMainFromTotals`): the row is written without it, and an S line
+  // says which riser the stabilo hangs on.
+  const own = stabiloMain
+    ? lines.filter((l) => !(l.level === 'main' && l.row === stabiloMain.row && l.index === stabiloMain.index))
+    : lines;
+  const c = cascadeCountsOf(own);
+  const order = Object.keys(c);
+  if (!order.some((r) => c[r].mains > 0)) return null;
+  const groups = [];
+  for (const r of order) {
+    if (c[r].mains > 0 || !groups.length) groups.push([r]);
+    else groups[groups.length - 1].push(r);
+  }
+  const out = [];
+  const derivedMiddles = [];
+  // Middles the generator can build: one level of them, each carrying a few
+  // top lines. No three-level row on file carries more than three anchors to
+  // a middle line (the K2 5's 2.7 is the most, the outboard two of a row
+  // going straight to a main); the Makalu 5's A row has one middle line for
+  // ten anchors because eight of them hang from its mains directly.
+  const ownMiddles = (r) => c[r].simple && c[r].middles > 0
+    && (c[r].anchors - 2) / c[r].middles <= 3;
+  for (const [host, ...deps] of groups) {
+    // A host's middles are its own only if every row hanging from it brings
+    // middles of its own; otherwise they carry the other row's top lines too.
+    const hostMiddles = ownMiddles(host) && deps.every(ownMiddles);
+    if (!hostMiddles) derivedMiddles.push(host);
+    out.push(`${host} ${c[host].anchors}${hostMiddles ? ` ${c[host].middles}` : ''}`
+      + `${c[host].mains ? ` ${c[host].mains}` : ''}`);
+    for (const d of deps) {
+      if (!ownMiddles(d)) derivedMiddles.push(d);
+      out.push(`${d} ${c[d].anchors}${ownMiddles(d) ? ` ${c[d].middles}` : ''}`);
+    }
+  }
+  const stabiloRiser = stabiloMain ? (groups.find((g) => g.includes(stabiloMain.row))?.[0] ?? null) : null;
+  if (stabiloRiser) out.push(`S ${stabiloRiser}`);
+  return {
+    layout: groups.map((g) => g.join('+')).join('/'),
+    risers: groups.length,
+    spec: out.join('\n'),
+    derivedMiddles,
+    counts: c,
+    stabiloRiser,
+  };
+}
+
+/**
+ * A sheet's tip lines: the outermost anchors that two or more rows hang on one
+ * path to the riser — the stabilo's lines, where a maker names them in the
+ * rows they sit outboard of.
+ *
+ * Ozone's and Niviuk's sheets do. Below its top line, every canopy line's
+ * path is its total less that top line, and on the Geo 7 the last two A and B
+ * anchors and the last C come to the same remainder to the millimetre in
+ * every size — 5092 mm on the MS, where the rows' own paths are 6262 to 6497.
+ * Lines of different rows on one remainder share every line below their top
+ * lines: one line, the stabilo's. The Hook 6's are a10, b10 and the ninth C
+ * (named c10), 4337 mm on the 20; Ozone's Vibe GT diagram draws its A13,
+ * A14, B13 and B14 on one line to the B riser.
+ *
+ * `totals` is keyed `[anchor][row]`, as `referenceTotals` gives it. A row's
+ * anchors are matched to its top lines in order where there are as many of
+ * each — the Hook 6 has no c9, and its ninth C total is c10's — and by number
+ * where there are not: the Artik R 2's sheet has fourteen A lines and its
+ * totals thirteen, and a line with no total is not counted.
+ *
+ * Only rows that reach the tip take part: two rows ending inboard on one
+ * middle line, as the Swift 6's eight C and D do at its eighth A of
+ * seventeen, are a cascade, not a stabilo.
+ *
+ * @returns {{ok: boolean, tips: Object<string, number>, groups: {rows: string[], remainderMM: number}[]}}
+ */
+export function tipLinesFromTotals(lines, totals, { toleranceMM = 3, reachesTip = 0.75 } = {}) {
+  const tops = {};
+  for (const l of lines) {
+    if (l.level !== 'upper' || !/^[A-I]$/.test(l.row)) continue;
+    (tops[l.row] ||= []).push(l);
+  }
+  const anchorsIn = Object.keys(totals).map(Number).sort((a, b) => a - b);
+  const rem = {};
+  for (const [row, list] of Object.entries(tops)) {
+    list.sort((a, b) => a.index - b.index);
+    const have = anchorsIn.filter((a) => Number.isFinite(totals[a]?.[row]));
+    if (!have.length) continue;
+    const byNumber = new Map(list.map((l) => [l.index, l]));
+    const pairs = have.length === list.length
+      ? have.map((a, k) => [a, list[k]])
+      : have.filter((a) => byNumber.has(a)).map((a) => [a, byNumber.get(a)]);
+    if (pairs.length) rem[row] = pairs.map(([a, l]) => totals[a][row] - l.lengthMM);
+  }
+  const rows = Object.keys(rem).sort();
+  const tips = Object.fromEntries(rows.map((r) => [r, 0]));
+  if (rows.length < 2) return { ok: false, tips, groups: [] };
+  const frontCount = tops[rows[0]].length;
+  const outer = rows.filter((row) => tops[row].length >= reachesTip * frontCount)
+    .map((row) => ({ row, r: rem[row][rem[row].length - 1] })).sort((a, b) => a.r - b.r);
+  const groups = [];
+  for (const o of outer) {
+    const g = groups[groups.length - 1];
+    if (g && o.r - g[g.length - 1].r <= toleranceMM) g.push(o); else groups.push([o]);
+  }
+  const found = [];
+  for (const g of groups.filter((x) => x.length >= 2)) {
+    const R = g.reduce((s, o) => s + o.r, 0) / g.length;
+    for (const { row } of g) {
+      let n = 0;
+      for (let i = rem[row].length - 1; i >= 0 && Math.abs(rem[row][i] - R) <= toleranceMM; i--) n++;
+      tips[row] = n;
+    }
+    found.push({ rows: g.map((o) => o.row).sort(), remainderMM: Math.round(R) });
+  }
+  return { ok: true, tips, groups: found };
+}
+
+/**
+ * The same, from a sheet that states each canopy line's path (BGD's): the
+ * lines on the main line under the front row's outermost anchor, where that
+ * main also carries another row's outermost. The Lynx 2's a15 to a17 and b16
+ * to b18 hang on BR4, a main on the B riser.
+ */
+export function tipLinesFromPaths(lines) {
+  const canopy = lines.filter((l) => l.reachesCanopy && l.statedPath && /^[A-I]$/.test(l.row));
+  const rows = [...new Set(canopy.map((l) => l.row))].sort();
+  const tips = Object.fromEntries(rows.map((r) => [r, 0]));
+  if (!rows.length) return { ok: false, tips, groups: [] };
+  const outermost = (r) => canopy.filter((l) => l.row === r)
+    .sort((a, b) => (a.ribPosition ?? a.index) - (b.ribPosition ?? b.index)).pop();
+  const lowest = (l) => l.statedPath[l.statedPath.length - 1];
+  const main = lowest(outermost(rows[0]));
+  const onIt = rows.filter((r) => lowest(outermost(r)) === main);
+  if (onIt.length < 2) return { ok: true, tips, groups: [] };
+  for (const r of onIt) tips[r] = canopy.filter((l) => l.row === r && lowest(l) === main).length;
+  return { ok: true, tips, groups: [{ rows: onIt, main }] };
+}
+
+/** A written cascade with each row's tip count added, where one is known. */
+export function withTipCounts(spec, tips) {
+  if (!tips) return spec;
+  return spec.split('\n').map((line) => {
+    const row = line.trim().split(/\s+/)[0];
+    return row in tips && !/\btips?\b/.test(line) ? `${line} tip ${tips[row]}` : line;
+  }).join('\n');
+}
+
+/**
+ * The stabilo's own line on a sheet that names its tip lines in their rows:
+ * the main line, or the main in two parts, that the tip lines' path is, once
+ * the riser is taken off.
+ *
+ * The riser is what the front rows' first anchors leave below their own
+ * lines (A1, AM1, AR1 and B1, BM1, BR1, as Ozone number them), where the two
+ * agree. On the Geo 7 the tip lines' path less the riser is CRU4 and CRL4 —
+ * "the fourth C main", in two parts — within 15 mm in every size; on the
+ * Vibe GT it is BRU4 and BRL4, which Ozone's diagram draws as the stabilo's
+ * line to the B riser. So those mains are not their rows' own, and the
+ * stabilo hangs on the C riser on one wing and the B riser on the other.
+ *
+ * @returns {{row: string, index: number, names: string[], lengthMM: number}|null}
+ */
+export function stabiloMainFromTotals(lines, totals, tips, { toleranceMM = 15 } = {}) {
+  if (!tips?.groups?.length) return null;
+  const L = new Map(lines.map((l) => [l.name, l.lengthMM]));
+  const riserVia = (r) => totals[1]?.[r] - (L.get(`${r}1`) ?? NaN) - (L.get(`${r}M1`) ?? NaN) - (L.get(`${r}R1`) ?? NaN);
+  const [ra, rb] = [riserVia('A'), riserVia('B')];
+  if (!Number.isFinite(ra) || !Number.isFinite(rb) || Math.abs(ra - rb) > 20) return null;
+  const riser = (ra + rb) / 2;
+  const mains = {};
+  for (const l of lines) {
+    if (l.level !== 'main' || !/^[A-I]$/.test(l.row)) continue;
+    (mains[`${l.row}${l.index}`] ||= { row: l.row, index: l.index, names: [], lengthMM: 0 });
+    mains[`${l.row}${l.index}`].names.push(l.name);
+    mains[`${l.row}${l.index}`].lengthMM += l.lengthMM;
+  }
+  const hits = Object.values(mains).filter((m) => tips.groups
+    .every((g) => Math.abs(g.remainderMM - m.lengthMM - riser) <= toleranceMM));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
+ * Write a built plan back out as a spec, so one can be edited and reused.
+ *
+ * A row with mains of its own is written as anchors, middles, mains; a row
+ * hanging from another row's mains as anchors and middles; the brake as
+ * anchors, middles and the lines to the pulley, without the one shared lower
+ * line every brake has. Read back, it builds the same counts.
+ */
 export function cascadeSpecFor(plan) {
   const byRow = {};
   for (const l of plan.lines) {
-    const r = (byRow[l.row] ||= {});
-    r[l.level] = (r[l.level] || 0) + 1;
+    if (l.row === 'S' || l.row === 'Z') continue;
+    const r = (byRow[l.row] ||= { upper: 0, middle: 0, main: 0, tip: 0 });
+    if (l.shared) continue;
+    if (l.level in r) r[l.level] += 1;
+    if (l.level === 'upper' && l.direct) r.tip += 1;
   }
-  const order = ['upper', 'cascade-2', 'cascade-3', 'middle', 'cascade-4', 'main'];
-  const out = ['# row  anchors  then the count at each level below'];
-  for (const row of Object.keys(byRow).sort()) {
-    const counts = order.map((lv) => byRow[row][lv]).filter(Boolean);
-    if (counts.length) out.push(`${row}  ${counts.join(' ')}`);
+  const out = ['# row  anchors  middles  mains   (a row on another\'s mains: anchors, middles)',
+    '#   then "tip n": how many of its anchors are tip lines, on the tip ribs'];
+  for (const row of Object.keys(byRow).sort((a, b) => (a === 'K') - (b === 'K') || a.localeCompare(b))) {
+    const c = byRow[row];
+    if (!c.upper) continue;
+    const counts = [c.upper, c.middle, c.main].filter((n, i) => i === 0 || n > 0);
+    out.push(`${row}  ${counts.join(' ')}${row === 'K' ? '' : `  tip ${c.tip}`}`);
   }
+  if (plan.stabilo?.fromRows && plan.stabilo.riser) out.push(`S  ${plan.stabilo.riser}`);
   return `${out.join('\n')}\n`;
 }

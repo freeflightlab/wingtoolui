@@ -17,7 +17,7 @@ import { naca4 } from '../src/core/airfoil.js';
 import { developWing, developmentError } from '../src/core/flatdev.js';
 import { nestPanels, fabricEstimate } from '../src/core/export.js';
 import {
-  buildLinePlan, RISER_LAYOUTS, anchorsForLineLength, ANCHOR_DENSITY,
+  buildLinePlan, RISER_LAYOUTS, anchorsForLineLength, designCascade,
 } from '../src/core/lineplan.js';
 import { analyseLoads, selectLines, parseMaterialsTable, DEFAULT_LINE_TABLE, lengthChain } from '../src/core/loads.js';
 import { solveEquilibrium } from '../src/core/equilibrium.js';
@@ -47,6 +47,7 @@ for (const specFile of readdirSync('data/reference').filter((x) => /-spec\.tsv$|
 const problems = [];
 const rows = [];
 const overshoot = [];
+const arcErrors = [];
 
 const flag = (wing, stage, what, detail) =>
   problems.push({ wing, stage, what, detail });
@@ -66,8 +67,9 @@ for (const [family, sizes] of Object.entries(fams)) {
         `${m.area.toFixed(2)} vs ${size.flatArea}`);
 
       const cells = Math.max(8, Math.round(size.cells / 2));
-      const lobe = buildLobe({ type: 'circle', projectedRatio: rec.projectedRatio },
-        pf.halfSpan);
+      // The arc the picker gives it: the handbook's ellipse through its
+      // projected span (published, or from Niviuk's projected aspect ratio).
+      const lobe = buildLobe(rec.lobe, pf.halfSpan);
       const wing = buildWing({
         planform: pf, lobe, airfoil: naca4('4415'), cells,
         pointsPerSurface: 24, zRotation: 'auto', alphaDeg: 6,
@@ -78,9 +80,14 @@ for (const [family, sizes] of Object.entries(fams)) {
         if (psErr > 0.06) flag(id, 'arc', 'projected span off',
           `${lm.projectedSpan.toFixed(2)} vs ${size.projectedSpan}`);
       }
-      const projErr = size.projectedArea
-        ? Math.abs(projectedArea(wing) - size.projectedArea) / size.projectedArea : 0;
-      if (projErr > 0.12) flag(id, 'arc', 'projected area off',
+      // The published projected area checks the arc independently of the
+      // span it was built through. 12% was allowed, and a circle through the
+      // published span came out short on 51 of the 55 wings that publish an
+      // area; the ellipse lands within 2.1% of it on every one.
+      const projSigned = size.projectedArea
+        ? (projectedArea(wing) - size.projectedArea) / size.projectedArea : null;
+      if (projSigned != null) arcErrors.push({ id, err: projSigned, basis: rec.projectedSpanBasis });
+      if (projSigned != null && Math.abs(projSigned) > 0.03) flag(id, 'arc', 'projected area off',
         `${projectedArea(wing).toFixed(2)} vs ${size.projectedArea}`);
 
       // --- development --------------------------------------------------
@@ -104,18 +111,24 @@ for (const [family, sizes] of Object.entries(fams)) {
       }
 
       // --- lines --------------------------------------------------------
-      // A design whose line sheets are on file is built with its own rows,
-      // riser count and anchor counts — the topology is the same in every
-      // size of a family. Any other is a two-liner above an aspect ratio of
-      // 6.2 and a three-riser, four-row wing below it.
+      // A design whose line sheets are on file is built with its own cascade
+      // (`DESIGN_LINES`): its riser layout, anchors and mains, and its middle
+      // lines where the generator can build them — the topology is the same
+      // in every size of a family. Any other is a two-liner above an aspect
+      // ratio of 6.2 and a three-riser, four-row wing below it.
       //
       // The aspect ratio was all there was, and it built the Alpina 5, a
       // two-liner at 5.9, as four rows on three risers: half as much line
-      // again as the wing has.
-      const own = ANCHOR_DENSITY.designs.find((d) => d.name === family) ?? null;
+      // again as the wing has. Then the own designs were six Ozone wings, and
+      // the BGD Lynx 2 — a three-liner, with A, B and C mains on all four of
+      // its sheets — fell to the rule at 6.2 and was built as a two-liner;
+      // the Artik R 2, a two-liner on four rows, as one on three.
+      const own = designCascade(family);
       const af = naca4('4415');
-      const risers = own ? own.risers : (size.flatAR >= 6.2 ? 2 : 3);
-      af.anchors = risers === 2
+      const risers = own ? own.layoutDef.filter((r) => r.rows.length).length
+        : (size.flatAR >= 6.2 ? 2 : 3);
+      const rowCount = own ? new Set(own.layoutDef.flatMap((r) => r.rows)).size : (risers === 2 ? 3 : 4);
+      af.anchors = rowCount === 3
         ? { A: 0.09, B: 0.38, C: 0.60 }
         : { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
       // Anchor density solved to the published consumption rather than taken
@@ -131,22 +144,30 @@ for (const [family, sizes] of Object.entries(fams)) {
       const riserM = 0.5;
       const lineHeightM = EXAMPLE_SCALING.lineLength.slope * size.flatSpan
         + EXAMPLE_SCALING.lineLength.intercept - riserM;
-      const layout = RISER_LAYOUTS[risers === 2 ? 'A/B+C' : 'A/B/C+D'];
+      const layout = own ? own.layoutDef : RISER_LAYOUTS[risers === 2 ? 'A/B+C' : 'A/B/C+D'];
       const brakes = { anchors: 13, levelCounts: [6, 3, 1] };
       let solved;
       if (own) {
+        // Its tip lines as its sheets show them, on one stabilo line as the
+        // makers draw it, as the picker builds it.
         const plan0 = buildLinePlan({
           wing, airfoil: af, layout, lineLengthM: lineHeightM,
-          anchorsPerRow: own.rows, mainsPerRow: 3, brakes,
+          anchorsPerRow: own.cascade.anchorsPerRow, middlesPerRow: own.cascade.middlesPerRow,
+          mainsPerRow: own.cascade.mainsPerRow, tipAnchorsPerRow: own.cascade.tipsPerRow,
+          brakes, stabilo: true, stabiloRiser: own.cascade.stabiloRiser ?? null,
         });
+        if (plan0.levelShortfalls.length) {
+          flag(id, 'lines', 'its own cascade could not be built as written',
+            plan0.levelShortfalls.map((f) => `${f.row} ${f.level} ${f.got}/${f.asked}`).join(', '));
+        }
         solved = {
-          plan: plan0, anchorsPerRow: own.rows, frontFraction: null, saturated: false,
+          plan: plan0, anchorsPerRow: own.cascade.anchorsPerRow, frontFraction: null, saturated: false,
           error: (plan0.totalLengthM - target) / target,
         };
       } else {
         solved = anchorsForLineLength({
           wing, airfoil: af, rows: Object.keys(af.anchors), targetMetres: target,
-          layout, lineLengthM: lineHeightM, risers, mainsPerRow: 3, brakes,
+          layout, lineLengthM: lineHeightM, risers, mainsPerRow: 3, brakes, stabilo: true,
         });
       }
       const plan = solved.plan;
@@ -154,7 +175,7 @@ for (const [family, sizes] of Object.entries(fams)) {
       // land on the published one. Density is the constraint kept because it
       // sets the loads. Tracked as a limitation, not flagged as a defect.
       overshoot.push({
-        id, error: solved.error, risers, published: size.totalLineLength != null,
+        id, family, error: solved.error, risers, published: size.totalLineLength != null,
         anchors: solved.anchorsPerRow, front: solved.frontFraction,
         saturated: solved.saturated, own: !!own,
       });
@@ -257,6 +278,15 @@ for (const [family, sizes] of Object.entries(fams)) {
 console.log(`${rows.length} wings completed the full pipeline, `
   + `${problems.length} problems\n`);
 
+if (arcErrors.length) {
+  const e = arcErrors.map((a) => a.err * 100);
+  const mean = e.reduce((s, v) => s + Math.abs(v), 0) / e.length;
+  const fromAR = arcErrors.filter((a) => /aspect ratio/.test(a.basis)).length;
+  console.log(`the arc: projected area against published, ${arcErrors.length} wings `
+    + `(${fromAR} through the span their projected aspect ratio gives): mean |error| `
+    + `${mean.toFixed(1)}%, ${Math.min(...e).toFixed(1)} to ${Math.max(...e).toFixed(1)}%\n`);
+}
+
 if (overshoot.length) {
   const pct = (v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}%`;
   const line = (label, list) => {
@@ -275,6 +305,14 @@ if (overshoot.length) {
   line('  of them on two', overshoot.filter((o) => o.own && o.risers === 2));
   line('density solved, on three risers', overshoot.filter((o) => !o.own && o.risers === 3));
   line('density solved, on two', overshoot.filter((o) => !o.own && o.risers === 2));
+  // Each family built from its own cascade, so a figure above is traceable
+  // to the wings in it.
+  const ownFamilies = [...new Set(overshoot.filter((o) => o.own).map((o) => o.family))];
+  console.log(`  own cascades, by family: ${ownFamilies.map((f) => {
+    const errs = overshoot.filter((o) => o.family === f).map((o) => o.error);
+    return `${f.replace(/^(Ozone|BGD|Niviuk) /, '')} ${pct(Math.min(...errs))}${errs.length > 1
+      ? ` to ${pct(Math.max(...errs))}` : ''}`;
+  }).join(', ')}`);
   const sorted = overshoot.slice().sort((a, b) => b.error - a.error);
   // Saturated means the search ran out of real-wing densities: at the
   // sparsest when the lines are still too long, at the densest when they are
@@ -285,10 +323,12 @@ if (overshoot.length) {
     ? `, at the ${o.error > 0 ? 'sparsest' : 'densest'} a real wing is` : ''})`;
   console.log(`  furthest over:  ${sorted.slice(0, 3).map(show).join('; ')}`);
   console.log(`  furthest under: ${sorted.slice(-3).map(show).join('; ')}`);
+  const familiesOf = (list) => [...new Set(list.map((o) => o.family))].join(', ');
+  const overSparse = overshoot.filter((o) => o.saturated && o.error > 0);
+  const underDense = overshoot.filter((o) => o.saturated && o.error < 0);
   console.log(`  density solved, and still over at the sparsest a real wing is: `
-    + `${overshoot.filter((o) => o.saturated && o.error > 0).length} of `
-    + `${overshoot.filter((o) => !o.own).length}; still under at the densest: `
-    + `${overshoot.filter((o) => o.saturated && o.error < 0).length}`);
+    + `${overSparse.length} of ${overshoot.filter((o) => !o.own).length} (${familiesOf(overSparse)}); `
+    + `still under at the densest: ${underDense.length} (${familiesOf(underDense)})`);
   console.log('  A two-liner\'s front row starts with pairs of short bridles (sixteen a side');
   console.log('  on each Ozone two-liner), a level the generator does not build, so it has');
   console.log('  more line for the same anchors. Density is kept because it sets the loads;');

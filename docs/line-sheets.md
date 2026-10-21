@@ -94,7 +94,9 @@ length to the 100–900 mm band, because this failure is invisible in the totals
 On the Geo 7, A13 and A14 are 1205 mm and 977 mm where every inboard A line is
 300–500 mm, and they have **no middle line above them**: the outermost anchors
 take one long line straight to the main level. `tipDirectAnchors` reproduces
-this.
+this. They are the stabilo's: with B13, B14 and C15 they share one path to the
+riser to the millimetre in every size, and a plan built with `stabilo: true`
+hangs them on one line (`docs/drawn-line-plans.md`, section 5).
 
 It changes the cut list and the number of pieces, and not where the canopy
 sits: the anchors are where the wing puts them either way.
@@ -118,18 +120,25 @@ them one way.
 - **shape deviation** — the spread once that offset is removed. *This* is the
   trim distribution across the span.
 
+The interface compares the rows that carry the wing and the brake each against
+its own offset. Makers measure a brake to different points — the Hook 6's is
+144 mm longer than its A at the centre, the Ultralite 5's 570 — and under one
+offset with the rest, its difference was read as the shape of the A to D rows.
+
 Comparing a parametric wing of the Geo 7 MS's proportions against the real
 thing — 11.52 m span, 2.84 m root, 24 cells a side, its own 14, 14, 15 and 14
 anchors a row, its 527 mm riser, 6.5 m lines, on a circular arc of 0.88 —
-gives a mean offset of 241 mm and a mean shape deviation of 110 mm over 57
+gives a mean offset of 231 mm and a mean shape deviation of 117 mm over 57
 anchors, the largest at the tip anchors A14, B14 and C15. The 12-cell test
 wing, which is not that wing at all, is 83 mm and 192 mm from it.
 
 The arc is the larger difference, and not in the direction a circle
 suggests. The Geo 7 MS is published at 8.87 m projected on 11.52 flat, 0.77;
-built on a circle of that ratio, the same plan fits its lines worse, 244 mm.
-A real arc is flatter in the middle and steeper at the tip than any circle,
-which is what moves the tip anchors. The tool is for diffing a design against
-reference wings, not for claiming a match.
+built on a circle of that ratio, the same plan fits its lines worse, 232 mm.
+A real arc is flatter in the middle and steeper at the tip than any circle:
+on the handbook's ellipse through that span, with its own tip lines, it comes
+to 88 mm, against 112 on the circle of 0.88 with them. The reference wings are
+built on that ellipse (`docs/reference-wings.md`). The tool is for diffing a
+design against reference wings, not for claiming a match.
 
 ---

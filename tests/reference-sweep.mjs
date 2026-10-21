@@ -50,9 +50,8 @@ for (const f of files) {
   // is on single lines; totals get their own.
   // A multi-size sheet lists one column per size, so a single line name
   // carries several lengths. Read as one wing it mixes an L with an XS, which
-  // is what produced "st1 appears twice" and "uppers longer than mains" on
-  // the Makalu. It is a known format the readers do not yet split, recorded
-  // rather than forced through the wrong one.
+  // is what produced "uppers longer than mains" on the Makalu. ("st1 appears
+  // twice" was UP's own: that sheet lists st1 twice and st2 not at all.)
   const body = readFileSync(`data/reference/${f}`, 'utf8');
   const isMultiSize = /(?:\t[A-Z][A-Za-z0-9 ]+\s(?:XS|S|SM|M|ML|L|XL)\b){2,}/.test(
     body.split('\n')[0] || '');

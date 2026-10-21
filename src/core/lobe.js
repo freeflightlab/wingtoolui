@@ -200,6 +200,30 @@ export function minArrowRatio(aRatio, type = 'ellipse', exponent = 1.6) {
   return hi;
 }
 
+/**
+ * The handbook's ellipse (3.1(c)) through a projected span: semi-axis `a` the
+ * projected half span, and the arrow `b` the least that carries the flat half
+ * span, so the tip is where the quarter ends — vertical, as a stabilo is.
+ *
+ * A real wing's arc is flatter in the middle and steeper at the tip than a
+ * circle, and the published projected AREA says so independently of the
+ * lines: through the published projected span, this ellipse projects the 55
+ * sizes of ten families that publish one to within 1.0% of it on average
+ * (−2.0 to +2.1%), and a circle through the same span to within 2.0% (−3.7 to
+ * +0.4%), short on 51 of them, because a circle curves the middle of the
+ * wing, where the chord is, as much as its tip. The circle is the nearer only
+ * on the Artik R 2, by a tenth of a percent, and the single-surface Skin 4 P,
+ * which this tool builds with a lower surface it does not have.
+ */
+export function ellipseForProjectedRatio(ratio) {
+  if (!(ratio > 0.5 && ratio < 1)) {
+    throw new Error(`ellipseForProjectedRatio: a projected ratio between 0.5 and 1 (got ${ratio})`);
+  }
+  // A millionth over the least arrow, so the arc is never a rounding short of
+  // the span it has to carry.
+  return { type: 'ellipse', aRatio: ratio, bRatio: minArrowRatio(ratio, 'ellipse') * (1 + 1e-6) };
+}
+
 /** Circle radius that turns a flat half-span into a given projected fraction. */
 export function radiusForProjectedRatio(halfSpan, ratio) {
   // Projected half span = R * sin(halfSpan/R). Solve R*sin(s/R)/s = ratio.

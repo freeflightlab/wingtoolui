@@ -1,0 +1,113 @@
+# Ozone Vibe GT: the rigging diagram, line by line.
+# Source: Ozone, "Vibe GT Rigging Diagram" (Vibe_GT_rigging_diagram.pdf, Adobe
+#   Illustrator, one A3 page), supplied by the user 2026-09-29.
+# Transcribed 2026-10-19 from the drawing: each line and the line it hangs
+#   from. A parent that is not a line is where the cascade ends: a riser, or
+#   the brake handle. "A2" is the drawing's A-squared riser, the split A.
+# The same in every size: the sheets vibegt-XS.tsv to vibegt-XL.tsv carry
+#   these names, and the unit suite holds the two to each other.
+# convention: ozone
+line	parent
+A1	AM1
+A2	AM1
+A3	AM2
+A4	AM2
+AM1	AR1
+AM2	AR1
+AR1	riser A
+A5	AM3
+A6	AM3
+A7	AM4
+A8	AM4
+AM3	AR2
+AM4	AR2
+AR2	riser A
+A9	AM5
+A10	AM5
+A11	AM6
+A12	AM6
+AM5	AR3
+AM6	AR3
+AR3	riser A2
+B1	BM1
+B2	BM1
+B3	BM2
+B4	BM2
+BM1	BR1
+BM2	BR1
+BR1	riser B
+B5	BM3
+B6	BM3
+B7	BM4
+B8	BM4
+BM3	BR2
+BM4	BR2
+BR2	riser B
+B9	BM5
+B10	BM5
+B11	BM6
+B12	BM6
+BM5	BR3
+BM6	BR3
+BR3	riser B
+A13	BRU4
+A14	BRU4
+B13	BRU4
+B14	BRU4
+BRU4	BRL4
+BRL4	riser B
+C1	CM1
+D1	CM1
+C2	CM1
+D2	CM1
+C3	CM2
+D3	CM2
+C4	CM2
+D4	CM2
+CM1	CR1
+CM2	CR1
+CR1	riser C
+C5	CM3
+D5	CM3
+C6	CM3
+D6	CM3
+C7	CM4
+D7	CM4
+C8	CM4
+D8	CM4
+CM3	CR2
+CM4	CR2
+CR2	riser C
+C9	CM5
+C10	CM5
+C11	CM6
+C12	CM6
+CM5	CR3
+CM6	CR3
+CR3	riser C
+K1	KMU1
+K2	KMU1
+K3	KMU2
+K4	KMU2
+K5	KMU3
+K6	KMU3
+K7	KMU4
+K8	KMU4
+K9	KMU5
+K10	KMU5
+K11	KMU6
+K12	KMU6
+K13	KMU7
+K14	KMU7
+KMU1	KML1
+KMU2	KML1
+KMU3	KML2
+KMU4	KML2
+KMU5	KML2
+KMU6	KML3
+KMU7	KML3
+KML1	KRU1
+KML2	KRU1
+KML3	KRU1
+KRU1	KRL1
+KRL1	handle

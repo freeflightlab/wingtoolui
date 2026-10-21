@@ -11,13 +11,18 @@
  * A UP workbook is recognised here by what is in it, and a design by its
  * maker and model whatever the sheet is called.
  */
+import { readFileSync, existsSync } from 'fs';
 import {
   parseLineTable, parseSimpleLineSheet, parseUpLineSheet, parseBgdLineTable,
+  parseStatedTopology, applyStatedTopology,
 } from '../src/core/lineplan.js';
 
 /** Files that are not line sheets at all. */
 const NOT_LINES = [
   /^niviuk-spec\.tsv$/,
+  // A maker's line-plan drawing, transcribed: what hangs from what, and no
+  // lengths. It is applied to the design's sheets, below.
+  /^lineplan-/,
   // An inspection record — reference, measured, delta — has no line names.
   /-inspection/,
   // A fabric schedule lists materials by location.
@@ -36,6 +41,27 @@ const NOT_LINES = [
  * 'totals' for canopy-to-riser sums (one row per canopy attachment).
  */
 export function referenceLines(f, body) {
+  const read = readLines(f, body);
+  if (!read) return read;
+  // Where the maker's own drawing of the plan is on file, it settles what
+  // the names cannot: which canopy lines hang from the stabilo line.
+  const stated = statedTopologyOf(designOf(f));
+  if (!stated) return read;
+  const applied = applyStatedTopology(read.lines, stated);
+  return { ...read, lines: applied.lines, stated: true, movedToStabilo: applied.movedToStabilo };
+}
+
+const STATED = new Map();
+/** The transcribed line plan of a design, or null where none is on file. */
+export function statedTopologyOf(design) {
+  if (!STATED.has(design)) {
+    const url = new URL(`../data/reference/lineplan-${design}.tsv`, import.meta.url);
+    STATED.set(design, existsSync(url) ? parseStatedTopology(readFileSync(url, 'utf8')) : null);
+  }
+  return STATED.get(design);
+}
+
+function readLines(f, body) {
   if (NOT_LINES.some((re) => re.test(f))) return null;
 
   if (/^up-split-/.test(f)) {
@@ -73,7 +99,7 @@ const SIZE = '(?:xxs|xs|s|sm|ms|m|ml|l|xl|xxl|\\d+)';
  *   up-torre-TORRE_L_-_Components.tsv      up-torre
  *   up-torre-TORRE_-_Total_lengths.tsv     up-torre
  *   up-split-makalu-5-sm.tsv               up-makalu5
- *   up-makalu5-sheet5.tsv                  up-makalu5
+ *   up-makalu5-Gesamt_overall.tsv          up-makalu5
  *   niviuk-hook6-24-totals.tsv             niviuk-hook6
  */
 export function designOf(f) {

@@ -105,8 +105,8 @@ The table above sat in this document, and in the comment over
 | the stabilo's main line | its top lines, `st1` to `st4` on the K2 5 |
 | nothing at all | `STI`, which is the stabilo's main line |
 
-The lengths settle it. Read UP's way the Meru 2's levels run 466, 915, 1767
-and 4506 mm on average, each longer than the one above. And its component
+The lengths settle it. Read UP's way the Meru 2 M's levels run 448, 877, 1466
+and 4542 mm on average, each longer than the one above. And its component
 sheet then counts the canopy lines its totals sheet does: the Torre's said
 A 20 and A 12.
 
@@ -162,10 +162,14 @@ few lines of the real table:
 
 | wing | lines, real | modelled | suspension mains, real | modelled |
 | --- | --- | --- | --- | --- |
-| Ozone Geo 7 MS | 112 | **108** | A 3, B 3, C 5 | A 3, B 3, C 3 |
-| Ozone Swift 6 MS | 114 | **112** | A 4, B 2, C 5 | A 3, B 3, C 3 |
-| Ozone Alpina 5 ML | 118 | 106 | A 4, B 4 | A 4, B 4 |
-| Ozone Zeno 2 ML | 102 | 120 | A 3, B 4 | A 5, B 5 |
+| Ozone Geo 7 MS | 112 | **108** | A 3, B 3, C 4 | A 3, B 3, C 3 |
+| Ozone Swift 6 MS | 114 | **112** | A 3, B 2, C 4 | A 3, B 3, C 3 |
+| Ozone Alpina 5 ML | 118 | 106 | A 3, B 3 | A 4, B 4 |
+| Ozone Zeno 2 ML | 102 | 120 | A 3, B 3 | A 5, B 5 |
+
+A main in two parts is one main — a short piece at the riser and the rest
+above it, as the Geo 7's CRL4 (970 mm) and CRU4. Counted as lines, these read
+C 5, A 4 and B 4 here until 2026-10-21.
 
 The brake has four main-level lines on every plan — three to the cascade and
 the shared lower line — where the sheets list two, one line in two parts. The
@@ -174,26 +178,21 @@ level split of the Geo 7 is 65 upper / 30 middle / 13 main against a real
 why.
 
 **This table used to agree better than the wings did.** It counted main lines
-as one number, brakes in, and the Geo 7's came to 13 on both sides — the
-plan's 3 + 3 + 3 and four brake lines, the wing's 3 + 3 + 5 and two — while
-the plan's D row ran three lines of its own to the riser under the name of
-middle lines.
+as one number, brakes in, and the Geo 7's came to 13 on both sides, while the
+plan's D row ran three lines of its own to the riser as middle lines.
 
 ### Main lines are a fixed count, not a scaled one
 
 A real wing has the **same number of main lines in every size**. The Geo 7
-carries A:3 B:3 C:5 in XS, MS and L alike; the Alpina 5 carries A:4 B:4 in
-every size; the Zeno 2 carries A:3 B:4.
+carries A:3 B:3 C:4 in XS, MS and L alike, the fourth C its stabilo's line;
+the Alpina 5 and the Zeno 2 carry A:3 B:3 in every size.
 
-The generator groups by a constant chunk size, so its main count grows with
-the anchor count — 12 against a real 10 on the Alpina, 14 against 7 on the
-Zeno. `mainsPerRow` fixes the count instead, which is what a maker actually
-specifies. At three a row the plan has three under each row that owns a
-riser — nine suspension mains on the three-liners, six on the two-liners —
-against the wings' 11, 11, 8 and 7. What a single number cannot say is the
-Geo 7's C riser, with a fourth line out to the tip in two parts (`CRL4` and
-`CRU4`), or the Zeno's A:3 B:4; a count per row is what a written cascade is
-for (section 7).
+The generator grouped by a constant chunk size, so its main count grew with
+the anchor count. `mainsPerRow` fixes the count instead, which is what a maker
+actually specifies; at three a row, nine suspension mains on a three-liner
+and six on a two-liner, against the wings' 10, 9, 6 and 6. What a single number
+cannot say is the Geo 7's C:4 beside its A:3 and B:3; a count per row is what
+a written cascade is for (section 7).
 
 It defaults to null, keeping the old behaviour, because a design that has not
 said how many mains it wants should not silently be given three.
@@ -220,14 +219,15 @@ Geo 7 has C:15 against A:14. It is about **riser count**:
 | Alpina 5 ML | 2 | A:31 B:19 C:12 | 2.6 |
 | Zeno 2 ML | 2 | A:30 B:14 C:8 | 3.8 |
 
-**The fewer risers, the more the front row must carry the shape on its own.**
-A three-liner spreads its rows nearly uniformly; a two-liner attaches the A
-row at almost every rib and thins out sharply toward the trailing edge.
+**A two-liner on three rows carries the shape on its front row**, thinning
+sharply toward the trailing edge. On four rows it pairs them instead, A with B
+and C with D (`docs/drawn-line-plans.md`), and tapers less than a three-liner.
 
-`anchorsPerRow` takes a count per row and spreads that many anchors evenly
-across the half-wing, which reaches the fractional spacings an integer stride
-cannot. Given the real per-row counts, the generator reproduces the real line
-tables:
+`anchorsPerRow` takes a count per row, which reaches the fractional spacings
+an integer stride cannot. The rows' own lines stop at the rib 84% of the way
+out and their tip lines, the stabilo's, go on to the tip ribs; a row with
+fewer anchors takes the front row's ribs from the centre out
+(`docs/drawn-line-plans.md`, section 5). Given real counts it gives:
 
 | wing | real | modelled | error |
 | --- | --- | --- | --- |
@@ -275,9 +275,11 @@ so the UP Torre was six designs — its totals sheet and each size's component
 sheet — and the Makalu 5, Meru 2 and Summit X two each. Five of those six
 Torres were also read with their middle lines counted as canopy lines. A
 design is its maker and model now, whatever its sheets are called, and where
-two sheets of one design count its rows differently the tool prints both: the
-Meru 2's totals sheet calls its three tip lines `sa1` to `sa3`, and its
-component sheet calls the same lines `a13` to `a15`.
+two sheets of one design count its rows differently the tool prints both. The
+Meru 2's did: its totals sheet calls its six stabilo lines `sa1` to `sb3`, and
+its component sheets call them `a13` to `a15` and `c13` to `c15`, counted in
+the A and C rows. UP's own line plan settles it (`docs/drawn-line-plans.md`),
+and they are read as stabilo lines now.
 
 ### Three shapes, because the designs show three
 
@@ -417,13 +419,13 @@ ordinary anchors being silently relabelled.
 
 ### Generating a stabilo
 
-`addStabilo` runs it to its own main line, as every reference wing does — the
-SAGE puts it on the A2 riser, UP gives it a main of its own, `STI`.
-
-It carries handling load, not lift, so like the brakes it is excluded from the
-span-load distribution. A test asserts that adding a stabilo changes the
-closure error by **nothing at all** — the same guard that caught the brake
-regression.
+A plan built with `stabilo: true` hangs every row's tip lines on one line, from
+a junction four fifths of the way up, to the riser that carries B — as Ozone
+draw the Vibe GT's A13 to B14 on BRU4 and BGD list the Lynx 2's a15 to b18 on
+BR4. Its top lines keep their rows and carry the tip's lift; the closure error
+is the same to the last digit. `addStabilo` adds one to a plan without tip
+lines: two lines at 35% of chord on the outermost ribs, on a main of their
+own, carrying handling load and not lift.
 
 ## 5. Not yet modelled
 
@@ -453,26 +455,31 @@ branching factor. That is fine for exploring and wrong for **describing** — a
 designer copying a real wing, or specifying one for a builder, knows the shape
 they want and could not say it.
 
-The format is how every manufacturer sheet in this project reads: row,
-anchors, then the count at each level below.
+The format is how every manufacturer sheet in this project counts: row,
+anchors, middle lines, main lines, and how many of the anchors are tip lines.
+A row hanging from another row's mains gives anchors and middles; K is the
+brake; S says which riser the stabilo hangs on.
 
 ```
-# the Ozone Zeno 2, from its own plan
-A 30 14 3
-B 14  6 4
-C  8  3 2
+# the Ozone Geo 7 MS, counted from its sheet and its totals
+A 14 6 3 tip 2
+B 14 6 3 tip 2
+C 15 6 3 tip 1
+D 14 6 tip 0
+S C
 ```
 
-`parseCascadeSpec` reads it, `buildLinePlan` builds exactly that, and
-`cascadeSpecFor` writes a built plan back out so one can be edited and reused.
-It is a checkbox and a text box in the tool, under Lines & risers.
+`parseCascadeSpec` reads it against the riser layout, `buildLinePlan` builds
+every count it gives (the middles were read and dropped until 2026-10-21), and
+`cascadeSpecFor` writes a plan back out (`docs/drawn-line-plans.md`).
 
 ### What it refuses
 
 A spec is typed by a person, so the typos a person makes are caught rather
 than built: a row name that does not exist, a level with **more** lines than
-the one above it, a zero or negative count, a row given twice, and rows
-reaching different depths.
+the one above it, a zero or negative count, a row given twice; and against
+the layout, mains for a row on another row's riser, a row on none of the
+risers, and a level more than the generator builds.
 
 `/^[A-Z]{1,2}$/` accepted `QQ` as a row. Two letters is legitimate — `BR`
 and `ST` are rows — so the test has to be against the known set, not against
@@ -482,16 +489,11 @@ the shape.
 
 **`mainsPerRow` said per row and was one integer applied to all of them.** A
 spec asking for A:3 B:4 C:2 could not be built; the A row came back with
-seven. Real plans differ by row — the Zeno 2's own is A:3 B:4 — which one
-number cannot express.
+seven. Real plans differ by row — the Lynx 2's own is A:3 B:3 C:2.
 
 **`chunkInto` returned one group fewer than asked, whenever the division was
 inexact.** Six middles into four came back as **three**, because
-`ceil(6/4) = 2` and three chunks of two exhaust the array a group early. The
-shortfall check did not fire because it compared against the same wrong
-arithmetic.
-
-Sizes are distributed now — the first `length % groups` chunks take one extra
-— and an empty input returns nothing rather than one empty group, which was a
-regression the first fix introduced and which produced NaN line lengths
-several steps away.
+`ceil(6/4) = 2` and three chunks of two exhaust the array a group early; the
+shortfall check compared against the same wrong arithmetic. Sizes are
+distributed now, and an empty input returns nothing rather than one empty
+group, a regression of the first fix that produced NaN line lengths.

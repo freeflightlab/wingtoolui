@@ -19,9 +19,10 @@ straightforward route, and they have been generous with the material.
 
 ## The reference data is not ours
 
-`data/reference/` holds published line tables and specifications from Ozone,
-PHI, BGD, Skywalk and UP Paragliders. It is here so the calculations can be
-**checked**, and every file carries its source.
+`data/reference/` holds published and supplied line tables, line-plan
+drawings and specifications from Ozone, PHI, BGD, Niviuk, Skywalk and UP
+Paragliders. It is here so the calculations can be **checked**, and every file
+carries its source.
 
 That is a different thing from redistributing design material, and a licence
 covering the code should not be read as covering this data. If the repository

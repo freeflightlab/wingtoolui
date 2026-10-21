@@ -14,8 +14,8 @@ One offline HTML file, 1.2 MB, no build step and no network. That constraint
 drove the architecture: 38 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 60,000 lines**: 23,400 core, 5,000 interface, 16,100 tests, 5,200
-tools, 10,100 documentation.
+**About 63,000 lines**: 24,200 core, 5,800 interface, 16,700 tests, 5,400
+tools, 10,800 documentation.
 
 ## 2. What is genuinely validated
 
@@ -28,11 +28,15 @@ reproduce **exactly**, and so does its own program's output: every one of its
 its karabiner position and attitude, to fractions of a millimetre.
 
 **Against 21 wings' line sheets from five manufacturers, and 55 published
-sizes**, in 137 reference tables. Every line sheet is held to five physical
+sizes**, in 143 reference tables, six of them the makers' own line-plan
+drawings transcribed line by line. Every line sheet is held to five physical
 invariants, not merely parsed. The anchor-density tables the generator works
 from are **measured from the corpus**, not hand-entered — the row ratios on 19
-designs, the front-row density on 20 — and a check stage fails if either
-drifts from its data. Of 23 published sizes transcribed from the makers' own
+designs, the front-row density on 20, each design's own cascade and tip lines
+— and a check stage fails if any drifts from its data. The reference wings'
+arc is checked against the published projected areas, independently of the
+span it is built through: an ellipse through that span lands within 1.0% on
+average on the 55, where the circle it replaced was 2.0% out and short on 51. Of 23 published sizes transcribed from the makers' own
 tables, 138 figures, none disagrees with the reference set.
 
 **Against a manufacturer's own inspection record.** The Enzo 3 sheets put
@@ -70,14 +74,16 @@ other way round, from where the risers hang, and gives 29.4 to 35.6 km/h at
 CL 0.58 to 0.63 with sinks of 0.92 to 1.08 m/s. The interface's balance is
 still the handbook's, on typed coefficients.
 
-**Generated linesets are long on two-liners.** Built with their own anchors,
-the three-liners land within a tenth of their sheets and the two-liners a
-third over: each Ozone two-liner has sixteen short bridles a side at the top of
-its front row, a level the generator does not build. Across the 55 published
-sizes the pipeline runs +7% (−21% to +43%). The interface's own derived plan
-attaches every second rib whatever the wing, which is a real density on the
-default wing and not on a published one loaded from the picker; a solve to the
-published total is a button, not yet the default.
+**Generated linesets are long on two-liners.** Built with their own counts,
+the three-liners land from 3% under to 12% over their published totals and
+the two-liners, and the Lynx 2, a third over: each Ozone two-liner has sixteen
+short bridles a side at the top of its front row, a level the generator does
+not build. Across the 55 published sizes the pipeline runs +15% (−21% to
++46%). A wing from the picker hangs from its own cascade where its sheets are
+on file and from anchors solved to its published total where they are not. In
+shape the rows that carry the wing are 88 mm from the 28 sheets with
+per-anchor totals on average; the brake is 91 to 197 mm from them, and is not
+yet understood.
 
 **Panel development is not validated against a third party.** The Swoop2's own
 2D DXF draws its panels as 83,776 individual line segments on one layer with
@@ -88,7 +94,7 @@ by it.
 
 ## 5. What is missing
 
-**44 open items in the roadmap.** The substantial ones:
+**47 open items in the roadmap.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.

@@ -1,26 +1,33 @@
 # Niviuk Paragliders — technical specifications
 # Source: Niviuk user manuals / technical data sheets, section 10.1
 # Retrieved: 2026-08-31 from the manufacturer's published PDFs
-# proj_span_m is blank: Niviuk publishes projected AREA and projected AR but
-#   not projected span. A blank is information; a computed value would not be.
+# proj_span_m is blank: Niviuk publishes projected AREA and projected
+#   ASPECT RATIO, not projected span. proj_AR is theirs, as printed, and
+#   the span is what the two define, b = sqrt(AR x S): the tool derives it
+#   and says so. It is not written in as if published.
+# proj_AR retrieved 2026-10-21: Hook 6 from Niviuk's technical data sheet
+#   (niviuk.com/biblioteca/items/449_A/technical_data_hook_6_nk.pdf, "4" in
+#   every size); Artik R 2 from niviuk.com/en/artik-r-2 (5,02); Skin 4 P and
+#   Bi Skin 2 P from Niviuk's tables as flybubble.com reprints them (3.93,
+#   4.12).
 # The ARTIK R 2 table's text layer absorbs the size header as a data row,
 #   shifting every label by one. Corrected here: 68 cells and AR 6.5, not
 #   '20 cells, AR 68'.
-family	size	cells	flat_span_m	flat_area_m2	flat_AR	proj_span_m	proj_area_m2	root_chord_m	mass_kg	weight_lo_kg	weight_hi_kg	total_line_m	line_pieces	application	certification	aspect_class
-Niviuk Hook 6	20	47	10.3	20.0	5.3		17.15	2.43	3.97	55	70	205		progression	EN/LTF B	mid
-Niviuk Hook 6	22	47	10.8	22.0	5.3		18.87	2.55	4.2	60	80	215		progression	EN/LTF B	mid
-Niviuk Hook 6	24	47	11.28	24.0	5.3		20.59	2.66	4.5	70	92	226		progression	EN/LTF B	mid
-Niviuk Hook 6	26	47	11.74	26.0	5.3		22.3	2.77	4.8	80	105	235		progression	EN/LTF B	mid
-Niviuk Hook 6	28	47	12.18	28.0	5.3		24.02	2.87	5.1	95	120	244		progression	EN/LTF B	mid
-Niviuk Hook 6	31	47	12.82	31.0	5.3		26.59	3.02	5.5	110	135	258		progression	EN/LTF B	mid
-Niviuk Artik R 2	20	68	11.29	19.6	6.5		16.76	2.19	4.0	60	75	183		performance XC	EN/LTF D	high
-Niviuk Artik R 2	21	68	11.68	21.0	6.5		17.97	2.26	4.2	70	85	190		performance XC	EN/LTF D	high
-Niviuk Artik R 2	23	68	12.1	22.5	6.5		19.26	2.34	4.5	80	95	197		performance XC	EN/LTF D	high
-Niviuk Artik R 2	24	68	12.49	24.0	6.5		20.54	2.42	4.8	90	105	203		performance XC	EN/LTF D	high
-Niviuk Artik R 2	25	68	12.87	25.5	6.5		21.83	2.49	4.9	100	115	210		performance XC	EN/LTF D	high
-Niviuk Artik R 2	27	68	13.25	27.0	6.5		23.11	2.57	5.4	110	125	216		performance XC	EN/LTF D	high
-Niviuk Skin 4 P	14	39	8.28	14.0	4.9		11.84	2.02	0.95	50	75	287		single surface		low
-Niviuk Skin 4 P	16	39	8.85	16.0	4.9		13.53	2.16	1.09	60	85	308		single surface		low
-Niviuk Skin 4 P	18	39	9.39	18.0	4.9		15.22	2.3	1.19	70	90	328		single surface		low
-Niviuk Skin 4 P	20	39	9.9	20.0	4.9		16.91	2.42	1.29	85	110	346		single surface		low
-Niviuk Bi Skin 2 P	31	39	13.06	31.0	5.5		26.17	2.94	3.3	130	190	522		single surface tandem	EN/LTF B	mid
+family	size	cells	flat_span_m	flat_area_m2	flat_AR	proj_span_m	proj_area_m2	root_chord_m	mass_kg	weight_lo_kg	weight_hi_kg	total_line_m	line_pieces	application	certification	aspect_class	proj_AR
+Niviuk Hook 6	20	47	10.3	20.0	5.3		17.15	2.43	3.97	55	70	205		progression	EN/LTF B	mid	4
+Niviuk Hook 6	22	47	10.8	22.0	5.3		18.87	2.55	4.2	60	80	215		progression	EN/LTF B	mid	4
+Niviuk Hook 6	24	47	11.28	24.0	5.3		20.59	2.66	4.5	70	92	226		progression	EN/LTF B	mid	4
+Niviuk Hook 6	26	47	11.74	26.0	5.3		22.3	2.77	4.8	80	105	235		progression	EN/LTF B	mid	4
+Niviuk Hook 6	28	47	12.18	28.0	5.3		24.02	2.87	5.1	95	120	244		progression	EN/LTF B	mid	4
+Niviuk Hook 6	31	47	12.82	31.0	5.3		26.59	3.02	5.5	110	135	258		progression	EN/LTF B	mid	4
+Niviuk Artik R 2	20	68	11.29	19.6	6.5		16.76	2.19	4.0	60	75	183		performance XC	EN/LTF D	high	5.02
+Niviuk Artik R 2	21	68	11.68	21.0	6.5		17.97	2.26	4.2	70	85	190		performance XC	EN/LTF D	high	5.02
+Niviuk Artik R 2	23	68	12.1	22.5	6.5		19.26	2.34	4.5	80	95	197		performance XC	EN/LTF D	high	5.02
+Niviuk Artik R 2	24	68	12.49	24.0	6.5		20.54	2.42	4.8	90	105	203		performance XC	EN/LTF D	high	5.02
+Niviuk Artik R 2	25	68	12.87	25.5	6.5		21.83	2.49	4.9	100	115	210		performance XC	EN/LTF D	high	5.02
+Niviuk Artik R 2	27	68	13.25	27.0	6.5		23.11	2.57	5.4	110	125	216		performance XC	EN/LTF D	high	5.02
+Niviuk Skin 4 P	14	39	8.28	14.0	4.9		11.84	2.02	0.95	50	75	287		single surface		low	3.93
+Niviuk Skin 4 P	16	39	8.85	16.0	4.9		13.53	2.16	1.09	60	85	308		single surface		low	3.93
+Niviuk Skin 4 P	18	39	9.39	18.0	4.9		15.22	2.3	1.19	70	90	328		single surface		low	3.93
+Niviuk Skin 4 P	20	39	9.9	20.0	4.9		16.91	2.42	1.29	85	110	346		single surface		low	3.93
+Niviuk Bi Skin 2 P	31	39	13.06	31.0	5.5		26.17	2.94	3.3	130	190	522		single surface tandem	EN/LTF B	mid	4.12

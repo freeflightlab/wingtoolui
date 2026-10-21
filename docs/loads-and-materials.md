@@ -230,9 +230,9 @@ on the upper mains, 260 mm on the mains and 300 mm on the brake main.
 loop allowance: much the same width on every bar, so it is a sliver of a main
 line and a third of a top line.*
 
-The consequence, on their own numbers: 112 m of finished line in 108 lines
-becomes **128 m of material**, +14%. Loops are **12% of everything cut**, and
-**37% of the shortest line**.
+The consequence, on their own numbers: 108 m of finished line in 108 lines
+becomes **124 m of material**, +15%. Loops are **13% of everything cut**, and
+**38% of the shortest line**. (These were the L's, under the M's name.)
 
 `stretchCorrection` now takes `loopAllowanceMM` and reports finished length
 and cut length separately. A model that returns only one of them is either
@@ -241,10 +241,10 @@ under-ordering material or over-cutting lines.
 ### A sheet that disagrees with itself
 
 Of 24 component sheets, 23 satisfy their own arithmetic exactly. One — the
-Meru 2 SM folding lines — has cutting lengths about 3% short of length plus
-loop, while the same wing's other sizes are exact. The ratio is not constant
-(0.969 to 0.974), so it is not a clean rescale either, and the cause cannot be
-determined from the data.
+Meru 2 M folding lines — has cutting lengths about 3% short of length plus
+loop. It was filed as the SM's: the converter wrote each sheet of UP's .xls
+workbooks under the next sheet's name. Under its own, the cause is plain —
+all twenty-two of its cutting lengths are the SM sheet's, to the millimetre.
 
 It is reported rather than absorbed. A checking tool that quietly accepts a
 sheet inconsistent with itself is not checking anything.

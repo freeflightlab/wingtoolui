@@ -28,8 +28,12 @@
  * sheet says 12. So a design is identified by maker and model here, and the
  * sheets of one design are held against each other.
  */
-import { readFileSync, readdirSync } from 'fs';
-import { ANCHOR_DENSITY, FRONT_DENSITY, parsePhiLineSheet } from '../src/core/lineplan.js';
+import { readFileSync, readdirSync, existsSync } from 'fs';
+import {
+  ANCHOR_DENSITY, FRONT_DENSITY, DESIGN_LINES, parsePhiLineSheet, cascadeSpecFromSheet,
+  parseLineTable, referenceTotals, tipLinesFromTotals, tipLinesFromPaths, withTipCounts,
+  stabiloMainFromTotals,
+} from '../src/core/lineplan.js';
 import { referenceLines, designOf } from './reference-files.mjs';
 
 const files = readdirSync('data/reference').filter((f) => f.endsWith('.tsv'));
@@ -52,10 +56,58 @@ for (const f of files) {
   for (const k of ['K', 'S', 'Z']) delete rows[k];
   if (Object.keys(rows).length < 2) continue;
 
+  // The risers, counted where the sheet has main lines — the lines on a
+  // riser. A main serving two rows (2AB1, DE) is on one riser, its first
+  // row's. This was assumed to be one fewer than the rows, and three of the
+  // four-row wings are two-liners: the Torre and the Meru 2, whose line plans
+  // show a and b anchors sharing the A mains and c and d the C mains, and the
+  // Artik R 2, whose sheet has A and C mains and no others.
+  const mainRows = new Set(read.lines
+    .filter((l) => l.level === 'main' && /^[A-I]$/.test((l.rows || [l.row])[0]))
+    .map((l) => (l.rows || [l.row])[0]));
+
   const family = designOf(f);
   if (!families.has(family)) families.set(family, []);
+  // The tip lines: the outermost anchors that rows share one path under —
+  // the stabilo's, on sheets that name them in their rows. Read from the
+  // sheet's own totals (Ozone), the totals Niviuk publish for the same size,
+  // or the paths BGD state; UP name the stabilo's lines as a row of their own.
+  let tips = null;
+  // And the stabilo's own line, where the sheet shows which it is: BGD state
+  // it, and an Ozone sheet's totals give it as the main its tip lines' path
+  // is (`stabiloMainFromTotals`). It is then not its row's main.
+  let stabiloMain = null;
+  if (read.kind === 'components') {
+    let found = null;
+    if (read.reader === 'bgd') {
+      found = tipLinesFromPaths(read.lines);
+      const m = found.groups[0]?.main && read.lines.find((l) => l.name === found.groups[0].main);
+      if (m) stabiloMain = { row: m.row, index: m.index };
+    } else if (read.reader === 'table') {
+      const totals = referenceTotals(parseLineTable(readFileSync(`data/reference/${f}`, 'utf8')));
+      found = tipLinesFromTotals(read.lines, totals);
+      if (found.ok && found.groups.length) stabiloMain = stabiloMainFromTotals(read.lines, totals, found);
+    } else if (/^niviuk-/.test(f)) {
+      const t = `data/reference/${f.replace(/\.tsv$/, '')}-totals.tsv`;
+      if (existsSync(t)) {
+        const totals = {};
+        for (const l of readFileSync(t, 'utf8').split('\n').filter((x) => /^\d/.test(x))) {
+          const [a, row, mm] = l.split('\t');
+          (totals[a] ||= {})[row] = Number(mm);
+        }
+        found = tipLinesFromTotals(read.lines, totals);
+      }
+    }
+    if (found?.ok && found.groups.length) tips = found.tips;
+  }
+  const cascade = read.kind === 'components' ? cascadeSpecFromSheet(read.lines, { stabiloMain }) : null;
+  if (cascade && tips) cascade.spec = withTipCounts(cascade.spec, tips);
   families.get(family).push({
     file: f, kind: read.kind, rows,
+    risers: mainRows.size || null,
+    // The cascade as far as the generator can build it, from a sheet that
+    // has the levels below the canopy, with its tip lines where they show.
+    cascade,
     pattern: Object.keys(rows).sort().map((k) => `${k}${rows[k]}`).join(' '),
   });
   sheets++;
@@ -75,42 +127,54 @@ for (const [family, list] of families) {
   }
   const rows = preferred.rows;
   const rowNames = Object.keys(rows).sort();
+  // Totals sheets carry no main lines; the component sheets say, and must
+  // agree with each other.
+  const riserCounts = [...new Set(list.map((x) => x.risers).filter(Boolean))];
+  if (riserCounts.length > 1) {
+    disagreements.push(`${family}: ${riserCounts.join(' and ')} risers on different sheets`);
+  }
   designs.push({
     family,
     sheets: list.length,
     rows,
     rowCount: rowNames.length,
+    risers: riserCounts.length === 1 ? riserCounts[0] : null,
     // The ratio the generator cares about: front row against the rearmost.
     frontToRear: rows[rowNames[0]] / rows[rowNames[rowNames.length - 1]],
   });
 }
 
-const byRows = {};
-for (const d of designs) (byRows[d.rowCount] ||= []).push(d.frontToRear);
+// One group a layout: risers, then load-bearing rows.
+const byLayout = {};
+for (const d of designs) (byLayout[`${d.risers}/${d.rowCount}`] ||= []).push(d.frontToRear);
 
 console.log(`${designs.length} designs measured from ${sheets} sheets, `
   + `${files.length} files\n`);
-console.log('front-row anchors per rear-row anchor, by load-bearing row count:');
-console.log('  rows   key   n   mean   min   max   verdict      table');
-const table = ANCHOR_DENSITY.ratioByRisers;
+console.log('front-row anchors per rear-row anchor, by risers / load-bearing rows:');
+console.log('  layout   n   mean   min   max   verdict      table');
+const table = ANCHOR_DENSITY.ratioByLayout;
 let mismatches = 0;
 const r2 = (x) => Math.round(x * 100) / 100;
-for (const [rows, vals] of Object.entries(byRows).sort()) {
+const layoutOrder = (k) => k.split('/').map(Number);
+for (const [key, vals] of Object.entries(byLayout)
+  .sort(([a], [b]) => layoutOrder(a)[0] - layoutOrder(b)[0] || layoutOrder(a)[1] - layoutOrder(b)[1])) {
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-  // The table is keyed by RISER count, taken as one fewer than the rows: the
-  // rearmost row cascades into the riser ahead of it. That is what the two-
-  // and three-riser wings here do; for five rows and nine it is only a key.
-  const t = table[String(Number(rows) - 1)];
+  const t = table[key];
   const claim = t ? `${t.mean.toFixed(2)} (n=${t.n}, ${t.min.toFixed(2)}-${t.max.toFixed(2)})` : '—';
   // Held to the figures, not to a tolerance: this is where the table comes
   // from, and "within a quarter" let n = 20 stand for twelve designs.
   const agrees = !!t && t.n === vals.length && r2(mean) === t.mean
     && r2(Math.min(...vals)) === t.min && r2(Math.max(...vals)) === t.max;
   if (!agrees) mismatches++;
-  console.log(`   ${rows}      ${Number(rows) - 1}    ${String(vals.length).padStart(2)}  `
+  console.log(`   ${key.padEnd(6)} ${String(vals.length).padStart(2)}  `
     + `${mean.toFixed(2)}  ${Math.min(...vals).toFixed(2)}  `
     + `${Math.max(...vals).toFixed(2)}   ${(agrees ? 'agrees' : 'DISAGREES').padEnd(11)}`
     + `${claim}`);
+}
+const extraLayouts = Object.keys(table).filter((k) => !byLayout[k]);
+if (extraLayouts.length) {
+  mismatches++;
+  console.log(`  DISAGREES: the table lists ${extraLayouts.join(', ')}, which no design measured has`);
 }
 if (ANCHOR_DENSITY.sampleDesigns !== designs.length || ANCHOR_DENSITY.sampleSheets !== sheets) {
   mismatches++;
@@ -121,7 +185,7 @@ if (ANCHOR_DENSITY.sampleDesigns !== designs.length || ANCHOR_DENSITY.sampleShee
 console.log('\nevery design measured:');
 for (const d of designs.sort((a, b) => b.rowCount - a.rowCount || a.family.localeCompare(b.family))) {
   const r = Object.entries(d.rows).sort().map(([k, v]) => `${k}${v}`).join(' ');
-  console.log(`  ${d.family.padEnd(18)} ${d.rowCount} rows  ${r.padEnd(34)}`
+  console.log(`  ${d.family.padEnd(18)} ${d.risers ?? '?'} risers ${d.rowCount} rows  ${r.padEnd(34)}`
     + `${d.frontToRear.toFixed(2)}  (${d.sheets} sheet${d.sheets > 1 ? 's' : ''})`);
 }
 
@@ -197,6 +261,37 @@ const cov = ars.reduce((s, a, i) => s + (a - ma) * (dens[i] - md), 0);
 const rAR = cov / Math.sqrt(ars.reduce((s, a) => s + (a - ma) ** 2, 0)
   * dens.reduce((s, x) => s + (x - md) ** 2, 0));
 console.log(`  against flat aspect ratio: r = ${rAR.toFixed(2)}`);
+/* Each design's own cascade, as `DESIGN_LINES` holds it for the pipeline and
+ * the wing picker: the layout and the counts, from every component sheet of
+ * the design, which must agree with each other and with the table. */
+console.log('\neach design\'s own cascade, as the generator can build it:');
+const familyOf = new Map(cellRows.map((r) => [r[col('design')], r[col('family')]]));
+const measuredLines = new Map();
+for (const [design, list] of families) {
+  const built = list.filter((x) => x.cascade);
+  if (!built.length) continue;
+  const forms = [...new Set(built.map((x) => `${x.cascade.layout} | ${x.cascade.spec}`))];
+  const name = familyOf.get(design) ?? design;
+  if (forms.length > 1) {
+    mismatches++;
+    console.log(`  DISAGREES: ${name}'s sheets give ${forms.length} different cascades`);
+  }
+  const [layout, spec] = forms[0].split(' | ');
+  measuredLines.set(name, { layout, spec, sheets: built.length });
+}
+for (const [name, m] of [...measuredLines].sort()) {
+  const t = DESIGN_LINES[name];
+  const agrees = !!t && t.layout === m.layout && t.spec === m.spec && t.sheets === m.sheets;
+  if (!agrees) mismatches++;
+  console.log(`  ${name.padEnd(20)} ${m.layout.padEnd(18)} ${m.spec.replace(/\n/g, ' / ').padEnd(46)}`
+    + ` (${m.sheets} sheet${m.sheets > 1 ? 's' : ''})${agrees ? '' : `   DISAGREES with ${t ? `${t.layout} | ${t.spec.replace(/\n/g, ' / ')}` : 'nothing'}`}`);
+}
+const extraLines = Object.keys(DESIGN_LINES).filter((k) => !measuredLines.has(k));
+if (extraLines.length) {
+  mismatches++;
+  console.log(`  DISAGREES: DESIGN_LINES lists ${extraLines.join(', ')}, which no sheet measures`);
+}
+
 
 console.log(`\n${mismatches} place(s) where the corpus disagrees with `
   + 'the hardcoded table');

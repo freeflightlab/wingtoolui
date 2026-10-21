@@ -98,6 +98,7 @@ def rk_value(rk):
 def parse_biff(stream):
     pos, sheets, sst, cells, cur = 0, [], [], {}, None
     boundsheets = []
+    bof_at = {}
     while pos < len(stream) - 4:
         t, ln = struct.unpack_from('<HH', stream, pos)
         pay = stream[pos+4:pos+4+ln]
@@ -123,6 +124,10 @@ def parse_biff(stream):
                 sst.append(s)
         elif t in (0x0009, 0x0209, 0x0409, 0x0809):   # BOF
             cur = len(cells); cells[cur] = {}
+            # Where this substream starts. A BOUNDSHEET names its sheet by
+            # this offset, and it is the only reliable way to pair the two:
+            # the first BOF is the workbook's own globals, which is no sheet.
+            bof_at[cur] = pos - 4 - ln
         elif t == 0x00FD and len(pay) >= 10:          # LABELSST
             r, c, _, idx = struct.unpack_from('<HHHI', pay, 0)
             cells.setdefault(cur, {})[(r, c)] = sst[idx] if idx < len(sst) else ''
@@ -143,7 +148,7 @@ def parse_biff(stream):
             bits = pay[6:14]
             if bits[6:8] != b'\xff\xff':
                 cells.setdefault(cur, {})[(r, c)] = struct.unpack('<d', bits)[0]
-    return boundsheets, cells
+    return boundsheets, cells, bof_at
 
 def to_tsv(cellmap):
     if not cellmap: return ''
@@ -168,13 +173,25 @@ if __name__ == '__main__':
     streams = ole_streams(data)
     wb = streams.get('Workbook') or streams.get('Book')
     if not wb: sys.exit('no Workbook stream: ' + ', '.join(streams))
-    sheets, cells = parse_biff(wb)
+    sheets, cells, bof_at = parse_biff(wb)
     names = [s['name'] for s in sheets]
     print(f"sheets: {names}", file=sys.stderr)
-    for i, key in enumerate(sorted(cells)):
-        nm = names[i] if i < len(names) else f'sheet{i}'
+    # Each sheet by the offset its BOUNDSHEET gives, not by counting.
+    #
+    # This paired the n-th substream with the n-th name. The first substream
+    # is the workbook globals, which holds no cells, so every sheet was
+    # written under the NEXT sheet's name and the last as "sheet5": UP's
+    # totals sheet came out as the L, the L as the M, and so on down. Nothing
+    # read the size from the name, so it went unnoticed until the line plans
+    # were checked against the totals size by size.
+    by_offset = {off: key for key, off in bof_at.items()}
+    for s in sheets:
+        key = by_offset.get(s['pos'])
+        if key is None:
+            print(f"  no substream at {s['pos']} for {s['name']!r}", file=sys.stderr)
+            continue
         body = to_tsv(cells[key])
         if not body.strip(): continue
-        out = f"{sys.argv[2]}-{nm}.tsv".replace(' ', '_')
+        out = f"{sys.argv[2]}-{s['name']}.tsv".replace(' ', '_')
         open(out, 'w').write(body + '\n')
         print(f"  wrote {out} ({body.count(chr(10))+1} rows)", file=sys.stderr)

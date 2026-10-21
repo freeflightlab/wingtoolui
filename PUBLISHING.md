@@ -114,7 +114,7 @@ Using git is simpler and is the only way that is hard to get wrong.
 build.py  package.json  MANIFEST.txt  README.md  …
 src/core/        38 modules
 src/ui/          index.html, app.js, style.css
-data/reference/  137 tables, CATALOGUE.md, and lep/ with the Swoop2's files
+data/reference/  143 tables, CATALOGUE.md, and lep/ with the Swoop2's files
 docs/            documents and figures
 tests/           the test suites
 tools/           checks, importers, the doctor

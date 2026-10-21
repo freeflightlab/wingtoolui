@@ -49,6 +49,10 @@ export function buildSize(base, k, {
   airfoil,
   layout = RISER_LAYOUTS['A/B/C+D'],
   projectedRatio = 0.87,
+  // The design's own arc, as fractions of the half span, so every size has
+  // its shape. Without it, a circle through `projectedRatio`: the family of
+  // an elliptical wing was drawn on circles.
+  lobeSpec = null,
   alphaDeg = 6,
   ovalAmount = 0.06,
   // The riser is hardware and is not scaled: half a metre unless told.
@@ -58,7 +62,7 @@ export function buildSize(base, k, {
   const inputs = scaleDesignInputs(base, k);
   const planform = planformFromDesignInputs(inputs);
   const metrics = planformMetrics(planform);
-  const lobe = buildLobe({ type: 'circle', projectedRatio }, planform.halfSpan);
+  const lobe = buildLobe(lobeSpec ?? { type: 'circle', projectedRatio }, planform.halfSpan);
   const wing = buildWing({
     planform, lobe, airfoil, cells, pointsPerSurface,
     zRotation: 'auto', alphaDeg,

@@ -87,6 +87,7 @@
  * behaving wings.
  */
 import { planformFromDesignInputs, planformMetrics } from './planform.js';
+import { ellipseForProjectedRatio } from './lobe.js';
 
 /**
  * Laws fitted to one family, kept as a worked example — **not** as defaults to
@@ -456,6 +457,9 @@ export function parseSizeFamilies(tsv) {
       flatAR: n('flat_AR'),
       projectedSpan: n('proj_span_m'),
       projectedArea: n('proj_area_m2'),
+      // The projected aspect ratio, where a maker publishes it and not the
+      // projected span (Niviuk): with the projected area it is the span.
+      projectedAR: n('proj_AR'),
       maxChord: n('root_chord_m'),
       minChord: null,
       mass: n('mass_kg'),
@@ -1199,6 +1203,34 @@ export function referenceDesignInputs(size, { tipChordFraction = 0.22, solveTipT
     }
   }
 
+  // Span ratio, which is what the arc is built from.
+  //
+  // This was the square root of the *area* ratio, and the two are not
+  // related that way. An arc shortens the span; it also loses the cosine of
+  // the local dihedral from the projected area, and those are different
+  // losses. On the PHI Allegro light the published span ratio is 0.794 and
+  // the square-rooted area ratio is 0.926 — 19.5% out at worst, on every
+  // wing in the database, which the full-pipeline run caught on all 38.
+  //
+  // Niviuk publish the projected area and the projected aspect ratio, not
+  // the span, and the span is what those two define: b = √(AR·S). The area
+  // ratio stood in for it, 0.858 on a Hook 6 24 whose own figures give
+  // 9.07 m on 11.28, 0.805 — every Niviuk wing a twentieth flatter than it is.
+  let projectedRatio = 0.87;
+  let projectedSpanBasis = 'assumed: no projected span, aspect ratio or area published';
+  if (size.projectedSpan && size.flatSpan) {
+    projectedRatio = size.projectedSpan / size.flatSpan;
+    projectedSpanBasis = 'published';
+  } else if (size.projectedAR && size.projectedArea) {
+    projectedRatio = Math.sqrt(size.projectedAR * size.projectedArea) / size.flatSpan;
+    projectedSpanBasis = 'from the published projected aspect ratio and area';
+  } else if (size.projectedArea && size.flatArea) {
+    // The last resort, used directly rather than square-rooted: across this
+    // database the area ratio is the closer of the two to the span ratio.
+    projectedRatio = size.projectedArea / size.flatArea;
+    projectedSpanBasis = 'the projected area ratio, no span published';
+  }
+
   return {
     inputs: {
       span: size.flatSpan,
@@ -1210,21 +1242,12 @@ export function referenceDesignInputs(size, { tipChordFraction = 0.22, solveTipT
     },
     tipChordBasis,
     cells: size.cells ?? 40,
-    // Span ratio, which is what buildLobe takes.
-    //
-    // This was the square root of the *area* ratio, and the two are not
-    // related that way. An arc shortens the span; it also loses the cosine of
-    // the local dihedral from the projected area, and those are different
-    // losses. On the PHI Allegro light the published span ratio is 0.794 and
-    // the square-rooted area ratio is 0.926 — 19.5% out at worst, on every
-    // wing in the database, which the full-pipeline run caught on all 38.
-    projectedRatio: size.projectedSpan && size.flatSpan
-      ? size.projectedSpan / size.flatSpan
-      : (size.projectedArea && size.flatArea
-        // Fall back to the area ratio only where span is not published, and
-        // use it directly rather than square-rooted: across this database the
-        // area ratio is the closer of the two to the span ratio.
-        ? size.projectedArea / size.flatArea : 0.87),
+    projectedRatio,
+    projectedSpanBasis,
+    // The arc: the handbook's ellipse through that projected span. A circle
+    // through it projects 51 of the 55 wings on file short of their published
+    // projected area, 2.0% out on average; the ellipse is 1.0% out.
+    lobe: ellipseForProjectedRatio(Math.min(0.99, Math.max(0.6, projectedRatio))),
     allUpMassKg: size.midWeight ?? null,
     lineLengthM: null,
     published: {
@@ -1240,7 +1263,7 @@ export function referenceDesignInputs(size, { tipChordFraction = 0.22, solveTipT
     derived: [
       size.minChord ? null : 'tip chord',
       'tip sweep', 'leading edge ellipticity', 'trailing edge ellipticity',
-      'aerofoil section', 'arc type', 'washin',
+      'aerofoil section', 'arc shape (an ellipse through the projected span)', 'washin',
     ].filter(Boolean),
     note: 'size from the published specification; shape is a neutral default',
   };

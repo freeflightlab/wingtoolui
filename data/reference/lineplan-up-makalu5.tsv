@@ -1,0 +1,96 @@
+# UP Makalu 5: the line plan, line by line.
+# Source: UP International, "MAKALU 5 Line Plan" (MAKALU_5_Line_Plan_2026-04-20.pdf,
+#   one page), supplied by the user 2026-09-29.
+# Transcribed 2026-10-19 from the drawing: each line and the line it hangs
+#   from. A parent that is not a line is where the cascade ends: a riser, or
+#   the brake handle. The drawing does not say which riser the stabilo line
+#   is fixed to, so it ends at "riser S".
+# The roman-numeral lines go to the riser here. On the Torre and the Meru 2
+#   the same names are a level above an Xmain line; on this wing there is no
+#   Xmain, and the sheets mark AI to CIII "loop on maillon".
+# convention: up
+line	parent
+a1	AI
+a2	AI
+a3	AI
+AI	riser A
+a4	AII
+a5	AII
+a6	AII
+AII	riser A
+a7	AIII
+a8	AIII
+A1	AIII
+a9	A1
+a10	A1
+AIII	riser A
+b1	BI
+b2	BI
+b3	BI
+BI	riser B
+b4	BII
+b5	BII
+b6	BII
+BII	riser B
+b7	BIII
+b8	BIII
+B1	BIII
+b9	B1
+b10	B1
+BIII	riser B
+c1	C1
+d1	C1
+c2	C2
+d2	C2
+c3	C3
+d3	C3
+C1	CI
+C2	CI
+C3	CI
+CI	riser C
+c4	C4
+d4	C4
+c5	C5
+d5	C5
+c6	C6
+d6	C6
+C4	CII
+C5	CII
+C6	CII
+CII	riser C
+c7	C7
+d7	C7
+c8	C8
+d8	C8
+c9	C9
+c10	C9
+C7	CIII
+C8	CIII
+C9	CIII
+CIII	riser C
+br1	BR1
+br2	BR1
+br3	BR1
+br4	BR2
+br5	BR2
+br6	BR2
+br7	BR3
+br8	BR3
+br9	BR3
+br10	BR3
+BR1	BRmain
+BR2	BRmain
+BR3	BRmain
+BRmain	handle
+sa1	ST1
+sa2	ST1
+sb1	ST1
+st1	ST2
+sb2	ST2
+st2	ST2
+st3	ST3
+st4	ST3
+ST1	STI
+ST2	STI
+ST3	STI
+STI	riser S

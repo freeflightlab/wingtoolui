@@ -174,8 +174,9 @@ Hook 6's per-line sheet has a `c10` in its ninth row.
 
 UP publish some sheets with a **column per size**: a line name, then its
 length in the L, M, SM and S wings across the row. Read as a single wing that
-mixes an L with an XS, which is what produced "st1 appears twice" and "uppers
-longer than mains" the first time the reference sweep met them.
+mixes an L with an XS, which is what produced "uppers longer than mains" the
+first time the reference sweep met them. ("st1 appears twice" is UP's own: the
+Makalu 5's sheet lists st1 twice and st2 not at all.)
 
 `splitMultiSizeSheet` turns one file into one sheet per size. Three files,
 **twelve wings recovered**, all parsing cleanly and all now checked against

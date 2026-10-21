@@ -18,7 +18,7 @@ Source: <https://laboratoridenvol.com/paragliderdesign/index.html> (revised
 | `airfoils.html` §2.6 | NACA sections | `airfoil.js` `naca4` | 4-digit, closed TE by default |
 | `airfoils.html` §2.7 | Intakes, anchors, rib holes | `airfoil.js` (anchors), `intake.js`, `ribholes.js` | Complete: holes and cross-ports drawn on the Rib tab and cut in the rib DXF |
 | `airfoils.html` §2.8–2.10 | XFOIL, XFLR5, fitting | `airfoil.js` `parseAirfoilText`, `xfoil.js` | Selig + Lednicer import; an XFOIL package out and its polar back in; XFLR5 not |
-| `voute.html` §3.1 | Arc types a–e | `lobe.js` `buildLobe` | Four of five: (a) circle, (c) ellipse, (d) bionic, (e) a point list; (b) is not built |
+| `voute.html` §3.1 | Arc types a–e | `lobe.js` `buildLobe` | Four of five: (a) circle, (c) ellipse, (d) bionic, (e) a point list; (b) is not built. A published wing is built on (c) through its projected span (`ellipseForProjectedRatio`) |
 | `voute.html` §3.2 | Influence of arc shape | `lobe.js` `lobeMetrics` | Metrics reported |
 | `voute.html` §3.3 | Washin / washout | `lobe.js` `washinAt` | Three distributions |
 | `voute.html` §3.4 | Profile insertion, both rotations | `wing3d.js` `buildWing` | Complete |

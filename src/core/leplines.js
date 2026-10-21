@@ -648,6 +648,7 @@ export function lepPlanForTool(geom, { ribOffset = 1 } = {}) {
       lineLengthM: geom.lineLengthCm / 100,
     },
     mergedRows: [],
+    levelShortfalls: [],
     mainShortfalls: [],
     mainsAsRequested: true,
   };
