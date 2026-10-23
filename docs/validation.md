@@ -155,7 +155,16 @@ input and output are in `data/reference/lep`. Read from the input alone:
 
 That one file exercises the centimetre-to-metre conversion, the wing scale
 factor, the matrix layout, the rib rotations and the whole line geometry
-together. `docs/swoop2.md` has the rest.
+together. `docs/swoop2.md` has the rest, and `docs/tuluaq19.md` a second
+complete design, from an earlier version of the program, to the same
+standard.
+
+Both designs' cutting files were then measured piece by piece and the pieces
+cut as their program cuts them. Their panels are within 0.04% (the Swoop2)
+and 0.14% (the Tuluaq) of the files', 0.03% in total (`docs/panels.md`); the
+196 pieces sewn inside their cells — full diagonals, straps, pieces between
+two ribs, rod pockets — within a part in ten thousand each
+(`docs/internal-structure.md`). Their trailing-edge mini-ribs are not built.
 
 (This section used to cite a second design, gnuC2-27, recovering 27.00 m². The
 file is not in the repository and nothing here checks it.)

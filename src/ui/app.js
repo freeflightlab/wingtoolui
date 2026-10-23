@@ -144,17 +144,40 @@ let XPOLAR = null; // imported XFOIL section polar, when there is one
 // asked, so a change can be read against the design before it.
 let REMEMBERED = null;
 
-/** The one complete design in the library, as opposed to a specification. */
+/**
+ * The complete designs in the library, as opposed to specifications: each
+ * brings its own ribs, sections and line plan, and loads through the import
+ * path. The Swoop2 was the only one, and the importer had only ever read it;
+ * the Tuluaq-19 is a second, from the same program, and reading it found
+ * three faults the first could not.
+ */
 const SWOOP2_ID = "Laboratori d'envol Swoop2  (complete design)";
+const TULUAQ_ID = "Crazy Bird Tuluaq-19  (complete design)";
+const COMPLETE_DESIGNS = [
+  {
+    id: SWOOP2_ID, name: 'Swoop2',
+    lep: () => (typeof SWOOP2_LEP === 'string' ? SWOOP2_LEP : ''),
+    sections: () => (typeof SWOOP2_SECTIONS === 'object' && SWOOP2_SECTIONS ? SWOOP2_SECTIONS : {}),
+  },
+  {
+    id: TULUAQ_ID, name: 'Tuluaq-19',
+    lep: () => (typeof TULUAQ_LEP === 'string' ? TULUAQ_LEP : ''),
+    sections: () => (typeof TULUAQ_SECTIONS === 'object' && TULUAQ_SECTIONS ? TULUAQ_SECTIONS : {}),
+  },
+];
+/** A complete design by its picker id, when this build carries it. */
+const completeDesign = (id) => COMPLETE_DESIGNS.find((d) => d.id === id && d.lep().length) ?? null;
+/** Whether a picker id names a complete design at all. */
+const isComplete = (id) => COMPLETE_DESIGNS.some((d) => d.id === id);
 
 /* ---------------------------------------------------------------- model -- */
 
 /** Take the size from a published wing, leaving the shape alone. */
 function applyReference() {
-  // Choosing "—" after the Swoop2 goes back to the parametric wing. It used
-  // to return here and leave the Swoop2 loaded under an empty picker.
+  // Choosing "—" after a complete design goes back to the parametric wing.
+  // It used to return here and leave the Swoop2 loaded under an empty picker.
   if (!S.reference) {
-    if (S._appliedReference === SWOOP2_ID) leaveImport();
+    if (isComplete(S._appliedReference)) leaveImport();
     S._appliedReference = '';
     S._referenceTotalLineM = null;
     return;
@@ -171,18 +194,18 @@ function applyReference() {
   // Every other entry gives a size and leaves the shape to defaults. This one
   // brings its own ribs, its own aerofoils and its own line plan, so it takes
   // the import path rather than the parametric one.
-  if (S.reference === SWOOP2_ID) {
-    if (typeof SWOOP2_LEP !== 'string' || !SWOOP2_LEP.length) {
-      setStatus('The Swoop2 is not in this build.');
+  if (isComplete(S.reference)) {
+    const design = completeDesign(S.reference);
+    if (!design) {
+      setStatus(`${S.reference.replace(/\s+\(.*$/, '')} is not in this build.`);
       S.reference = '';
       return;
     }
     try {
-      loadLepDesign(parseLep(SWOOP2_LEP),
-        typeof SWOOP2_SECTIONS === 'object' && SWOOP2_SECTIONS ? SWOOP2_SECTIONS : {});
+      loadLepDesign(parseLep(design.lep()), design.sections());
       S._appliedReference = S.reference;
     } catch (e) {
-      setStatus(`Swoop2: ${e.message}`);
+      setStatus(`${design.name}: ${e.message}`);
       S.reference = '';
     }
     return;
@@ -425,16 +448,23 @@ function loadLepDesign(doc, sectionTexts = {}) {
   let table = null;
   let joncs = null;
   let holes = null;
+  let panels = null;
+  let structure = null;
   if (haveAll) {
     table = lepRibTable(doc, { airfoils: texts });
     geom = lepLineGeometry(doc, { airfoils: texts });
     joncs = lepJoncs(doc, table);
     holes = lepHoles(doc, table);
+    // Its own panels, as its program cuts them: they do not move with any
+    // slider, so they are made once. And what it sews inside its cells —
+    // diagonals, pieces between ribs, straps, rod pockets — the same way.
+    try { panels = lepPanels(doc, table); } catch (e) { panels = null; }
+    try { structure = lepStructure(doc, table); } catch (e) { structure = null; }
   }
   // Section 12: what the design sews inside its cells.
   let hv = null;
   try { hv = parseHVRibs(doc); } catch (e) { hv = null; }
-  LEP = { doc, design, info: describeLep(doc), texts, parsed, geom, table, joncs, holes, hv };
+  LEP = { doc, design, info: describeLep(doc), texts, parsed, geom, table, joncs, holes, hv, panels, structure };
   S.name = design.name || S.name;
   const nameField = document.getElementById('wingName');
   if (nameField) nameField.value = S.name;
@@ -480,14 +510,21 @@ function loadLepDesign(doc, sectionTexts = {}) {
   }
   const missing = [...(design.notReproduced ?? []), ...(joncs?.notReproduced ?? []),
     ...[...new Set((holes?.notReproduced ?? []).map((x) => x.replace(/^rib \d+: /, '')))]];
-  // Its internal pieces: the diagonals are placed where the file puts them;
-  // the straps and the pieces between two ribs are in the file and not drawn.
-  if (hv && hv.count) {
+  // Its internal pieces are cut as its program cuts them when its sections
+  // are here; what that does not reach is said. The rods' own gaps are
+  // already in the list.
+  if (structure?.ok) {
+    missing.push(...structure.notReproduced.filter((x) => !x.startsWith('rods:')));
+  } else if (hv && hv.count) {
     const left = [];
+    if (hv.diagonals.length) left.push(`${hv.diagonals.length} rows of diagonals`);
     if (hv.straps.length) left.push(`${hv.straps.length} straps between adjacent ribs`);
     if (hv.general.length) left.push(`${hv.general.length} pieces between two ribs`);
     if (hv.other.length) left.push(`${hv.other.length} other internal pieces`);
-    if (left.length) missing.push(`${left.join(', ')} (section 12)`);
+    if (left.length) {
+      missing.push(`${left.join(', ')} (section 12)`
+        + (structure?.problems?.length ? ` — ${structure.problems[0]}` : ''));
+    }
   }
   if (missing.length) said.push(`not reproduced: ${missing.join('; ')}`);
   S._referenceNote = `${design.name || 'LEP design'}: a complete design from `
@@ -681,7 +718,19 @@ function rebuild() {
 
     // Developed flat here; the billow is added once the flight is solved,
     // because billow from pressure needs the speed the wing flies at.
-    let panels = developWing(wing);
+    //
+    // An imported design brings its own panels (`lepPanels`): its surfaces
+    // parted where its program parts them, cut wider than their cells by
+    // its own skin tension, round its own intake closures, with its own seam
+    // allowances — its cutting file's pieces, to 0.03% of their area. This
+    // tool's ovalization is a stand-in for exactly that, and is not laid
+    // over them.
+    const ownPanels = imported && LEP.panels?.ok && LEP.panels.panels.length ? LEP.panels : null;
+    let panels = ownPanels
+      ? ownPanels.panels.map((p) => ({
+        cell: p.cell, surface: p.surface, ...(p.centre ? { centre: true } : {}), own: true, panel: p.panel,
+      }))
+      : developWing(wing);
 
     // The solve takes the wing's own span and root chord: an imported
     // design is not the sliders, and solving the Swoop2's balance on a
@@ -888,7 +937,7 @@ function rebuild() {
     // lower — so the upper panel carries (1 + dCp/2) q and the lower
     // (1 - dCp/2) q.
     let billow = null;
-    if (S.applyOval && S.ovalFromPressure) {
+    if (S.applyOval && S.ovalFromPressure && !ownPanels) {
       const cl = chordwiseLoading(airfoil, S.alphaDeg);
       const qPa = 0.5 * atm.density * balance.speedMS * balance.speedMS;
       // The loading is singular at the nose; a real suction peak is not.
@@ -900,7 +949,7 @@ function rebuild() {
         lower: { loading: across((d) => 1 - d / 2), tensionNPerM: S.sailTension, dynamicPressurePa: qPa },
       };
     }
-    if (S.applyOval) {
+    if (S.applyOval && !ownPanels) {
       panels = panels.map((p) => ({
         ...p,
         panel: applyOvalization(p.panel, {
@@ -1328,18 +1377,18 @@ function buildControls() {
   LIVE_HINTS.length = 0;
   const P = clear('g-planform');
   if (REFERENCE_LIB.length) {
-    const haveSwoop = typeof SWOOP2_LEP === 'string' && SWOOP2_LEP.length > 0;
+    const complete = COMPLETE_DESIGNS.filter((d) => d.lep().length);
     selectField(P, 'reference', 'Start from a published wing',
       [['', '—']]
-        .concat(haveSwoop ? [[SWOOP2_ID, SWOOP2_ID]] : [])
+        .concat(complete.map((d) => [d.id, d.id]))
         .concat(REFERENCE_LIB.map((e) => [e.id, `${e.id}  ${e.flatArea} m²`])));
     const families = new Set(REFERENCE_LIB.map((e) => e.family)).size;
     hint(P, `${REFERENCE_LIB.length} published sizes across ${families} `
       + 'families, which load the SIZE only: a specification does not say how '
       + 'elliptical the leading edge is, or what section the wing uses. '
-      + (haveSwoop
-        ? 'The Swoop2 at the top is different — a complete design, geometry '
-          + 'and all.'
+      + (complete.length
+        ? `${complete.map((d) => `The ${d.name}`).join(' and ')} at the top `
+          + `${complete.length > 1 ? 'are' : 'is'} different — complete designs, geometry and all.`
         : ''));
   }
   slider(P, 'isoAz', 'Isometric — azimuth', -180, 180, 5, (v) => v.toFixed(0), '°');
@@ -1701,10 +1750,17 @@ function buildControls() {
     if (own) {
       // The design's own. Which rows and how far they reach are the file's
       // to say, so the two controls that decide them are not offered.
+      const st = LEP?.structure?.ok ? LEP.structure : null;
       hint(IN, 'Placed where the file puts them (section 12) — which rib, '
-        + 'which row, which neighbour. The file also gives each one a shape '
-        + 'in four numbers this tool does not read, so the base width below '
-        + 'is the tool\'s, not the design\'s.');
+        + 'which row, which neighbour — for the drawing and the tension and '
+        + 'balance figures, which are this tool\'s model of a diagonal at '
+        + 'each of those places, at the base width below. '
+        + (st
+          ? `The pieces themselves are cut as the design's program cuts them: ${lepStructureWords(st.pieces)}, `
+            + `${st.totals.wing.cutM2.toFixed(2)} m2 for the wing. The bill counts them and the Diagonals DXF writes them.`
+          : LEP?.structure?.problems?.length
+            ? `The design's own pieces could not all be cut: ${LEP.structure.problems[0]}.`
+            : 'The design\'s own pieces need its section files to be cut.'));
     } else {
       selectField(IN, 'vribRows', 'Diagonals on rows', [
         ['ABCD', 'all rows'], ['ABC', 'A, B, C'], ['AB', 'A, B'],
@@ -1738,8 +1794,20 @@ function buildControls() {
 
   // Panels and cutting.
   const N = clear('g-panels');
-  checkField(N, 'ovalFromPressure', 'Billow from pressure, not a flat amount');
-  if (S.ovalFromPressure) {
+  const ownCut = !!(LEP?.design && LEP.panels?.ok);
+  if (ownCut) {
+    // The controls below set this tool's stand-ins for what the design
+    // states itself: shown here, they would do nothing.
+    const P = LEP.panels;
+    const a = P.allowances.upper;
+    hint(N, `${LEP.design.name}'s panels are its own: cut ${P.skin === 'groups' ? 'by its skin tension (section 31)' : 'by its skin tension (section 5)'}`
+      + `, round its own intakes (${P.vents === 'glue' ? 'section 26' : 'section 2'}), with its own seam allowances — `
+      + `${a.side} mm at the sides, ${a.front} at the front, ${a.back} at the trailing edge (section 6). `
+      + `${(P.totals.upper.cutM2 * 2).toFixed(2)} m2 of upper surface and ${(P.totals.lower.cutM2 * 2).toFixed(2)} m2 of lower as cut.`
+      + (P.notReproduced.length ? ` Drawn straight where it has ${P.notReproduced.join(', ')}.` : ''));
+  }
+  if (!ownCut) checkField(N, 'ovalFromPressure', 'Billow from pressure, not a flat amount');
+  if (S.ovalFromPressure && !ownCut) {
     liveHint(N, () => (M.billow
       ? `At ${M.billow.dynamicPressurePa.toFixed(0)} Pa of dynamic pressure and `
         + `${S.sailTension} N/m of tension across the cell (Assumptions), the panels `
@@ -1754,9 +1822,11 @@ function buildControls() {
   ]);
   checkField(N, 'marks', 'Registration marks on panels');
   hint(N, 'Notches, grain arrows and panel labels. Notches pair at equal fractions of each seam, so the ease ovalization leaves is spread evenly.');
-  checkField(N, 'applyOval', 'Add ovalization');
-  slider(N, 'ovalAmount', 'Total widening', 0, 12, 0.1, (v) => v.toFixed(1), '%');
-  slider(N, 'seamAllowance', 'Seam allowance', 0, 25, 1, (v) => v.toFixed(0), ' mm');
+  if (!ownCut) {
+    checkField(N, 'applyOval', 'Add ovalization');
+    slider(N, 'ovalAmount', 'Total widening', 0, 12, 0.1, (v) => v.toFixed(1), '%');
+    slider(N, 'seamAllowance', 'Seam allowance', 0, 25, 1, (v) => v.toFixed(0), ' mm');
+  }
   slider(N, 'pointsPerSurface', 'Points per surface', 20, 120, 5, (v) => v.toFixed(0));
   hint(N, 'Along each surface of every rib, clustered at the nose where the '
     + 'section curves most. Ribs are cut along these points and panels '
@@ -1867,7 +1937,9 @@ function buildControls() {
     ['pressure', 'the section pressure distribution'],
   ]);
   numberField(AS, 'cdCylinder', 'Line drag coefficient', 0.8, 1.4, 0.05);
-  numberField(AS, 'sailTension', 'Sail tension across the cell (N/m)', 5, 500, 1);
+  // What the billow from pressure is worked out at; a design that cuts its
+  // own panels states its billow, and the control would change nothing.
+  if (!ownCut) numberField(AS, 'sailTension', 'Sail tension across the cell (N/m)', 5, 500, 1);
   numberField(AS, 'printMargin', 'Printed pattern margin (mm)', 5, 25, 1);
   numberField(AS, 'printOverlap', 'Printed pattern overlap (mm)', 5, 40, 1);
 
@@ -2019,22 +2091,37 @@ function buildControls() {
       `# Rib stress, ${S.name}`,
       `# ${r.note}`,
       `# at ${r.designFactor} g, through a 20 mm tab into ${r.cloth}`
-        + (ribCloth === S.clothRib ? '' : ` (no strength figure here for ${S.clothRib}, the cloth chosen)`)
-        + '; the load fans out 30 degrees either side across the rib',
+        + (ribCloth === S.clothRib ? '' : ` (no strength figure here for ${S.clothRib}, the cloth chosen)`),
+      '# each line loads its rib along straight rays from the tab to the upper seam, the only place '
+        + 'they can end: round the way the line pulls in the rib\'s plane, each ray by the cosine of '
+        + `its angle from the pull, and none closer than ${(r.clearanceM * 1000).toFixed(0)} mm to an opening`,
+      '# line_deg: the pull turned round, from square to the chord, positive aft; across_pct: the part '
+        + 'of the pull across the rib\'s plane, which the diagonals and the sail take, and which this '
+        + 'leaves on the rib to err on the safe side',
+      '# fan_deg: the clear rays either side of the pull; spread_deg: how wide the fan works '
+        + '(55 for a clear 30 either side); seam_N_per_m: what the upper seam gets where the rays arrive',
       `# longest reinforcement: ${r.longest.name} on rib ${r.longest.ribIndex}, `
         + `${(r.longest.reachM * 1000).toFixed(0)} mm of the ${(r.longest.depthM * 1000).toFixed(0)} mm `
-        + `the rib is deep there, at ${r.longest.loadN.toFixed(0)} N`,
+        + `to the seam there, at ${r.longest.loadN.toFixed(0)} N`,
       '',
-      ['rib', 'chord_m', 'anchor', 'at_chord_pct', 'load_N', 'reach_mm', 'rib_depth_mm',
+      ['rib', 'chord_m', 'anchor', 'at_chord_pct', 'load_N', 'line_deg', 'across_pct',
+        'fan_from_deg', 'fan_to_deg', 'spread_deg', 'reach_mm', 'to_seam_mm', 'seam_N_per_m',
         'tape_to_seam', 'hole_in_path'].join('\t'),
     ];
+    const f1 = (v) => (Number.isFinite(v) ? v.toFixed(1) : '-');
     for (const x of r.ribs) {
       for (const q of x.paths) {
+        const w = q.path.wedge;
         lines.push([
           x.ribIndex, M.wing.ribs[x.ribIndex].chord.toFixed(3), q.name,
           (q.chordFraction * 100).toFixed(1), q.loadN.toFixed(0),
-          (q.reach.reachM * 1000).toFixed(0), (q.reach.availableM * 1000).toFixed(0),
-          q.reach.reachesSeam ? 'yes' : '-', q.path.holeInPath ? 'yes' : '-',
+          q.lineAngleAssumed ? '-' : f1(q.lineAngleDeg),
+          Number.isFinite(q.outOfPlane) ? (q.outOfPlane * 100).toFixed(0) : '-',
+          f1(w?.clearFromDeg), f1(w?.clearToDeg), f1(w?.spreadDeg),
+          (q.reach.reachM * 1000).toFixed(0), Number.isFinite(q.reach.availableM) ? (q.reach.availableM * 1000).toFixed(0) : '-',
+          q.path.seam ? q.path.seam.peakLineLoadNPerM.toFixed(0) : '-',
+          q.reach.reachesSeam ? 'yes' : '-',
+          q.path.blocked ? 'across the pull' : (q.path.holeInPath ? 'in reach' : '-'),
         ].join('\t'));
       }
     }
@@ -2050,6 +2137,7 @@ function buildControls() {
     const said = `${r.anchorCount} anchors on ${r.ribCount} ribs checked at ${r.designFactor} g: `
       + `longest reinforcement ${(r.longest.reachM * 1000).toFixed(0)} mm`;
     const bad = [];
+    if (r.blocked.length) bad.push(`${r.blocked.length} with an opening across the line's pull`);
     if (r.anchorsToSeam.length) bad.push(`${r.anchorsToSeam.length} need tape to the upper seam`);
     if (r.ribsWithHolesInLoadPath.length) {
       bad.push(`${r.ribsWithHolesInLoadPath.length} rib${r.ribsWithHolesInLoadPath.length > 1 ? 's' : ''} `
@@ -2403,6 +2491,14 @@ function buildControls() {
     }
   }, 'btn');
   button(grid, 'Diagonals DXF', () => {
+    // An imported design's own pieces, as its program cuts them — all of
+    // what it sews inside its cells, each kind on its own layers.
+    const own = ownStructure();
+    if (own && own.pieces.length) {
+      save(`${S.name}-internal.dxf`, lepStructureToDXF(own, { rollWidth: S.rollWidth, gap: S.panelGap / 100 }));
+      setStatus(null, `The design's own internal structure, one side: ${lepStructureWords(own.pieces.map((p) => ({ ...p, copies: 1 })))}.`);
+      return;
+    }
     if (!M.vribs || !M.vribs.count) { setStatus('No diagonal ribs to export.'); return; }
     save(`${S.name}-diagonals.dxf`, vribsToDXF(M.vribs, { rollWidth: S.rollWidth, gap: S.panelGap / 100 }));
   }, 'btn');
@@ -2538,7 +2634,7 @@ function buildControls() {
     F.append(box);
     button(F, 'Return to parametric wing', () => {
       leaveImport();
-      if (S._appliedReference === SWOOP2_ID) { S.reference = ''; S._appliedReference = ''; }
+      if (isComplete(S._appliedReference)) { S.reference = ''; S._appliedReference = ''; }
       buildControls(); rebuild();
     });
   } else {
@@ -2550,8 +2646,27 @@ function buildControls() {
 }
 
 function seamed() {
-  if (!S.seamAllowance) return M.panels;
-  return M.panels.map((p) => ({ ...p, panel: { ...addSeamAllowance(p.panel, S.seamAllowance), seamLengths: p.panel.seamLengths } }));
+  return M.panels.map((p) => {
+    // An imported design's own cut line, with its own allowances.
+    if (p.panel.cut) {
+      return { ...p, panel: { left: p.panel.cut.left, right: p.panel.cut.right, seamLengths: p.panel.seamLengths } };
+    }
+    if (!S.seamAllowance) return p;
+    return { ...p, panel: { ...addSeamAllowance(p.panel, S.seamAllowance), seamLengths: p.panel.seamLengths } };
+  });
+}
+
+/** What the panels are cut with, in words: the design's own allowances or the slider's. */
+function seamAllowanceWords() {
+  const own = M.panels?.some((p) => p.panel.cut) ? LEP?.panels?.allowances : null;
+  if (own) {
+    const a = own.upper;
+    const b = own.lower;
+    const same = a.side === b.side && a.front === b.front && a.back === b.back;
+    return `the design's own seam allowances: ${a.side} mm at the sides, ${a.front} at the front, `
+      + `${a.back} at the trailing edge${same ? '' : ` above; ${b.side}, ${b.front} and ${b.back} below`}`;
+  }
+  return `${S.seamAllowance} mm seam allowance`;
 }
 
 /* --------------------------------------------------------------- render -- */
@@ -3545,7 +3660,7 @@ function drawCut() {
     + `  ·  ${(f.utilisation * 100).toFixed(0)}% used`
     + (Number.isFinite(f.clearanceM)
       ? `, closest panels ${(f.clearanceM * 1000).toFixed(0)} mm apart` : '')
-    + `  ·  with ${S.seamAllowance} mm seam allowance`
+    + `  ·  with ${seamAllowanceWords()}`
     + `  ·  shown in ${bands} band${bands > 1 ? 's' : ''}`
     + (M.nestStale ? '  ·  updating…' : '');
 }
@@ -4110,6 +4225,7 @@ function billOfMaterials() {
   const ribs = ribClothTotals(M.wing, M.airfoil, {
     ribCloth: cloth.rib, openings: !!S.ribHoles, ownHoles,
     rodsByRib: Object.fromEntries(M.wing.ribs.map((rib) => [rib.index, rodLinesOn(rib.index)])),
+    pullsByRib: Object.fromEntries(M.wing.ribs.map((rib) => [rib.index, linePullsOn(rib.index)])),
   });
 
   // The ribs on a roll of their own, as they are cut: each rib's outline
@@ -4175,6 +4291,7 @@ function billOfMaterials() {
     ribHoles: ribs,
     ribRoll,
     vribs: S.vribs ? M.vribs : null,
+    structure: ownStructure(),
     // `linePlan` and `lineSelection`, not `plan` and `selection`.
     //
     // Passed under the wrong names these were silently dropped and the bill
@@ -4199,9 +4316,13 @@ function billOfMaterials() {
     notes: fab.warnings,
     rollWidth: S.rollWidth,
     gap: S.panelGap / 100,
-    seamAllowanceMM: S.seamAllowance,
+    // The design's own allowances when its panels are its own.
+    seamAllowanceMM: M.panels.some((p) => p.panel.cut) ? (LEP.panels.allowances.upper.side || 1) : S.seamAllowance,
+    seamAllowanceText: M.panels.some((p) => p.panel.cut) ? seamAllowanceWords() : null,
   });
-  if (S.rods && M.rods) bom.neverWeighed.unshift('rod pockets');
+  if (S.rods && M.rods && !ownStructure()?.pieces.some((p) => p.kind === 'pocket')) {
+    bom.neverWeighed.unshift('rod pockets');
+  }
   // More than the wing weighs is not a rounding error, and it is said. A
   // published wing gives its size here, not its cloth or its construction:
   // an ultralight weighed in a 32 g sail comes out heavier than the real one.
@@ -4213,6 +4334,17 @@ function billOfMaterials() {
         + 'the cloths chosen under Assumptions are heavier than this wing\'s, or the mass set is too low');
   }
   return { bom, cloth, ribs, reinforcement, tabs, fabric: fab };
+}
+
+/**
+ * The imported design's own internal structure, as the bill and the
+ * cutting file take it: null on any other wing, and its rods' pockets only
+ * while its rods are on.
+ */
+function ownStructure() {
+  const st = M.imported && LEP?.structure?.ok ? LEP.structure : null;
+  if (!st) return null;
+  return { ...st, pieces: st.pieces.filter((p) => p.kind !== 'pocket' || S.rods) };
 }
 
 /** Tension, size and balance of the diagonals on the page, worked out once. */
@@ -4244,11 +4376,22 @@ function rodLinesOn(ribIndex) {
 }
 
 /**
+ * Which way each row's line pulls on a rib, in its plane: what its openings
+ * aim the anchors' fans by. Null without a line plan.
+ */
+function linePullsOn(ribIndex) {
+  if (!M.linePlan) return null;
+  const all = (M._pulls ??= linePullsByRib(M.wing, M.linePlan));
+  return all[ribIndex] ?? null;
+}
+
+/**
  * The openings this tool cuts in a rib.
  *
  * One place, so the Rib tab, the rib pattern, the stress report, the rod
  * check and the bill cannot each cut a slightly different hole: shaped to
- * keep clear of the rods on that rib, and sized against the cell it feeds.
+ * keep clear of the rods on that rib and of the rays each line's load takes
+ * to the seam, and sized against the cell it feeds.
  */
 function openingsOf(rib) {
   // Kept until the wing next changes: the Rib tab, the rod check, the note
@@ -4259,6 +4402,7 @@ function openingsOf(rib) {
   const set = ribOpenings(rib, nb === rib ? null : nb, M.airfoil, {
     speedMS: M.balance ? M.balance.speedMS : 11,
     rods: rodLinesOn(rib.index),
+    pulls: linePullsOn(rib.index),
   });
   kept.set(rib.index, set);
   return set;
@@ -4392,17 +4536,26 @@ function structureSummary() {
     return 'None placed: on the rows chosen, no rib without a line stands beside one with a line.';
   }
   const rows = [...new Set(v.vribs.map((x) => x.row))].sort();
+  // An imported design's own pieces are cut as its program cuts them; what
+  // this summary describes is this tool's model of a diagonal at each place.
+  const ownCut = v.own && M.imported && LEP?.structure?.ok ? LEP.structure : null;
+  const diagonalCut = ownCut
+    ? ownCut.pieces.filter((p) => p.kind === 'diagonal').reduce((t, p) => t + p.cutAreaM2 * p.copies, 0) : null;
   const parts = [
     `${v.own ? 'The design\'s own' : 'Placed from the line plan'}: `
       + `${rows.map((row) => `${row} ${v.vribs.filter((x) => x.row === row).length}`).join(', ')} `
-      + `a side, ${(v.totalAreaM2 * 2).toFixed(2)} m² of cloth on the whole wing.`,
+      + (ownCut
+        ? `a side, modelled at this tool's base width: ${(v.totalAreaM2 * 2).toFixed(2)} m² of cloth on the whole wing, `
+          + `where its program cuts its full diagonals from ${diagonalCut.toFixed(2)} m².`
+        : `a side, ${(v.totalAreaM2 * 2).toFixed(2)} m² of cloth on the whole wing.`),
     f.tension.fullyTaut === f.tension.count
       ? 'All are in tension across their whole width.'
       : `${f.tension.count - f.tension.fullyTaut} of ${f.tension.count} are slack over part of their width.`,
     `${f.geom.note[0].toUpperCase()}${f.geom.note.slice(1)}.`,
     `${f.balance.note[0].toUpperCase()}${f.balance.note.slice(1)}`
       + (v.own && f.balance.strapsNeeded.length && LEP?.hv?.general?.length
-        ? ` — the file states ${LEP.hv.general.length} such pieces, which are not drawn or cut here.`
+        ? ` — the file states ${LEP.hv.general.length} such pieces`
+          + (ownCut ? ', cut as its program cuts them and not drawn here.' : ', which are not drawn or cut here.')
         : '.'),
   ];
   if (free.length) {
@@ -4536,15 +4689,45 @@ function ribFeatures(rib) {
   const intakeEnds = intakeSpec && intakeSpec.end > intakeSpec.start
     ? [onLower(intakeSpec.start * rib.chord), onLower(intakeSpec.end * rib.chord)] : [];
 
-  // What actually gets cut: the outline, a seam allowance outside it.
-  const allowance = S.seamAllowance / 1000;
+  // What actually gets cut: the outline, a seam allowance outside it — an
+  // imported design's own for its ribs (its section 6), whose panels are
+  // cut with its own too.
+  const ownRib = M.panels?.some((p) => p.panel.cut) ? LEP?.panels?.allowances?.rib : null;
+  const allowance = (Number.isFinite(ownRib) ? ownRib : S.seamAllowance) / 1000;
   const cutLine = allowance > 0 ? offsetClosedLoop(loop, allowance) : [];
+
+  // The load paths. Cloth only pulls, so each line loads its rib along
+  // straight rays from the tab to the upper seam, round the way the line
+  // pulls (`ribstress.js`): here at the design case the stress report
+  // checks, through the openings this rib really has.
+  const loadPaths = [];
+  if (M.loads && M.linePlan) {
+    const loadOf = new Map(M.loads.anchorLoads
+      .filter((a) => a.ribIndex === rib.index).map((a) => [a.row, a.loadN]));
+    const cap = (RIB_CLOTH[S.clothRib] ?? RIB_CLOTH['Porcher Skytex 27 hard']).lineLoadNPerM;
+    for (const a of anchors) {
+      if (!loadOf.has(a.row)) continue;     // a brake, or a line the loads do not carry
+      const line = M.linePlan.lines.find((l) => l.level === 'upper' && l.ribIndex === rib.index
+        && (l.anchorRow ?? l.row) === a.row && Array.isArray(l.to));
+      const pull = line ? lineAngleOnRib(rib, line) : null;
+      try {
+        const path = anchorLoadPath({
+          anchorChordFraction: a.fraction, loadN: RIB_DESIGN_FACTOR * loadOf.get(a.row),
+          chordM: rib.chord, upper, lower, anchorPointM: a.point, holes,
+          lineAngleDeg: pull?.lineAngleDeg ?? null, clothLineLoadNPerM: cap, stepDeg: 1,
+        });
+        loadPaths.push({ row: a.row, point: a.point, path, outOfPlane: pull?.outOfPlane ?? null });
+      } catch (e) {
+        // A rib this cannot be drawn on is still drawn, without its paths.
+      }
+    }
+  }
 
   return {
     flat, upper, lower, loop, cutLine, anchorsHere, onLower, anchors,
     ownHoles, holeSet, holes, rodsHere, rods: rods.map((r) => r.points), rodShapes: rods,
     rodClash,
-    apexes, bases, intakeSpec, intakeRun, intake: intakeEnds,
+    apexes, bases, intakeSpec, intakeRun, intake: intakeEnds, loadPaths,
   };
 }
 
@@ -4676,6 +4859,47 @@ function drawRib() {
   // it. Generated separately they overlapped by up to 270 mm on the root rib;
   // designed once against both constraints they cannot.
   for (const h of F.holes) c.path(h, '#5fd97a', 1.1, { close: true });
+
+  // The load paths: from each line's tab, the rays that reach the upper seam
+  // clear of every opening, round the way its line pulls (dashed), and the
+  // outline of the reinforcement the load needs at the tab before the cloth
+  // alone carries it. Red where an opening is across the line's own pull.
+  const rad = Math.PI / 180;
+  for (const lp of F.loadPaths) {
+    const p = lp.path;
+    if (!p.fan) continue;
+    const colour = p.blocked ? '#ff5e5e' : '#ff9f5e';
+    const from = p.wedge?.clearFromDeg;
+    const to = p.wedge?.clearToDeg;
+    if (Number.isFinite(from) && Number.isFinite(to)) {
+      const rays = p.fan.rays.filter((r) => r.clear && r.angleDeg >= from && r.angleDeg <= to);
+      if (rays.length > 1) {
+        c.path([lp.point, ...rays.map((r) => r.seam)], colour, 0.6,
+          { close: true, fill: 'rgba(255,159,94,0.10)', opacity: 0.55 });
+      }
+      if (p.reachM > 0) {
+        const patch = [];
+        for (let d = from; d <= to + 1e-9; d += 1) {
+          const r = Math.min(p.reachAt(d), p.fan.at(d).lengthM ?? Infinity);
+          patch.push([lp.point[0] + r * Math.sin(d * rad), lp.point[1] + r * Math.cos(d * rad)]);
+        }
+        c.path([lp.point, ...patch], colour, 1.4, { close: true });
+      }
+    }
+    const axis = p.fan.at(p.lineAngleDeg);
+    if (axis?.seam) c.path([lp.point, axis.seam], colour, 1.1, { dash: '4 3' });
+  }
+  if (F.loadPaths.length) {
+    const cut = F.loadPaths.filter((lp) => lp.path.blocked).map((lp) => lp.row);
+    const worst = F.loadPaths.reduce((m, lp) => (lp.path.reachM > (m?.path.reachM ?? -1) ? lp : m), null);
+    said.push({
+      text: cut.length
+        ? `an opening is across the ${cut.join(', ')} line's pull`
+        : `every line's pull clear to the seam; reinforcement ${(worst.path.reachM * 1000).toFixed(0)} mm `
+          + `at most (${worst.row}) at ${RIB_DESIGN_FACTOR} g`,
+      bad: cut.length > 0,
+    });
+  }
   if (S.ribHoles && F.ownHoles) {
     if (F.ownHoles.length) {
       said.unshift({ text: `${F.ownHoles.length} holes, the design's own`, bad: false });

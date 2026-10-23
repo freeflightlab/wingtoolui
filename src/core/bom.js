@@ -25,6 +25,7 @@
  */
 
 import { fabricEstimate, vribFabricEstimate } from './export.js';
+import { lepStructureNesting, lepStructureWords } from './lepstructure.js';
 
 /** Representative cloth weights, kg per square metre. */
 export const DEFAULT_CLOTH = {
@@ -51,6 +52,11 @@ export function buildBOM({
   // area only, and the total says the ribs are not in the roll to order.
   ribRoll = null,
   vribs = null,
+  // An imported design's own internal structure (`lepStructure`): its full
+  // diagonals, pieces between two ribs, straps and rod pockets, as its
+  // program cuts them. Billed instead of `vribs`, which are this tool's
+  // model of the diagonals at the places the design gives.
+  structure = null,
   linePlan = null,
   lineSelection = null,
   lineStretch = null,
@@ -61,6 +67,10 @@ export function buildBOM({
   // when they are finished outlines. The sail is then weighed at its cut
   // size, and what is still not weighed is said accordingly.
   seamAllowanceMM = 0,
+  // Said instead of "the N mm seam allowance" when the panels carry their
+  // own: an imported design's, different at the sides, the front and the
+  // trailing edge.
+  seamAllowanceText = null,
   riserCount = 3,
   brakeHandles = 2,
   reinforcement = null,
@@ -125,7 +135,7 @@ export function buildBOM({
           : '')
         + `; lower ${lowerArea.toFixed(2)} m2`
         + (seamAllowanceMM > 0
-          ? ` — as cut, with the ${seamAllowanceMM} mm seam allowance.`
+          ? ` — as cut, with ${seamAllowanceText ?? `the ${seamAllowanceMM} mm seam allowance`}.`
           : ' — finished size, with no seam allowance.')
         + ' Ordered by roll length; the offcut is bought either way.'
         // One layout, one roll. With more than one cloth that is not how it
@@ -161,8 +171,27 @@ export function buildBOM({
     missing.push('ribs');
   }
 
-  // ---- diagonals ---------------------------------------------------------
-  if (vribs && vribs.count) {
+  // ---- diagonals and the rest of the internal structure -------------------
+  const inside = structure && structure.pieces && structure.pieces.length ? structure : null;
+  if (inside) {
+    const est = lepStructureNesting(inside.pieces, { rollWidth, gap });
+    const copies = (p) => p.copies ?? 2;
+    const area = inside.pieces.reduce((t, p) => t + p.cutAreaM2 * copies(p), 0);
+    fabric.push({
+      item: 'Internal structure cloth',
+      rollMetres: est.linearMetres * 2,
+      rollWidth,
+      panelAreaM2: area,
+      utilisation: est.utilisation,
+      count: inside.pieces.reduce((t, p) => t + copies(p), 0),
+      massKg: area * C.diagonal,
+      note: `the design's own, as its program cuts them: ${lepStructureWords(inside.pieces)}; `
+        + 'nested and ordered on their own, apart from the sail',
+    });
+    if (inside.miniRibs) {
+      missing.push(`trailing-edge mini-ribs (${inside.miniRibs} a side in the design, not reproduced)`);
+    }
+  } else if (vribs && vribs.count) {
     const est = vribFabricEstimate(vribs, { rollWidth, gap });
     fabric.push({
       item: 'Diagonal cloth',

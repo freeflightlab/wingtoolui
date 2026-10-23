@@ -85,6 +85,10 @@ if (!existsSync('MANIFEST.txt')) {
       if (/\.(js|mjs|py|html|css)$/.test(f)) onDisk.push(`${d}/${f}`);
     }
   }
+  // The complete designs, which the build embeds and the suite reads.
+  if (existsSync('data/reference/lep')) {
+    for (const f of readdirSync('data/reference/lep')) onDisk.push(`data/reference/lep/${f}`);
+  }
   const unlisted = onDisk.filter((f) => !manifest.includes(f));
   say(unlisted.length === 0, 'and the manifest lists every source file',
     unlisted.length ? `unlisted: ${unlisted.join(', ')}` : 'in step');

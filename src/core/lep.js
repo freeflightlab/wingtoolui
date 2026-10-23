@@ -197,7 +197,10 @@ export function readAirfoils(doc) {
       open: parseInt(f[4], 10) === 1,
       displacementCm: f.length > 5 ? num(f[5]) : 0,
       relativeWeight: f.length > 6 ? num(f[6]) : 1,
-      special: f.length > 7 ? num(f[7]) : 0,
+      // Where the trailing-edge mini-rib in the cell outboard of this rib
+      // starts, in per cent of the inboard rib's chord from its trailing
+      // edge (the program's rib(i,56)); 0, 1 or 100 for none.
+      miniRibPct: f.length > 7 ? num(f[7]) : 0,
     };
   }).filter((r) => Number.isFinite(r.rib));
 }
@@ -242,7 +245,8 @@ export function readAoA(doc) {
  *     rib 25, which is 5 * (209.07 - 77.93) / 209.07.
  *   - The special wingtip moves the last rib's edges AFTER the washin has
  *     been computed from its original chord.
- *   - A zero rotation point is replaced by 0.01%.
+ *   - A zero rotation point is replaced by 0.01%, and a centre rib on the
+ *     centreline is moved 0.01 out.
  *
  * `lepToDesign` used the washin COLUMN, which is zero on the Swoop2 because
  * its file asks for mode 1 — so the imported wing had no washin at all
@@ -255,12 +259,16 @@ export function lepRibs(doc) {
   const notes = [];
   const notReproduced = [];
 
-  const ribs = g.ribs.map((r) => ({
+  const ribs = g.ribs.map((r, i) => ({
     index: r.index,
     x: r.xRib * k,
     yLE: r.yLE * k,
     yTE: r.yTE * k,
-    xp: r.xp * k,
+    // A centre rib on the centreline is moved 0.01 out, as the program does
+    // ("Anticipates xp=0 in central airfoil"): the cloth sewn to it — the
+    // first cell's panels, its straps and the diagonal from it — is cut to
+    // that rib, a tenth of a millimetre off the centreline on the Swoop2.
+    xp: (i === 0 && r.xp === 0 ? 0.01 : r.xp) * k,
     z: r.z * k,
     beta: r.betaDeg,
     // A zero rotation point is replaced, as the program does, to avoid a
@@ -767,9 +775,10 @@ export function designToLep(model, template = null) {
  *
  *   type 11   `n 11  i r  j r  w 0 0 0`
  *             A strap from anchor row `r` on rib `i` to the same row on rib
- *             `j = i + 1`, of width `w`. Seventy on the Swoop2: every
- *             adjacent pair from 1-2 to 23-24 at each of rows 1 to 3, and
- *             24-25 at row 1.
+ *             `j = i + 1`, along their lower surfaces, `w` per cent of each
+ *             rib's chord either side of its anchor. Seventy on the Swoop2:
+ *             every adjacent pair from 1-2 to 23-24 at each of rows 1 to 3,
+ *             and 24-25 at row 1.
  *
  *   type 15   `n 15  i r  L R  a b c d`
  *             A diagonal from anchor row `r` on rib `i`, to the left
@@ -787,25 +796,27 @@ export function designToLep(model, template = null) {
  *
  *   type 16   `n 16  i x h a b  j x h a b`
  *             A piece between ribs `i` and `j = i + 1`, each end given by a
- *             position `x` along the chord in percent and three more
- *             numbers. Fifteen on the Swoop2, at 11, 39 and 72% on the rib
- *             pairs 4-5, 8-9 ... 20-21 — exactly the pairs of ribs that
- *             carry no line, between the tops of the diagonals either side.
+ *             position `x` along the chord in percent, a height `h` from the
+ *             lower surface (0) to the upper (100), and how far it runs
+ *             ahead of `x` and behind it, `a` and `b`, in per cent of that
+ *             rib's chord. Fifteen on the Swoop2, at 11, 39 and 72% on the
+ *             rib pairs 4-5, 8-9 ... 20-21 — exactly the pairs of ribs that
+ *             carry no line, between the tops of the diagonals either side —
+ *             all at height 100: under the upper surface.
  *
- * WHAT IS NOT ESTABLISHED, and so is kept as written rather than used:
+ * The four numbers that close a type-15 row (`60.0 28.0 85. 2.` on every one
+ * of the Swoop2's) are the angles, from the chord, at which the piece rises
+ * from the first and last anchors to the next rib's upper surface; how deep
+ * the cut-out between two anchors goes, in per cent of the way across; and
+ * the width of cloth either side of each anchor, in per cent of chord. Each
+ * of these was read from the program's own source (leparagliding.f), and
+ * types 1 to 6 are the same pieces with widths in centimetres. They were
+ * left unread here until the pieces were reproduced — `lepStructure` cuts
+ * every one of them as the program does, to its cutting file's area.
  *
- *   - the four numbers that close a type-15 row (`60.0 28.0 85. 2.` on every
- *     one of the Swoop2's) — they give the piece its shape;
- *   - the three numbers after each position on a type-16 row;
- *   - whether a type-11 width is centimetres or percent of chord.
- *     LEparagliding numbers its percent-of-chord forms ten above the
- *     centimetre ones (11 to 16 for 1 to 6), which would make it percent,
- *     but nothing in this repository shows it and the manual could not be
- *     reached when this was written.
- *
- * So the diagonals are built where the file says — which rib, which row,
- * which neighbour — at the width the tool is set to, and the straps and the
- * general pieces are counted and named, not drawn.
+ * Here the diagonals are placed where the file says — which rib, which row,
+ * which neighbour — for this tool's model of them, at the width the tool is
+ * set to.
  */
 export function parseHVRibs(doc) {
   // `doc.sections` is an array, and a section holds `dataIndices` into
@@ -841,16 +852,18 @@ export function parseHVRibs(doc) {
     if (kind === 1 && whole(f[2]) && whole(f[4])) {
       Object.assign(e, {
         kind: 'strap', fromRib: f[2], fromAnchor: f[3], toRib: f[4], toAnchor: f[5],
+        // Either side of the anchor: per cent of chord for type 11,
+        // centimetres for type 1 (see the header).
         width: f[6],
-        // Kept under its old name for the H-rib builder, which treats the
-        // number as centimetres. See the header: the unit is not established.
+        // Kept under its old name, which the H-rib builder reads.
         widthCm: f[6],
       });
       straps.push(e);
     } else if (kind === 5 && whole(f[2]) && whole(f[3])) {
       Object.assign(e, {
         kind: 'diagonal', rib: f[2], row: f[3], left: f[4] === 1, right: f[5] === 1,
-        // The piece's shape, as written. Not interpreted.
+        // The piece's shape: front and back angles, cut-out depth and
+        // width at each anchor (see the header). `lepStructure` reads it.
         shape: f.slice(6, 10),
         // For anything that lists every piece by the two ribs it joins.
         fromRib: f[2], toRib: f[4] === 1 ? f[2] - 1 : f[2] + 1,

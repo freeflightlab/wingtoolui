@@ -564,8 +564,12 @@ try {
         console.log(`  FAIL the panel does not say what the Swoop2's diagonals come to: "${summary.slice(0, 160)}"`);
         process.exit(1);
       }
-      if (!/70 straps between adjacent ribs, 15 pieces between two ribs \(section 12\)/.test(S2._referenceNote || '')) {
-        console.log(`  FAIL the import note does not name what section 12 holds besides: "${(S2._referenceNote || '').slice(-200)}"`);
+      // Its straps and pieces between ribs are cut as its program cuts them
+      // now, so the import note no longer lists them; what it still lists
+      // is what is not built — the trailing-edge mini-ribs.
+      if (!/Not reproduced: 25 trailing-edge mini-ribs/.test(S2._referenceNote || '')
+        || /straps between adjacent ribs|pieces between two ribs/.test(S2._referenceNote || '')) {
+        console.log(`  FAIL the import note does not say what of the Swoop2 is not built: "${(S2._referenceNote || '').slice(-200)}"`);
         process.exit(1);
       }
       console.log(`  ok   its diagonals are its own: ${v.count} a side on rows ${rowsHere}, every one `
@@ -708,6 +712,151 @@ try {
     }
     console.log(`  ok   and returns to the parametric wing it replaced, `
       + `${back.wing.ribs.length} ribs and ${globalThis.__S.span} m`);
+  }
+
+  // The Tuluaq-19, the second complete design, chosen from the picker. Its
+  // file is a different program version with different habits — a brake
+  // anchor at exactly 100% of chord, an anchor at 0%, a webbing riser, four
+  // rows on three risers — and the line geometry used to crash on it.
+  {
+    const TID = 'Crazy Bird Tuluaq-19  (complete design)';
+    const S3 = globalThis.__S;
+    globalThis.__buttons.length = 0;
+    globalThis.__controls();
+    const before = globalThis.__getM();
+    const beforeSpan = S3.span;
+    S3.reference = TID;
+    globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
+    const m3 = globalThis.__getM();
+    if (m3.error || S3._appliedReference !== TID || !m3.imported) {
+      console.log(`  FAIL the Tuluaq-19 does not load from the picker: ${m3.error || 'not applied'}`);
+      process.exit(1);
+    }
+    const ok3 = Math.abs(m3.metrics.area - 19.0) < 0.05 && m3.wing.ribs.length === 18
+      && S3.cells === 17 && S3.centreRib === true && Math.abs(m3.hangDepthM - 6.171) < 0.01;
+    if (!ok3) {
+      console.log(`  FAIL the Tuluaq-19 loads as ${m3.metrics.area.toFixed(2)} m2, ${m3.wing.ribs.length} `
+        + `half-wing ribs, ${S3.cells} cells a side, the pilot ${m3.hangDepthM} m down`);
+      process.exit(1);
+    }
+    const v3 = m3.vribs;
+    const rows3 = [...new Set(v3.vribs.map((d) => d.row))].sort().join('');
+    if (!v3.own || v3.count !== 40 || rows3 !== 'ABCD' || v3.unsupportedRibs.length) {
+      console.log(`  FAIL the Tuluaq-19's diagonals are not its own: ${v3.count} a side on rows ${rows3}, `
+        + `own ${v3.own}, unsupported ${v3.unsupportedRibs.join(' ')}`);
+      process.exit(1);
+    }
+    for (const tb of ['wing', 'lines', 'structure', 'rib', 'analysis']) {
+      try { globalThis.__tab(tb); }
+      catch (e) { console.log(`  FAIL the Tuluaq-19 breaks the ${tb} view: ${e.message}`); process.exit(1); }
+    }
+    const was3 = { ribHoles: S3.ribHoles, rods: S3.rods };
+    S3.ribHoles = true; S3.rods = true;
+    globalThis.__rebuild();
+    globalThis.__buttons.length = 0;
+    globalThis.__controls();
+    globalThis.__saved = {};
+    const failed3 = [];
+    let ran3 = 0;
+    for (const b of globalThis.__buttons.slice().filter((x) => !REPLACES_DESIGN.test(x.text))) {
+      try { b.fn(); ran3++; } catch (e) { failed3.push(`${b.text}: ${e.message.slice(0, 50)}`); }
+    }
+    Object.assign(S3, was3);
+    if (failed3.length) {
+      console.log(`  FAIL ${failed3.length} exports fail on the Tuluaq-19: ${failed3.slice(0, 3).join(' | ')}`);
+      process.exit(1);
+    }
+    const bom3 = globalThis.__saved['TULUAQ_19-bom.txt'] || '';
+    if (!/^Bill of materials — TULUAQ_19/.test(bom3) || !/the design's own holes/.test(bom3)
+      || !/PPSL65\s+140\.3 m\s+96 pieces/.test(bom3) || !/TSL280\s+53\.3 m\s+18 pieces/.test(bom3)) {
+      console.log(`  FAIL the Tuluaq-19's bill is not of its own holes and lines: "${bom3.slice(0, 200)}"`);
+      process.exit(1);
+    }
+    console.log(`  ok   the Tuluaq-19 loads from the picker: ${m3.metrics.area.toFixed(2)} m2, 18 half-wing ribs, `
+      + `${v3.count} diagonals a side on rows ${rows3}, the pilot ${m3.hangDepthM.toFixed(2)} m down; `
+      + `${ran3} exports, ${Object.keys(globalThis.__saved).length} files, its own holes and lines in the bill`);
+
+    // Its panels and ribs are cut as its cutting file cuts them, and the bill
+    // weighs them at that size. The tool's own development, with its 6%
+    // ovalization and one seam allowance, missed the panels by a tenth.
+    const fsx3 = require('fs');
+    const areaOf3 = (pts) => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1]; return Math.abs(a / 2); };
+    for (const [id, key, tag] of [[TID, 'tuluaq19', 'TULUAQ_19'], ["Laboratori d'envol Swoop2  (complete design)", 'swoop2', 'Swoop2']]) {
+      S3.reference = id;
+      globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
+      const mc = globalThis.__getM();
+      const rowsC = fsx3.readFileSync(`data/reference/lep/${key}-cut-parts.tsv`, 'utf8').split('\n')
+        .filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
+      const sumOf = (part) => rowsC.filter((r) => r[0] === part).reduce((t, r) => t + Number(r[3]), 0) / 1e4;
+      const own = mc.panels.filter((p) => p.own && p.panel.cut);
+      const cutArea = (surface) => own.filter((p) => p.surface === surface)
+        .reduce((t, p) => t + areaOf3(p.panel.cut.left.concat(p.panel.cut.right.slice().reverse())), 0);
+      const dU = cutArea('upper') / sumOf('upper panel') - 1;
+      const dL = cutArea('lower') / sumOf('lower panel') - 1;
+      if (own.length !== mc.panels.length || !(Math.abs(dU) < 0.001 && Math.abs(dL) < 0.001)) {
+        console.log(`  FAIL ${tag}'s panels are not its cutting file's: ${own.length} of ${mc.panels.length} its own, `
+          + `upper ${(dU * 100).toFixed(2)}%, lower ${(dL * 100).toFixed(2)}%`);
+        process.exit(1);
+      }
+      // Its ribs, at its own rib allowance: all but the tip, its section
+      // thinned to a sliver, within a quarter of a per cent of the file's —
+      // most within a tenth.
+      const ribRows = rowsC.filter((r) => r[0] === 'rib');
+      const ribOff = ribRows.map((r) => {
+        const rib = mc.wing.ribs[Number(r[1]) - 1];
+        return areaOf3(globalThis.__ribFeatures(rib).cutLine) * 1e4 / Number(r[3]) - 1;
+      });
+      const bodyOff = ribOff.slice(0, -1).map(Math.abs);
+      if (!(Math.max(...bodyOff) < 0.0025 && bodyOff.filter((x) => x < 0.001).length >= bodyOff.length - 2)) {
+        console.log(`  FAIL ${tag}'s ribs are not cut as its file cuts them: worst ${(Math.max(...bodyOff) * 100).toFixed(2)}%`);
+        process.exit(1);
+      }
+      // The bill weighs the sail as cut, with its own allowances.
+      globalThis.__buttons.length = 0; globalThis.__controls(); globalThis.__saved = {};
+      globalThis.__buttons.find((b) => b.text === 'Bill of materials').fn();
+      const billC = Object.values(globalThis.__saved).map(String).join('\n');
+      const mU = /upper ([\d.]+) m2/.exec(billC);
+      const mL = /; lower ([\d.]+) m2/.exec(billC);
+      if (!mU || !mL || Math.abs(Number(mU[1]) / (2 * sumOf('upper panel')) - 1) > 0.002
+        || Math.abs(Number(mL[1]) / (2 * sumOf('lower panel')) - 1) > 0.002 || !/the design's own seam allowances/.test(billC)) {
+        console.log(`  FAIL ${tag}'s bill does not weigh its own panels: upper ${mU?.[1]}, lower ${mL?.[1]} against `
+          + `${(2 * sumOf('upper panel')).toFixed(2)} and ${(2 * sumOf('lower panel')).toFixed(2)}`);
+        process.exit(1);
+      }
+      // And what it sews inside its cells, as its program cuts them: in the
+      // bill instead of this tool's diagonals, and on its own cutting file.
+      const st = globalThis.__getLEP()?.structure;
+      const mI = /Internal structure cloth[\s\S]*?(\d+) pieces, ([\d.]+) m2/.exec(billC);
+      if (!st?.ok || !mI || Math.abs(Number(mI[2]) / st.totals.wing.cutM2 - 1) > 0.001
+        || Number(mI[1]) !== st.totals.wing.count || /Diagonal cloth/.test(billC)
+        || !/the design's own, as its program cuts them/.test(billC) || !/trailing-edge mini-ribs/.test(billC)) {
+        console.log(`  FAIL ${tag}'s bill does not carry its own internal structure: ${mI ? mI[0].slice(-60) : 'no item'} against `
+          + `${st?.totals?.wing?.count} pieces, ${st?.totals?.wing?.cutM2?.toFixed(2)} m2`);
+        process.exit(1);
+      }
+      globalThis.__saved = {};
+      globalThis.__buttons.find((b) => b.text === 'Diagonals DXF').fn();
+      const dxfI = Object.entries(globalThis.__saved).find(([f]) => /-internal\.dxf$/.test(f))?.[1] ?? '';
+      const loopsI = globalThis.__parseDXF(dxfI).polylines?.filter((q) => /-cut$/.test(q.layer ?? '')).length ?? 0;
+      if (loopsI !== st.pieces.length) {
+        console.log(`  FAIL ${tag}'s internal-structure cutting file has ${loopsI} pieces, not ${st.pieces.length}`);
+        process.exit(1);
+      }
+      console.log(`  ok   ${tag}: its own panels, as its cutting file cuts them (upper ${(dU * 100).toFixed(2)}%, `
+        + `lower ${(dL * 100).toFixed(2)}%), its ribs at its own allowance (worst ${(Math.max(...bodyOff) * 100).toFixed(2)}% `
+        + `off the tip), and the bill weighs the sail as cut: ${mU[1]} and ${mL[1]} m2; its internal structure `
+        + `${mI[2]} m2 in ${mI[1]} pieces, ${loopsI} a side on its cutting file`);
+    }
+    S3.reference = '';
+    globalThis.__rebuild(); globalThis.__controls();
+    const back3 = globalThis.__getM();
+    if (back3.imported || S3._appliedReference) {
+      console.log('  FAIL choosing "—" after the Tuluaq-19 left the import in place');
+      process.exit(1);
+    }
+    console.log(`  ok   and "—" in the picker returns to the parametric wing, ${back3.wing.ribs.length} ribs`
+      + ` and ${S3.span} m (${beforeSpan} m before it)`);
+    void before;
   }
 
   globalThis.__tab('wing');
@@ -1195,28 +1344,66 @@ try {
       return globalThis.__saved[`${Sr.name}-rib-stress.tsv`] || '';
     };
     const longest = (text) => {
-      const m = /# longest reinforcement: (\S+) on rib (\d+), (\d+) mm of the (\d+) mm the rib is deep there, at (\d+) N/.exec(text);
+      const m = /# longest reinforcement: (\S+) on rib (\d+), (\d+) mm of the (\d+) mm to the seam there, at (\d+) N/.exec(text);
       return m ? { name: m[1], rib: Number(m[2]), reach: Number(m[3]), depth: Number(m[4]), load: Number(m[5]) } : null;
     };
     Sr.ribHoles = true; Sr.clothRib = 'Porcher Skytex 40 hard';
     const heavy = report();
     const Mr = globalThis.__getM();
     const rows = heavy.split('\n').filter((l) => /^\d+\t/.test(l)).map((l) => l.split('\t'));
+    const head = heavy.split('\n').find((l) => l.startsWith('rib\t')).split('\t');
+    const col = (name) => head.indexOf(name);
     const anchors = Mr.loads.anchorLoads.length;
-    if (!/into Porcher Skytex 40 hard;/.test(heavy)) failR('the rib stress report is not in the rib cloth chosen: ' + heavy.split('\n')[3]);
+    if (!/into Porcher Skytex 40 hard$/m.test(heavy)) failR('the rib stress report is not in the rib cloth chosen: ' + heavy.split('\n')[3]);
     if (rows.length !== anchors) failR(`the rib stress report has ${rows.length} rows for ${anchors} anchors`);
-    // Each anchor's room is the depth of its own rib there: 5 to 20% of chord.
-    const shares = rows.map((r) => Number(r[6]) / 1000 / Number(r[1]));
+    // Each anchor's room is its own rib's, from the tab to the seam along
+    // the most loaded ray: 5 to 20% of chord.
+    const shares = rows.map((r) => Number(r[col('to_seam_mm')]) / 1000 / Number(r[col('chord_m')]));
     if (!(Math.min(...shares) > 0.04 && Math.max(...shares) < 0.20)) {
       failR(`rib depths in the report run ${(Math.min(...shares) * 100).toFixed(1)} to ${(Math.max(...shares) * 100).toFixed(1)}% of chord`);
     }
+    // Every line's pull is read off its line, and lies inside its own fan:
+    // the A lines lean forward and the D lines aft.
+    const pulls = rows.map((r) => ({ row: r[col('anchor')][0], deg: Number(r[col('line_deg')]),
+      from: Number(r[col('fan_from_deg')]), to: Number(r[col('fan_to_deg')]) }));
+    if (!pulls.every((p) => Number.isFinite(p.deg) && p.deg >= p.from && p.deg <= p.to)) {
+      failR('a line\'s pull is missing from the report, or outside its own fan');
+    }
+    const lean = (row) => { const xs = pulls.filter((p) => p.row === row).map((p) => p.deg); return xs.reduce((a, b) => a + b, 0) / xs.length; };
+    // Whatever rows the wing has: the front one leans forward of the back
+    // one, and the back one aft.
+    const rowsR = [...new Set(pulls.map((p) => p.row))].sort();
+    const frontR = rowsR[0];
+    const backR = rowsR[rowsR.length - 1];
+    if (!(rowsR.length > 2 && lean(frontR) < lean(backR) - 5 && lean(backR) > 5)) {
+      failR(`the lines do not lean as a cascade does: ${rowsR.map((r) => `${r} ${lean(r).toFixed(1)}`).join(', ')}`);
+    }
+    if (!rows.every((r) => Number(r[col('seam_N_per_m')]) > 0)) failR('an anchor delivers nothing to the seam');
     const lh = longest(heavy);
-    if (!lh || !(lh.reach < lh.depth)) failR('the report does not name its longest reinforcement: ' + heavy.split('\n')[4]);
+    if (!lh || !(lh.reach < lh.depth)) failR('the report does not name its longest reinforcement: ' + heavy.split('\n')[7]);
+    // The Rib tab draws the same load paths: on every rib with lines it says
+    // whether each line's pull is clear to the seam and how far the
+    // reinforcement must reach, and the longest it shows is the report's.
+    const tabR = Sr.tab;
+    globalThis.__tab('rib');
+    const textsR = () => { const out = []; const w = (n) => { if (!n) return; if (n.tagName === 'text' && n._text) out.push(n._text); for (const c of n.children || []) w(c); }; w(document.getElementById('vp-rib')); return out.join(' || '); };
+    let shownR = 0;
+    let ribsR = 0;
+    for (let i = 0; i < Mr.wing.ribs.length; i++) {
+      globalThis.__rib(i);
+      const m = /every line's pull clear to the seam; reinforcement (\d+) mm at most \((\w)\) at 8 g/.exec(textsR());
+      if (m) { ribsR++; shownR = Math.max(shownR, Number(m[1])); }
+    }
+    const linedR = new Set(Mr.loads.anchorLoads.map((a) => a.ribIndex)).size;
+    if (ribsR !== linedR || Math.abs(shownR - lh.reach) > 1) {
+      failR(`the Rib tab shows load paths on ${ribsR} of ${linedR} ribs with lines, longest ${shownR} mm against the report's ${lh.reach}`);
+    }
+    globalThis.__tab(tabR);
     // A weaker cloth needs the reinforcement to reach further.
     Sr.clothRib = 'Porcher Skytex 27 hard';
     const light = report();
     const ll = longest(light);
-    if (!/into Porcher Skytex 27 hard;/.test(light) || !(ll.reach > lh.reach)) {
+    if (!/into Porcher Skytex 27 hard$/m.test(light) || !(ll.reach > lh.reach)) {
       failR(`a weaker rib cloth does not lengthen the reinforcement: ${lh.reach} mm then ${ll && ll.reach} mm`);
     }
     // One with no strength figure is checked as the weakest listed, and says so.
@@ -1225,7 +1412,8 @@ try {
     if (!/into Porcher Skytex 27 hard \(no strength figure here for Porcher Skytex 38, the cloth chosen\)/.test(other)) {
       failR('a rib cloth with no strength figure is not reported as such: ' + other.split('\n')[3]);
     }
-    console.log(`  ok   rib stress report: ${rows.length} anchors, each against its own rib's depth `
+    console.log(`  ok   rib stress report: ${rows.length} anchors, each line's pull inside its own fan to the seam `
+      + `(${frontR} ${lean(frontR).toFixed(1)}, ${backR} ${lean(backR).toFixed(1)} degrees), each against its own rib `
       + `(${(Math.min(...shares) * 100).toFixed(0)} to ${(Math.max(...shares) * 100).toFixed(0)}% of chord); longest reinforcement `
       + `${lh.reach} mm in ${keepR.clothRib === 'Porcher Skytex 40 hard' ? 'the default' : 'a heavy'} cloth, ${ll.reach} mm in Skytex 27 hard`);
     Object.assign(Sr, keepR); globalThis.__rebuild(); globalThis.__controls();

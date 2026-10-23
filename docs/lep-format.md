@@ -6,14 +6,16 @@ implementation and to the large body of published designs built with it.
 
 Specification: the [LEparagliding user
 manual](https://www.laboratoridenvol.com/leparagliding/manual.en.html),
-section 6. The file in this repository, the Swoop2's, is a 3.30p input.
+section 6. Two designs are in this repository: the Swoop2's, a 3.30p input,
+and the Tuluaq-19's, a 3.25 input with the CRLF line ends it was published
+with.
 
 ---
 
 ## The governing constraint
 
 The Swoop2's file has **37 sections**, numbered up to 39. This project writes
-four of them and reads fourteen.
+four of them and reads twenty.
 
 | Section | Content | Here |
 | --- | --- | --- |
@@ -22,14 +24,19 @@ four of them and reads fourteen.
 | 3 | Anchor points | read + written |
 | 8 | Angle-of-attack and line-length estimate | read + written |
 | 4 | Airfoil holes | read: the design's own lightening holes |
+| 5, 31 | Skin tension, and its newer module | read: how much wider than its cell each panel is cut |
+| 6 | Sewing allowances | read: the panels', ribs' and diagonals' own |
 | 9, 10, 11 | Suspension lines, brakes, ramification lengths | read: the line plan, built as the program builds it |
-| 12 | H, V and VH ribs | read: the straps and diagonals, rib by rib |
+| 12 | H, V and VH ribs | read and cut: every full diagonal, strap and piece between two ribs as its program cuts it (`docs/internal-structure.md`) |
 | 18 | Elastic lines corrections | read: the load and stretch of every line |
-| 21 | Nylon rods | read |
+| 21 | Nylon rods | read: the rods, and the pockets they are sewn into |
 | 27 | Special wing tip | read (the angled tip, type 1) |
 | 30 | Airfoil thickness modification | read |
-| 34 | Lines characteristics table | read: the design's own line types |
-| 5–7, 15–17, 19, 20, 22–26, 28, 29, 31–33, 35–39 | Skin tension, sewing allowances, marks, colours, extra rib points, DXF options, mylars, tabs, glue vents, calage variation, 3D shaping, parts separation, detailed risers, the program's own equilibrium solver, XFLR5 export… | **carried through untouched** |
+| 26 | Glue vents | read: which panel closes how much of each cell's intake |
+| 34 | Lines characteristics table | read: the design's own line types, round lines and webbing |
+| 37 | Special parameters | read in part: how many sides the program gives an ellipse (code 3002) |
+| 38 | HVR holes | read: the holes cut in diagonals and in pieces between two ribs |
+| 7, 15–17, 19, 20, 22–25, 28, 29, 32, 33, 35, 36, 39 | Marks, colours, extra rib points, DXF options, mylars, tabs, calage variation, 3D shaping, parts separation, detailed risers, the program's own equilibrium solver, XFLR5 export… | **carried through untouched** |
 
 So the design rule is: **never discard what is not understood**. A file is
 parsed into an ordered list of sections, each keeping its exact original
@@ -38,11 +45,11 @@ are written back byte for byte.
 
 This is what makes the round trip safe. A designer can bring in a real wing,
 change the planform here, write it out, and their mylars and marks will be
-exactly as they left them. `writeLep(parseLep(t)) === t` is asserted on the
-Swoop2's file, sections this project has no model for included.
+exactly as they left them. `writeLep(parseLep(t)) === t` is asserted on
+both files, sections this project has no model for and line ends included.
 
-What is *read* is a complete design: `docs/swoop2.md` sets the result beside
-the program's own output, line by line.
+What is *read* is a complete design: `docs/swoop2.md` and `docs/tuluaq19.md`
+set the result beside the program's own output, line by line.
 
 ---
 
@@ -129,14 +136,33 @@ tip, and this tool places every rib where the program does: the rib plane's
 angle to the glide path and the local angle of attack agree with the
 program's own table to 0.005° on every rib.
 
-(This section used to describe a second file, gnuC2-27. It was checked once,
+The **Tuluaq-19**, a 19 m² design from an earlier version of the same
+program (3.25), reproduces to the same standard, and it found three details of the
+program the Swoop2 never exercised. Each is the program's, not this tool's
+choice, and each is now done as the program does it:
+
+- **Anchors are found in single precision.** An anchor at exactly 100% of
+  chord is a hair past the trailing edge in double precision on some ribs,
+  and was not found at all.
+- **An anchor no segment of the lower surface holds stays at the section's
+  origin**, its leading edge: the program's arrays start at zero and nothing
+  overwrites them. The tip rib's A anchor, at 0%, is one.
+- **A webbing riser (`r` in section 34) has one more column than a round
+  line**, and its frontal area is counted without its loops.
+
+`docs/tuluaq19.md` has the figures.
+
+(This section used to describe a further file, gnuC2-27. It was checked once,
 is not in the repository, and nothing here holds it.)
 
 ---
 
 ## Not read
 
-Sections 5 to 7 (skin tension, sewing allowances, marks), 22 and 23 (mylars
-and tab reinforcements), 26 (glue vents), 28 (calage variation), 29 (3D
-shaping), 31 (the newer skin tension module), 33 (detailed risers) and 35 (the
-program's own equilibrium solver inputs). All are round-trip safe.
+Section 7 (marks), 22 and 23 (mylars and tab reinforcements), 28 (calage
+variation), 29 (3D shaping), 33 (detailed risers) and 35 (the program's own
+equilibrium solver inputs). All are round-trip safe.
+
+Sections 5, 6, 26 and 31 are read for the design's own panels
+(`lepPanels`), which come out as its cutting file cuts them: see
+`docs/panels.md`.

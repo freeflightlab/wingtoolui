@@ -84,6 +84,7 @@ MODULES = [
     "export.js",
     "lep.js",
     "leplines.js",
+    "lepstructure.js",
     "xfoil.js",
 ]
 
@@ -305,6 +306,15 @@ def build():
     section = (ROOT / "data" / "reference" / "lep" / "swoop2-gnuReflex.txt")
     reference_js += ("\nconst SWOOP2_SECTIONS = "
                      + json.dumps({"gnuReflex.txt": section.read_text()} if section.exists() else {})
+                     + ";")
+    # The Tuluaq-19: a second complete design from the same program (3.25,
+    # CRLF line ends), which the importer is held to as it is to the Swoop2.
+    tuluaq = (ROOT / "data" / "reference" / "lep" / "tuluaq19-20250107.lep")
+    reference_js += ("\nconst TULUAQ_LEP = "
+                     + json.dumps(tuluaq.read_text() if tuluaq.exists() else "") + ";")
+    tsection = (ROOT / "data" / "reference" / "lep" / "tuluaq19-gnua.txt")
+    reference_js += ("\nconst TULUAQ_SECTIONS = "
+                     + json.dumps({"gnua.txt": tsection.read_text()} if tsection.exists() else {})
                      + ";")
 
     shell = (UI / "index.html").read_text()

@@ -470,7 +470,8 @@ export function buildHRibs({
   // `parseHVRibs` returns LEP section 12's type-11 rows: which two ribs each
   // strip joins, which anchor station it sits at, and how wide it is. The
   // Swoop2 carries 70, one between each adjacent pair at each of three
-  // stations, 2 cm wide — and every one of them was being ignored.
+  // stations, 2% of chord either side — and every one of them was being
+  // ignored.
   //
   // A file entry gives a chord STATION and a width; this function works in a
   // chord RANGE, so the width is laid either side of the station.
@@ -495,7 +496,13 @@ export function buildHRibs({
       const station = fracs[Math.max(0, Math.min(fracs.length - 1,
         (e.fromAnchor ?? 1) - 1))];
       const chordM = ribs[i].chord || 1;
-      const half = ((e.widthCm ?? 2) / 100) / chordM / 2;
+      // The width either side of the anchor, as the program reads it
+      // (leparagliding.f, and `lepStructure` cuts every strap to its file's
+      // area this way): per cent of the rib's chord for type 11,
+      // centimetres for type 1. This took the number as the strap's whole
+      // width in centimetres, and the Swoop2's straps came out a quarter of
+      // the 8.4 cm its program cuts them at the root.
+      const half = e.type === 1 ? ((e.width ?? 2) / 100) / chordM : (e.width ?? 2) / 100;
       const from = Math.max(0.01, station - half);
       const to = Math.min(0.99, station + half);
       const one = buildHRibs({

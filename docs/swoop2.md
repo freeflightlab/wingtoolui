@@ -117,10 +117,22 @@ surfaces, and the suite now holds the tool to all of them —
 | rib contour lengths | `lep-out.txt`, section 6 | 0.007 mm |
 | karabiner position, angle of attack 4.32°, assiette 1.39° | `lep-out.txt` | to the printed figure |
 | lineset weight 0.468 kg, frontal area 0.426 m² | the program's totals | to the printed figure |
+| every panel's cut area, upper and lower | its cutting file, measured | 0.04% |
 
-What it still does **not** settle is the panel development against the
-Swoop2's own cutting file, which section 5 explains, and the aerodynamics: the
-design publishes no polar to compare a polar with.
+The panels came last. Its cutting file could not be read by joining
+segments (section 5), so every piece in it was measured as a closed outline
+(`swoop2-cut-parts.tsv`), and the design's own panels, as `lepPanels` cuts
+them from its file, are within 0.04% of every one but the tip's upper panel,
+which its file draws open: 11.722 and 9.751 m² a side against 11.719 and
+9.750. `docs/panels.md` has the four things that took.
+
+Its internal structure is cut the same way: its 13 full diagonals, 15 pieces
+between two ribs, 70 straps and 50 rod pockets a side, every one within a
+part in ten thousand of its file's, 11.87 m² for the wing
+(`docs/internal-structure.md`). What it still does **not** settle is its 25
+trailing-edge mini-ribs a side, cut from a billow the tool does not
+reproduce, and the aerodynamics: the design publishes no polar to compare a
+polar with.
 
 ---
 
@@ -214,3 +226,10 @@ spatial clustering rather than graph walking. That is the honest state:
 
 The tool is still worth having — it works on any file that draws its cut lines
 cleanly, and it is proven against known answers rather than against itself.
+
+The pieces were measured another way, once, for the reference table: from
+the file's own frames "for cutting table", by colour, with each piece found
+as a face of the drawing's segments rather than by walking from one end.
+How, and the checks on it — rib 1 at its section's area plus its allowance
+to 0.04% — are in the header of `swoop2-cut-parts.tsv`. That is a
+measurement made outside the tool, not something it does.

@@ -11,6 +11,7 @@ import { parseLineTable, summarise, parseUpLineSheet, parseBgdLineTable,
   parsePhiLineSheet, parseSimpleLineSheet, parseStatedTopology } from '../src/core/lineplan.js';
 import { parseSizeFamilies } from '../src/core/scaling.js';
 import { parseMaterialsTable } from '../src/core/loads.js';
+import { parseLep, describeLep } from '../src/core/lep.js';
 
 const files = readdirSync('data/reference').filter((f) => f.endsWith('.tsv')).sort();
 const wings = new Map();
@@ -158,6 +159,48 @@ out.push('| file | kind | detail |');
 out.push('| --- | --- | --- |');
 for (const o of other.sort((a, b) => a.f.localeCompare(b.f))) {
   out.push(`| \`${o.f}\` | ${o.kind} | ${o.detail} |`);
+}
+
+// The complete designs: a design's own input, its section, the program's
+// output and its cut parts, rather than a maker's published sheet.
+const lepDir = 'data/reference/lep';
+const lepFiles = readdirSync(lepDir).sort();
+out.push('');
+out.push('## Complete designs');
+out.push('');
+out.push(`In \`${lepDir}/\`, ${lepFiles.length} files. Each design is its LEparagliding input, its section, `
+  + 'the program\'s own output and its cutting file measured.');
+out.push('');
+out.push('| file | kind | detail |');
+out.push('| --- | --- | --- |');
+for (const f of lepFiles) {
+  const body = readFileSync(`${lepDir}/${f}`, 'latin1');
+  let kind = 'other';
+  let detail = '';
+  if (f.endsWith('.lep')) {
+    const d = describeLep(parseLep(body));
+    const version = /Input data file (?:version )?([\d.]+p?)/.exec(body)?.[1] ?? '?';
+    kind = 'LEparagliding input';
+    detail = `${d.brand} ${d.name}, ${d.cells} cells, ${d.sections.length} sections, format ${version}`;
+  } else if (/-lep-out\.txt$/.test(f)) {
+    kind = 'the program\'s own output';
+    const v = /LABORATORI D'ENVOL PARAGLIDING\s+([\d.]+p?)/.exec(body)?.[1];
+    detail = v ? `version ${v}` : '';
+  } else if (/-cut-parts\.tsv$/.test(f)) {
+    // The header is a comment line; after it each row is one piece — a rib,
+    // a panel, a piece sewn inside the wing — or a group of pieces as a total.
+    const rows = body.split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+    const n = (part) => rows.filter((l) => l.startsWith(`${part}\t`)).length;
+    const inside = rows.filter((l) => /^(full diagonal|strap|piece between ribs|rod pocket),/.test(l)).length;
+    const one = n('rib') + n('upper panel') + n('lower panel') + inside;
+    kind = 'cut parts, measured';
+    detail = `${n('rib')} ribs, ${n('upper panel')} upper and ${n('lower panel')} lower panels and ${inside} pieces `
+      + `inside the wing one by one, ${rows.length - one} groups of parts as totals, from the design's 2D DXF`;
+  } else if (f.endsWith('.txt')) {
+    kind = 'section';
+    detail = `${body.trim().split('\n')[0].trim()}`;
+  }
+  out.push(`| \`${f}\` | ${kind} | ${detail} |`);
 }
 
 writeFileSync('data/reference/CATALOGUE.md', `${out.join('\n')}\n`);

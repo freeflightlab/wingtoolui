@@ -210,12 +210,13 @@ its own aerofoils and its own line plan, so it takes the import path instead:
 
 > Swoop2: a complete design from Laboratori d'envol — 50 cells, 51 ribs, 90
 > lines a side as its program computes them. The planform, arc and section
-> sliders do not apply to it. Not reproduced: 70 straps between adjacent ribs,
-> 15 pieces between two ribs (section 12).
+> sliders do not apply to it. Not reproduced: 25 trailing-edge mini-ribs.
 
-The last sentence is the part of section 12 the tool reads and does not build:
-it places the file's 39 diagonals where the file puts them, and lists the
-straps and the pieces between two ribs rather than inventing a shape for them.
+The last sentence is what of the design the tool reads and does not build.
+It said, until this round, that the straps and pieces between two ribs of
+section 12 were listed rather than given an invented shape; every one of
+them is now cut as the design's program cuts it (`docs/internal-structure.md`),
+and what is left are the mini-ribs its program cuts from its own billow.
 
 Choosing any specification afterwards clears the imported geometry, or the
 tool would show a Geo 7 built out of Swoop2 ribs. That is asserted, because

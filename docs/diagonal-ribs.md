@@ -262,39 +262,40 @@ is re-evaluated on every rebuild.
 
 ---
 
-## 9. LEP section 12, and what is not read
+## 9. LEP section 12, read and cut
 
 The Swoop2's section 12 holds 124 pieces of three kinds, each with its own
 row layout (`parseHVRibs`):
 
-| type | count | what it is | read |
+| type | count | what it is | here |
 | --- | --- | --- | --- |
-| 11 | 70 | a strap from an anchor row on one rib to the same row on the next | counted |
-| 15 | 39 | a diagonal from an anchor, to the rib before or after | **placed** |
-| 16 | 15 | a piece between two ribs at a chord position | counted |
+| 11 | 70 | a strap from an anchor row on one rib to the same row on the next | cut |
+| 15 | 39 | a diagonal from an anchor, to the rib before or after | **placed**, and cut |
+| 16 | 15 | a piece between two ribs at a chord position | cut |
 
 **Left is towards the centre.** That is not from a manual; it is what the
 file's own lines say. Read that way all 39 diagonals run from a rib with a
 line to a rib with none. Read the other way, every one of them would join two
 lined ribs — the one place a diagonal is never wanted.
 
-Not established, and so kept as written rather than used:
+The numbers this section once kept as written — the four that close a
+type-15 row, those after each position on a type-16 row, the unit of a
+type-11 width — are now read from the program's own source, and every piece
+is cut as the design's program cuts it, to its cutting file's area
+(`lepStructure`, `docs/internal-structure.md`). Thirty-nine rows are thirteen
+pieces: a full diagonal is one piece per rib and side over all its rows.
 
-- the four numbers that close a type-15 row (`60.0 28.0 85. 2.` on every one)
-  — they give the piece its shape, so **the base width is the tool's setting,
-  not the design's**;
-- the numbers after each position on a type-16 row;
-- whether a type-11 width is centimetres or percent of chord.
-
-The LEparagliding manual would settle all three and could not be reached when
-this was written. Until it is, the straps and the pieces between two ribs are
-named in the import note and the bill, and not drawn or cut.
+What this document describes is the tool's model of a diagonal, and that is
+what the drawing and the tension and balance figures still work on, placed at
+the file's rows at the tool's base width. The bill and the Diagonals DXF of
+an imported design carry its own pieces.
 
 ---
 
 ## 10. Not covered
 
-- **Straps.** Wanted ones are counted (section 5); none is built.
+- **Straps.** Wanted ones are counted (section 5); none is built, except an
+  imported design's own (section 9).
 - **Diagonals as structure.** They are load paths and cut patterns, not
   members with stiffness.
 - **The effect on the rib itself.** A diagonal pulls on the rib it lands on;

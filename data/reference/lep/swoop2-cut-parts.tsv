@@ -1,0 +1,266 @@
+# swoop2-cut-parts.tsv: the Swoop 2's cut pieces (version 20260829)
+#
+# Every piece in the design's own 2D cutting file, measured: the reference for
+# this tool's bill of materials and panel development on an imported design.
+#
+# SOURCE: "20260829 Swoop2 2D.dxf" in the design archive "20260829 Swoop2.zip", laboratoridenvol.com/projects/Swoop2/Swoop2.en.html
+#   Retrieved 2026-10-21. Laboratori d'envol publishes its designs and the
+#   program that draws them (LEparagliding, GNU GPL) at laboratoridenvol.com.
+# METHOD: the frames "for cutting table" and the internal-structure frames of
+#   the 2D DXF. A piece is a closed outline at its CUT size: the seam allowance
+#   (10 mm on panels and ribs, 10 mm leading edge, 20 mm trailing edge; its section 6) is part of the outline. Holes are the closed loops inside a
+#   piece and are taken out. The upper surface's tip piece is drawn 1.4 cm open and is counted (778.72 cm2 of the colour-panel total, 1698.80 of the undivided).
+#   Each undivided panel is also listed by itself, by its cell (in the rib column),
+#   in the order the file draws them: from the centre out. The tip's upper panel,
+#   drawn open, is the 1698.80 above.
+#   And each piece sewn inside the wing (section 12) by itself, added
+#   2026-10-22: every full diagonal by the rib its lines hang from and the
+#   side it runs to; every strap by its row and inboard rib; every piece
+#   between two ribs by its inboard rib and chord position; every rod pocket
+#   by its rib and its rod's bloc (section 21). Which piece is
+#   which is read off where the program lays it out — across the frame by
+#   rib, along it by row or chord position — and each was confirmed against
+#   the piece the program's own construction gives (docs/internal-structure.md).
+#   A diagonal's gross area is its outline, its cut-outs between anchors
+#   taken out of it; its holes are the ellipses at its anchors. The rib-23
+#   diagonal has two: the program computes three, and the file leaves out
+#   the one that runs off the piece.
+#   One side of the wing: the whole wing is twice this, the centre rib once.
+#   Units: the file's own, centimetres; areas cm2.
+# CHECKS: rib 1 is its section's area (gnuReflex, 0.11161 c2) plus 10 mm over its contour, 5312 cm2 against 5313.92; its holes are its section 4, 1186 cm2 against 1183.76; the upper surface is the program's own 3D surface (STL, 21.67 m2 whole wing) plus seam allowance.
+#
+# part	rib	pieces	gross_cm2	holes	holes_cm2	perimeter_cm
+rib	1	1	5313.92	9	1183.76	
+rib	2	1	5304.01	9	1181.46	
+rib	3	1	5274.34	9	1174.57	
+rib	4	1	5225.90	9	1163.31	
+rib	5	1	5157.72	9	1147.48	
+rib	6	1	5071.41	9	1127.45	
+rib	7	1	4966.24	9	1103.05	
+rib	8	1	4843.62	9	1074.61	
+rib	9	1	4704.64	9	1042.41	
+rib	10	1	4548.93	9	1006.35	
+rib	11	1	4378.20	9	966.84	
+rib	12	1	4193.09	9	924.05	
+rib	13	1	3994.40	9	878.18	
+rib	14	1	3783.78	9	829.62	
+rib	15	1	3561.57	9	778.46	
+rib	16	1	3329.70	9	725.17	
+rib	17	1	3088.58	9	669.86	
+rib	18	1	2828.09	9	610.26	
+rib	19	1	2548.32	9	546.44	
+rib	20	1	2256.60	9	480.13	
+rib	21	1	1962.64	9	413.62	
+rib	22	1	1670.73	9	347.94	
+rib	23	1	1384.62	9	284.02	
+rib	24	1	1107.00	9	222.57	
+rib	25	1	841.14	9	164.47	
+rib	26	1	126.89	0	0	
+trailing-edge mini-ribs		25	4762.86	100	553.36	
+upper surface, colour panels		52	118495.66	0	0.00	11614.36
+lower surface, colour panels		50	98717.85	0	0.00	10546.42
+upper surface, undivided		25	117193.80	0	0.00	
+lower surface, undivided		25	97496.00	0	0.00	
+full diagonal ribs		13	31868.25	38	3068.61	4765.53
+straps between ribs		70	11329.47	0	0.00	4204.56
+V-ribs between two ribs		15	13976.79	75	3536.18	1859.19
+rod pockets		50	9005.43	0	0.00	7459.57
+ribs and mini-ribs, perimeter						10754.56
+upper panel	1	1	6628.36	0	0.00	
+upper panel	2	1	6611.91	0	0.00	
+upper panel	3	1	6564.05	0	0.00	
+upper panel	4	1	6490.02	0	0.00	
+upper panel	5	1	6412.60	0	0.00	
+upper panel	6	1	6296.55	0	0.00	
+upper panel	7	1	6169.82	0	0.00	
+upper panel	8	1	6046.25	0	0.00	
+upper panel	9	1	5884.68	0	0.00	
+upper panel	10	1	5708.20	0	0.00	
+upper panel	11	1	5509.01	0	0.00	
+upper panel	12	1	5298.31	0	0.00	
+upper panel	13	1	5062.23	0	0.00	
+upper panel	14	1	4821.94	0	0.00	
+upper panel	15	1	4574.56	0	0.00	
+upper panel	16	1	4330.01	0	0.00	
+upper panel	17	1	4041.12	0	0.00	
+upper panel	18	1	3731.14	0	0.00	
+upper panel	19	1	3403.27	0	0.00	
+upper panel	20	1	3066.27	0	0.00	
+upper panel	21	1	2736.26	0	0.00	
+upper panel	22	1	2386.04	0	0.00	
+upper panel	23	1	2035.57	0	0.00	
+upper panel	24	1	1686.62	0	0.00	
+upper panel	25	1	1698.80	0	0.00	
+lower panel	1	1	5522.54	0	0.00	
+lower panel	2	1	5503.05	0	0.00	
+lower panel	3	1	5461.19	0	0.00	
+lower panel	4	1	5417.12	0	0.00	
+lower panel	5	1	5336.48	0	0.00	
+lower panel	6	1	5255.24	0	0.00	
+lower panel	7	1	5150.24	0	0.00	
+lower panel	8	1	5019.56	0	0.00	
+lower panel	9	1	4881.44	0	0.00	
+lower panel	10	1	4735.38	0	0.00	
+lower panel	11	1	4572.24	0	0.00	
+lower panel	12	1	4397.15	0	0.00	
+lower panel	13	1	4217.19	0	0.00	
+lower panel	14	1	4017.05	0	0.00	
+lower panel	15	1	3806.65	0	0.00	
+lower panel	16	1	3568.81	0	0.00	
+lower panel	17	1	3341.26	0	0.00	
+lower panel	18	1	3089.10	0	0.00	
+lower panel	19	1	2821.26	0	0.00	
+lower panel	20	1	2537.55	0	0.00	
+lower panel	21	1	2243.35	0	0.00	
+lower panel	22	1	1967.94	0	0.00	
+lower panel	23	1	1713.27	0	0.00	
+lower panel	24	1	1431.08	0	0.00	
+lower panel	25	1	1489.80	0	0.00	
+full diagonal, left	2	1	3582.53	3	343.04	
+full diagonal, right	3	1	3558.48	3	339.04	
+full diagonal, left	6	1	3471.23	3	331.25	
+full diagonal, right	7	1	3313.41	3	317.72	
+full diagonal, left	10	1	3172.58	3	302.83	
+full diagonal, right	11	1	2897.65	3	281.38	
+full diagonal, left	14	1	2704.62	3	258.51	
+full diagonal, right	15	1	2343.13	3	232.77	
+full diagonal, left	18	1	2113.88	3	203.56	
+full diagonal, right	19	1	1646.73	3	171.53	
+full diagonal, left	22	1	1374.47	3	134.77	
+full diagonal, right	23	1	884.29	2	70.62	
+full diagonal, left	25	1	805.26	3	81.58	
+strap, row 1	1	1	223.54	0	0.00	
+strap, row 1	2	1	222.67	0	0.00	
+strap, row 1	3	1	221.03	0	0.00	
+strap, row 1	4	1	219.12	0	0.00	
+strap, row 1	5	1	215.99	0	0.00	
+strap, row 1	6	1	212.58	0	0.00	
+strap, row 1	7	1	208.24	0	0.00	
+strap, row 1	8	1	203.24	0	0.00	
+strap, row 1	9	1	197.53	0	0.00	
+strap, row 1	10	1	191.72	0	0.00	
+strap, row 1	11	1	184.89	0	0.00	
+strap, row 1	12	1	177.92	0	0.00	
+strap, row 1	13	1	170.32	0	0.00	
+strap, row 1	14	1	162.25	0	0.00	
+strap, row 1	15	1	153.69	0	0.00	
+strap, row 1	16	1	144.34	0	0.00	
+strap, row 1	17	1	134.91	0	0.00	
+strap, row 1	18	1	124.71	0	0.00	
+strap, row 1	19	1	113.65	0	0.00	
+strap, row 1	20	1	102.25	0	0.00	
+strap, row 1	21	1	90.36	0	0.00	
+strap, row 1	22	1	78.79	0	0.00	
+strap, row 1	23	1	67.19	0	0.00	
+strap, row 1	24	1	55.62	0	0.00	
+strap, row 2	1	1	217.79	0	0.00	
+strap, row 2	2	1	216.91	0	0.00	
+strap, row 2	3	1	215.30	0	0.00	
+strap, row 2	4	1	213.59	0	0.00	
+strap, row 2	5	1	210.37	0	0.00	
+strap, row 2	6	1	207.18	0	0.00	
+strap, row 2	7	1	203.03	0	0.00	
+strap, row 2	8	1	197.76	0	0.00	
+strap, row 2	9	1	192.23	0	0.00	
+strap, row 2	10	1	186.49	0	0.00	
+strap, row 2	11	1	179.96	0	0.00	
+strap, row 2	12	1	173.07	0	0.00	
+strap, row 2	13	1	165.91	0	0.00	
+strap, row 2	14	1	158.03	0	0.00	
+strap, row 2	15	1	149.62	0	0.00	
+strap, row 2	16	1	140.12	0	0.00	
+strap, row 2	17	1	131.05	0	0.00	
+strap, row 2	18	1	121.15	0	0.00	
+strap, row 2	19	1	110.40	0	0.00	
+strap, row 2	20	1	99.25	0	0.00	
+strap, row 2	21	1	87.36	0	0.00	
+strap, row 2	22	1	76.17	0	0.00	
+strap, row 2	23	1	64.89	0	0.00	
+strap, row 3	1	1	218.85	0	0.00	
+strap, row 3	2	1	218.01	0	0.00	
+strap, row 3	3	1	216.39	0	0.00	
+strap, row 3	4	1	214.64	0	0.00	
+strap, row 3	5	1	211.41	0	0.00	
+strap, row 3	6	1	208.18	0	0.00	
+strap, row 3	7	1	204.05	0	0.00	
+strap, row 3	8	1	198.69	0	0.00	
+strap, row 3	9	1	193.20	0	0.00	
+strap, row 3	10	1	187.34	0	0.00	
+strap, row 3	11	1	180.88	0	0.00	
+strap, row 3	12	1	173.86	0	0.00	
+strap, row 3	13	1	166.74	0	0.00	
+strap, row 3	14	1	158.78	0	0.00	
+strap, row 3	15	1	150.33	0	0.00	
+strap, row 3	16	1	140.76	0	0.00	
+strap, row 3	17	1	131.65	0	0.00	
+strap, row 3	18	1	121.68	0	0.00	
+strap, row 3	19	1	110.90	0	0.00	
+strap, row 3	20	1	99.68	0	0.00	
+strap, row 3	21	1	87.69	0	0.00	
+strap, row 3	22	1	76.46	0	0.00	
+strap, row 3	23	1	65.11	0	0.00	
+piece between ribs, 11%	4	1	1097.22	5	278.44	
+piece between ribs, 39%	4	1	1266.80	5	322.10	
+piece between ribs, 72%	4	1	1238.26	5	314.39	
+piece between ribs, 11%	8	1	1024.39	5	259.60	
+piece between ribs, 39%	8	1	1181.43	5	299.86	
+piece between ribs, 72%	8	1	1150.55	5	291.44	
+piece between ribs, 11%	12	1	897.15	5	226.93	
+piece between ribs, 39%	12	1	1033.83	5	261.48	
+piece between ribs, 72%	12	1	1006.68	5	253.87	
+piece between ribs, 11%	16	1	734.28	5	185.51	
+piece between ribs, 39%	16	1	844.20	5	212.60	
+piece between ribs, 72%	16	1	818.71	5	204.99	
+piece between ribs, 11%	20	1	516.81	5	133.26	
+piece between ribs, 39%	20	1	590.51	5	149.29	
+piece between ribs, 72%	20	1	575.99	5	142.43	
+rod pocket, bloc 1	1	1	203.23	0	0.00	
+rod pocket, bloc 2	1	1	247.47	0	0.00	
+rod pocket, bloc 1	2	1	203.03	0	0.00	
+rod pocket, bloc 2	2	1	247.23	0	0.00	
+rod pocket, bloc 1	3	1	202.43	0	0.00	
+rod pocket, bloc 2	3	1	246.50	0	0.00	
+rod pocket, bloc 1	4	1	201.44	0	0.00	
+rod pocket, bloc 2	4	1	245.32	0	0.00	
+rod pocket, bloc 1	5	1	200.05	0	0.00	
+rod pocket, bloc 2	5	1	243.64	0	0.00	
+rod pocket, bloc 1	6	1	198.27	0	0.00	
+rod pocket, bloc 2	6	1	241.50	0	0.00	
+rod pocket, bloc 1	7	1	196.08	0	0.00	
+rod pocket, bloc 2	7	1	238.86	0	0.00	
+rod pocket, bloc 1	8	1	193.50	0	0.00	
+rod pocket, bloc 2	8	1	235.76	0	0.00	
+rod pocket, bloc 1	9	1	190.53	0	0.00	
+rod pocket, bloc 2	9	1	232.18	0	0.00	
+rod pocket, bloc 1	10	1	187.15	0	0.00	
+rod pocket, bloc 2	10	1	228.12	0	0.00	
+rod pocket, bloc 1	11	1	183.38	0	0.00	
+rod pocket, bloc 2	11	1	223.59	0	0.00	
+rod pocket, bloc 1	12	1	179.21	0	0.00	
+rod pocket, bloc 2	12	1	218.57	0	0.00	
+rod pocket, bloc 1	13	1	174.63	0	0.00	
+rod pocket, bloc 2	13	1	213.06	0	0.00	
+rod pocket, bloc 1	14	1	169.65	0	0.00	
+rod pocket, bloc 2	14	1	207.07	0	0.00	
+rod pocket, bloc 1	15	1	164.24	0	0.00	
+rod pocket, bloc 2	15	1	200.56	0	0.00	
+rod pocket, bloc 1	16	1	158.42	0	0.00	
+rod pocket, bloc 2	16	1	193.55	0	0.00	
+rod pocket, bloc 1	17	1	152.14	0	0.00	
+rod pocket, bloc 2	17	1	186.00	0	0.00	
+rod pocket, bloc 1	18	1	145.08	0	0.00	
+rod pocket, bloc 2	18	1	177.51	0	0.00	
+rod pocket, bloc 1	19	1	137.12	0	0.00	
+rod pocket, bloc 2	19	1	167.93	0	0.00	
+rod pocket, bloc 1	20	1	128.35	0	0.00	
+rod pocket, bloc 2	20	1	157.38	0	0.00	
+rod pocket, bloc 1	21	1	118.91	0	0.00	
+rod pocket, bloc 2	21	1	146.02	0	0.00	
+rod pocket, bloc 1	22	1	108.82	0	0.00	
+rod pocket, bloc 2	22	1	133.88	0	0.00	
+rod pocket, bloc 1	23	1	98.03	0	0.00	
+rod pocket, bloc 2	23	1	120.90	0	0.00	
+rod pocket, bloc 1	24	1	86.44	0	0.00	
+rod pocket, bloc 2	24	1	106.95	0	0.00	
+rod pocket, bloc 1	25	1	73.88	0	0.00	
+rod pocket, bloc 2	25	1	91.85	0	0.00	

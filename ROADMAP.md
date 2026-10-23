@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2479-test validation suite and a benchmark with regression budgets
+- [x] 2566-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -860,18 +860,91 @@ validation notes flagged.
       where the stabilo's own line is not found, its riser is assumed (the
       one carrying B), and UP's plans leave it undrawn.
 
+### Round of 2026-10-21: a second complete design
+
+- [x] **The Tuluaq-19 read exactly** — Crazy Bird's 19 m² design from
+      LEparagliding 3.25, with its own output and cutting file
+      (`data/reference/lep/`). It crashed the tool on loading: an anchor at
+      exactly 100% of chord missed in double precision, one at 0% put at the
+      wing's origin 4.4 m away, and a webbing riser read as a line made of
+      "daN". All three done as the program does them; then its 89 lines,
+      ribs, rods, holes, attitude and main parameters held to the printed
+      figures. It is in the picker beside the Swoop2. See `docs/tuluaq19.md`.
+- [x] **Both designs' cut parts measured** from their 2D cutting files
+      (`*-cut-parts.tsv`): every panel, rib, diagonal, strap, mini-rib and
+      pocket at cut size, the reference the panel development lacked.
+- [x] **The manifest listed none of the complete designs' files**, which
+      the build embeds and the suite reads; it lists them now, the audit
+      checks them, and the catalogue describes them.
+- [x] **The rib carries its load on radials from the line to the seam** —
+      straight rays from the tab to the upper seam, aimed by the line's own
+      pull in the rib's plane (read off the plan: −23° to +22° on the default
+      wing), shared by the cosine of each ray's angle as Flamant has it, cut
+      by the holes, with what a lopsided fan pulls across the line held by
+      the lower surface. It replaces a Whitmore band of 30° either side of
+      straight up. On their own ribs, holes and lines, 86 of the two built
+      designs' 88 loaded anchors pull inside a fan that reaches the seam 10 mm
+      clear of every hole, 24 to 67° wide as it works; the two that do not
+      are on tip ribs thinned to 1% and 10%. The openings now keep each
+      line's own fan clear, the Rib tab draws the fans, and the report gives
+      each line's pull, fan, reach and what the seam gets. See
+      `docs/rib-stress.md`.
+- [x] **An imported design's own panels** (`lepPanels`) — its surfaces
+      parted where the intake opens under the nose, cut wider than their
+      cells by its own skin tension (sections 31 and 5, read from the
+      program's source), run over the intakes its section 26 closes, with
+      its own seam allowances by edge. Every panel of both designs' cutting
+      files measured: within 0.07% on the Swoop2, 0.12% on the Tuluaq, and
+      0.03% in total, where the tool's own development was 4 to 8% off on
+      each surface. The interface cuts, nests, prints and bills them, and
+      cuts the ribs with the design's own allowance. See `docs/panels.md`.
+- [x] **The Tuluaq's D row read as its stabilo** — every line to a row
+      other than its riser's was taken for a stabilo line, and the load model
+      gives the stabilo no lift: the tenth of the load the design's program
+      puts on its D row, on the C riser, went nowhere. A row with no riser of
+      its own is now that row.
+
+### Round of 2026-10-22: what a design sews inside its cells
+
+- [x] **An imported design's internal structure as cut** (`lepStructure`)
+      — its full diagonals (one piece per rib and side over all its rows,
+      a parabolic cut-out between each pair of anchors), straps, pieces
+      between two ribs and rod pockets, built as its program builds them,
+      read from the program's own source. Every one of the 196 pieces in
+      the two cutting files is within a part in ten thousand of its file's.
+      The bill carries them — 11.87 m² on the Swoop2 and 10.48 on the
+      Tuluaq, where it had 3.9 and 5.5 — and the Diagonals DXF writes them.
+      The two program versions draw two of them differently, and each file
+      is held to its own. It found two things elsewhere: a lowered rib is
+      lowered before its twist for its surfaces and after for its anchors,
+      and a centre rib on the centreline is moved 0.01 out. See
+      `docs/internal-structure.md`.
+- [ ] **An imported design's trailing-edge mini-ribs** — 25 a side on the
+      Swoop2, 16 on the Tuluaq, 0.84 and 0.89 m² for the wing in their
+      files. The program cuts them from the section as it billows the cell
+      over it (its 6.12.0 and its ovalization), which is not yet reproduced;
+      the bill lists them as missing.
+- [x] **The H-rib builder read a strap's width as a whole width in
+      centimetres** — the Swoop2's type-11 straps are 2% of chord either side
+      of the anchor, as the program reads them: four times the width it built
+      at the root. It reads them the program's way now.
+- [x] **A label of ours** — the Swoop2's seventy straps were listed in its
+      cut-parts file as upper straps; they run along the lower surfaces at
+      the anchors.
+
 ## Phase 3 — construction detail
 
 - [x] **Rib stress and reinforcement reach** — at 1 g a 20 mm tab carries
       a real anchor load into bare rib cloth; at the 8 g case it does not, by
       a factor of four, so the model sizes how far the reinforcement must
       reach. `checkWingRibStress` runs it on a wing's own loads, each rib's
-      own depth at each anchor and the holes really cut: 56 mm at most on the
-      12-cell test wing, 6 mm on the default wing, 8 mm on the Swoop2, and no
-      rib needs tape to the seam. Two earlier accounts are corrected in
-      `docs/rib-stress.md`: one rested on an invented 260 N anchor load, the
-      next on a rib "a quarter of its chord" deep and a load path walked
-      along the chord.
+      own outline and each line's own pull, through the holes really cut: 80
+      mm at most on the 12-cell test wing, 8 mm on the default wing, 13 mm on
+      the Swoop2, 37 mm on the Tuluaq-19, and no rib needs tape to the seam.
+      Three earlier accounts are corrected in `docs/rib-stress.md`: one
+      rested on an invented 260 N anchor load, the next on a rib "a quarter
+      of its chord" deep and a load path walked along the chord, the third
+      on a fan standing straight up whatever the line did.
 
 - [x] **Cell intake geometry** — the opening checked against the
       stagnation point, which goes as the square of the angle above the

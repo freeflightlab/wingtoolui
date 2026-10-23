@@ -34,6 +34,7 @@
 
 import { readAoA, sectionData, lepRibs } from './lep.js';
 import { DEFAULT_LOAD_CASE } from './loads.js';
+import { developPanel } from './flatdev.js';
 
 /**
  * A LEparagliding `.txt` section: a name, four counts, then the points from the
@@ -97,16 +98,30 @@ export function lepRibTable(doc, { airfoils = {} } = {}) {
  * A point of a rib's section, placed in 3D the way LEparagliding places it
  * (its section 6 and 12.3): washin about RP, yaw about z_pos, dihedral, then
  * the rib's position. u and v in centimetres of this rib.
+ *
+ * A rib with a displacement (section 2: the program lowers a rib that
+ * carries no line) is lowered at one of two moments, and the program uses
+ * both. Its section 6 — the surfaces the panels are cut from — and the
+ * pieces of section 12 lower it BEFORE twisting it; its anchors and the
+ * rib's other marked points (12.3, 12.4) AFTER, under the author's own
+ * note to review it. A rib with washin moves `disp sin(washin)` along its
+ * chord between the two: up to 0.85 mm on the six lowered ribs of the
+ * Tuluaq-19. Before, unless `lowered: 'after'`. Lowered after for every
+ * point, as this did until the Tuluaq's diagonals were reproduced, its
+ * diagonals next to those ribs were up to 0.007% off their file's; lowered
+ * before, none is more than 0.0001%.
  */
-export function lepRibPoint(rib, u, v) {
+export function lepRibPoint(rib, u, v, { lowered = 'before' } = {}) {
   const c = rib.chord;
   const th = (rib.washin * Math.PI) / 180;
   const rz = (rib.rotZ * Math.PI) / 180;
   const b = (rib.beta * Math.PI) / 180;
   const rp = (rib.rp / 100) * c;
   const pos = (c * rib.zPos) / 100;
-  const u17 = (u - rp) * Math.cos(th) + v * Math.sin(th) + rp;
-  const v17 = (-u + rp) * Math.sin(th) + v * Math.cos(th) - rib.disp;
+  const disp = rib.disp ?? 0;
+  const vd = lowered === 'after' ? v : v - disp;
+  const u17 = (u - rp) * Math.cos(th) + vd * Math.sin(th) + rp;
+  const v17 = (-u + rp) * Math.sin(th) + vd * Math.cos(th) - (lowered === 'after' ? disp : 0);
   const w4 = -u17 * Math.sin(rz) + pos * Math.sin(rz);
   const u4 = u17 * Math.cos(rz) + pos * (1 - Math.cos(rz));
   const v4 = v17;
@@ -117,8 +132,29 @@ export function lepRibPoint(rib, u, v) {
 
 /**
  * The anchor at `pct` percent of chord on a rib's lower surface, in 3D.
- * Found as the program finds it: linear interpolation between the section's
- * own points, searching only the part after the intake.
+ * Found as the program finds it (its section 9.1): linear interpolation
+ * between the section's own points, searching only the part after the
+ * intake.
+ *
+ * Three details are the program's and not this tool's choice, and the
+ * Tuluaq-19 — the second complete design here — needs all three:
+ *
+ * - **The comparison is in single precision.** The program converts both
+ *   sides to `real` before comparing ("Please, don't compare directly two
+ *   double precision numbers !!!"). Compared in double precision, an anchor
+ *   at exactly 100% of chord — the Tuluaq's brakes — is a hair past the
+ *   trailing edge on some ribs (rib 13's chord is 170.21295102283997 cm, and
+ *   that times 100 over 100 is 170.21295102284; rib 6 is the same) and was
+ *   not found at all: the line geometry then crashed.
+ * - **The last segment that holds the station wins**, because the program's
+ *   loop does not stop at the first.
+ * - **An anchor no segment holds stays at the section's origin.** The
+ *   program's arrays start at zero and nothing overwrites them, so an anchor
+ *   ahead of the intake — the Tuluaq's tip rib has its A at 0% — sits at
+ *   (0, 0) of the section: the leading edge. This returned nothing, and the
+ *   caller put the anchor at the origin of the WING, 4.4 m away.
+ *
+ * `found` on the result's `lepAnchor` says which of the two it was.
  */
 export function lepAnchorPoint(rib, pct) {
   const s = rib.section;
@@ -127,13 +163,18 @@ export function lepAnchorPoint(rib, pct) {
   const target = (c * pct) / 100;
   const U = s.points.map((p) => c * p[0]);
   const V = s.points.map((p) => c * p[1] * rib.thickness);
+  const f = Math.fround;
+  let hit = null;
   for (let j = s.extrados - 1; j < s.points.length - 1; j++) {
-    if (U[j] <= target && target <= U[j + 1] && U[j + 1] !== U[j]) {
+    if (f(U[j]) <= f(target) && f(U[j + 1]) >= f(target) && U[j + 1] !== U[j]) {
       const m = (V[j + 1] - V[j]) / (U[j + 1] - U[j]);
-      return lepRibPoint(rib, target, V[j] + m * (target - U[j]));
+      hit = [target, V[j] + m * (target - U[j])];
     }
   }
-  return null;
+  // Lowered after the twist, as the program places its anchors (its 12.3).
+  const pt = hit ? lepRibPoint(rib, hit[0], hit[1], { lowered: 'after' }) : lepRibPoint(rib, 0, 0, { lowered: 'after' });
+  pt.lepAnchor = { found: !!hit, pct };
+  return pt;
 }
 
 /** Paths of section 9 or 10: levels, (level, order) pairs, final row, rib. */
@@ -171,6 +212,9 @@ export function lepLineGeometry(doc, { airfoils = {} } = {}) {
   const ribs = table.ribs;
   const k = table.scale;
   const problems = [];
+  // What the program does that a reader might not expect, said rather than
+  // treated as an error: an anchor it leaves at the section's origin.
+  const notes = [];
   if (table.missingAirfoils.length) {
     return {
       ok: false,
@@ -242,7 +286,12 @@ export function lepLineGeometry(doc, { airfoils = {} } = {}) {
     if (!anchorCache.has(key)) {
       const r = rib(i);
       const pt = r ? lepAnchorPoint(r, r.anchorsPct[j - 1] ?? 0) : null;
-      if (!pt) problems.push(`rib ${i} row ${j}: anchor not found on the lower surface`);
+      if (!pt) problems.push(`rib ${i} row ${j}: no such rib`);
+      else if (!pt.lepAnchor.found) {
+        notes.push(`rib ${i} row ${j}: ${pt.lepAnchor.pct}% of chord is ahead of the intake, where `
+          + 'the program does not look; it leaves the anchor at the section\'s origin, the leading edge, '
+          + 'and so does this');
+      }
       anchorCache.set(key, pt || [0, 0, 0]);
     }
     return anchorCache.get(key);
@@ -345,9 +394,12 @@ export function lepLineGeometry(doc, { airfoils = {} } = {}) {
 
   // The brakes, from the top of the last riser (section 14 of the program).
   const brakeAnchor = (q) => {
-    const at = (i) => {
+    // `neighbour`: the rib after a fractional brake point. The program
+    // (its 5.1.8+) gives that rib a brake station of 100% when it has none.
+    const at = (i, neighbour = false) => {
       const r = rib(i);
-      let pt = lepAnchorPoint(r, r.anchorsPct[5] ?? 0);
+      const pct = r.anchorsPct[5] ?? 0;
+      let pt = lepAnchorPoint(r, neighbour && pct === 0 ? 100 : pct);
       // Brake distribution: extra length along the arc normal, by span.
       const s = (r.x / ribs[ribs.length - 1].x) * 100;
       let extra = 0;
@@ -365,7 +417,7 @@ export function lepLineGeometry(doc, { airfoils = {} } = {}) {
     };
     const a = at(q.rib);
     if (!q.ribFraction || q.rib >= ribs.length) return a;
-    const b = at(q.rib + 1);
+    const b = at(q.rib + 1, true);
     return a.map((v, i) => (1 - q.ribFraction) * v + q.ribFraction * b[i]);
   };
   const brakeAction = (ps) => {
@@ -460,9 +512,16 @@ export function lepLineGeometry(doc, { airfoils = {} } = {}) {
   // (47 cm, two 12 cm `p` loops, 5 mm) is listed at 2847.06 mm2:
   // 470 x 5 + 240 x 5 x 0.41421 = 2847.06. Every `s` line there is its
   // full looped length by its diameter.
+  //
+  // And a webbing riser (section `r`) is counted without its loops at all —
+  // the program's 14.9, "case r don't count loops": the Tuluaq's 12 mm
+  // riser is 5640 mm2 there, 470 x 12. Counted with its loops it put the
+  // total 4.7% over the program's printed 0.363 m2.
   const P_LOOP = Math.SQRT2 - 1;
-  const frontalCm = (l) => l.cutLength
-    + 2 * loopOf(l) * (l.material?.loopKind === 'p' ? P_LOOP : 1);
+  const frontalCm = (l) => {
+    if (l.level === 1 && l.material?.section === 'rectangular') return l.cutLength;
+    return l.cutLength + 2 * loopOf(l) * (l.material?.loopKind === 'p' ? P_LOOP : 1);
+  };
   totals.lineAreaM2 = 2 * sum(lines, (l) => (frontalCm(l) / 100)
     * ((l.material?.diameterMM ?? 0) / 1000));
   totals.byType = {};
@@ -496,6 +555,7 @@ export function lepLineGeometry(doc, { airfoils = {} } = {}) {
     lines,
     totals,
     problems,
+    notes,
   };
 }
 
@@ -507,18 +567,29 @@ export function lepLineTypes(doc) {
   const n = parseInt(s[1], 10);
   for (const l of s.slice(2, 2 + n)) {
     // "2  c  1.90    Line275   275 daN  s_dyneem    2.26   g   s 12. cm  1"
+    // "1  r  12.  2.5 Riser   1000 daN  aramid      15.0   g   s 12. cm 7"
+    //
+    // The section is `c` for a round line, one dimension, and `r` for a
+    // rectangular one — webbing — with two: width, then thickness. Read as
+    // a round line, the Tuluaq's webbing riser came out labelled "2.5", made
+    // of "daN" and weighing nothing.
     const f = l.split(/\s+/);
+    const rect = f[1] === 'r';
+    const o = rect ? 1 : 0;
     out.set(Number(f[0]), {
       type: Number(f[0]),
+      section: rect ? 'rectangular' : 'round',
+      // The frontal size: a round line's diameter, a webbing's width.
       diameterMM: Number(f[2]),
-      label: f[3],
-      strengthDaN: Number(f[4]),
-      material: f[6],
-      gramsPerMetre: Number(f[7]),
+      thicknessMM: rect ? Number(f[3]) : null,
+      label: f[3 + o],
+      strengthDaN: Number(f[4 + o]),
+      material: f[6 + o],
+      gramsPerMetre: Number(f[7 + o]),
       // How the loop is made: `s` or `p`. The program weighs both alike but
       // gives a `p` loop less frontal area (see the totals).
-      loopKind: f[9],
-      loopCm: Number(f[10]),
+      loopKind: f[9 + o],
+      loopCm: Number(f[10 + o]),
     });
   }
   return out;
@@ -552,13 +623,22 @@ export function lepPlanForTool(geom, { ribOffset = 1 } = {}) {
   const planRow = (l) => (l.brake ? 'K' : l.letter);
   const TOOL_LEVEL = { 2: 'main', 3: 'middle', 4: 'upper' };
 
-  // Anchor numbering per row, spanwise, so `A1` is the innermost A line. A
-  // line that ends on a row other than its riser's is a stabilo line.
+  // Anchor numbering per row, spanwise, so `A1` is the innermost A line.
+  //
+  // A line from one riser to a row that has a riser of its own is a stabilo
+  // line: the Swoop2's C lines to the A and B anchors of its tip. A row with
+  // no riser of its own is simply that row, on the riser it hangs from — the
+  // Tuluaq-19's D row is on its C riser. Every line to a row other than its
+  // riser's was taken for a stabilo line, which filed the Tuluaq's whole D
+  // row under the stabilo, and the load model, which gives the stabilo none
+  // of the lift, dropped the tenth of the wing's load the design's own
+  // program puts on it.
+  const riserRows = new Set((geom.riserTops ?? []).map((t) => t.letter));
   const anchorsOf = (paths) => paths.map((q) => `${q.row}:${q.rib}`);
   const anchorIndex = new Map();
   const terminals = geom.lines.filter((x) => x.terminal).map((l) => {
     const q = l.paths[0];
-    const stab = !l.brake && LETTER(q.row) !== l.letter;
+    const stab = !l.brake && LETTER(q.row) !== l.letter && riserRows.has(LETTER(q.row));
     return { l, q, row: l.brake ? 'K' : stab ? 'S' : LETTER(q.row) };
   });
   terminals.sort((a, b) => (a.row < b.row ? -1 : a.row > b.row ? 1 : (a.q.rib - b.q.rib) || (a.q.row - b.q.row)));
@@ -877,6 +957,9 @@ export function lepJoncs(doc, table) {
         out.joncs.push({
           bloc: b.bloc, type: b.type, rib: i, ribIndex: i - 1,
           lengthCm: j.length, points: j.points,
+          // The group's four pocket widths, millimetres: what the rod's
+          // pocket is cut from (lepStructure).
+          pocket: g.sjo,
         });
       }
     }
@@ -950,6 +1033,410 @@ function lepJoncPolyline(rib, type, ex, inn) {
     length += Math.hypot(points[j][0] - points[j - 1][0], points[j][1] - points[j - 1][1]);
   }
   return { length, points };
+}
+
+/* ------------------------------------------------------------ panels -- */
+
+/** Section 6: the design's seam allowances, millimetres. */
+export function lepSeamAllowances(doc) {
+  const s = sectionData(doc, 6).map((l) => l.trim().split(/\s+/).map(Number));
+  if (s.length < 4 || !s.slice(0, 4).every((r) => Number.isFinite(r[0]))) return null;
+  return {
+    upper: { side: s[0][0], front: s[0][1], back: s[0][2] },
+    lower: { side: s[1][0], front: s[1][1], back: s[1][2] },
+    rib: s[2][0],
+    vrib: s[3][0],
+  };
+}
+
+/**
+ * How much wider than its cell each panel is cut: the design's skin tension.
+ *
+ * Section 31, the newer module, when the file switches it on, by groups of
+ * ribs; otherwise section 5's six points for every rib. Each point is a
+ * position along the panel and an over-width in per cent of the cell's own
+ * width, added to EACH side: `{ upper: [[x, pct], ...], lower: [...] }` by
+ * rib number, 1-based as the file numbers them.
+ */
+export function lepSkinTension(doc) {
+  const rows = (n) => sectionData(doc, n).map((l) => l.trim().split(/\s+/).map(Number));
+  const s31 = rows(31);
+  const byRib = new Map();
+  let mode = 'classic';
+  if (s31.length && s31[0][0] === 1) {
+    mode = 'groups';
+    const groups = s31[1][0];
+    let p = 2;
+    for (let g = 0; g < groups && p < s31.length; g++) {
+      const [, from, to, count] = s31[p++];
+      const pts = s31.slice(p, p + count);
+      p += count;
+      const table = {
+        upper: pts.map((r) => [r[1], r[2]]),
+        lower: pts.map((r) => [r[3], r[4]]),
+      };
+      for (let i = from; i <= to; i++) byRib.set(i, table);
+    }
+  } else {
+    // Section 5: a label line, then the six points.
+    const pts = rows(5).filter((r) => r.length >= 4 && r.every(Number.isFinite)).slice(0, 6);
+    const table = { upper: pts.map((r) => [r[0], r[1]]), lower: pts.map((r) => [r[2], r[3]]) };
+    byRib.set('*', table);
+  }
+  return {
+    mode,
+    /** The table for a rib, by its 1-based number. */
+    of(rib) {
+      return byRib.get(rib) ?? byRib.get('*') ?? null;
+    },
+  };
+}
+
+/**
+ * How each cell's air intake is closed: section 26's "glue vents", or, when
+ * the file does not use them, section 2's open flag.
+ *
+ * By the number of the rib on the cell's outboard side, as the program keys
+ * them: `{ type, p1, p2 }`. Type 4 is an intake whose front part the upper
+ * panel closes, down to `1 - p/100` of the intake at the inboard (p1) and
+ * outboard (p2) rib; -4 one whose rear part the lower panel closes, `p/100`
+ * of it; -1 a cell closed altogether, the lower panel run forward over the
+ * whole intake; 0 and 1 an open intake.
+ */
+export function lepVents(doc) {
+  const rows = sectionData(doc, 26).map((l) => l.trim().split(/\s+/).map(Number));
+  const byRib = new Map();
+  if (rows.length && rows[0][0] === 1) {
+    for (const r of rows.slice(1)) {
+      if (!Number.isFinite(r[0]) || !Number.isFinite(r[1])) continue;
+      byRib.set(r[0], { type: r[1], p1: Number.isFinite(r[2]) ? r[2] : 0, p2: Number.isFinite(r[3]) ? r[3] : 0 });
+    }
+    // The program sets the central cell's two sides alike.
+    const first = byRib.get(1);
+    if (first && Math.abs(first.type) >= 4) first.p2 = first.p1;
+    return { mode: 'glue', of: (rib) => byRib.get(rib) ?? { type: 1, p1: 0, p2: 0 } };
+  }
+  for (const l of sectionData(doc, 2)) {
+    const f = l.trim().split(/\s+/);
+    const rib = Number(f[0]);
+    const open = Number(f[4]);
+    if (Number.isFinite(rib) && Number.isFinite(open)) byRib.set(rib, { type: open === 0 ? -1 : 1, p1: 0, p2: 0 });
+  }
+  return { mode: 'classic', of: (rib) => byRib.get(rib) ?? { type: 1, p1: 0, p2: 0 } };
+}
+
+/** Linear interpolation in a table of [x, y] points, ordered or not. */
+function tableAt(table, x) {
+  const t = table.slice().sort((a, b) => a[0] - b[0]);
+  if (x <= t[0][0]) return t[0][1];
+  for (let k = 1; k < t.length; k++) {
+    if (x <= t[k][0] * 1.001) {
+      const span = t[k][0] - t[k - 1][0];
+      return span > 0 ? t[k - 1][1] + ((x - t[k - 1][0]) / span) * (t[k][1] - t[k - 1][1]) : t[k][1];
+    }
+  }
+  return t[t.length - 1][1];
+}
+
+function cumulative(poly) {
+  const out = [0];
+  for (let k = 1; k < poly.length; k++) {
+    out.push(out[k - 1] + Math.hypot(poly[k][0] - poly[k - 1][0], poly[k][1] - poly[k - 1][1]));
+  }
+  return out;
+}
+
+/**
+ * Each point of an edge moved out of the panel by `d[k]`, square to the
+ * segment before it — the nearest that has a length, where the edge has
+ * closed to a point.
+ */
+function offsetEdge(edge, other, d) {
+  const real = (k) => Math.hypot(edge[k][0] - edge[k - 1][0], edge[k][1] - edge[k - 1][1]) > 1e-6;
+  return edge.map((p, k) => {
+    let j = Math.max(1, k);
+    while (j > 1 && !real(j)) j--;
+    while (j < edge.length - 1 && !real(j)) j++;
+    const a = edge[j - 1];
+    const b = edge[j];
+    const tx = b[0] - a[0];
+    const ty = b[1] - a[1];
+    const tl = Math.hypot(tx, ty) || 1;
+    let nx = -ty / tl;
+    let ny = tx / tl;
+    // Out of the panel: away from the other edge.
+    if (nx * (other[k][0] - p[0]) + ny * (other[k][1] - p[1]) > 0) { nx = -nx; ny = -ny; }
+    return [p[0] + nx * d[k], p[1] + ny * d[k]];
+  });
+}
+
+/**
+ * The design's own panels, as its program cuts them.
+ *
+ * Three things the tool's own panels do differently, each the program's
+ * and not a choice:
+ *
+ * - **Where the surfaces part.** The upper panel (the extrados) runs from
+ *   the trailing edge over the top, round the nose and down to where the
+ *   intake opens; the lower (the intrados) from where it closes to the
+ *   trailing edge. The opening between is no panel's.
+ * - **How much wider than its cell a panel is cut** — the design's skin
+ *   tension, so the sail can billow (`lepSkinTension`). Over-width at each
+ *   point, per side, is the table's per cent of the cell's width at the
+ *   middle point of that surface, at a position along the edge: from the
+ *   front end on the upper panel, from the trailing edge on the lower — the
+ *   program measures the two from opposite ends — and on the lower panel's
+ *   right edge it is the NEXT cell's width the per cent is of. Every edge
+ *   point moves out square to the segment before it, as its `puntslat`
+ *   moves them.
+ * - **Its own seam allowances** (`lepSeamAllowances`): the sides, the front
+ *   end and the trailing-edge end of each surface.
+ * - **Its own intakes** (`lepVents`): where a cell's intake is partly or
+ *   wholly closed, the panel that closes it runs on over the intake, the
+ *   upper one down from its front or the lower one forward from its rear,
+ *   to where the design says at each rib.
+ *
+ * Returns, for each cell of the half wing and each surface, the developed
+ * sewing outline (`panel`: left and right edges, front first, metres) and
+ * the cut outline with its allowances (`cut`), and both areas.
+ */
+export function lepPanels(doc, table) {
+  const ribs = table.ribs;
+  const skin = lepSkinTension(doc);
+  const vents = lepVents(doc);
+  const allow = lepSeamAllowances(doc) ?? {
+    upper: { side: 0, front: 0, back: 0 }, lower: { side: 0, front: 0, back: 0 },
+  };
+  const out = [];
+  const problems = [];
+
+  // One surface of one rib in 3D, metres, front end first. A mirrored rib
+  // is the rib on the other side of the centreline.
+  const at3 = (rib, q) => {
+    const p = lepRibPoint(rib.of ?? rib, rib.chord * q[0], rib.chord * q[1] * rib.thickness).map((v) => v / 100);
+    if (rib.mirror) p[0] = -p[0];
+    return p;
+  };
+  const surfaceOf = (rib, surface) => {
+    const s = rib.section;
+    const P = s.points;
+    const idx = [];
+    if (surface === 'upper') {
+      for (let j = s.extrados - 1; j >= 0; j--) idx.push(j);
+    } else {
+      for (let j = s.extrados + s.intake - 2; j < P.length; j++) idx.push(j);
+    }
+    return idx.map((j) => at3(rib, P[j]));
+  };
+  // Points along a rib's intake, from where it opens (0) to where it closes
+  // (1), at `count` fractions of its length between `from` and `to`.
+  const intakeRun = (rib, from, to, count) => {
+    const s = rib.section;
+    const run = s.points.slice(s.extrados - 1, s.extrados + s.intake - 1);
+    const d = [0];
+    for (let k = 1; k < run.length; k++) {
+      d.push(d[k - 1] + Math.hypot(run[k][0] - run[k - 1][0], run[k][1] - run[k - 1][1]));
+    }
+    const total = d[d.length - 1] || 1;
+    const alongIntake = (f) => {
+      const target = f * total;
+      let k = 1;
+      while (k < run.length - 1 && d[k] < target) k++;
+      const g = (target - d[k - 1]) / ((d[k] - d[k - 1]) || 1);
+      return [run[k - 1][0] + g * (run[k][0] - run[k - 1][0]), run[k - 1][1] + g * (run[k][1] - run[k - 1][1])];
+    };
+    const out = [];
+    for (let k = 0; k < count; k++) out.push(at3(rib, alongIntake(from + ((to - from) * k) / Math.max(1, count - 1))));
+    return out;
+  };
+  // How far a panel runs on over a cell's intake, as a fraction of the
+  // intake at each of its ribs: the upper from where the intake opens, the
+  // lower from where it closes.
+  const overIntake = (cellRight, surface) => {
+    const v = vents.of(cellRight);
+    if (surface === 'upper') {
+      return v.type >= 4 && v.type <= 6 ? [1 - v.p1 / 100, 1 - v.p2 / 100] : [0, 0];
+    }
+    if (v.type === -1) return [1, 1];
+    return v.type <= -4 && v.type >= -6 ? [v.p1 / 100, v.p2 / 100] : [0, 0];
+  };
+  const unread = new Set();
+  // The width the over-width is a per cent of: the cell at the middle point
+  // of the surface, as the program numbers its points.
+  const midIndex = (s, surface) => (surface === 'upper'
+    ? (s.extrados - 1) - (Math.trunc(s.extrados / 2) - 1)
+    : (Math.trunc((s.extrados + s.intake - 1 + s.points.length) / 2) - 1) - (s.extrados + s.intake - 2));
+
+  // A design with a cell on the centreline, rather than a rib, has one more
+  // panel: between its first rib and that rib's mirror, cut once.
+  // The program's own test: a first rib at 0.01 or more along the span,
+  // before the wing is scaled (its `cencell`). Not the rib's projected
+  // position, which the program moves 0.01 off the centreline itself.
+  const centre = ribs.length && ribs[0].section && ribs[0].x / (table.scale || 1) >= 0.01;
+  const pairs = [];
+  if (centre) pairs.push([{ ...ribs[0], of: ribs[0], mirror: true }, ribs[0], 0]);
+  for (let i = 0; i < ribs.length - 1; i++) pairs.push([ribs[i], ribs[i + 1], i + 1]);
+
+  const developed = [];
+  for (const [a, b, cellNo] of pairs) {
+    if (!a.section || !b.section || a.section.points.length !== b.section.points.length) {
+      problems.push(`cell ${cellNo}: its ribs have no section, or different ones`);
+      developed.push(null);
+      continue;
+    }
+    // Ribs and rows are numbered from 1, the cell by the rib inboard of it.
+    const cell = { cellNo, centre: cellNo === 0 };
+    const vent = vents.of(cellNo + 1);
+    if (Math.abs(vent.type) === 5 || Math.abs(vent.type) === 6 || vent.type === -2 || vent.type === -3) {
+      unread.add(vent.type);
+    }
+    for (const surface of ['upper', 'lower']) {
+      let L = surfaceOf(a, surface);
+      let R = surfaceOf(b, surface);
+      // Run on over the intake, ahead of the panel's own front end.
+      const [fa, fb] = overIntake(cellNo + 1, surface);
+      const extra = fa > 0 || fb > 0 ? a.section.intake : 0;
+      if (extra) {
+        const K = extra;
+        const ext = (rib, f) => (surface === 'upper'
+          ? intakeRun(rib, 0, f, K + 1).slice(1).reverse()
+          : intakeRun(rib, 1 - f, 1, K + 1).slice(0, K));
+        L = ext(a, fa).concat(L);
+        R = ext(b, fb).concat(R);
+      }
+      const dev = developPanel(L, R);
+      const m = midIndex(a.section, surface) + extra;
+      cell[surface] = {
+        dev, extra, width: Math.hypot(dev.right[m][0] - dev.left[m][0], dev.right[m][1] - dev.left[m][1]),
+      };
+    }
+    developed.push(cell);
+  }
+
+  for (let i = 0; i < developed.length; i++) {
+    const cell = developed[i];
+    if (!cell) continue;
+    for (const surface of ['upper', 'lower']) {
+      const { dev, width, extra } = cell[surface];
+      const tLeft = skin.of(Math.max(1, cell.cellNo))?.[surface];
+      const tRight = skin.of(cell.cellNo + 1)?.[surface];
+      // The lower panel's right edge: the next cell's width, as the program has it.
+      const widthRight = surface === 'lower' ? (developed[i + 1]?.lower.width ?? width) : width;
+      // Measured along the panel's own surface, from its own front end: the
+      // run over the intake ahead of it takes the value at that end.
+      const over = (edge, tab, w) => {
+        if (!tab || !tab.length) return edge.map(() => 0);
+        const own = edge.slice(extra);
+        const s = cumulative(own);
+        const L = s[s.length - 1] || 1;
+        const v = s.map((d) => {
+          const x = surface === 'upper' ? (100 * d) / L : 100 * (1 - d / L);
+          return (w * tableAt(tab, x)) / 100;
+        });
+        return edge.slice(0, extra).map(() => v[0]).concat(v);
+      };
+      const vL = over(dev.left, tLeft, width);
+      const vR = over(dev.right, tRight, widthRight);
+      const sewL = offsetEdge(dev.left, dev.right, vL);
+      const sewR = offsetEdge(dev.right, dev.left, vR);
+      const A = allow[surface];
+      // The cut line: every edge of the sewing outline moved out by its own
+      // allowance — the sides, the front end (round an intake it closes, the
+      // edge across the intake) and the trailing edge — corners mitred.
+      const sewing = sewL.concat(sewR.slice().reverse());
+      const n = sewL.length;
+      const kinds = sewing.map((_, k) => (k < n - 1 ? A.side : k === n - 1 ? A.back
+        : k < 2 * n - 1 ? A.side : A.front));
+      const cut = offsetOutline(sewing, kinds.map((mm) => mm / 1000));
+      out.push({
+        cell: cell.cellNo,
+        ...(cell.centre ? { centre: true } : {}),
+        surface,
+        // The sewing outline: what the tool's own panels are, with the cut
+        // line round it.
+        panel: {
+          left: sewL, right: sewR, seamLengths: dev.seamLengths,
+          cut: { left: cut.slice(0, n), right: cut.slice(n).reverse() },
+        },
+        developed: dev,
+        cut,
+        widthM: width,
+        areaM2: shoelace(sewing),
+        developedAreaM2: shoelace(dev.left.concat(dev.right.slice().reverse())),
+        cutAreaM2: shoelace(cut),
+      });
+    }
+  }
+
+  const sum = (surface, key) => out.filter((p) => p.surface === surface).reduce((t, p) => t + p[key], 0);
+  return {
+    ok: problems.length === 0,
+    problems,
+    panels: out,
+    skin: skin.mode,
+    vents: vents.mode,
+    // Intake closures drawn as a straight edge where the design has an arc
+    // or an ellipse, or a shape this does not draw at all.
+    notReproduced: [...unread].map((t) => `intake type ${t}`),
+    allowances: allow,
+    // One side of the wing.
+    totals: {
+      upper: { developedM2: sum('upper', 'developedAreaM2'), sewnM2: sum('upper', 'areaM2'), cutM2: sum('upper', 'cutAreaM2') },
+      lower: { developedM2: sum('lower', 'developedAreaM2'), sewnM2: sum('lower', 'areaM2'), cutM2: sum('lower', 'cutAreaM2') },
+    },
+  };
+}
+
+/**
+ * A closed outline with each edge moved out by its own distance: `d[k]` for
+ * the edge from point k to the next. Each corner goes where the offsets of
+ * the edges either side of it meet — passing over edges of no length, where
+ * a panel's edge has closed to a point — held to four times the larger
+ * distance on a corner too sharp to mitre. One point out for each point in,
+ * so the edges can be split apart again.
+ */
+function offsetOutline(pts, d) {
+  const n = pts.length;
+  let area = 0;
+  for (let i = 0, j = n - 1; i < n; j = i++) area += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  const sgn = area > 0 ? 1 : -1;     // outward is to the right of a counter-clockwise walk
+  const edges = pts.map((a, k) => {
+    const b = pts[(k + 1) % n];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    // An edge of a micron or less is an edge that has closed to a point:
+    // where a panel runs over an intake at one rib and not the other, its
+    // edge on the other is a run of points the development leaves a hair
+    // apart, and their directions are noise.
+    if (len < 1e-6) return null;
+    const t = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+    return { p: [a[0] + sgn * t[1] * d[k], a[1] - sgn * t[0] * d[k]], t, d: d[k] };
+  });
+  if (edges.every((e) => !e)) return pts.slice();
+  return pts.map((pk, k) => {
+    let ia = (k - 1 + n) % n;
+    while (!edges[ia]) ia = (ia - 1 + n) % n;
+    let ib = k;
+    while (!edges[ib]) ib = (ib + 1) % n;
+    const A = edges[ia];
+    const B = edges[ib];
+    const den = A.t[0] * B.t[1] - A.t[1] * B.t[0];
+    // B.p is the offset of B's first point, which is this one or a copy of it.
+    let q = B.p;
+    if (Math.abs(den) > 1e-9) {
+      const s = ((B.p[0] - A.p[0]) * B.t[1] - (B.p[1] - A.p[1]) * B.t[0]) / den;
+      q = [A.p[0] + s * A.t[0], A.p[1] + s * A.t[1]];
+    }
+    const lim = 4 * Math.max(A.d, B.d);
+    const off = Math.hypot(q[0] - pk[0], q[1] - pk[1]);
+    if (off > lim && off > 0) q = [pk[0] + ((q[0] - pk[0]) * lim) / off, pk[1] + ((q[1] - pk[1]) * lim) / off];
+    return q;
+  });
+}
+
+function shoelace(pts) {
+  let a = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  return Math.abs(a / 2);
 }
 
 /**

@@ -41,18 +41,19 @@ others nonsense — **type 16 referenced rib 100 on a 26-rib half wing**, and
 type 15 had a 60 cm "width". They are different records sharing a section. A
 type-16 end is a rib and a chord percentage (rib 4 at 11% to rib 5 at 11%);
 the 100 was a percentage. A type-15 row, `15  25 3  1 0  60.0  28.0  85.  2.`,
-is rib 25, row 3, and a left/right flag; its four shape numbers are kept as
-written, not interpreted.
+is rib 25, row 3, and a left/right flag, then its shape: the angles at which
+it rises to the next rib from its first and last anchors, the depth of the
+cut-out between anchors, and the width of cloth at each.
 
-What the interface does with them, said on loading the Swoop2: the 39
-diagonals are built where the file puts them, and the rest are listed —
-"Not reproduced: 70 straps between adjacent ribs, 15 pieces between two ribs
-(section 12)." The straps go through the H-rib builder in `vribs.js` in the
-suite, 3054 cm² a side on the Swoop2's own ribs, but not in the interface:
-the file gives which ribs, which row and how wide, and how high in the cell a
-strap sits is this tool's assumption, and a cut file with an assumed height in
-it would be worse than a list. The fifteen pieces between two ribs are exactly the fifteen top straps
-that the diagonals' statics asks for, pair for pair.
+On loading the Swoop2 the interface now cuts every one of them as its
+program does, piece for piece to its cutting file (`docs/internal-structure.md`),
+and the import note lists what that leaves: its trailing-edge mini-ribs.
+The straps run along the two ribs' lower surfaces at the anchors, 2% of
+chord either side. The fifteen pieces between two ribs sit under the upper
+surface, at height 100 — exactly the fifteen top straps that the diagonals'
+statics asks for, pair for pair. The H-rib builder in `vribs.js` takes the
+file's straps too, in the suite, now at the width the program reads; it
+models a strap of its own height in the cell, which is not the design's.
 
 ### I wrote the builder twice
 

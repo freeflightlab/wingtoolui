@@ -20,9 +20,12 @@
  * Holes there weaken exactly the part that shapes the intake.
  *
  * **Load paths from the anchors.** A line anchor pulls on the rib, and that
- * load has to reach the sail. The material directly above an anchor is
- * structure, not spare weight, and a hole placed across that path is the
- * classic way to build a rib that fails at its tabs.
+ * load has to reach the sail. Cloth only pulls, so it goes along straight
+ * rays from the tab to the upper seam, fanned round the line's own pull
+ * (`ribstress.js`), and a hole placed across them is the classic way to
+ * build a rib that fails at its tabs. So each anchor keeps a disc round its
+ * tab and a fan of rays to the seam, aimed the way its line pulls — the A
+ * lines lean forward and the D lines aft — rather than a band straight up.
  *
  * **Webs between holes.** Two holes separated by a few millimetres of fabric
  * are one big hole with a decorative strip through it.
@@ -42,8 +45,15 @@ export const DEFAULT_HOLE_RULES = {
   toTE: 0.88,            // nor behind this: trailing edge is thin and sewn
   // Fraction of local thickness left as a band at each surface.
   surfaceMargin: 0.22,
-  // Clear of an anchor by this fraction of chord, either side.
+  // Clear of an anchor by this fraction of chord, either side: the tab and
+  // the reinforcement round it.
   anchorClearance: 0.035,
+  // And clear of the rays its load takes to the upper seam: this many
+  // degrees either side of the line's pull, and `fanClearanceM` more. The
+  // two built designs here leave their fans 24 to 67 degrees wide as they
+  // work; 20 either side is 38.
+  fanHalfAngleDeg: 20,
+  fanClearanceM: 0.010,
   // Minimum fabric left between two holes, as a fraction of chord.
   webWidth: 0.030,
   // Smallest hole worth cutting; below this the seam work costs more than
@@ -66,7 +76,7 @@ export const DEFAULT_HOLE_RULES = {
  * and the DXF rib export use, so a hole drawn on screen is the hole that
  * gets cut.
  */
-export function buildRibHoles(rib, airfoil, rules = {}, { rods = null } = {}) {
+export function buildRibHoles(rib, airfoil, rules = {}, { rods = null, pulls = null } = {}) {
   const R = { ...DEFAULT_HOLE_RULES, ...rules };
   const chord = rib.chord;
   // Rods on this rib, as they lie in its plane (metres): the openings are
@@ -79,6 +89,19 @@ export function buildRibHoles(rib, airfoil, rules = {}, { rods = null } = {}) {
   // Rib profile in its own plane: chordwise x from the leading edge, and the
   // upper and lower ordinates.
   const prof = ribProfile(rib);
+
+  // Each anchor's fan: from the tab, round the way its line pulls (`pulls`,
+  // degrees from the rib's own up, positive aft, by row); square to the
+  // chord where nothing says.
+  const fans = Object.entries(airfoil.anchors || {})
+    .filter(([, f]) => Number.isFinite(f))
+    .map(([row, f]) => ({
+      row,
+      point: [f * chord, prof.at(f).lo * chord],
+      pullDeg: Number.isFinite(pulls?.[row]) ? pulls[row] : 0,
+      halfAngleDeg: R.fanHalfAngleDeg,
+      clearanceM: R.fanClearanceM,
+    }));
 
   // Chordwise positions that must be kept clear: the anchors, plus the
   // intake, which is a cut-out already.
@@ -106,7 +129,8 @@ export function buildRibHoles(rib, airfoil, rules = {}, { rods = null } = {}) {
     const a = lo + R.webWidth / 2;
     const b = hi - R.webWidth / 2;
     if (b - a < R.minWidth) continue;
-    holes.push(makeHole(prof, a, b, R, chord, keepClear));
+    const h = makeHole(prof, a, b, R, chord, keepClear, fans);
+    if (h) holes.push(h);
   }
 
   const ribArea = profileArea(prof) * chord * chord;
@@ -124,13 +148,40 @@ export function buildRibHoles(rib, airfoil, rules = {}, { rods = null } = {}) {
     rules: R,
     gaps,
     blocked,
+    fans,
   };
 }
 
+/**
+ * How high a hole may reach at `xM` without entering an anchor's fan.
+ *
+ * The fan is the wedge of rays from the tab, `halfAngleDeg` either side of
+ * the line's pull; a point beside it, at the same station, is below the
+ * wedge's edge, and has to be `clearanceM` below it measured square to the
+ * edge. Infinity where no fan is overhead.
+ */
+function underFans(xM, fans) {
+  let top = Infinity;
+  for (const f of fans ?? []) {
+    const dx = xM - f.point[0];
+    if (Math.abs(dx) < 1e-12) { top = Math.min(top, f.point[1]); continue; }
+    // The fan's edge on this side, as an angle from up, positive towards
+    // the station.
+    const edgeDeg = dx > 0 ? f.pullDeg + f.halfAngleDeg : f.halfAngleDeg - f.pullDeg;
+    if (edgeDeg <= 0) continue;                                        // the fan leans away
+    if (edgeDeg >= 90) { top = Math.min(top, f.point[1]); continue; }  // it covers the whole side
+    const e = (edgeDeg * Math.PI) / 180;
+    const vEdge = f.point[1] + Math.abs(dx) / Math.tan(e);
+    top = Math.min(top, vEdge - f.clearanceM / Math.sin(e));
+  }
+  return top;
+}
+
 /** One hole, as a rounded polygon following the section's own shape. */
-function makeHole(prof, x0, x1, R, chord, keepClear = null) {
-  // More stations where the edge has to turn round the end of a rod.
-  const n = keepClear ? 48 : 24;
+function makeHole(prof, x0, x1, R, chord, keepClear = null, fans = null) {
+  // More stations where the edge has to turn round the end of a rod, or
+  // along the edge of a fan.
+  const n = keepClear || fans?.length ? 48 : 24;
   const top = [];
   const bottom = [];
   // Rods as closely spaced points, so the clearance can be taken as a
@@ -182,18 +233,47 @@ function makeHole(prof, x0, x1, R, chord, keepClear = null) {
       const lim = limits(x * chord, mid * chord);
       yTop = Math.min(yTop, lim.above);
       yBottom = Math.max(yBottom, lim.below);
-      // Nothing left between two rods at this station: the hole closes here.
-      if (yTop < yBottom) { yTop = (yTop + yBottom) / 2; yBottom = yTop; }
     }
+    // Under the edges of the fans either side.
+    if (fans?.length) yTop = Math.min(yTop, underFans(x * chord, fans));
     top.push([x * chord, yTop]);
     bottom.push([x * chord, yBottom]);
   }
-  const outline = top.concat(bottom.slice().reverse());
+  // Where a fan has closed the hole at an end, it starts and stops where
+  // the fan's edge meets the bottom of it: found between the last station
+  // closed and the first open, so the hole still comes to a point.
+  const gap = top.map((p, i) => p[1] - bottom[i][1]);
+  let first = 0;
+  let last = top.length - 1;
+  while (first < top.length && gap[first] < -1e-12) first++;
+  while (last > first && gap[last] < -1e-12) last--;
+  if (first >= last) return null;
+  const cap = (i, j) => {
+    // Between station j (closed) and i (open): where the gap is zero.
+    const f = gap[i] / (gap[i] - gap[j]);
+    const u = top[i][0] + f * (top[j][0] - top[i][0]);
+    const v = bottom[i][1] + f * (bottom[j][1] - bottom[i][1]);
+    return [u, v];
+  };
+  const T = [];
+  const Bm = [];
+  if (first > 0) { const p0 = cap(first, first - 1); T.push(p0); Bm.push(p0); }
+  for (let i = first; i <= last; i++) {
+    // Nothing left between two rods inside the hole: it closes here.
+    if (gap[i] < 0) { const m = (top[i][1] + bottom[i][1]) / 2; T.push([top[i][0], m]); Bm.push([top[i][0], m]); continue; }
+    T.push(top[i]);
+    Bm.push(bottom[i]);
+  }
+  if (last < top.length - 1) { const p1 = cap(last, last + 1); T.push(p1); Bm.push(p1); }
+  const outline = T.concat(Bm.slice().reverse());
+  const from = T[0][0] / chord;
+  const to = T[T.length - 1][0] / chord;
+  if ((to - from) < R.minWidth) return null;
   return {
-    fromChord: x0,
-    toChord: x1,
+    fromChord: from,
+    toChord: to,
     outline,
-    widthM: (x1 - x0) * chord,
+    widthM: (to - from) * chord,
     areaM2: Math.abs(holePolygonArea(outline)),
   };
 }
@@ -270,6 +350,13 @@ export function checkRibHoles(set, airfoil) {
         problems.push({ hole: h, reason: `crosses the load path at ${a.toFixed(3)}` });
       }
     }
+    // And no point of it inside the rays an anchor's load takes to the seam.
+    if (Array.isArray(h.outline) && set.fans?.length) {
+      for (const f of set.fans) {
+        const tooHigh = h.outline.some(([u, v]) => v > underFans(u, [f]) + 1e-6);
+        if (tooHigh) problems.push({ hole: h, reason: `enters the fan of the ${f.row} anchor` });
+      }
+    }
   }
 
   // Webs between consecutive holes.
@@ -299,9 +386,11 @@ export function checkRibHoles(set, airfoil) {
  * surfaces, so this is not a rounding error: a wing with 50 ribs at a metre
  * of chord carries several square metres of rib.
  */
-export function buildAllRibHoles(wing, airfoil, { rules = {}, ribCloth = 0.040, rodsByRib = null } = {}) {
+export function buildAllRibHoles(wing, airfoil, {
+  rules = {}, ribCloth = 0.040, rodsByRib = null, pullsByRib = null,
+} = {}) {
   const sets = wing.ribs.map((rib, i) => buildRibHoles(rib, airfoil, rules,
-    { rods: rodsByRib ? rodsByRib[i] ?? null : null }));
+    { rods: rodsByRib ? rodsByRib[i] ?? null : null, pulls: pullsByRib ? pullsByRib[i] ?? null : null }));
   // The whole wing: every rib twice, except one on the centreline, which the
   // wing has once. Doubling the half counted the centre rib — the largest
   // rib there is — as two.
@@ -333,7 +422,7 @@ export function buildAllRibHoles(wing, airfoil, { rules = {}, ribCloth = 0.040, 
  * under a line that said only that their holes had not been counted.
  */
 export function ribClothTotals(wing, airfoil, {
-  ribCloth = 0.040, openings = true, ownHoles = null, rules = {}, rodsByRib = null,
+  ribCloth = 0.040, openings = true, ownHoles = null, rules = {}, rodsByRib = null, pullsByRib = null,
 } = {}) {
   const polygonArea = (pts) => {
     let a = 0;
@@ -349,7 +438,7 @@ export function ribClothTotals(wing, airfoil, {
   wing.ribs.forEach((rib, i) => {
     const copies = ribCopies(wing, i);
     const set = buildRibHoles(rib, airfoil, rules,
-      { rods: rodsByRib ? rodsByRib[i] ?? null : null });
+      { rods: rodsByRib ? rodsByRib[i] ?? null : null, pulls: pullsByRib ? pullsByRib[i] ?? null : null });
     ribCount += copies;
     ribArea += set.ribAreaM2 * copies;
     if (!openings) return;
@@ -557,9 +646,9 @@ function scalePolygon(pts, k) {
  * That is the case this reports.
  */
 export function ribOpenings(rib, neighbour, airfoil, {
-  rules = {}, speedMS = 11, rho = 1.225, rods = null,
+  rules = {}, speedMS = 11, rho = 1.225, rods = null, pulls = null,
 } = {}) {
-  const holes = buildRibHoles(rib, airfoil, rules, { rods });
+  const holes = buildRibHoles(rib, airfoil, rules, { rods, pulls });
   const volume = neighbour ? cellVolume(rib, neighbour) : 0;
   const need = crossPortRequirement(volume, { speedMS, rho, rules });
 
@@ -686,10 +775,10 @@ export function checkRibInternals({
 }
 
 export function allRibOpenings(wing, airfoil, opts = {}) {
-  const { rodsByRib = null, ...rest } = opts;
+  const { rodsByRib = null, pullsByRib = null, ...rest } = opts;
   const sets = wing.ribs.map((rib, i) => ribOpenings(
     rib, wing.ribs[i + 1] ?? null, airfoil,
-    { ...rest, rods: rodsByRib ? rodsByRib[i] ?? null : null },
+    { ...rest, rods: rodsByRib ? rodsByRib[i] ?? null : null, pulls: pullsByRib ? pullsByRib[i] ?? null : null },
   ));
   const short = sets.filter((s) => !s.ventilates && s.ventilationRequiredM2 > 0);
   const ratios = sets

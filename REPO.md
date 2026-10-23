@@ -6,15 +6,15 @@ Where things are, and why they are there rather than somewhere else.
 wingtoolui/
 ├── dist/                  the built tool — one HTML file, committed on purpose
 ├── src/
-│   ├── core/              38 modules, one per chapter or concern
+│   ├── core/              39 modules, one per chapter or concern
 │   └── ui/                index.html, style.css, app.js
 ├── tests/                 five programs: the unit suite, the Phase 1 audit,
 │                          the full pipeline, the reference sweep, the benchmark
 ├── tools/                 the other check stages, the interface harness,
 │                          importers, figures, and the search tool
 ├── data/reference/        143 tables of published and supplied data, and
-│                          the Swoop2's own files
-├── docs/                  41 notes on what was built, and what it cost
+│                          two complete designs' own files in lep/
+├── docs/                  42 notes on what was built, and what it cost
 ├── build.py               bundles src/ into dist/, with a collision guard
 ├── package.json           named scripts; no dependencies to install
 ├── MANIFEST.txt           every file, generated

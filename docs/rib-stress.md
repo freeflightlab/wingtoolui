@@ -5,8 +5,9 @@ holes between them. It did not check the cloth in between. A rib can satisfy
 every placement rule — nose band, surface margins, anchor clearance, webs —
 and still be a rib that tears at the attachment point.
 
-`ribstress.js` is that check, and this is the third account of what it found.
-The first two were wrong in ways worth keeping, so they are in section 5.
+`ribstress.js` is that check, and this is the fourth account of what it
+found. The first three were wrong in ways worth keeping, so they are in
+section 7.
 
 ## 1. An anchor load, and the cloth it enters
 
@@ -26,83 +27,133 @@ at the 8 g case             295 N              =  14.7 kN/m
 ```
 
 At 1 g the tab alone puts the load into cloth that carries it. At the design
-case it does not, by a factor of four. The load goes into a Dacron tab and
-patch, which `reinforcement.js` sizes by width, and the question left is **how
-far that reinforcement must reach before bare cloth can take over** — its
-length, which nothing else here sizes.
+case it does not, by a factor of four. The load goes into a reinforcement at
+the tab, and the questions left are **how far that reinforcement must reach
+before bare cloth can take over**, and whether the cloth then has a straight
+path to somewhere that can take the load on.
 
-## 2. The reach, and the room for it
+## 2. Radials from the line, and they end at a seam
 
-The load fans out as it travels into the rib, 30° either side — the Whitmore
-section of gusset-plate design — so the load per metre of cloth falls with
-distance. `reinforcementReach` is where it has fallen to what the cloth
-carries:
+Cloth carries tension and nothing else. So a line pulling on a rib loads it
+along straight rays from the attachment point — the wrinkles a loaded rib
+shows fan out from its tab — and a ray can only end where the rib is sewn to
+something: the upper seam. A ray that runs into a hole ends in mid-air, which
+is to say it is not there.
+
+For each anchor `anchorLoadPath`:
+
+1. finds the rays from the tab to the upper seam that cross no hole and come
+   no closer than 10 mm to one (`radialFan`);
+2. aims them at the line's own pull, turned round, in the rib's plane — read
+   off the line plan (`lineAngleOnRib`), not assumed square to the chord;
+3. shares the load between them by the cosine of each one's angle from the
+   pull, falling as one over the distance along it (`radialField`). On a
+   half-plane that is Flamant's elastic answer for a point load, `2F/π` per
+   radian along the pull, and it is the rule `vribs.js` already used for the
+   fibres of a diagonal. A ray more than a right angle from the pull would
+   have to push, and carries nothing. Where the holes leave the fan lopsided,
+   what the rays pull across the line is held by the lower surface, to which
+   the rib is sewn at the anchor.
+
+Near the tab the load is spread over the tab, not a point, so the load per
+metre along a ray is `q / (r + r0)`, with `r0` where the fan is as wide as the
+tab. The reinforcement can stop where that falls to what the cloth carries:
 
 ```
-reach = ( load / cloth strength − tab width ) / ( 2 tan 30° )
+reach = q_peak × ( 1 / cloth strength − tab width / load ),   q_peak = load / I
+I = ∫ cos² over the clear rays:   0.96 rad for a clear 30° either side, π/2 on a half-plane
 ```
 
-At 8 g that is 16 mm for the average anchor of the test wing and **56 mm** for
-the worst.
+So a fan the holes narrow needs a longer reinforcement, and the model says
+by how much. `spreadDeg` is the width the fan works at — the angle a fan at
+the peak ray's intensity throughout would need for the whole load: 55 for a
+clear 30 either side, 90 on a half-plane.
 
-The room is **the depth of the rib at the anchor**: the path runs from the
-anchor, on the lower surface, across the rib to the upper. On a NACA 4415 that
-is 11.1%, 15.0%, 12.7% and 7.0% of chord at the four rows.
+The lines lean. On the 12-cell test wing the A lines pull up to 10° forward
+of square to the chord and the D lines 9 to 17° aft; on the default wing
+−23° to +22°. A fan taken straight up, as the model did, was aimed up to a
+quarter of a right angle off the load.
 
-| rib | chord | A, at 8 g | reach / depth | D, at 8 g | reach / depth |
-| --- | --- | --- | --- | --- | --- |
-| 0 | 2.60 m | 232 N | 40 / 289 mm | 66 N | 0 / 182 mm |
-| 2 | 2.53 m | 295 N | 56 / 282 mm | 84 N | 4 / 178 mm |
-| 6 | 2.24 m | 226 N | 39 / 249 mm | 65 N | 0 / 157 mm |
-| 10 | 1.66 m | 103 N | 8 / 184 mm | 29 N | 0 / 116 mm |
-| 12 | 0.90 m | 10 N | 0 / 100 mm | 3 N | 0 / 63 mm |
+## 3. The reach, and the room for it
 
-**No anchor needs its reinforcement run to the upper seam**, and the longest is
-a fifth of the depth it has. The mechanism that would change that is real —
-reach goes with the load and room with the rib, so a load that stops inside a
-deep rib does not stop inside a shallow one. An anchor carrying 60 N at 1 g
-needs 101 mm at 8 g: the root's D anchor has 182 mm and the tip's 63 mm. No
-anchor on this wing carries that, and the tip's carry least.
+At 8 g on the test wing (Skytex 27 hard, this tool's openings), reach over the
+distance to the seam along the most loaded ray, and the fan's spread:
 
-Two more wings, through the **Rib stress report** button (85 kg, ribs in
-Skytex 40 hard):
+| rib | chord | A | B | D |
+| --- | --- | --- | --- | --- |
+| 0 | 2.60 m | 35 / 277 mm, 77° | 57 / 390 mm, 46° | 0 / 178 mm, 86° |
+| 2 | 2.53 m | 49 / 274 mm, 76° | **80 / 380 mm**, 46° | 3 / 174 mm, 86° |
+| 6 | 2.24 m | 35 / 251 mm, 73° | 56 / 337 mm, 46° | 0 / 153 mm, 85° |
+| 10 | 1.66 m | 7 / 183 mm, 74° | 12 / 249 mm, 44° | 0 / 113 mm, 84° |
+| 12 | 0.90 m | 0 / 106 mm, 67° | 0 / 136 mm, 40° | 0 / 62 mm, 81° |
 
-| wing | anchors a side | worst, 1 g | longest reinforcement at 8 g |
-| --- | --- | --- | --- |
-| the default, 24 cells | 52 on 13 ribs | 17.2 N | 6 mm, in a rib 287 mm deep |
-| the Swoop2, its own lines | 37 on 13 ribs | 19.1 N | 8 mm, in a rib 304 mm deep |
+**No anchor needs its reinforcement run to the upper seam**, and the longest
+is a fifth of the room it has. The longest is a B anchor's, not the A's that
+carries the same load: the B sits between two openings, and its fan works at
+46° where the A's, open to the nose, works at 76°. The mechanism that would
+change the verdict is real — reach goes with the load and room with the rib —
+and an anchor carrying 60 N at 1 g needs 122 mm at 8 g in a clear ±30° fan:
+the root's D anchor has 182 mm and the tip's 63 mm. No anchor here carries
+that, and the tip's carry least.
 
-Per-anchor loads are small because there are many anchors. More cells, more
-lines, shorter reinforcement.
+The **Rib stress report** on three wings, at 8 g with ribs in Skytex 40 hard:
 
-## 3. Holes
+| wing | anchors a side | worst, 1 g | longest reinforcement | lines lean |
+| --- | --- | --- | --- | --- |
+| the default, 24 cells | 52 on 13 ribs | 17.2 N | 8 mm, B2, of 385 mm | −23° to +22° |
+| the Swoop2, its own lines and holes | 37 on 13 ribs | 19.1 N | 13 mm, B2, of 343 mm | −5° to +20° |
+| the Tuluaq-19, its own lines and holes | 44 on 12 ribs | 24.9 N | 37 mm, B3, of 450 mm | −8° to +29° |
 
-A lightening hole beside an anchor takes away cloth the spreading load needed.
-`anchorLoadPath` walks from the anchor across the rib; at each height the load
-is in a band `tab + 2 × height × tan 30°` wide, and every hole's own outline
-is cut at that height to see how much of the band it removes.
+The Rib tab draws the same: each line's fan to the seam, its pull dashed, and
+the outline of the reinforcement the load needs round the tab — the curve
+where every ray's load per metre falls to the cloth's.
 
-**A hole is in the path where what is left cannot carry the load**: inside the
-reinforcement's reach, or beyond it where a hole has narrowed the band back
-under what the cloth needs. That finds:
+## 4. Holes
 
-- a hole close beside an anchor, **ahead of it or behind**
-- a web between two holes that is narrower than the load needs
-- and not the same hole cut 150 mm up the rib, past where the load has spread
+A hole is in the path in one of two ways:
 
-On every wing tried there is none:
+- **across the line's own pull** (`blocked`): no straight ray goes the way
+  the line pulls. The load still reaches the seam round the hole, at a higher
+  stress, and the design is at fault;
+- **inside the reinforcement's reach** (`holeInPath`): the patch at the tab
+  would have to be cut by it.
 
-| wing | holes | nearest to an anchor | in a load path at 8 g |
-| --- | --- | --- | --- |
-| test wing, default wing | this tool's | 5% of chord, by rule | 0 |
-| the Swoop2 | its own, 225 on 25 ribs | 2.5% of chord | 0 |
+A hole further off is not in the path, but it is not free either: every ray
+it cuts is a ray the load does not have, and the reach above says what that
+costs. So the same hole beside an anchor counts against the anchor whether it
+is cut 20 mm up the rib or 150 mm, and is in its path only when it is 20 mm.
 
-The tool's rule keeps an opening 3.5% of chord from an anchor, with half a web
-more: 5% in all. The Swoop2 is a wing that has been built, and its own holes
-come as close as 2.5% to an anchor without entering a load path — so a check
-that flagged it would have been a fault in the check.
+**The two built designs bear this out.** On their own ribs, holes and lines —
+the program's own geometry, not this tool's import of it — 86 of their 88
+loaded anchors have the line's pull inside a fan that reaches the upper seam
+10 mm clear of every hole, and the holes leave those fans 24 to 67° wide as
+they work: 37 to 60° on the Swoop2, 24 to 67° on the Tuluaq, narrowest at a B
+anchor between two holes. The two that do not are on the tip ribs, thinned to
+1% and 10% of their section, where there is no depth for a fan to cross.
+Neither design says any of this. It is what their holes do.
 
-## 4. The PMA connection
+**The tool's openings are aimed the same way.** Each anchor keeps a disc
+round its tab and a fan of rays 20° either side of its line's pull, 10 mm
+more, and an opening stays under the fans' edges (`buildRibHoles`'s
+`pulls`, which the interface reads off the line plan). With nothing to say
+which way a line pulls, the fan stands square to the chord, and on the
+default wing the openings are then exactly what they were: the old band of
+3.5% of chord either side kept those fans clear already. Aimed by the lines,
+the default wing's openings lose 0.14% of their area, and the tightest side
+of any fan goes from 12° — a B line leaning 11° forward, against a band
+standing straight up — to 19.7°.
+
+## 5. The seam
+
+The rays deliver the load to the upper seam over the width of the fan where
+it arrives, measured from where the fan is as wide as the tab. At 8 g the
+worst is 417 N/m on the default wing, 871 N/m on the Tuluaq and 1126 N/m on
+the Swoop2 — at its tip rib, thinned to 1% of its section, where the seam is
+inside the tab's own width — against a seam this project estimates at
+2500 N/m (`RIB_SEAM_N_PER_M`, the figure the sail seams are checked at, and
+like it an estimate).
+
+## 6. The PMA connection
 
 §5.3 tests exactly this. An inspector attaches an A line of the first line
 group, places a needle at least 100 mm up the rib, and pulls. The ripstop must
@@ -113,10 +164,10 @@ rib is loaded through its own line*. So the tension the design puts into the
 rib is part of what the inspector is pulling against, and a design that
 already works the cloth hard will fail a test that a slacker one passes on
 identical fabric. `predictedTearMargin` estimates that reading before the wing
-is built. The path is always walked to 100 mm, or the depth of the rib, for
-that reason.
+is built, from the load per metre 100 mm up the line's pull, or at the seam
+where the rib is shallower.
 
-## 5. Two accounts that were wrong
+## 7. Accounts that were wrong
 
 **"Rib cloth cannot carry an anchor load at all, not even at 1 g."** The first
 version worked on 260 N at 1 g and 2080 N at 8 g, and reported the A anchor at
@@ -131,9 +182,16 @@ was `chord × 0.25`, where a rib is 7 to 15% of chord deep at its anchors: two
 to three and a half times the room it has. And the path was walked *along the
 chord, aft of the anchor*, under a comment that said it ran up to the upper
 surface — so a hole ahead of an anchor could not be in the way, and a hole
-behind it was, at whatever height it was cut. That version reported "a hole in
-the load path on 6 of 11 ribs", later 2 of 7. With the path across the rib and
-the holes where their outlines are, it is none.
+behind it was, at whatever height it was cut.
+
+**"Straight up, 30° either side."** The third version walked the path across
+the rib in a Whitmore band of 30° either side of square to the chord, and
+found a hole by how much of the band it took out at each height. It did not
+know which way the line pulls, where the band ended, or what the seam got,
+and it said so under "what this is not". The load is carried on radials from
+the line, and can only go to a seam: aimed by the line and ended at the seam,
+the longest reinforcement on the test wing is the B anchor's 80 mm between
+two holes, where the band had the A anchor's 56 mm.
 
 It also counted a rib as needing tape to the seam only when *all* its anchors
 did, checked every wing as Skytex 27 hard whatever its ribs were set to be cut
@@ -141,30 +199,37 @@ from, and checked an imported design against holes it does not have.
 
 The lesson of the first is the one the PMA measuring tension already taught:
 **per-item loads on a paraglider are small because there are many items.** The
-lesson of the second is that fixing the number a result came from does not
-check the geometry it was put through.
+lesson of the second and third is that fixing the number a result came from
+does not check the geometry it was put through.
 
-## 6. What this is not
+## 8. What this is not
 
 - **A line-load model** — force per metre of cloth — not a finite element
   analysis. Every result carries `lineLoadModel: true`.
-- **On estimated strengths.** The cloth figures are this project's, not a
-  supplier's; `RIB_CLOTH.provenance` says so and the report repeats it. The
-  lengths move with them — the test wing's 56 mm is 19 mm at twice the
-  strength and 129 mm at half — and the conclusion, that the reinforcement is
-  short next to the rib, holds across that range.
-- **Straight across.** The path is taken at right angles to the chord. A line
-  leans fore or aft by its row; that is not in it.
+- **Radial only.** A ray a hole cuts carries nothing, wherever along it the
+  hole is, where real cloth would carry some of that load round the hole in
+  two-way tension. It errs on the safe side.
+- **The whole line load on the rib.** A line also pulls across the rib's
+  plane — 50% of its pull at the median on the default wing, whose top lines
+  are short and splay, 18% on the two built designs — and the rib, a
+  membrane in its own plane, cannot take that: the diagonals and the sail do.
+  The fan is given the whole load anyway, and the report says how much of it
+  is across the plane.
+- **On estimated strengths.** The cloth and seam figures are this project's,
+  not a supplier's; `RIB_CLOTH.provenance` says so and the report repeats it.
+  The lengths move with them; the conclusion, that the reinforcement is short
+  next to the rib, holds at half the strength and at twice it.
 - **One load case.** 8 g on the trim load distribution. On the bar the load
   moves aft (`docs/loads-and-materials.md`), which this does not follow.
 - **A 20 mm tab**, the minimum `buildTabs` cuts. A tab sized wider by load
   needs less reach than this says.
 - A rib with no outline — a bare chord — is given a depth of 10% of chord, and
-  the result says `depthAssumed`.
+  the result says `depthAssumed`; a line with no direction is taken as square
+  to the chord, and the result says `lineAngleAssumed`.
 
 ---
 
-## 7. The other half: what the sail cloth carries
+## 9. The other half: what the sail cloth carries
 
 A panel between two ribs is a membrane under pressure. `panelStress` gives the
 spanwise tension from the membrane equation — the same one `ovalization.js`

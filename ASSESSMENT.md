@@ -11,7 +11,7 @@ patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
 One offline HTML file, 1.2 MB, no build step and no network. That constraint
-drove the architecture: 38 core modules bundled into a single scope, with the
+drove the architecture: 39 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
 **About 63,000 lines**: 24,200 core, 5,800 interface, 16,700 tests, 5,400
@@ -26,6 +26,14 @@ demonstrating the method. Flat area, span, root chord, cell and rib counts
 reproduce **exactly**, and so does its own program's output: every one of its
 93 lines' length, cut length, load and type, its ribs' placement, its rods,
 its karabiner position and attitude, to fractions of a millimetre.
+
+**And against a second complete design, the Tuluaq-19**, from an earlier
+version of the same program, to the same standard: its 89 lines, its ribs,
+rods, holes, projected figures and attitude. It crashed the tool when first
+loaded. The three details of the program behind that — an anchor at exactly
+100% of chord, one ahead of the intake, a webbing riser — are fixed and held
+by tests. One design read exactly was evidence about that design; two are
+evidence about the reader.
 
 **Against 21 wings' line sheets from five manufacturers, and 55 published
 sizes**, in 143 reference tables, six of them the makers' own line-plan
@@ -85,16 +93,21 @@ shape the rows that carry the wing are 88 mm from the 28 sheets with
 per-anchor totals on average; the brake is 91 to 197 mm from them, and is not
 yet understood.
 
-**Panel development is not validated against a third party.** The Swoop2's own
-2D DXF draws its panels as 83,776 individual line segments on one layer with
-16,463 junctions, and connectivity alone cannot separate a panel from the
-marks drawn on it. The reconstruction tool is correct — exact on this
-project's own 50 panels exploded and rebuilt — and the input is not separable
-by it.
+**An imported design is cut as its program cuts it, all but its mini-ribs.**
+Every piece of both complete designs' cutting files was measured. Their
+panels — surfaces parted under the nose, skin tension, intake closures, the
+design's own allowances — are within 0.04% of the Swoop2's and 0.14% of the
+Tuluaq's, piece by piece, and 0.03% in total. What they sew inside their
+cells — full diagonals, straps, pieces between two ribs and rod pockets, read
+from the program's own source — is within a part in ten thousand of every
+piece in both files, and the bill now carries it: 11.9 and 10.5 m² for the
+wing where it had 3.9 and 5.5. Their trailing-edge mini-ribs, which the
+program cuts from its own billow, are not built: 0.84 and 0.89 m², listed
+as missing. The Tuluaq's tip panel, the 0.14%, is not explained.
 
 ## 5. What is missing
 
-**47 open items in the roadmap.** The substantial ones:
+**48 open items in the roadmap.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
@@ -102,8 +115,8 @@ by it.
 - Parts of the core with no way in from the interface: the speed system and
   trimmers, the coupled balance, the vortex lattice, the inflated shape and
   3D shaping. Each says so where it is documented.
-- The Swoop2's 70 straps and 15 pieces between ribs are read and listed, not
-  built.
+- An imported design's trailing-edge mini-ribs, cut from its program's own
+  billow.
 - Asymmetric and left/right-independent line plans.
 - Nesting: 63.5% of the roll on the default wing, against panels that fill
   94% of their own boxes.

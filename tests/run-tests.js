@@ -11,9 +11,13 @@ import { vortexLattice, stripsFromWing } from '../src/core/vlm.js';
 import { freeBodyCheck } from '../src/core/freebody.js';
 import {
   lepLineGeometry, lepPlanForTool, lepRibTable, lepAnchorPoint, readLepAirfoil, lepJoncs, lepHoles,
-  lepLineSelection, lepLengthChain,
+  lepLineSelection, lepLengthChain, lepLineTypes, lepRibPoint,
+  lepPanels, lepSeamAllowances, lepSkinTension, lepVents,
 } from '../src/core/leplines.js';
 import { toRibPlane, hasCentreRib, ribCopies, wholeWingCounts, ribSurfacePoint } from '../src/core/wing3d.js';
+import {
+  lepStructure, lepResample, lepFlatten, lepStructureToDXF, lepStructureNesting, lepStructureWords,
+} from '../src/core/lepstructure.js';
 import { gridRowsFromNames, labelsForRow } from '../tools/niviuk-totals-labels.mjs';
 import { referenceLines, designOf, statedTopologyOf } from '../tools/reference-files.mjs';
 import { figures as diagramFigures } from '../tools/make-diagrams.mjs';
@@ -74,7 +78,7 @@ import {
 import {
   anchorLoadPath, reinforcementReach, checkRibStress, predictedTearMargin,
   checkWingRibStress, RIB_CLOTH, panelStress, checkWingPanelStress, SAIL_CLOTH,
-  ASSUMED_RIB_DEPTH,
+  ASSUMED_RIB_DEPTH, radialFan, radialField, lineAngleOnRib, RIB_SEAM_N_PER_M,
 } from '../src/core/ribstress.js';
 import {
   lineGeometryCheck, lineStrengthCheck, PMA_GEOMETRY, PMA_STRENGTH,
@@ -7789,6 +7793,161 @@ section('What the rib cloth carries');
     overloaded.ribsNeedingTapeToSeam > 0 && overloaded.crossoverRib !== null
     && overloaded.ribs.some((r) => r.toSeam.length > 0 && !r.allReachSeam),
     overloaded.note);
+
+  // Each line pulls its own way in its rib. The test wing's lean from
+  // forward on the A row to aft on the D, and the rays are aimed by them.
+  const leanR = wingStress.lineAngles;
+  check('the pull of each line is read off the plan, not assumed square to the chord',
+    leanR && leanR.count === wingStress.anchorCount
+    && wingStress.ribs.every((r) => r.paths.every((q) => !q.lineAngleAssumed)),
+    leanR ? `${leanR.min.toFixed(1)} to ${leanR.max.toFixed(1)} degrees from the rib's own up` : 'none');
+  const lean = (row) => {
+    const xs = wingStress.ribs.flatMap((r) => r.paths.filter((q) => q.name[0] === row).map((q) => q.lineAngleDeg));
+    return xs.reduce((a, b) => a + b, 0) / xs.length;
+  };
+  check('and the rows lean as a cascade does: the A forward, the D furthest aft',
+    lean('A') < lean('B') && lean('B') < lean('D') && lean('C') < lean('D') && lean('A') < 0 && lean('D') > 10,
+    ['A', 'B', 'C', 'D'].map((r) => `${r} ${lean(r).toFixed(1)}`).join(', '));
+  // The seam where the rays arrive gets the load, and it is no small part of
+  // what a seam carries at 8 g.
+  check('the upper seam takes the rays\' load, and holds it at 8 g',
+    wingStress.seamWorst && wingStress.seamWorst.lineLoadNPerM > 0
+    && wingStress.seamWorst.utilisation < 1,
+    wingStress.seamWorst ? `${wingStress.seamWorst.name} on rib ${wingStress.seamWorst.ribIndex}: `
+      + `${wingStress.seamWorst.lineLoadNPerM.toFixed(0)} N/m against ${RIB_SEAM_N_PER_M} N/m` : '');
+}
+
+// ---------------------------------------------------------------------------
+section('The rib carries its load on radials to the seam');
+
+{
+  // Cloth only pulls, so a line loads its rib along straight rays from the
+  // tab, and a ray has to end where the rib is sewn to the sail. These pin
+  // the field the rays carry, the fan the holes leave them, and then hold
+  // the two built designs here to it.
+  const F = 100;
+  const D = Math.PI / 180;
+  const integrate = (f, lo, hi) => {
+    let t = 0;
+    const n = 4000;
+    for (let i = 0; i < n; i++) t += f(lo + ((i + 0.5) * (hi - lo)) / n) * ((hi - lo) / n);
+    return t;
+  };
+  const half = radialField({ intervals: [[-90, 90]], loadN: F });
+  check('on a half-plane the rays carry Flamant\'s 2F/pi per radian along the pull',
+    Math.abs(half.a - (2 * F) / Math.PI) < 1e-9 && Math.abs(half.acrossN) < 1e-9 && half.peakDeg === 0,
+    `${half.a.toFixed(4)} N per radian`);
+  const narrow = radialField({ intervals: [[-30, 30]], loadN: F });
+  const along = integrate((p) => narrow.forcePerRadian(p / D) * Math.cos(p), -30 * D, 30 * D);
+  check('in a fan of 30 degrees either side they still carry exactly the load, more of it each',
+    Math.abs(along - F) < 1e-6 && Math.abs(narrow.a - F / (Math.PI / 6 + Math.sin(Math.PI / 3) / 2)) < 1e-9
+    && narrow.a > half.a,
+    `${narrow.a.toFixed(2)} N per radian against ${half.a.toFixed(2)}`);
+  const lop = radialField({ intervals: [[-60, 10]], pullDeg: 0, loadN: F });
+  const across = integrate((p) => lop.forcePerRadian(p / D) * Math.sin(p), -60 * D, 10 * D);
+  check('a lopsided fan pulls across the line as well, and the lower surface takes that',
+    lop.acrossN < 0 && Math.abs(lop.acrossN - across) < 1e-6
+    && Math.abs(integrate((p) => lop.forcePerRadian(p / D) * Math.cos(p), -60 * D, 10 * D) - F) < 1e-6,
+    `${(-lop.acrossN).toFixed(1)} N forward along the rays, held aft by the lower surface`);
+  check('a ray more than a right angle from the pull carries nothing',
+    radialField({ intervals: [[-120, 120]], loadN: F }).a === half.a
+    && radialField({ intervals: [[95, 120]], loadN: F }).feasible === false);
+
+  // The fan on a slab of rib 300 mm deep, with one hole 60 mm aft of the
+  // anchor running its full depth: the rays aft stop where they would pass
+  // the hole closer than the clearance.
+  const slabU = [[0, 0.3], [2, 0.3]];
+  const slabL = [[0, 0], [2, 0]];
+  const slot = [[0.86, 0], [1.2, 0], [1.2, 0.3], [0.86, 0.3]];
+  const fanS = radialFan({ upper: slabU, lower: slabL, anchor: [0.8, 0], holes: [slot], clearanceM: 0.01 });
+  const edge = Math.atan(0.05 / 0.3) / D;
+  const iv = fanS.around(0);
+  check('a hole beside an anchor cuts its fan where the geometry says',
+    iv && Math.abs(iv[1] - edge) <= fanS.stepDeg && iv[0] < -60,
+    `clear to ${iv?.[1]} degrees aft, against atan(50/300) = ${edge.toFixed(2)}`);
+  check('every clear ray ends on the upper seam',
+    fanS.rays.filter((r) => r.clear).every((r) => Math.abs(r.seam[1] - 0.3) < 1e-12));
+
+  // So the line's own direction matters: the same anchor and hole, with the
+  // line leaning aft, has its pull straight into the hole.
+  const lineAt = (deg) => anchorLoadPath({
+    anchorChordFraction: 0.4, loadN: 200, chordM: 2, upper: slabU, lower: slabL,
+    anchorPointM: [0.8, 0], holes: [slot], lineAngleDeg: deg,
+  });
+  const fore = lineAt(-10);
+  const aft = lineAt(20);
+  check('a line pulling clear of the hole has a straight path to the seam; one leaning into it does not',
+    !fore.blocked && aft.blocked && aft.holeInPath && /across the line's own pull/.test(aft.note),
+    `${fore.note}; ${aft.note}`);
+  check('and with its pull cut the load still reaches the seam round the hole, at a higher stress',
+    aft.reachM > fore.reachM && aft.atPMADistance.utilisation > fore.atPMADistance.utilisation,
+    `reinforcement ${(fore.reachM * 1000).toFixed(0)} mm against ${(aft.reachM * 1000).toFixed(0)} mm`);
+  check('the reach is where the rays fall to what the cloth carries',
+    (() => {
+      const r = fore.reachM;
+      const n = fore.field.forcePerRadian(fore.field.peakDeg) / (r + fore.field.peakNPerRad * 0.02 / 200);
+      return Math.abs(n - 3500) < 1e-6;
+    })());
+
+  // The two built designs, on their own geometry: the program's ribs, their
+  // own holes, their own lines. Neither file says anything about load paths;
+  // this is what their holes do.
+  const designs = [
+    ['Swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt'],
+    ['Tuluaq-19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt'],
+  ];
+  for (const [name, file, sectionFile, sectionName] of designs) {
+    const docR = parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1'));
+    const airfoilsR = { [sectionName]: readFileSync(`data/reference/lep/${sectionFile}`, 'latin1') };
+    const tR = lepRibTable(docR, { airfoils: airfoilsR });
+    const holesR = lepHoles(docR, tR);
+    const gR = lepLineGeometry(docR, { airfoils: airfoilsR });
+    const seen = new Set();
+    const fans = [];
+    for (const l of gR.lines.filter((x) => x.terminal && !x.brake && x.loadKg > 0)) {
+      const p = l.paths[0];
+      if (seen.has(`${p.rib}|${p.row}`)) continue;
+      seen.add(`${p.rib}|${p.row}`);
+      const rib = tR.ribs[p.rib - 1];
+      // The rib's own frame, as the program places it: centimetres to metres.
+      const o = lepRibPoint(rib, 0, 0);
+      const eu = lepRibPoint(rib, 1, 0).map((v, i) => v - o[i]);
+      const ev = lepRibPoint(rib, 0, 1).map((v, i) => v - o[i]);
+      const dot = (x, y) => x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+      const plane = (q) => { const r = q.map((v, i) => v - o[i]); return [dot(r, eu) / 100, dot(r, ev) / 100]; };
+      const A = plane(l.to);
+      const B = plane(l.from);
+      const pullDeg = Math.atan2(A[0] - B[0], A[1] - B[1]) / D;
+      const s = rib.section;
+      const pts = s.points.map(([x, y]) => [(x * rib.chord) / 100, (y * rib.chord * rib.thickness) / 100]);
+      const fan = radialFan({
+        upper: pts.slice(0, s.extrados), lower: pts.slice(s.extrados - 1), anchor: A,
+        holes: (holesR.byRib.get(p.rib - 1) ?? []).map((h) => h.outline), clearanceM: 0.01,
+      });
+      const iv = fan.around(pullDeg);
+      const field = radialField({ intervals: fan.intervals, pullDeg, loadN: 1 });
+      fans.push({
+        rib: p.rib, row: p.row, pct: rib.anchorsPct[p.row - 1], pullDeg, iv, holes: fan.holeCount,
+        tip: rib.thickness < 0.2, spreadDeg: field.feasible ? field.spreadDeg : 0,
+      });
+    }
+    // Each design's tip rib is the exception: a special wingtip, its section
+    // thinned to 1% (the Swoop2) or 10% (the Tuluaq) of itself, which leaves
+    // a rib a few millimetres deep and nothing for a fan to cross.
+    const outside = fans.filter((f) => !f.iv);
+    check(`${name}: every loaded line's pull has a clear ray to the upper seam, 10 mm clear of its own holes`,
+      outside.every((f) => f.tip) && outside.length <= 1 && fans.filter((f) => !f.tip).length > 30,
+      `${fans.length - outside.length} of ${fans.length} anchors`
+      + (outside.length ? `; not rib ${outside.map((f) => `${f.rib} row ${f.row} at ${f.pct}%, the tip`).join(', ')}` : ''));
+    // How wide the fans are as they work: the angle a fan at the peak ray's
+    // intensity would need for the whole load. A clear 30 degrees either side
+    // is 55; the narrowest these designs leave is at a B anchor, between holes.
+    const holed = fans.filter((f) => f.iv && f.holes > 0).map((f) => f.spreadDeg).sort((x, y) => x - y);
+    check(`${name}: and its holes leave every fan at least 20 degrees wide as it works`,
+      holed.length > 30 && holed[0] >= 20,
+      `${holed[0].toFixed(1)} to ${holed[holed.length - 1].toFixed(1)} degrees, median `
+      + `${holed[Math.floor(holed.length / 2)].toFixed(1)}, on ${holed.length} anchors`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -8724,6 +8883,485 @@ section('Swoop2: LEparagliding\'s own geometry, reproduced');
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+section('Tuluaq-19: a second complete design, reproduced');
+
+{
+  // The Swoop2 was the only LEparagliding file this importer had ever read,
+  // and it read that one exactly. The Tuluaq-19 (Laboratori d'envol and
+  // Crazy Bird, 19 m2, 34 cells and a zero-width one at the centre, program
+  // 3.25, CRLF line ends) is a second, published with its own output, and it
+  // found three faults the first could not: it CRASHED the line geometry (a
+  // brake anchor at exactly
+  // 100% of chord, missed by double-precision rounding), put an anchor at 0%
+  // of chord at the origin of the wing, 4.4 m from where the program puts
+  // it, and read its webbing riser as a round line made of "daN". Each is
+  // pinned below, and then the whole design is held to its program's own
+  // printed output, as the Swoop2 is.
+  const text = readFileSync('data/reference/lep/tuluaq19-20250107.lep', 'latin1');
+  const secText = readFileSync('data/reference/lep/tuluaq19-gnua.txt', 'latin1');
+  const out = readFileSync('data/reference/lep/tuluaq19-lep-out.txt', 'latin1');
+  const doc = parseLep(text);
+  const t = lepRibTable(doc, { airfoils: { 'gnua.txt': secText } });
+  const g = lepLineGeometry(doc, { airfoils: { 'gnua.txt': secText } });
+  check('the line geometry builds from the file and its section', g.ok, g.problems.join('; '));
+  check('and the file writes back byte for byte, its CRLF line ends and the sections not read included',
+    text.includes('\r\n') && writeLep(doc) === text && doc.sections.length === 35);
+
+  // The three faults.
+  const r13 = t.ribs[12];
+  check('a brake anchor at exactly 100% of chord is found, as the program finds it (in single precision)',
+    (r13.chord * 100) / 100 > r13.chord && lepAnchorPoint(r13, 100).lepAnchor.found,
+    `${r13.chord} x 100 / 100 = ${(r13.chord * 100) / 100}`);
+  const r18 = t.ribs[17];
+  const le18 = lepRibPoint(r18, 0, 0);
+  const a18 = lepAnchorPoint(r18, r18.anchorsPct[0]);
+  check('an anchor at 0%, ahead of the intake, stays at the section\'s origin as the program leaves it',
+    r18.anchorsPct[0] === 0 && !a18.lepAnchor.found && Math.hypot(...a18.map((v, i) => v - le18[i])) < 1e-12
+    && g.notes.some((n) => /rib 18 row 1/.test(n)),
+    g.notes.join('; '));
+  const typesT = lepLineTypes(doc);
+  const riserT = typesT.get(1);
+  check('a webbing riser is read as webbing: 12 x 2.5 mm, aramid, 15 g/m',
+    riserT.section === 'rectangular' && riserT.diameterMM === 12 && riserT.thicknessMM === 2.5
+    && riserT.label === 'Riser' && riserT.material === 'aramid' && riserT.gramsPerMetre === 15
+    && riserT.loopCm === 12 && typesT.get(2).label === 'TSL280' && typesT.get(2).section === 'round',
+    JSON.stringify(riserT));
+
+  // Section 4 of lep-out.txt: every line.
+  const ref = [];
+  for (const m of out.matchAll(/^\s*\d+\s+(\d+)\s+(\d+)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+L =\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s*$/gm)) {
+    ref.push({ plan: +m[1], level: +m[2], order: +m[3], L: +m[4], cut: +m[5], load: +m[6], type: +m[7] });
+  }
+  let worstL = 0; let worstCut = 0; let worstLoad = 0; let typeMiss = 0; let found = 0;
+  for (const r of ref) {
+    const l = g.lines.find((x) => x.plan === r.plan && x.level === r.level && x.order === r.order);
+    if (!l) continue;
+    found += 1;
+    worstL = Math.max(worstL, Math.abs(l.length - r.L));
+    worstCut = Math.max(worstCut, Math.abs(l.cutLength - r.cut));
+    worstLoad = Math.max(worstLoad, Math.abs(l.loadKg - r.load));
+    if (l.type !== r.type) typeMiss += 1;
+  }
+  check('all 89 lines are found, riser to brake', ref.length === 89 && found === 89 && g.lines.length === 89,
+    `${found} of ${ref.length}`);
+  check('every line length matches to a tenth of a millimetre, the ones to the 0% anchor included',
+    worstL < 0.01, `worst ${(worstL * 10).toFixed(3)} mm`);
+  check('and every corrected (cut) length', worstCut < 0.01, `worst ${(worstCut * 10).toFixed(3)} mm`);
+  check('and every load the program assigns', worstLoad < 0.006, `worst ${worstLoad.toFixed(4)} kg`);
+  check('and every line type', typeMiss === 0, `${typeMiss} differ`);
+  near('total without loops is the printed 247.39 m', g.totals.cutM, 247.39, 0.006, ' m');
+  near('and with loops the printed 282.59 m', g.totals.withLoopsM, 282.59, 0.006, ' m');
+  near('the lineset weighs the printed 0.382 kg, risers included', g.totals.weightKg, 0.382, 0.0006, ' kg');
+  // The program's 14.9 counts a webbing riser's frontal area WITHOUT its
+  // loops; with them the total came out 0.380.
+  near('and has the printed 0.363 m2 of frontal area, the webbing risers without their loops',
+    g.totals.lineAreaM2, 0.363, 0.0006, ' m2');
+  const printedByType = { 1: 4.26, 2: 53.28, 3: 83.98, 4: 140.33, 6: 5.00 };
+  check('the metres to buy of every type are the printed ones',
+    Object.entries(printedByType).every(([ty, m]) => Math.abs((g.totals.byType[ty]?.metres ?? 0) - m) < 0.006),
+    Object.values(g.totals.byType).map((x) => `${x.label} ${x.metres.toFixed(2)}`).join(', '));
+
+  // Sections 1 and 2.
+  near('karabiner depth 617.12 cm', g.karabiner[2], 617.12, 0.006, ' cm');
+  near('karabiner under the calage point, 93.36 cm', g.karabiner[1], 93.36, 0.006, ' cm');
+  near('angle of attack 7.41 degrees', g.aoaDeg, 7.41, 0.006, ' deg');
+  near('assiette 0.72 degrees', g.assietteDeg, 0.72, 0.006, ' deg');
+
+  // Section 3: chords, the tip's at a tenth of the section's thickness.
+  const chords = [259.34, 258.77, 257.07, 254.25, 250.29, 245.23, 239.05, 231.79, 223.43, 213.22,
+    200.86, 186.45, 170.21, 152.48, 133.55, 113.74, 93.34, 72.62];
+  check('every rib\'s chord is the printed one',
+    t.ribs.length === 18 && t.ribs.every((r, i) => Math.abs(r.chord - chords[i]) < 0.0051),
+    `worst ${Math.max(...t.ribs.map((r, i) => Math.abs(r.chord - chords[i]))).toFixed(4)} cm`);
+  check('and its section is thinned as section 30 says: 0.9, then 0.8 and 0.1 at the tip',
+    t.ribs.slice(0, 16).every((r) => r.thickness === 0.9) && t.ribs[16].thickness === 0.8 && t.ribs[17].thickness === 0.1);
+
+  // In this tool's plan its D row is the D row, on the C riser it hangs
+  // from. Every line to a row other than its riser's was taken for a
+  // stabilo line, and the load model gives the stabilo none of the lift: the
+  // tenth of the load the program puts on the D row went nowhere.
+  const planT = lepPlanForTool(g);
+  const upperT = planT.lines.filter((l) => l.level === 'upper');
+  const dRow = upperT.filter((l) => l.row === 'D');
+  const stabT = upperT.filter((l) => l.row === 'S');
+  check('its D row is read as the D row, on the C riser, not as a stabilo',
+    dRow.length === 12 && dRow.filter((l) => l.riser === 'C').length === 10
+    && stabT.length === 4 && stabT.every((l) => l.riser === 'B' && ['A', 'C'].includes(l.anchorRow)
+      && [15, 17].includes(l.ribIndex)),
+    `D ${dRow.length} (${dRow.filter((l) => l.riser === 'C').length} on C), stabilo `
+    + stabT.map((l) => `${l.name} ${l.riser}->${l.anchorRow} rib ${l.ribIndex + 1}`).join(', '));
+  const kgBy = {};
+  for (const l of g.lines.filter((x) => x.terminal && !x.brake)) {
+    const r = 'ABCD'[l.paths[0].row - 1];
+    kgBy[r] = (kgBy[r] ?? 0) + l.loadKg;
+  }
+  const kgAll = Object.values(kgBy).reduce((x, y) => x + y, 0);
+  check('which is the tenth of the load the program puts there',
+    Math.abs(kgBy.D / kgAll - 0.10) < 0.001,
+    Object.entries(kgBy).map(([r, v]) => `${r} ${((100 * v) / kgAll).toFixed(1)}%`).join(', '));
+
+  // Section 6: contour lengths, mm.
+  const contour = { 1: [2836.55, 2422.52], 9: [2443.80, 2087.10], 17: [1008.95, 870.88], 18: [739.30, 674.68] };
+  let worstContour = 0;
+  for (const [i, [ex, inn]] of Object.entries(contour)) {
+    const r = t.ribs[i - 1];
+    const c = r.chord * 10;
+    const P = r.section.points.map(([x, y]) => [x * c, y * c * r.thickness]);
+    const arc = (a, b) => {
+      let L = 0;
+      for (let k = a; k < b; k++) L += Math.hypot(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1]);
+      return L;
+    };
+    const s0 = r.section.extrados + r.section.intake - 1;
+    worstContour = Math.max(worstContour,
+      Math.abs(arc(0, r.section.extrados - 1) - ex), Math.abs(arc(s0, P.length - 1) - inn));
+  }
+  check('rib contour lengths match section 6, root to tip, thinned sections included',
+    worstContour < 0.02, `worst ${worstContour.toFixed(3)} mm`);
+
+  // Section 12: phi and chi on the tool's own wing. This design does not
+  // turn its ribs into the glide path, so phi runs up to 7.41 at the tip.
+  const secAfT = parseAirfoilText(secText, 'gnua');
+  const designT = lepToDesign(doc, { sections: { 'gnua.txt': secAfT } });
+  const wingT = buildWing({
+    planform: discretePlanform(designT.planformRows), lobe: null, airfoil: secAfT,
+    explicitRibs: designT.explicitRibs, pointsPerSurface: 80, alphaDeg: g.aoaDeg,
+  });
+  const phiT = [0, 0.44, 0.86, 1.30, 1.72, 2.13, 2.51, 3.00, 3.47, 3.93, 4.32, 4.70, 5.17, 5.75, 6.23, 6.76, 7.25, 7.41];
+  const chiT = [7.41, 7.42, 7.45, 7.49, 7.56, 7.64, 7.74, 7.85, 7.96, 8.10, 8.25, 8.42, 8.58, 8.69, 8.78, 8.75, 8.47, 8.74];
+  const dPhiT = Math.max(...wingT.ribs.map((rb, i) => Math.abs(rb.phiDeg - phiT[i])));
+  const dChiT = Math.max(...wingT.ribs.map((rb, i) => Math.abs(rb.chiDeg - chiT[i])));
+  check('phi matches every rib, up to 7.41 degrees at the tip', dPhiT < 0.0101, `worst ${dPhiT.toFixed(4)} deg`);
+  check('and chi, the local angle of attack', dChiT < 0.0101, `worst ${dChiT.toFixed(4)} deg`);
+
+  // Section 1: the main parameters, flat and projected, on the tool's own
+  // wing — the projected ones from the arc as the tool builds it.
+  const mT = planformMetrics(discretePlanform(designT.planformRows));
+  const projT = projectedArea(wingT);
+  const mainT = [
+    ['flat area', mT.area, 19.00], ['flat span', mT.span, 9.04], ['flat aspect ratio', mT.aspectRatio, 4.30],
+    ['projected area', projT, 16.56], ['projected span', designT.projectedSpan, 7.40],
+    ['projected aspect ratio', designT.projectedSpan ** 2 / projT, 3.31],
+  ];
+  check('its main parameters are the printed ones: 19.00 m2, 9.04 m, 4.30 flat; 16.56 m2, 7.40 m, 3.31 projected',
+    mainT.every(([, v, p]) => Math.abs(v - p) < 0.0051),
+    mainT.map(([n, v]) => `${n} ${v.toFixed(3)}`).join(', '));
+
+  // Section 8: rods.
+  const jT = lepJoncs(doc, t);
+  const pubT = [73.4, 73.3, 72.8, 72.0, 70.9, 69.4, 67.7, 65.6, 63.3, 60.4, 56.9, 52.8, 48.2, 43.2];
+  check('its 14 nose rods a side are the printed lengths',
+    jT.ok && jT.joncs.length === 14 && jT.joncs.every((x, i) => Math.abs(x.lengthCm - pubT[i]) < 0.051),
+    jT.joncs.map((x) => x.lengthCm.toFixed(1)).join(' '));
+  near('and both sides come to the printed 17.80 m', jT.bothSidesM, 17.80, 0.006, ' m');
+
+  // Section 4 holes, against the design's own cutting file.
+  const cut = readFileSync('data/reference/lep/tuluaq19-cut-parts.tsv', 'utf8').split('\n')
+    .filter((l) => l.startsWith('rib\t')).map((l) => l.split('\t'));
+  const holesT = lepHoles(doc, t);
+  const areaOf = (o) => {
+    let a = 0;
+    for (let i = 0, k = o.length - 1; i < o.length; k = i++) a += o[k][0] * o[i][1] - o[i][0] * o[k][1];
+    return Math.abs(a / 2);
+  };
+  let worstHole = 0;
+  for (const [, ribNo, , , n, holesCm2] of cut) {
+    const mine = holesT.byRib.get(Number(ribNo) - 1) ?? [];
+    if (Number(n) !== mine.length) worstHole = Infinity;
+    if (!mine.length) continue;
+    const a = mine.reduce((s, h) => s + areaOf(h.outline), 0) * 1e4;
+    worstHole = Math.max(worstHole, Math.abs(a / Number(holesCm2) - 1));
+  }
+  check('nine holes on each of ribs 1-17 and none on the tip, as its cutting file cuts them',
+    holesT.byRib.size === 17 && cut.length === 18 && Number.isFinite(worstHole));
+  check('each rib\'s holes take out the area its cutting file does, to its polygons\' 0.4%',
+    worstHole < 0.005, `worst ${(worstHole * 100).toFixed(2)}%`);
+
+  // Section 12, the internal structure: full diagonals and straps.
+  const hvT = parseHVRibs(doc);
+  check('its 60 internal entries are 36 diagonals and 24 straps, none unread',
+    hvT.count === 60 && hvT.diagonals.length === 36 && hvT.straps.length === 24 && hvT.notUnderstood === 0,
+    hvT.note);
+  check('and the diagonals are 40 pieces: rib 16 hangs one each side',
+    lepDiagonalPieces(hvT).length === 40);
+}
+
+section('The panels a design cuts, as its program cuts them');
+
+{
+  // The tool's own panels for an imported design missed its cutting file by
+  // a tenth: they parted the surfaces at the nose, were not cut wider than
+  // their cells, closed no intake and took one seam allowance for all. Each
+  // of the four is the program's (its source is in the design archives),
+  // and with all four the design's own panels come out as its cutting file
+  // cuts them.
+  const perim = (pts) => {
+    let L = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) L += Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]);
+    return L;
+  };
+  const designs = [
+    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', 25],
+    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', 17],
+  ];
+  const results = {};
+  for (const [name, key, file, sectionFile, sectionName, cells] of designs) {
+    const docP = parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1'));
+    const tP = lepRibTable(docP, { airfoils: { [sectionName]: readFileSync(`data/reference/lep/${sectionFile}`, 'latin1') } });
+    const P = lepPanels(docP, tP);
+    const rows = readFileSync(`data/reference/lep/${key}-cut-parts.tsv`, 'utf8').split('\n')
+      .filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
+    const measured = (part) => rows.filter((r) => r[0] === part).map((r) => ({ cell: Number(r[1]), cm2: Number(r[3]), cm: Number(r[6]) }));
+    results[name] = { P, measured };
+    check(`${name}: ${cells} cells, an upper and a lower panel each, none refused`,
+      P.ok && P.panels.length === 2 * cells && P.notReproduced.length === 0
+      && measured('upper panel').length === cells && measured('lower panel').length === cells,
+      P.problems.join('; '));
+    for (const surface of ['upper', 'lower']) {
+      const mine = P.panels.filter((x) => x.surface === surface);
+      const theirs = measured(`${surface} panel`);
+      const total = theirs.reduce((t, x) => t + x.cm2, 0) / 1e4;
+      // The Swoop2's upper panel at the tip is drawn open in its file, and
+      // measured across the gap: it is held to a per cent.
+      const off = mine.map((x) => {
+        const m = theirs.find((y) => y.cell === x.cell);
+        return { cell: x.cell, d: (x.cutAreaM2 * 1e4) / m.cm2 - 1, open: name === 'Swoop2' && surface === 'upper' && x.cell === 25 };
+      });
+      const worst = off.filter((x) => !x.open).reduce((m, x) => (Math.abs(x.d) > Math.abs(m.d) ? x : m), { d: 0 });
+      check(`${name}: every ${surface} panel is cut to its cutting file's area`,
+        Math.abs(worst.d) < 0.0015 && off.filter((x) => x.open).every((x) => Math.abs(x.d) < 0.01),
+        `worst ${(worst.d * 100).toFixed(3)}%, cell ${worst.cell}; the ${surface} surface ${(P.totals[surface].cutM2).toFixed(4)} m2 `
+        + `against ${total.toFixed(4)} a side`);
+      if (theirs.every((x) => Number.isFinite(x.cm) && x.cm > 0)) {
+        const dP = Math.max(...mine.map((x) => Math.abs(perim(x.panel.cut.left.concat(x.panel.cut.right.slice().reverse())) * 100
+          - theirs.find((y) => y.cell === x.cell).cm)));
+        check(`${name}: and to its outline: every ${surface} panel's cut line is the file's length to 3 mm`,
+          dP < 0.3, `worst ${(dP * 10).toFixed(1)} mm`);
+      }
+    }
+  }
+
+  // The four things, one at a time, on the Tuluaq.
+  const docQ = parseLep(readFileSync('data/reference/lep/tuluaq19-20250107.lep', 'latin1'));
+  const PQ = results['Tuluaq-19'].P;
+  check('its own seam allowances are read: 15 mm at the sides, 25 at the front, 10 at the trailing edge',
+    JSON.stringify(lepSeamAllowances(docQ).upper) === '{"side":15,"front":25,"back":10}'
+    && JSON.stringify(results.Swoop2.P.allowances.lower) === '{"side":10,"front":10,"back":20}');
+  const skinQ = lepSkinTension(docQ);
+  check('its skin tension is section 31\'s, eleven points from rib 1 to 18',
+    skinQ.mode === 'groups' && skinQ.of(1).upper.length === 11 && skinQ.of(18).upper[5][1] === 2.6);
+  const grow = (s) => PQ.totals[s].sewnM2 / PQ.totals[s].developedM2 - 1;
+  check('and it cuts the panels wider than their cells: 4% on the upper surface, 3% on the lower',
+    grow('upper') > 0.035 && grow('upper') < 0.045 && grow('lower') > 0.025 && grow('lower') < 0.035,
+    `${(grow('upper') * 100).toFixed(1)}% and ${(grow('lower') * 100).toFixed(1)}%`);
+  const ventsQ = lepVents(docQ);
+  check('its intakes are closed as section 26 says: upper panels run over the front of five cells\' intakes, '
+    + 'lower panels over the rear of four and the whole of two',
+    ventsQ.mode === 'glue' && ventsQ.of(5).type === 4 && ventsQ.of(4).type === -4 && ventsQ.of(18).type === -1
+    && ventsQ.of(6).type === 0);
+  const upperQ = PQ.panels.filter((x) => x.surface === 'upper');
+  const extQ = upperQ.filter((x) => x.developed.left.length > upperQ[5].developed.left.length).map((x) => x.cell);
+  check('and the upper panels that run on are cells 1, 2, 4, 8 and 12',
+    extQ.join() === '1,2,4,8,12', extQ.join());
+  // The upper panel parts from the lower where the intake opens, under the
+  // nose: its front end is below the leading edge, not at it.
+  const r1 = PQ.panels.find((x) => x.cell === 6 && x.surface === 'upper');
+  const secQ = lepRibTable(docQ, { airfoils: { 'gnua.txt': readFileSync('data/reference/lep/tuluaq19-gnua.txt', 'latin1') } })
+    .ribs[5].section;
+  const frontQ = secQ.points[secQ.extrados - 1];
+  check('the upper panel wraps the nose to the intake: its front end is on the lower surface',
+    r1.developed.left.length === secQ.extrados && frontQ[1] < 0 && frontQ[0] > 0.01,
+    `it ends ${(frontQ[0] * 100).toFixed(1)}% of chord back, ${(-frontQ[1] * 100).toFixed(1)}% under the chord line`);
+}
+
+section('What a design sews inside its cells, as its program cuts it');
+
+{
+  // Section 12 — full diagonals, straps, pieces between two ribs — and the
+  // rods' pockets of section 21, built the way the design's own program
+  // builds them (`lepStructure`, read from leparagliding.f), against every
+  // piece of both complete designs' cutting files. The Swoop2's file was
+  // drawn by the program's 3.30 and the Tuluaq's by 3.25, which drew a
+  // diagonal's cut-outs and a pocket's edges differently: each is held to
+  // its own.
+
+  // The program's resampling is by count, not length: a 3-point line to 21
+  // points keeps its corner, and every segment gets its share by count.
+  const rs = lepResample([[0, 0], [1, 0], [1, 3]], 21);
+  check('the program\'s resampling: 21 points, its own ends, the corner kept, ten to a segment',
+    rs.length === 21 && rs[0][0] === 0 && rs[20][1] === 3 && rs.some((q) => q[0] === 1 && q[1] === 0)
+    && rs.filter((q) => q[1] === 0).length === 11,
+    JSON.stringify(rs.slice(9, 12)));
+  // And its flattening lays a flat strip down as it is.
+  const Lf = []; const Rf = [];
+  for (let k = 0; k <= 20; k++) { Lf.push([0, k * 0.1, 0]); Rf.push([0.5, k * 0.1, 0.2]); }
+  const fl = lepFlatten(Lf, Rf);
+  const flatArea = (() => { const ring = fl.pl1.concat(fl.pr1.slice().reverse()); let a = 0; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1]; return Math.abs(a / 2); })();
+  near('the program\'s flattening keeps a flat strip\'s area', flatArea, Math.hypot(0.5, 0.2) * 2, 1e-12);
+
+  const designs = [
+    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', false],
+    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', true],
+  ];
+  const built = {};
+  for (const [name, key, file, sf, sn, before330] of designs) {
+    const doc = parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1'));
+    const t = lepRibTable(doc, { airfoils: { [sn]: readFileSync(`data/reference/lep/${sf}`, 'latin1') } });
+    const st = lepStructure(doc, t);
+    built[name] = { st, t };
+    const rows = readFileSync(`data/reference/lep/${key}-cut-parts.tsv`, 'utf8').split('\n')
+      .filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
+    const one = (prefix) => rows.filter((r) => r[0].startsWith(prefix));
+    const group = (part) => rows.find((r) => r[0] === part);
+    const of = (kind) => st.pieces.filter((p) => p.kind === kind);
+    // What the file was drawn as: 3.30 cuts a diagonal's cut-outs through
+    // its allowance; 3.25 drew them inside a whole one, and offset a
+    // pocket's edges its older way.
+    const asDrawn = (p) => (before330 && p.drawnBefore330 ? p.drawnBefore330 : p);
+    const cm2 = (m2) => m2 * 1e4;
+
+    check(`${name}: its internal structure is built, every kind its file has, piece for piece`,
+      st.ok && of('diagonal').length === one('full diagonal,').length
+      && of('strap').length === one('strap,').length
+      && of('between').length === one('piece between ribs,').length
+      && of('pocket').length === one('rod pocket,').length
+      && of('diagonal').length === Number(group('full diagonal ribs')[2])
+      && of('strap').length === Number(group('straps between ribs')[2])
+      && of('pocket').length === Number(group('rod pockets')[2]),
+      `${st.problems.join('; ')} — ${['diagonal', 'strap', 'between', 'pocket'].map((k) => `${of(k).length} ${k}`).join(', ')}`);
+
+    // Full diagonals. Each to two parts in a hundred thousand: close enough
+    // to tell a rib lowered before its twist from one lowered after, which
+    // moves the Tuluaq's tip diagonal seven in a hundred thousand.
+    let worstD = { d: 0 };
+    let worstH = { d: 0 };
+    let holesRight = true;
+    let perimD = 0;
+    for (const r of one('full diagonal,')) {
+      const side = r[0].endsWith('left') ? 'left' : 'right';
+      const p = of('diagonal').find((x) => x.rib === Number(r[1]) && x.side === side);
+      if (!p) { worstD = { d: 1, at: `${r[1]} ${side}` }; continue; }
+      const d = cm2(asDrawn(p).outlineAreaM2) / Number(r[3]) - 1;
+      if (Math.abs(d) > Math.abs(worstD.d)) worstD = { d, at: `${r[1]} ${side}` };
+      // The file's holes: 3.25's cut-outs, 3.30's ellipses at the anchors.
+      const holes = before330 ? p.drawnBefore330.cutOutsM2 : p.holesAreaM2;
+      const count = before330 ? p.cutOuts.length : p.holes.length;
+      if (count !== Number(r[4])) holesRight = false;
+      const dh = cm2(holes) / Number(r[5]) - 1;
+      if (Math.abs(dh) > Math.abs(worstH.d)) worstH = { d: dh, at: `${r[1]} ${side}` };
+      if (r[6]) perimD = Math.max(perimD, Math.abs(asDrawn(p).perimeterM * 100 - Number(r[6])));
+    }
+    check(`${name}: every full diagonal is its file's, to two parts in a hundred thousand`,
+      Math.abs(worstD.d) < 2e-5, `worst ${(worstD.d * 100).toFixed(5)}% at rib ${worstD.at}`);
+    check(`${name}: and so are its ${before330 ? 'cut-outs' : 'holes'}, piece by piece`,
+      holesRight && Math.abs(worstH.d) < 1e-4,
+      `worst ${(worstH.d * 100).toFixed(4)}% at rib ${worstH.at}${holesRight ? '' : '; a count differs'}`);
+    if (before330) check(`${name}: and its diagonals' cut lines, to a millimetre`, perimD < 0.1, `worst ${(perimD * 10).toFixed(2)} mm`);
+
+    // Straps, pieces between two ribs and pockets: each to a part in ten
+    // thousand, the file's own rounding to a hundredth of a cm2 on the
+    // smallest.
+    const pieceCheck = (label, prefix, kind, find, holes) => {
+      let worst = { d: 0 };
+      let perim = 0;
+      for (const r of one(prefix)) {
+        const p = find(r);
+        if (!p) { worst = { d: 1, at: r.slice(0, 2).join(' ') }; continue; }
+        const d = cm2(asDrawn(p).outlineAreaM2) / Number(r[3]) - 1;
+        if (Math.abs(d) > Math.abs(worst.d)) worst = { d, at: r.slice(0, 2).join(' ') };
+        if (holes) {
+          const dh = cm2(p.holesAreaM2) / Number(r[5]) - 1;
+          if (p.holes.length !== Number(r[4]) || Math.abs(dh) > 1e-4) worst = { d: Math.max(Math.abs(worst.d), Math.abs(dh), 1e-3), at: `${r[0]} ${r[1]} holes` };
+        }
+        if (r[6]) perim = Math.max(perim, Math.abs(asDrawn(p).perimeterM * 100 - Number(r[6])));
+      }
+      check(`${name}: every ${label} is its file's, to a part in ten thousand${holes ? ', its holes too' : ''}`,
+        Math.abs(worst.d) < 1e-4 && perim < 0.1,
+        `worst ${(worst.d * 100).toFixed(4)}% at ${worst.at}${perim ? `; cut line to ${(perim * 10).toFixed(2)} mm` : ''}`);
+    };
+    pieceCheck('strap', 'strap,', 'strap',
+      (r) => of('strap').find((p) => p.ribs[0] === Number(r[1]) && p.row === Number(r[0].split('row ')[1])));
+    if (one('piece between ribs,').length) {
+      pieceCheck('piece between two ribs', 'piece between ribs,', 'between',
+        (r) => of('between').find((p) => p.ribs[0] === Number(r[1]) && p.chordPct[0] === Number(r[0].split(', ')[1].replace('%', ''))), true);
+    }
+    pieceCheck('rod pocket', 'rod pocket,', 'pocket',
+      (r) => of('pocket').find((p) => p.rib === Number(r[1]) && p.bloc === Number(r[0].split('bloc ')[1])));
+
+    // The totals the file was measured as, cut lines included.
+    const sum = (kind, f) => of(kind).reduce((a, p) => a + f(p), 0);
+    const totals = [
+      ['full diagonal ribs', 'diagonal'], ['straps between ribs', 'strap'],
+      ['V-ribs between two ribs', 'between'], ['rod pockets', 'pocket'],
+    ].filter(([part]) => group(part));
+    const off = totals.map(([part, kind]) => {
+      const g = group(part);
+      const area = cm2(sum(kind, (p) => asDrawn(p).outlineAreaM2));
+      const perim = sum(kind, (p) => asDrawn(p).perimeterM) * 100;
+      return { part, dA: area / Number(g[3]) - 1, dP: g[6] ? perim - Number(g[6]) : 0 };
+    });
+    check(`${name}: and its totals: area to a part in ten thousand, cut line to a millimetre`,
+      off.every((o) => Math.abs(o.dA) < 1e-4 && Math.abs(o.dP) < 0.1),
+      off.map((o) => `${o.part} ${(o.dA * 100).toFixed(4)}%, ${(o.dP * 10).toFixed(2)} mm`).join('; '));
+
+    // What it does not build is said, and counted as the file counts it.
+    check(`${name}: its trailing-edge mini-ribs are counted, not built, and said`,
+      st.miniRibs === Number(group('trailing-edge mini-ribs')[2])
+      && st.notReproduced.some((x) => new RegExp(`^${st.miniRibs} trailing-edge mini-ribs$`).test(x)),
+      `${st.miniRibs} against ${group('trailing-edge mini-ribs')[2]}; ${st.notReproduced.join('; ')}`);
+  }
+
+  // The one hole the Swoop2's file does not have is the one the program
+  // computes off its piece: at the first anchor of the rib-23 diagonal.
+  const sw = built.Swoop2.st;
+  const d23 = sw.pieces.find((p) => p.kind === 'diagonal' && p.rib === 23);
+  check('the Swoop2: a hole that would run off its piece is not cut, and it is the one its file leaves out',
+    sw.droppedHoles === 1 && d23.holes.length === 2 && sw.pieces.filter((p) => p.kind === 'diagonal' && p !== d23).every((p) => p.holes.length === 3),
+    `${sw.droppedHoles} dropped, rib 23 has ${d23.holes.length}`);
+
+  // 3.30 cuts a diagonal's cut-outs through its seam allowance; 3.25 left
+  // the allowance whole across them. On the Tuluaq that is the allowance
+  // across 30 openings.
+  const tu = built['Tuluaq-19'].st;
+  const tuD = tu.pieces.filter((p) => p.kind === 'diagonal');
+  const asCut = tuD.reduce((a, p) => a + p.cutAreaM2, 0);
+  const asDrawn325 = tuD.reduce((a, p) => a + p.drawnBefore330.cutAreaM2, 0);
+  const openings = tuD.reduce((a, p) => a + p.cutOuts.reduce((b, c) => b + Math.hypot(c[c.length - 1][0] - c[0][0], c[c.length - 1][1] - c[0][1]), 0), 0);
+  check('the Tuluaq: its diagonals as 3.30 cuts them carry less cloth than its 3.25 file, by the allowance across each opening',
+    tuD.every((p) => p.cutAreaM2 < p.drawnBefore330.cutAreaM2)
+    && Math.abs((asDrawn325 - asCut) / (openings * tu.settings.ribAllowanceCm / 100) - 1) < 0.1,
+    `${asCut.toFixed(4)} m2 against ${asDrawn325.toFixed(4)} a side; the allowance across ${openings.toFixed(2)} m of openings is `
+    + `${(openings * tu.settings.ribAllowanceCm / 100).toFixed(4)} m2`);
+
+  // The bill takes them, for the whole wing: the centre rib's pockets once.
+  for (const [name, { st }] of Object.entries(built)) {
+    const bom = buildBOM({ structure: st, name });
+    const item = bom.fabric.find((f) => f.item === 'Internal structure cloth');
+    const wing = st.pieces.reduce((a, p) => a + p.cutAreaM2 * p.copies, 0);
+    const centre = st.pieces.filter((p) => p.copies === 1);
+    check(`${name}: the bill counts its internal structure for the whole wing, the centre rib's pieces once`,
+      item && Math.abs(item.panelAreaM2 - wing) < 1e-9 && item.count === 2 * st.pieces.length - centre.length
+      && centre.every((p) => p.kind === 'pocket' && p.rib === 1)
+      && !bom.fabric.some((f) => f.item === 'Diagonal cloth')
+      && bom.missing.some((m) => /trailing-edge mini-ribs/.test(m)),
+      `${item?.count} pieces, ${item?.panelAreaM2?.toFixed(2)} m2: ${lepStructureWords(st.pieces)}`);
+  }
+
+  // And its own cutting file: every piece of a side, its holes on their layer.
+  const dxf = parseDXF(lepStructureToDXF(sw, { rollWidth: 1.4, gap: 0.03 }));
+  const cutLoops = dxf.polylines.filter((q) => /-cut$/.test(q.layer));
+  const holeLoops = dxf.polylines.filter((q) => /-holes$/.test(q.layer));
+  const fileArea = cutLoops.reduce((a, q) => a + outlineArea(q.points), 0) - holeLoops.reduce((a, q) => a + outlineArea(q.points), 0);
+  const nest = lepStructureNesting(sw.pieces, { rollWidth: 1.4, gap: 0.03 });
+  check('the Swoop2: its internal-structure cutting file holds every piece and hole of a side, at its area',
+    cutLoops.length === sw.pieces.length && holeLoops.length === sw.pieces.reduce((a, p) => a + p.holes.length, 0)
+    // Written to the micron, which is all the area moves by.
+    && Math.abs(fileArea / sw.totals.all.cutM2 - 1) < 1e-5 && nest.linearMetres > 0,
+    `${cutLoops.length} pieces, ${holeLoops.length} holes, ${fileArea.toFixed(4)} m2 against ${sw.totals.all.cutM2.toFixed(4)}; `
+    + `${nest.linearMetres.toFixed(1)} m of a 1.4 m roll a side`);
+}
+
 section('Swoop2: the source method\'s own design');
 
 {
@@ -8753,6 +9391,17 @@ section('Swoop2: the source method\'s own design');
   near('root chord matches the published 2.0907 m',
     r[0].chord, 2.0907, 0.0005, ' m');
   check('cell and rib counts match', d.cells === 50 && d.geometry.ribCount === 51);
+  // And the projected figures, from the arc as the tool builds the wing.
+  const secP = parseAirfoilText(readFileSync('data/reference/lep/swoop2-gnuReflex.txt', 'utf8'), 'gnuReflex');
+  const dP = lepToDesign(lep, { sections: { 'gnuReflex.txt': secP } });
+  const projP = projectedArea(buildWing({
+    planform: discretePlanform(dP.planformRows), lobe: null, airfoil: secP,
+    explicitRibs: dP.explicitRibs, pointsPerSurface: 80,
+  }));
+  check('projected area, span and aspect ratio are the published 15.30 m2, 8.46 m and 4.68',
+    Math.abs(projP - 15.30) < 0.0051 && Math.abs(dP.projectedSpan - 8.46) < 0.0051
+    && Math.abs(dP.projectedSpan ** 2 / projP - 4.68) < 0.0051,
+    `${projP.toFixed(3)} m2, ${dP.projectedSpan.toFixed(3)} m, ${(dP.projectedSpan ** 2 / projP).toFixed(3)}`);
 
   // The line list, in the prefix convention.
   const sheet = parseSimpleLineSheet(

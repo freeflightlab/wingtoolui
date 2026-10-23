@@ -100,13 +100,13 @@ NOT WEIGHED
 ```
 
 The bill counted sail cloth and line only for a long time, and said so at the
-bottom. It now carries the ribs with what is cut out of them, the diagonals,
-reinforcement, tabs, rods and webbing — and still ends by naming what it does
-not weigh, so the total is not read as the weight of a wing. The roll to
-order covers all three cloths, each laid out on its own roll; the ribs used
-to be left out of it without a word. With the rods
-turned off it lists mylar at the intakes instead (98 pieces, 90 g): something
-has to hold the nose.
+bottom. It now carries the ribs with what is cut out of them, the diagonals
+(an imported design's own structure, pockets and all: `internal-structure.md`),
+reinforcement, tabs, rods and webbing, and still names what it does not weigh,
+so the total is not read as the weight of a wing. The roll to order covers
+all three cloths, each on its own roll; the ribs used to be left out of it
+without a word. With the rods turned off it lists mylar at the intakes
+instead (98 pieces, 90 g): something has to hold the nose.
 
 Against a published wing the comparison is direct. Loaded by size and built in
 the default cloths, the 43 ordinary double-surface sizes come to 65–101% of
