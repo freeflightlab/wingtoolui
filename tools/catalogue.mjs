@@ -190,11 +190,15 @@ for (const f of lepFiles) {
     // The header is a comment line; after it each row is one piece — a rib,
     // a panel, a piece sewn inside the wing — or a group of pieces as a total.
     const rows = body.split('\n').filter((l) => l.trim() && !l.startsWith('#'));
-    const n = (part) => rows.filter((l) => l.startsWith(`${part}\t`)).length;
-    const inside = rows.filter((l) => /^(full diagonal|strap|piece between ribs|rod pocket),/.test(l)).length;
-    const one = n('rib') + n('upper panel') + n('lower panel') + inside;
+    // A panel cut across by 3D shaping is listed piece by piece:
+    // "upper panel, front", "upper panel, rear".
+    const n = (part) => rows.filter((l) => l.startsWith(`${part}\t`) || l.startsWith(`${part}, `)).length;
+    const inside = rows.filter((l) => /^(full diagonal|V-rib strip|strap|piece between ribs|rod pocket),/.test(l)).length;
+    const minis = n('mini-rib');
+    const one = n('rib') + n('upper panel') + n('lower panel') + inside + minis;
     kind = 'cut parts, measured';
-    detail = `${n('rib')} ribs, ${n('upper panel')} upper and ${n('lower panel')} lower panels and ${inside} pieces `
+    detail = `${n('rib')} ribs, ${n('upper panel')} upper and ${n('lower panel')} lower panel pieces`
+      + `${minis ? `, ${minis} mini-ribs` : ''} and ${inside} pieces `
       + `inside the wing one by one, ${rows.length - one} groups of parts as totals, from the design's 2D DXF`;
   } else if (f.endsWith('.txt')) {
     kind = 'section';

@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2566-test validation suite and a benchmark with regression budgets
+- [x] 2632-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -919,11 +919,15 @@ validation notes flagged.
       lowered before its twist for its surfaces and after for its anchors,
       and a centre rib on the centreline is moved 0.01 out. See
       `docs/internal-structure.md`.
-- [ ] **An imported design's trailing-edge mini-ribs** — 25 a side on the
-      Swoop2, 16 on the Tuluaq, 0.84 and 0.89 m² for the wing in their
-      files. The program cuts them from the section as it billows the cell
-      over it (its 6.12.0 and its ovalization), which is not yet reproduced;
-      the bill lists them as missing.
+- [x] **An imported design's trailing-edge mini-ribs** — 25 a side on the
+      Swoop2, 16 on the Tuluaq, 29 on the gnuC2-23. Built as the program
+      builds them (its 6.12.0): the rear of the rib inboard of the cell, its
+      front raised to the cell's billow — the panel's width as cut standing
+      over the ribs' distance as an arc, the program's `hautok` — by section
+      37's code 3001, with section 38's type 9 holes. All 70 match their
+      files in total, the gnuC2-23's piece by piece, and the bill weighs them
+      as rib cloth: 0.82, 0.89 and 1.50 m² for the wing. Done in the round of
+      2026-10-26; see `docs/internal-structure.md`, section 5.
 - [x] **The H-rib builder read a strap's width as a whole width in
       centimetres** — the Swoop2's type-11 straps are 2% of chord either side
       of the anchor, as the program reads them: four times the width it built
@@ -931,6 +935,47 @@ validation notes flagged.
 - [x] **A label of ours** — the Swoop2's seventy straps were listed in its
       cut-parts file as upper straps; they run along the lower surfaces at
       the anchors.
+
+### Round of 2026-10-22 to 10-26: a third complete design
+
+- [x] **The gnuC2-23 read exactly** — Laboratori d'envol's 23 m² design
+      from LEparagliding 3.28, with its own output, cutting files and the
+      program's source (`data/reference/lep/`). Its 95 lines, main
+      parameters and chords matched on the first load. What it has that the
+      other two do not was added as its program does it: a shark nose (rod
+      type 3, an upper and a lower rod on every rib, 42.32 m), V-ribs as
+      separate strips (section 12's type 3), pieces between ribs whose edge
+      on a lower surface the program draws straight, a flat tip rib — whose
+      φ came out 0.70° against 0.01 until its plane was taken from its frame
+      — 3D shaping that cuts every upper panel in two, and intakes closed on
+      a diagonal (section 26's −2 and −3). In the picker with the other two.
+      See `docs/gnuc2-23.md`.
+- [x] **The program's seam matching** (section 5's `1000`): each sewing edge
+      stretched back to its rib's length and the panel's end turned to take
+      it up, with upper panels laid out from the trailing edge as the
+      program lays them. It was the Tuluaq's tip panel, 0.14% off and
+      unexplained: 0.011% now. Every panel of the three files within 0.034%,
+      but the gnuC2-23's self-crossing tip front piece. See `docs/panels.md`.
+- [x] **Every rib cut as its program cuts it** (`lepRibCutLine`, its 6.11).
+      The tool's mitred offset put 2 to 3 cm² more on every rib — 0.03% at
+      the root, 2.5% at the Swoop2's tip; every rib of the three files is
+      within 0.002% now, and the bill weighs an imported design's ribs as
+      cut. Holes are the program's polygons, 39-sided before 3.30 and 60 or
+      section 37's 3002 since: the 48-sided ones were 0.15% off.
+- [x] **The Diagonals summary judged an imported design on half its
+      pieces** — it said ribs were held from one side, or not reached at
+      all, that the design's other pieces between ribs hold. It says now
+      that its findings are on the places it models, and which of those ribs
+      the design's own pieces join.
+- [ ] **A closed intake laid out by itself** — the program develops a
+      closed intake's strip apart from the panel and joins it on: the
+      Swoop2's lower panels run over the rear of the intake are 0.034%
+      over, the gnuC2-23's closed tip cells 0.011% under, 0.3 mm at the
+      intake's first points.
+- [ ] **The calage and riser variations the program prints** (its section
+      28 and its output's section 7) are not compared with this tool's speed
+      system, which has its own model (`docs/speed-system.md`); the three
+      designs' tables are on file.
 
 ## Phase 3 — construction detail
 

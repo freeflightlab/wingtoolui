@@ -564,12 +564,11 @@ try {
         console.log(`  FAIL the panel does not say what the Swoop2's diagonals come to: "${summary.slice(0, 160)}"`);
         process.exit(1);
       }
-      // Its straps and pieces between ribs are cut as its program cuts them
-      // now, so the import note no longer lists them; what it still lists
-      // is what is not built — the trailing-edge mini-ribs.
-      if (!/Not reproduced: 25 trailing-edge mini-ribs/.test(S2._referenceNote || '')
-        || /straps between adjacent ribs|pieces between two ribs/.test(S2._referenceNote || '')) {
-        console.log(`  FAIL the import note does not say what of the Swoop2 is not built: "${(S2._referenceNote || '').slice(-200)}"`);
+      // Its straps, pieces between ribs and trailing-edge mini-ribs are cut
+      // as its program cuts them now, so the import note lists none of them:
+      // it said "Not reproduced: 25 trailing-edge mini-ribs" until they were.
+      if (/Not reproduced|mini-ribs|straps between adjacent ribs|pieces between two ribs/.test(S2._referenceNote || '')) {
+        console.log(`  FAIL the import note says the Swoop2 has pieces not built: "${(S2._referenceNote || '').slice(-200)}"`);
         process.exit(1);
       }
       console.log(`  ok   its diagonals are its own: ${v.count} a side on rows ${rowsHere}, every one `
@@ -776,21 +775,92 @@ try {
       + `${v3.count} diagonals a side on rows ${rows3}, the pilot ${m3.hangDepthM.toFixed(2)} m down; `
       + `${ran3} exports, ${Object.keys(globalThis.__saved).length} files, its own holes and lines in the bill`);
 
+    // The gnuC2-23, the third: a shark nose (two rods a rib), V-ribs, pieces
+    // between ribs, a flat tip rib and upper panels cut in two by its 3D
+    // shaping — every view and every export has to take all of them.
+    const GID = "Laboratori d'envol gnuC2-23  (complete design)";
+    S3.reference = GID;
+    globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
+    const m4 = globalThis.__getM();
+    if (m4.error || S3._appliedReference !== GID || !m4.imported) {
+      console.log(`  FAIL the gnuC2-23 does not load from the picker: ${m4.error || 'not applied'}`);
+      process.exit(1);
+    }
+    const v4 = m4.vribs;
+    const rows4 = [...new Set(v4.vribs.map((d) => d.row))].sort().join('');
+    const pieces4 = m4.panels.filter((p) => p.panel.pieces?.length === 2).length;
+    if (!(Math.abs(m4.metrics.area - 23.0) < 0.05 && m4.wing.ribs.length === 31 && S3.cells === 30
+      && Math.abs(m4.hangDepthM - 7.231) < 0.01 && v4.own && v4.count === 51 && rows4 === 'ABC'
+      && m4.panels.length === 60 && pieces4 === 30 && m4.rods?.own && m4.rods.rods.length === 60)) {
+      console.log(`  FAIL the gnuC2-23 loads as ${m4.metrics.area.toFixed(2)} m2, ${m4.wing.ribs.length} ribs, ${S3.cells} cells, `
+        + `the pilot ${m4.hangDepthM} m down, ${v4.count} diagonals on ${rows4}, ${pieces4} panels in two, ${m4.rods?.rods?.length} rods`);
+      process.exit(1);
+    }
+    for (const tb of ['wing', 'lines', 'structure', 'rib', 'analysis']) {
+      try { globalThis.__tab(tb); }
+      catch (e) { console.log(`  FAIL the gnuC2-23 breaks the ${tb} view: ${e.message}`); process.exit(1); }
+    }
+    // Its flat tip rib on the Rib tab: drawn, with its cutting line.
+    S3.ribIndex = 30;
+    try { globalThis.__tab('rib'); } catch (e) { console.log(`  FAIL the gnuC2-23's flat tip rib breaks the Rib tab: ${e.message}`); process.exit(1); }
+    const tipF = globalThis.__ribFeatures(m4.wing.ribs[30]);
+    S3.ribIndex = 0;
+    if (!tipF.cutLine.length || tipF.holes.length || tipF.rods.length) {
+      console.log(`  FAIL the gnuC2-23's flat tip rib: ${tipF.cutLine.length} cut points, ${tipF.holes.length} holes, ${tipF.rods.length} rods`);
+      process.exit(1);
+    }
+    const was4 = { ribHoles: S3.ribHoles, rods: S3.rods };
+    S3.ribHoles = true; S3.rods = true;
+    globalThis.__rebuild();
+    globalThis.__buttons.length = 0;
+    globalThis.__controls();
+    globalThis.__saved = {};
+    const failed4 = [];
+    let ran4 = 0;
+    for (const b of globalThis.__buttons.slice().filter((x) => !REPLACES_DESIGN.test(x.text))) {
+      try { b.fn(); ran4++; } catch (e) { failed4.push(`${b.text}: ${e.message.slice(0, 50)}`); }
+    }
+    Object.assign(S3, was4);
+    if (failed4.length) {
+      console.log(`  FAIL ${failed4.length} exports fail on the gnuC2-23: ${failed4.slice(0, 3).join(' | ')}`);
+      process.exit(1);
+    }
+    const bom4 = globalThis.__saved['gnuC2-23-bom.txt'] || '';
+    const panelsDxf4 = globalThis.__parseDXF(globalThis.__saved['gnuC2-23-panels.dxf'] || '');
+    // Each piece labelled by its cell, surface and part: 2Uf and 2Ur, 2L.
+    const pieceLayers4 = new Set((panelsDxf4.texts ?? []).map((q) => q.text ?? q.value).filter((l) => /^\d+U[fr]$/.test(l ?? '')));
+    if (!/^Bill of materials — gnuC2-23/.test(bom4) || !/the design's own holes/.test(bom4)
+      || !/Line160\s+113\.5 m\s+60 pieces/.test(bom4) || !/Line275\s+94\.5 m\s+26 pieces/.test(bom4)
+      || !/118 pieces\s+41\.4 m/.test(bom4) || pieceLayers4.size < 60) {
+      console.log(`  FAIL the gnuC2-23's bill or panels file is not its own: "${bom4.slice(0, 200)}", `
+        + `${pieceLayers4.size} upper pieces labelled in its panels file`);
+      process.exit(1);
+    }
+    console.log(`  ok   the gnuC2-23 loads from the picker: ${m4.metrics.area.toFixed(2)} m2, 31 half-wing ribs, its flat tip rib `
+      + `drawn, ${v4.count} diagonal places on rows ${rows4}, 60 shark-nose rods, ${pieces4} upper panels cut in two `
+      + `(${pieceLayers4.size} pieces labelled in its panels file); ${ran4} exports, ${Object.keys(globalThis.__saved).length} files`);
+
     // Its panels and ribs are cut as its cutting file cuts them, and the bill
     // weighs them at that size. The tool's own development, with its 6%
     // ovalization and one seam allowance, missed the panels by a tenth.
     const fsx3 = require('fs');
     const areaOf3 = (pts) => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1]; return Math.abs(a / 2); };
-    for (const [id, key, tag] of [[TID, 'tuluaq19', 'TULUAQ_19'], ["Laboratori d'envol Swoop2  (complete design)", 'swoop2', 'Swoop2']]) {
+    for (const [id, key, tag] of [[TID, 'tuluaq19', 'TULUAQ_19'], ["Laboratori d'envol Swoop2  (complete design)", 'swoop2', 'Swoop2'],
+      [GID, 'gnuc2-23', 'gnuC2-23']]) {
       S3.reference = id;
       globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
       const mc = globalThis.__getM();
       const rowsC = fsx3.readFileSync(`data/reference/lep/${key}-cut-parts.tsv`, 'utf8').split('\n')
         .filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
-      const sumOf = (part) => rowsC.filter((r) => r[0] === part).reduce((t, r) => t + Number(r[3]), 0) / 1e4;
+      // A panel cut in two by 3D shaping is two rows, "upper panel, front" and "upper panel, rear".
+      const sumOf = (part) => rowsC.filter((r) => r[0] === part || r[0].startsWith(`${part},`))
+        .reduce((t, r) => t + Number(r[3]), 0) / 1e4;
       const own = mc.panels.filter((p) => p.own && p.panel.cut);
+      const ringOf = (c) => c.left.concat(c.right.slice().reverse());
       const cutArea = (surface) => own.filter((p) => p.surface === surface)
-        .reduce((t, p) => t + areaOf3(p.panel.cut.left.concat(p.panel.cut.right.slice().reverse())), 0);
+        .reduce((t, p) => t + (p.panel.pieces?.length
+          ? p.panel.pieces.reduce((u, q) => u + areaOf3(ringOf(q.cut)), 0)
+          : areaOf3(ringOf(p.panel.cut))), 0);
       const dU = cutArea('upper') / sumOf('upper panel') - 1;
       const dL = cutArea('lower') / sumOf('lower panel') - 1;
       if (own.length !== mc.panels.length || !(Math.abs(dU) < 0.001 && Math.abs(dL) < 0.001)) {
@@ -798,17 +868,18 @@ try {
           + `upper ${(dU * 100).toFixed(2)}%, lower ${(dL * 100).toFixed(2)}%`);
         process.exit(1);
       }
-      // Its ribs, at its own rib allowance: all but the tip, its section
-      // thinned to a sliver, within a quarter of a per cent of the file's —
-      // most within a tenth.
+      // Its ribs, at its own rib allowance, drawn as its program draws them:
+      // every one, the tip's included, to the file's area. They were this
+      // tool's offset, mitred at the trailing edge: a quarter of a per cent
+      // off on the small ribs and 2.5% on the Swoop2's tip.
       const ribRows = rowsC.filter((r) => r[0] === 'rib');
       const ribOff = ribRows.map((r) => {
         const rib = mc.wing.ribs[Number(r[1]) - 1];
         return areaOf3(globalThis.__ribFeatures(rib).cutLine) * 1e4 / Number(r[3]) - 1;
       });
-      const bodyOff = ribOff.slice(0, -1).map(Math.abs);
-      if (!(Math.max(...bodyOff) < 0.0025 && bodyOff.filter((x) => x < 0.001).length >= bodyOff.length - 2)) {
-        console.log(`  FAIL ${tag}'s ribs are not cut as its file cuts them: worst ${(Math.max(...bodyOff) * 100).toFixed(2)}%`);
+      const bodyOff = ribOff.map(Math.abs);
+      if (!(ribRows.length === mc.wing.ribs.length && Math.max(...bodyOff) < 5e-5)) {
+        console.log(`  FAIL ${tag}'s ribs are not cut as its file cuts them: worst ${(Math.max(...bodyOff) * 100).toFixed(4)}%`);
         process.exit(1);
       }
       // The bill weighs the sail as cut, with its own allowances.
@@ -823,15 +894,33 @@ try {
           + `${(2 * sumOf('upper panel')).toFixed(2)} and ${(2 * sumOf('lower panel')).toFixed(2)}`);
         process.exit(1);
       }
+      // And its ribs at their cut size: the whole wing's ribs to its file's,
+      // with no allowance left in what the bill does not weigh.
+      const ribBlock = /Rib cloth\n((?:\s{4}[^\n]*\n)+)/.exec(billC)?.[1] ?? '';
+      const ribSolid = /% of ([\d.]+) m2 removed/.exec(ribBlock)?.[1] ?? /(\d+) pieces, ([\d.]+) m2/.exec(ribBlock)?.[2];
+      const mR = /as cut, with the design's own allowance/.test(ribBlock) && ribSolid ? [null, null, null, ribSolid] : null;
+      const ribsFiled = ribRows.reduce((t, r, i) => t + (Number(r[3]) / 1e4) * (i === 0 && mc.wing.ribs[0].station < 1e-9 ? 1 : 2), 0);
+      const notWeighed = (/NOT WEIGHED\n([\s\S]*?)\n\n/.exec(billC) ?? [])[1] ?? '';
+      if (!mR || Math.abs(Number(mR[3]) / ribsFiled - 1) > 0.0005 || /allowance/.test(notWeighed)) {
+        console.log(`  FAIL ${tag}'s bill does not weigh its ribs as cut: ${mR ? mR[3] : 'no item'} m2 against ${ribsFiled.toFixed(2)}; `
+          + `not weighed: ${notWeighed.replace(/\n\s*/g, '; ')}`);
+        process.exit(1);
+      }
       // And what it sews inside its cells, as its program cuts them: in the
       // bill instead of this tool's diagonals, and on its own cutting file.
+      // Its trailing-edge mini-ribs too, as their own item in the rib cloth;
+      // nothing of it is left out of the bill.
       const st = globalThis.__getLEP()?.structure;
+      const wingOf = (pred) => (st?.pieces ?? []).filter(pred).reduce((t, p) => [t[0] + p.copies, t[1] + p.cutAreaM2 * p.copies], [0, 0]);
+      const [nI, aI] = wingOf((p) => p.kind !== 'minirib');
+      const [nM, aM] = wingOf((p) => p.kind === 'minirib');
       const mI = /Internal structure cloth[\s\S]*?(\d+) pieces, ([\d.]+) m2/.exec(billC);
-      if (!st?.ok || !mI || Math.abs(Number(mI[2]) / st.totals.wing.cutM2 - 1) > 0.001
-        || Number(mI[1]) !== st.totals.wing.count || /Diagonal cloth/.test(billC)
-        || !/the design's own, as its program cuts them/.test(billC) || !/trailing-edge mini-ribs/.test(billC)) {
+      const mM = /Mini-rib cloth[\s\S]*?(\d+) pieces, ([\d.]+) m2/.exec(billC);
+      if (!st?.ok || !mI || Math.abs(Number(mI[2]) / aI - 1) > 0.001 || Number(mI[1]) !== nI
+        || !mM || Math.abs(Number(mM[2]) - aM) > 0.0051 || Number(mM[1]) !== nM || /Diagonal cloth/.test(billC)
+        || !/the design's own, as its program cuts them/.test(billC) || /NOT IN THIS BILL[\s\S]*mini-ribs/.test(billC)) {
         console.log(`  FAIL ${tag}'s bill does not carry its own internal structure: ${mI ? mI[0].slice(-60) : 'no item'} against `
-          + `${st?.totals?.wing?.count} pieces, ${st?.totals?.wing?.cutM2?.toFixed(2)} m2`);
+          + `${nI} pieces, ${aI.toFixed(2)} m2; mini-ribs ${mM ? mM[0].slice(-40) : 'no item'} against ${nM}, ${aM.toFixed(2)}`);
         process.exit(1);
       }
       globalThis.__saved = {};
@@ -843,9 +932,9 @@ try {
         process.exit(1);
       }
       console.log(`  ok   ${tag}: its own panels, as its cutting file cuts them (upper ${(dU * 100).toFixed(2)}%, `
-        + `lower ${(dL * 100).toFixed(2)}%), its ribs at its own allowance (worst ${(Math.max(...bodyOff) * 100).toFixed(2)}% `
-        + `off the tip), and the bill weighs the sail as cut: ${mU[1]} and ${mL[1]} m2; its internal structure `
-        + `${mI[2]} m2 in ${mI[1]} pieces, ${loopsI} a side on its cutting file`);
+        + `lower ${(dL * 100).toFixed(2)}%), its ribs as its program cuts them (worst ${(Math.max(...bodyOff) * 100).toFixed(4)}%, `
+        + `${mR[3]} m2 in the bill), and the bill weighs the sail as cut: ${mU[1]} and ${mL[1]} m2; its internal structure `
+        + `${mI[2]} m2 in ${mI[1]} pieces and its mini-ribs ${mM[2]} m2 in ${mM[1]}, ${loopsI} a side on its cutting file`);
     }
     S3.reference = '';
     globalThis.__rebuild(); globalThis.__controls();

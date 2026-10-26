@@ -316,6 +316,16 @@ def build():
     reference_js += ("\nconst TULUAQ_SECTIONS = "
                      + json.dumps({"gnua.txt": tsection.read_text()} if tsection.exists() else {})
                      + ";")
+    # The gnuC2-23: a third, from the program's 3.28, with a shark nose,
+    # V-ribs, 3D-shaped upper panels and a flat tip rib — each of which the
+    # first two did not have.
+    gnuc2 = (ROOT / "data" / "reference" / "lep" / "gnuc2-23-20260429.lep")
+    reference_js += ("\nconst GNUC2_LEP = "
+                     + json.dumps(gnuc2.read_text(encoding="latin-1") if gnuc2.exists() else "") + ";")
+    gsection = (ROOT / "data" / "reference" / "lep" / "gnuc2-23-gnuC2.txt")
+    reference_js += ("\nconst GNUC2_SECTIONS = "
+                     + json.dumps({"gnuC2.txt": gsection.read_text()} if gsection.exists() else {})
+                     + ";")
 
     shell = (UI / "index.html").read_text()
     app = (UI / "app.js").read_text()

@@ -2,7 +2,8 @@
 
 Chapter 7 of the handbook is figures and one paragraph, so this is a
 reconstruction from the drawings, from what the geometry has to do, and from
-the one complete design in the repository — the Swoop2, which states its own.
+the complete designs in the repository — the Swoop2 above all, which states
+its own.
 
 > "Diagonal ribs (V-rib) are used primarily to reduce the number of anchors
 > in the sail ... joining the intrados surface with the extrados surface of
@@ -289,6 +290,13 @@ What this document describes is the tool's model of a diagonal, and that is
 what the drawing and the tension and balance figures still work on, placed at
 the file's rows at the tool's base width. The bill and the Diagonals DXF of
 an imported design carry its own pieces.
+
+The gnuC2-23 has no full diagonals: its section 12 holds 18 V-ribs as
+separate strips (type 3), placed as diagonals, and 93 pieces between two
+ribs, of which the 27 that run from an anchor on one rib's lower surface to
+the next rib above it are placed as diagonals too. Its other 66 join ribs
+the model does not see, and the summary says that what it finds is on the
+places it models (`docs/gnuc2-23.md`).
 
 ---
 

@@ -234,7 +234,13 @@ function flowAngles(rib, g) {
   const mid = rib.lower[Math.floor(rib.lower.length / 2)];
 
   const chord = sub(te, le);
-  const normal = cross(chord, sub(mid, le));
+  // A section thinned to nothing (the gnuC2-23's tip rib, section 30 "0.0")
+  // has its lower surface ON the chord line, and the cross product of two
+  // parallel vectors points anywhere: its phi came out 0.70 degrees against
+  // the program's 0.01. Its plane is still the rib's own, which the frame
+  // the placement built carries.
+  let normal = cross(chord, sub(mid, le));
+  if (Math.hypot(...normal) < 1e-9 * dot(chord, chord) && rib.frame) normal = rib.frame.w;
 
   const cosChi = Math.abs(dot(unit(chord), g));
   const sinPhi = Math.abs(dot(unit(normal), g));

@@ -117,7 +117,8 @@ export function nestPanels(panels, {
 
 /** The panel a placed entry came from, so its other fields ride along. */
 function panelsById(panels, q) {
-  return panels.find((p) => p.cell === q.cell && p.surface === q.surface && p.panel === q.panel) || {};
+  return panels.find((p) => p.cell === q.cell && p.surface === q.surface && p.panel === q.panel
+    && (p.part ?? null) === (q.part ?? p.part ?? null)) || {};
 }
 
 function nestSkyline(panels, {
@@ -281,11 +282,11 @@ export function panelsToDXF(panels, { rollWidth = 1.4, gap = 0.03, labels = true
   const doc = dxfDocument();
 
   for (const p of nested.placed) {
-    const layer = `${p.surface}-cell-${p.cell}`;
+    const layer = `${p.surface}-cell-${p.cell}${p.part ? `-${p.part}` : ''}`;
     doc.polyline(p.outline, { layer, color: p.surface === 'upper' ? ACI.cyan : ACI.green, closed: true });
     if (labels) {
       const c = centroidOf(p.outline);
-      doc.text(`${p.surface[0].toUpperCase()}${p.cell}`, c, { height: 0.03, color: ACI.yellow });
+      doc.text(`${p.surface[0].toUpperCase()}${p.cell}${p.part ? p.part[0] : ''}`, c, { height: 0.03, color: ACI.yellow });
     }
   }
 
@@ -711,6 +712,11 @@ export function vribFabricEstimate(vribSet, { rollWidth = 1.4, gap = 0.03 } = {}
  * Marks go on their own layers, so a cutting table can be told to cut the
  * outline, plot the notches and ignore the text.
  */
+/** Which marks belong to a placed panel: its surface, cell and, cut across, its piece. */
+function markKey(p) {
+  return `${p.surface}:${p.cell}${p.part ? `:${p.part}` : ''}`;
+}
+
 export function markedPanelsToDXF(panels, {
   rollWidth = 1.4, gap = 0.03, nested = null, marking = {}, packer = 'profile',
 } = {}) {
@@ -722,7 +728,7 @@ export function markedPanelsToDXF(panels, {
     rollWidth, gap, method: packer === 'profile' ? 'profile' : 'skyline',
   });
   const marks = markPanels(panels, marking);
-  const byKey = new Map(marks.marks.map((m) => [`${m.surface}:${m.cell}`, m]));
+  const byKey = new Map(marks.marks.map((m) => [markKey(m), m]));
   const doc = dxfDocument();
 
   for (const p of layout.placed) {
@@ -732,7 +738,7 @@ export function markedPanelsToDXF(panels, {
       closed: true,
     });
 
-    const m = byKey.get(`${p.surface}:${p.cell}`);
+    const m = byKey.get(markKey(p));
     // Both packers carry the two seams through their transform; a layout
     // handed in without them still gets its outline and label.
     if (!m) continue;
@@ -827,18 +833,18 @@ export function tiledPages(panels, {
 
   const layout = nested || nestPanels(panels, { rollWidth, gap });
   const marks = includeMarks ? markPanels(panels, marking) : null;
-  const byKey = marks ? new Map(marks.marks.map((m) => [`${m.surface}:${m.cell}`, m])) : null;
+  const byKey = marks ? new Map(marks.marks.map((m) => [markKey(m), m])) : null;
 
   // Everything to be drawn, in millimetres.
   const shapes = [];
   for (const p of layout.placed) {
     shapes.push({
       points: p.outline.map(([x, y]) => [x * 1000, y * 1000]),
-      kind: 'panel', label: `${p.cell}${p.surface === 'upper' ? 'U' : 'L'}`,
+      kind: 'panel', label: `${p.cell}${p.surface === 'upper' ? 'U' : 'L'}${p.part ? p.part[0] : ''}`,
       closed: true,
     });
     if (!byKey) continue;
-    const m = byKey.get(`${p.surface}:${p.cell}`);
+    const m = byKey.get(markKey(p));
     if (!m || !p.left || !p.right) continue;
     const pm = markPlacedSeams(p.left, p.right,
       m.leftNotches.map((n) => n.fraction), m.rightNotches.map((n) => n.fraction),

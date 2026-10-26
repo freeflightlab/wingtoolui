@@ -423,6 +423,10 @@ export function buildAllRibHoles(wing, airfoil, {
  */
 export function ribClothTotals(wing, airfoil, {
   ribCloth = 0.040, openings = true, ownHoles = null, rules = {}, rodsByRib = null, pullsByRib = null,
+  // An imported design's ribs as its program cuts them (`lepRibCutLine`): a
+  // map from rib index to the cutting line, metres. With one for every rib
+  // the ribs are weighed as cut, their allowance on, as its sail is.
+  cutOutlines = null,
 } = {}) {
   const polygonArea = (pts) => {
     let a = 0;
@@ -431,6 +435,16 @@ export function ribClothTotals(wing, airfoil, {
     }
     return Math.abs(a / 2);
   };
+  // The signed area of a cutting line: a flat rib's runs out to its nose and
+  // back on itself, and what it encloses is the strip behind the intake.
+  const signedArea = (pts) => {
+    let a = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+    }
+    return a / 2;
+  };
+  const asCut = !!cutOutlines && wing.ribs.every((rib) => cutOutlines.get(rib.index)?.length > 2);
   let ribArea = 0;
   let holeArea = 0;
   let holeCount = 0;
@@ -440,7 +454,7 @@ export function ribClothTotals(wing, airfoil, {
     const set = buildRibHoles(rib, airfoil, rules,
       { rods: rodsByRib ? rodsByRib[i] ?? null : null, pulls: pullsByRib ? pullsByRib[i] ?? null : null });
     ribCount += copies;
-    ribArea += set.ribAreaM2 * copies;
+    ribArea += (asCut ? Math.abs(signedArea(cutOutlines.get(rib.index))) : set.ribAreaM2) * copies;
     if (!openings) return;
     if (ownHoles) {
       const own = ownHoles.get(rib.index) ?? [];
@@ -462,6 +476,8 @@ export function ribClothTotals(wing, airfoil, {
     massSavedKg: holeArea * ribCloth,
     ribClothKgPerM2: ribCloth,
     source: !openings ? 'solid' : ownHoles ? 'the design\'s own holes' : 'this tool\'s openings',
+    // True when the ribs are weighed at their cut size, allowance on.
+    asCut,
   };
 }
 

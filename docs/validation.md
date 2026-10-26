@@ -57,7 +57,8 @@ individual moments.
 
 88 line sheets of 19 designs from four makers — Ozone, UP, Niviuk and BGD —
 PHI's cascade table for one more wing, seven size families from four makers,
-and one complete design, the Swoop2, with its own program's output.
+and three complete designs — the Swoop2, the Tuluaq-19 and the gnuC2-23 —
+each with its own program's output and its cutting files.
 
 ### 2.1 Cascade topology recovered from lengths alone
 
@@ -155,19 +156,24 @@ input and output are in `data/reference/lep`. Read from the input alone:
 
 That one file exercises the centimetre-to-metre conversion, the wing scale
 factor, the matrix layout, the rib rotations and the whole line geometry
-together. `docs/swoop2.md` has the rest, and `docs/tuluaq19.md` a second
-complete design, from an earlier version of the program, to the same
-standard.
+together. `docs/swoop2.md` has the rest, `docs/tuluaq19.md` a second
+complete design, from an earlier version of the program, and
+`docs/gnuc2-23.md` a third, from 3.28, each to the same standard.
 
-Both designs' cutting files were then measured piece by piece and the pieces
-cut as their program cuts them. Their panels are within 0.04% (the Swoop2)
-and 0.14% (the Tuluaq) of the files', 0.03% in total (`docs/panels.md`); the
-196 pieces sewn inside their cells — full diagonals, straps, pieces between
-two ribs, rod pockets — within a part in ten thousand each
-(`docs/internal-structure.md`). Their trailing-edge mini-ribs are not built.
+The three designs' cutting files were then measured piece by piece and the
+pieces cut as their program cuts them. Their panels are within 0.034% (the
+Swoop2), 0.011% (the Tuluaq) and 0.011% (the gnuC2-23, all but its tip
+cell's self-crossing front piece) of the files', and no surface's total is
+0.02% off (`docs/panels.md`); every rib is within 0.002% and every hole to
+the hundredth of a cm² the files are written to; the 379 pieces sewn inside
+their cells — full diagonals, V-rib strips, straps, pieces between two ribs,
+rod pockets — within a part in ten thousand each, or the file's own
+rounding on the smallest, and their 70 trailing-edge mini-ribs with them
+(`docs/internal-structure.md`).
 
 (This section used to cite a second design, gnuC2-27, recovering 27.00 m². The
-file is not in the repository and nothing here checks it.)
+file is not in the repository and nothing here checks it; the gnuC2-23, a
+different size, is.)
 
 ### 2.7 Published flight figures
 

@@ -62,13 +62,15 @@ Held to the program's printed output, as the Swoop2 is:
 | karabiner 617.12 cm deep, 93.36 cm aft | section 2 | to the printed figure | |
 | angle of attack 7.41°, assiette 0.72° | section 2 | to the printed figure | |
 | 14 nose rods a side, 17.80 m both sides | section 8 | to the printed figure | |
-| nine holes on ribs 1 to 17, none on the tip | its cutting file | area per rib | 0.15% |
+| nine holes on ribs 1 to 17, none on the tip | its cutting file | area per rib | 0.006 cm² |
 | 36 diagonals and 24 straps, 40 diagonal pieces | its input, section 12 | none unread | |
 
 The holes are checked against the design's own cutting file rather than its
 output, which prints no hole areas: each rib's holes, as the tool builds them
-from section 4, take out the area the cut rib has removed, to the resolution
-of the file's polygons.
+from section 4 — the program's 39-sided polygons, as 3.25 drew them — take
+out the area the cut rib has removed, to the hundredth of a cm² the file is
+written to. (The tool's 48-sided ones were 0.15% off, found on the
+gnuC2-23: `docs/gnuc2-23.md`.)
 
 ## 3. In the interface
 
@@ -100,11 +102,15 @@ along the panels' sides and on the ribs, 25 mm at the leading edge, 10 mm at
 the trailing edge.
 
 Its panels, as the tool now cuts them from its file (`lepPanels`), are the
-file's: 12.617 and 10.227 m² a side against 12.615 and 10.227, every panel
-within 0.14% and every cut line the file's length to 3 mm. Its ribs, cut
-with its own 15 mm, are within 0.25% on all but the tip. `docs/panels.md`
+file's: 12.615 and 10.227 m² a side against 12.615 and 10.227, every panel
+within 0.011% and every cut line the file's length to 2 mm. The tip panel
+was 0.14% over until the program's seam matching, which its section 5 asks
+for, was reproduced on the gnuC2-23. Its ribs are cut as its program cuts
+them, with its own 15 mm, every one to 0.002% — the tip's, thinned to a
+tenth, included; they were within 0.25% on all but the tip. `docs/panels.md`
 has how, and what was missing before: where the surfaces part, the skin
-tension, the intakes its section 26 closes, and its own allowances.
+tension, the intakes its section 26 closes, its own allowances and the
+seam matching.
 
 Its internal structure is cut as its program cuts it: its ten full
 diagonals a side, each one piece across all four rows with three parabolic
@@ -113,4 +119,5 @@ ten thousand of its file's (`docs/internal-structure.md`). Its file was drawn
 by the program's 3.25, which left the seam allowance whole across each
 cut-out: the bill counts the pieces as 3.30 cuts them, 10.48 m² for the
 wing, 0.30 m² less than its file draws. Its 16 trailing-edge mini-ribs a
-side are not yet built.
+side are built too, as its program drew them, to its file's 4455.32 cm² in
+total.

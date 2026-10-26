@@ -2651,7 +2651,13 @@ function flowAngles(rib, g) {
   const mid = rib.lower[Math.floor(rib.lower.length / 2)];
 
   const chord = sub(te, le);
-  const normal = cross(chord, sub(mid, le));
+  // A section thinned to nothing (the gnuC2-23's tip rib, section 30 "0.0")
+  // has its lower surface ON the chord line, and the cross product of two
+  // parallel vectors points anywhere: its phi came out 0.70 degrees against
+  // the program's 0.01. Its plane is still the rib's own, which the frame
+  // the placement built carries.
+  let normal = cross(chord, sub(mid, le));
+  if (Math.hypot(...normal) < 1e-9 * dot(chord, chord) && rib.frame) normal = rib.frame.w;
 
   const cosChi = Math.abs(dot(unit(chord), g));
   const sinPhi = Math.abs(dot(unit(normal), g));
@@ -11156,7 +11162,9 @@ function markPanel(item, spec = {}, counts = null) {
   return {
     cell: item.cell,
     surface: item.surface,
-    label: `${item.cell}${item.surface === 'upper' ? 'U' : 'L'}`,
+    // A panel cut across by 3D shaping is two or three pieces.
+    ...(item.part ? { part: item.part } : {}),
+    label: `${item.cell}${item.surface === 'upper' ? 'U' : 'L'}${item.part ? item.part[0] : ''}`,
     labelAt: [cx, cy],
     leftNotches,
     rightNotches,
@@ -11184,8 +11192,11 @@ function markPanels(items, spec = {}) {
   // seams that will be sewn together, then hand those counts to the panels.
   // Otherwise two panels sharing a seam can disagree about how many notches
   // it carries.
+  // Pieces are sewn to the pieces beside them: a panel cut across by 3D
+  // shaping has its front pieces joined across the span, and its rear ones.
+  const run = (it) => `${it.surface}${it.part ? `/${it.part}` : ''}`;
   const bySurfaceItems = {};
-  for (const it of items) (bySurfaceItems[it.surface] ||= []).push(it);
+  for (const it of items) (bySurfaceItems[run(it)] ||= []).push(it);
   for (const list of Object.values(bySurfaceItems)) list.sort((a, b) => a.cell - b.cell);
 
   const countFor = new Map();          // key: `${surface}:${cellA}-${cellB}`
@@ -11199,7 +11210,7 @@ function markPanels(items, spec = {}) {
   }
 
   const marks = items.map((it) => {
-    const list = bySurfaceItems[it.surface];
+    const list = bySurfaceItems[run(it)];
     const i = list.indexOf(it);
     const left = i > 0
       ? countFor.get(`${it.surface}:${list[i - 1].cell}-${it.cell}`) : null;
@@ -11209,7 +11220,7 @@ function markPanels(items, spec = {}) {
   });
 
   const bySurface = {};
-  for (const m of marks) (bySurface[m.surface] ||= []).push(m);
+  for (const m of marks) (bySurface[run(m)] ||= []).push(m);
   for (const list of Object.values(bySurface)) list.sort((a, b) => a.cell - b.cell);
 
   const joins = [];
@@ -13550,6 +13561,10 @@ function buildAllRibHoles(wing, airfoil, {
  */
 function ribClothTotals(wing, airfoil, {
   ribCloth = 0.040, openings = true, ownHoles = null, rules = {}, rodsByRib = null, pullsByRib = null,
+  // An imported design's ribs as its program cuts them (`lepRibCutLine`): a
+  // map from rib index to the cutting line, metres. With one for every rib
+  // the ribs are weighed as cut, their allowance on, as its sail is.
+  cutOutlines = null,
 } = {}) {
   const polygonArea = (pts) => {
     let a = 0;
@@ -13558,6 +13573,16 @@ function ribClothTotals(wing, airfoil, {
     }
     return Math.abs(a / 2);
   };
+  // The signed area of a cutting line: a flat rib's runs out to its nose and
+  // back on itself, and what it encloses is the strip behind the intake.
+  const signedArea = (pts) => {
+    let a = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+    }
+    return a / 2;
+  };
+  const asCut = !!cutOutlines && wing.ribs.every((rib) => cutOutlines.get(rib.index)?.length > 2);
   let ribArea = 0;
   let holeArea = 0;
   let holeCount = 0;
@@ -13567,7 +13592,7 @@ function ribClothTotals(wing, airfoil, {
     const set = buildRibHoles(rib, airfoil, rules,
       { rods: rodsByRib ? rodsByRib[i] ?? null : null, pulls: pullsByRib ? pullsByRib[i] ?? null : null });
     ribCount += copies;
-    ribArea += set.ribAreaM2 * copies;
+    ribArea += (asCut ? Math.abs(signedArea(cutOutlines.get(rib.index))) : set.ribAreaM2) * copies;
     if (!openings) return;
     if (ownHoles) {
       const own = ownHoles.get(rib.index) ?? [];
@@ -13589,6 +13614,8 @@ function ribClothTotals(wing, airfoil, {
     massSavedKg: holeArea * ribCloth,
     ribClothKgPerM2: ribCloth,
     source: !openings ? 'solid' : ownHoles ? 'the design\'s own holes' : 'this tool\'s openings',
+    // True when the ribs are weighed at their cut size, allowance on.
+    asCut,
   };
 }
 
@@ -18296,10 +18323,11 @@ function buildBOM({
       removedFraction: ribHoles.removedFraction,
       massKg: ribHoles.holedMassKg,
       count: ribHoles.ribCount ?? null,
-      note: ribHoles.holeAreaM2 > 0
+      note: (ribHoles.holeAreaM2 > 0
         ? `${(ribHoles.removedFraction * 100).toFixed(0)}% of ${ribHoles.ribAreaM2.toFixed(2)} m2 `
           + `removed as openings${ribHoles.source ? ` (${ribHoles.source})` : ''}`
-        : 'solid ribs, no openings',
+        : 'solid ribs, no openings')
+        + (ribHoles.asCut ? '; as cut, with the design\'s own allowance, as its program cuts them' : ''),
     });
   } else {
     // Said as what it is. This read "rib holes (rib area counted solid)" when
@@ -18309,26 +18337,48 @@ function buildBOM({
   }
 
   // ---- diagonals and the rest of the internal structure -------------------
-  const inside = structure && structure.pieces && structure.pieces.length ? structure : null;
-  if (inside) {
-    const est = lepStructureNesting(inside.pieces, { rollWidth, gap });
-    const copies = (p) => p.copies ?? 2;
-    const area = inside.pieces.reduce((t, p) => t + p.cutAreaM2 * copies(p), 0);
+  // An imported design's trailing-edge mini-ribs are rib cloth, and billed
+  // as their own item; everything else it sews inside is the diagonals'.
+  const copies = (p) => p.copies ?? 2;
+  const minis = (structure?.pieces ?? []).filter((p) => p.kind === 'minirib');
+  const insidePieces = (structure?.pieces ?? []).filter((p) => p.kind !== 'minirib');
+  const inside = structure && (insidePieces.length || minis.length) ? structure : null;
+  if (insidePieces.length) {
+    const est = lepStructureNesting(insidePieces, { rollWidth, gap });
+    const area = insidePieces.reduce((t, p) => t + p.cutAreaM2 * copies(p), 0);
     fabric.push({
       item: 'Internal structure cloth',
       rollMetres: est.linearMetres * 2,
       rollWidth,
       panelAreaM2: area,
       utilisation: est.utilisation,
-      count: inside.pieces.reduce((t, p) => t + copies(p), 0),
+      count: insidePieces.reduce((t, p) => t + copies(p), 0),
       massKg: area * C.diagonal,
-      note: `the design's own, as its program cuts them: ${lepStructureWords(inside.pieces)}; `
+      note: `the design's own, as its program cuts them: ${lepStructureWords(insidePieces)}; `
         + 'nested and ordered on their own, apart from the sail',
     });
-    if (inside.miniRibs) {
-      missing.push(`trailing-edge mini-ribs (${inside.miniRibs} a side in the design, not reproduced)`);
-    }
-  } else if (vribs && vribs.count) {
+  }
+  if (minis.length) {
+    const est = lepStructureNesting(minis, { rollWidth, gap });
+    const area = minis.reduce((t, p) => t + p.cutAreaM2 * copies(p), 0);
+    const holes = minis.reduce((t, p) => t + p.holes.length * copies(p), 0);
+    fabric.push({
+      item: 'Mini-rib cloth',
+      rollMetres: est.linearMetres * 2,
+      rollWidth,
+      panelAreaM2: area,
+      utilisation: est.utilisation,
+      count: minis.reduce((t, p) => t + copies(p), 0),
+      massKg: area * C.rib,
+      note: `the design's own trailing-edge mini-ribs, as its program cuts them, in the rib cloth`
+        + (holes ? `, ${holes} holes out` : '')
+        + '; nested on their own',
+    });
+  }
+  if (inside && structure.miniRibs > minis.length) {
+    missing.push(`trailing-edge mini-ribs (${structure.miniRibs - minis.length} of ${structure.miniRibs} a side in the design, not built)`);
+  }
+  if (!inside && vribs && vribs.count) {
     const est = vribFabricEstimate(vribs, { rollWidth, gap });
     fabric.push({
       item: 'Diagonal cloth',
@@ -18424,14 +18474,19 @@ function buildBOM({
 
   // What no part of this bill weighs, whatever was passed in. Named, so the
   // total is not read as the weight of a wing.
+  // This said "seam allowances folded under" whatever it had been given,
+  // under a sail that had been weighed with its allowance on. And it named
+  // the ribs' and the diagonals' after an imported design's were weighed as
+  // its program cuts them.
+  const allowanceLeft = (() => {
+    if (!(seamAllowanceMM > 0)) return 'seam allowances folded under';
+    const left = [...(ribHoles?.asCut ? [] : ['ribs']), ...(inside ? [] : ['diagonals'])];
+    return left.length ? `the seam allowance on ${left.join(' and ')} (the sail is weighed as cut)` : null;
+  })();
   const neverWeighed = [
     'riser webbing and its hardware (maillons, pulleys, handles)',
     'thread',
-    // This said "seam allowances folded under" whatever it had been given,
-    // under a sail that had been weighed with its allowance on.
-    seamAllowanceMM > 0
-      ? 'the seam allowance on ribs and diagonals (the sail is weighed as cut)'
-      : 'seam allowances folded under',
+    ...(allowanceLeft ? [allowanceLeft] : []),
     'labels and the stuff a wing is delivered with',
   ];
   if (rodItems.some((r) => r.massKg == null)) {
@@ -22027,7 +22082,8 @@ function nestPanels(panels, {
 
 /** The panel a placed entry came from, so its other fields ride along. */
 function panelsById(panels, q) {
-  return panels.find((p) => p.cell === q.cell && p.surface === q.surface && p.panel === q.panel) || {};
+  return panels.find((p) => p.cell === q.cell && p.surface === q.surface && p.panel === q.panel
+    && (p.part ?? null) === (q.part ?? p.part ?? null)) || {};
 }
 
 function nestSkyline(panels, {
@@ -22191,11 +22247,11 @@ function panelsToDXF(panels, { rollWidth = 1.4, gap = 0.03, labels = true, neste
   const doc = dxfDocument();
 
   for (const p of nested.placed) {
-    const layer = `${p.surface}-cell-${p.cell}`;
+    const layer = `${p.surface}-cell-${p.cell}${p.part ? `-${p.part}` : ''}`;
     doc.polyline(p.outline, { layer, color: p.surface === 'upper' ? ACI.cyan : ACI.green, closed: true });
     if (labels) {
       const c = centroidOf(p.outline);
-      doc.text(`${p.surface[0].toUpperCase()}${p.cell}`, c, { height: 0.03, color: ACI.yellow });
+      doc.text(`${p.surface[0].toUpperCase()}${p.cell}${p.part ? p.part[0] : ''}`, c, { height: 0.03, color: ACI.yellow });
     }
   }
 
@@ -22621,6 +22677,10 @@ function vribFabricEstimate(vribSet, { rollWidth = 1.4, gap = 0.03 } = {}) {
  * Marks go on their own layers, so a cutting table can be told to cut the
  * outline, plot the notches and ignore the text.
  */
+/** Which marks belong to a placed panel: its surface, cell and, cut across, its piece. */
+function markKey(p) {
+  return `${p.surface}:${p.cell}${p.part ? `:${p.part}` : ''}`;
+}
 function markedPanelsToDXF(panels, {
   rollWidth = 1.4, gap = 0.03, nested = null, marking = {}, packer = 'profile',
 } = {}) {
@@ -22632,7 +22692,7 @@ function markedPanelsToDXF(panels, {
     rollWidth, gap, method: packer === 'profile' ? 'profile' : 'skyline',
   });
   const marks = markPanels(panels, marking);
-  const byKey = new Map(marks.marks.map((m) => [`${m.surface}:${m.cell}`, m]));
+  const byKey = new Map(marks.marks.map((m) => [markKey(m), m]));
   const doc = dxfDocument();
 
   for (const p of layout.placed) {
@@ -22642,7 +22702,7 @@ function markedPanelsToDXF(panels, {
       closed: true,
     });
 
-    const m = byKey.get(`${p.surface}:${p.cell}`);
+    const m = byKey.get(markKey(p));
     // Both packers carry the two seams through their transform; a layout
     // handed in without them still gets its outline and label.
     if (!m) continue;
@@ -22737,18 +22797,18 @@ function tiledPages(panels, {
 
   const layout = nested || nestPanels(panels, { rollWidth, gap });
   const marks = includeMarks ? markPanels(panels, marking) : null;
-  const byKey = marks ? new Map(marks.marks.map((m) => [`${m.surface}:${m.cell}`, m])) : null;
+  const byKey = marks ? new Map(marks.marks.map((m) => [markKey(m), m])) : null;
 
   // Everything to be drawn, in millimetres.
   const shapes = [];
   for (const p of layout.placed) {
     shapes.push({
       points: p.outline.map(([x, y]) => [x * 1000, y * 1000]),
-      kind: 'panel', label: `${p.cell}${p.surface === 'upper' ? 'U' : 'L'}`,
+      kind: 'panel', label: `${p.cell}${p.surface === 'upper' ? 'U' : 'L'}${p.part ? p.part[0] : ''}`,
       closed: true,
     });
     if (!byKey) continue;
-    const m = byKey.get(`${p.surface}:${p.cell}`);
+    const m = byKey.get(markKey(p));
     if (!m || !p.left || !p.right) continue;
     const pm = markPlacedSeams(p.left, p.right,
       m.leftNotches.map((n) => n.fraction), m.rightNotches.map((n) => n.fraction),
@@ -24308,7 +24368,18 @@ function designToLep(model, template = null) {
  *             rib's chord. Fifteen on the Swoop2, at 11, 39 and 72% on the
  *             rib pairs 4-5, 8-9 ... 20-21 — exactly the pairs of ribs that
  *             carry no line, between the tops of the diagonals either side —
- *             all at height 100: under the upper surface.
+ *             all at height 100: under the upper surface. The gnuC2-23's
+ *             93 run at heights 0, 70 and 100, most from one rib's lower
+ *             surface to the next one's upper.
+ *
+ *   type 3    `n 3  i r  L R  f u p 0`
+ *             A V-rib from anchor row `r` on rib `i`: a strip from its lower
+ *             surface, `f` either side of the anchor, up to the upper surface
+ *             of the rib before (`L` = 1) and of the rib after (`R` = 1), `u`
+ *             either side of that rib's own anchor of the row. Centimetres
+ *             of the unscaled wing, or per cent of chord when `p` is 1; type
+ *             13 gives both in per cent of each rib's own chord. Eighteen on
+ *             the gnuC2-23, at its three rows on ribs 20 to 29.
  *
  * The four numbers that close a type-15 row (`60.0 28.0 85. 2.` on every one
  * of the Swoop2's) are the angles, from the chord, at which the piece rises
@@ -24334,7 +24405,7 @@ function parseHVRibs(doc) {
     .filter((l) => typeof l === 'string' && l.trim() && !l.startsWith('*'));
   const empty = {
     count: 0, declared: 0, entries: [], byType: {}, straps: [], diagonals: [],
-    general: [], other: [], hRibs: [], notUnderstood: 0, modelled: false,
+    general: [], vribs: [], other: [], hRibs: [], notUnderstood: 0, modelled: false,
   };
   if (!lines.length) return { ...empty, note: 'no section 12' };
 
@@ -24343,6 +24414,7 @@ function parseHVRibs(doc) {
   const straps = [];
   const diagonals = [];
   const general = [];
+  const vribs = [];
   const other = [];
   const whole = (v) => Number.isInteger(v) && v > 0;
 
@@ -24384,6 +24456,16 @@ function parseHVRibs(doc) {
         ],
       });
       general.push(e);
+    } else if (kind === 3 && whole(f[2]) && whole(f[3]) && f.length >= 10) {
+      Object.assign(e, {
+        kind: 'vrib', rib: f[2], row: f[3], left: f[4] === 1, right: f[5] === 1,
+        // Half-widths: along the anchor rib's lower surface, and along each
+        // neighbour's upper surface. Centimetres of the unscaled wing for
+        // type 3 unless its ninth column is 1, per cent of chord for 13.
+        lower: f[6], upper: f[7], percent: type === 13 || f[8] === 1,
+        fromRib: f[4] === 1 ? f[2] - 1 : f[2], toRib: f[5] === 1 ? f[2] + 1 : f[2],
+      });
+      vribs.push(e);
     } else {
       Object.assign(e, { kind: 'other', fromRib: f[2], toRib: f[4] });
       other.push(e);
@@ -24398,6 +24480,7 @@ function parseHVRibs(doc) {
   if (diagonals.length) said.push(`${diagonals.length} diagonals`);
   if (straps.length) said.push(`${straps.length} straps between adjacent ribs`);
   if (general.length) said.push(`${general.length} pieces between two ribs at a chord position`);
+  if (vribs.length) said.push(`${vribs.length} V-ribs from an anchor to the ribs beside it`);
   if (other.length) {
     said.push(`${other.length} of type ${[...new Set(other.map((e) => e.type))].join(', ')}`
       + ' whose columns are not read');
@@ -24414,6 +24497,8 @@ function parseHVRibs(doc) {
     diagonals,
     /** Types 6 and 16: a piece between two ribs, each end at a chord position. */
     general,
+    /** Types 3 and 13: a V-rib, an anchor's strip to each rib beside it. */
+    vribs,
     /** Anything else in the section, counted and not read. */
     other,
     /** The straps, under the name the H-rib builder was written against. */
@@ -24426,18 +24511,44 @@ function parseHVRibs(doc) {
 }
 
 /**
- * The file's own diagonals, as the pieces `buildVRibs` places.
+ * The file's own diagonals, as the pieces `buildVRibs` places: every piece
+ * that runs from an anchor on one rib's lower surface up to the rib beside
+ * it.
+ *
+ * Full diagonals (types 5, 15) and V-ribs (3, 13) say their anchor row; a
+ * piece between two ribs (6, 16) with one end on the lower surface (height
+ * 0) at a rib's anchor and the other above it is one too, its row the anchor
+ * it starts at — `table` (`lepRibTable`) gives the anchors. A piece with
+ * neither end on the lower surface carries a diagonal on over the next rib
+ * and is not one by itself; a strip along the lower surface is none.
  *
  * Rib numbers in the file start at 1 at the centre; rows are 1 for A.
  */
-function lepDiagonalPieces(hv) {
+function lepDiagonalPieces(hv, table = null) {
   const out = [];
+  const add = (r, from, sides, source) => {
+    const row = 'ABCDE'[r - 1];
+    if (!row) return;
+    for (const to of sides) out.push({ row, fromRib: from - 1, toRib: to - 1, source });
+  };
   for (const d of hv?.diagonals ?? []) {
-    const row = 'ABCDE'[d.row - 1];
-    if (!row) continue;
-    const from = d.rib - 1;
-    if (d.left) out.push({ row, fromRib: from, toRib: from - 1, source: `section 12 row ${d.index}` });
-    if (d.right) out.push({ row, fromRib: from, toRib: from + 1, source: `section 12 row ${d.index}` });
+    add(d.row, d.rib, [...(d.left ? [d.rib - 1] : []), ...(d.right ? [d.rib + 1] : [])], `section 12 row ${d.index}`);
+  }
+  for (const d of hv?.vribs ?? []) {
+    add(d.row, d.rib, [...(d.left ? [d.rib - 1] : []), ...(d.right ? [d.rib + 1] : [])], `section 12 row ${d.index}`);
+  }
+  if (table) {
+    for (const e of hv?.general ?? []) {
+      const [a, b] = e.ends;
+      const low = [a, b].filter((x) => x.rest[0] === 0);
+      if (low.length !== 1) continue;
+      const anchor = low[0];
+      const other = anchor === a ? b : a;
+      const rib = table.ribs?.[anchor.rib - 1];
+      const r = (rib?.anchorsPct ?? []).findIndex((p) => Math.abs(p - anchor.chordPct) < 0.5);
+      if (r < 0) continue;
+      add(r + 1, anchor.rib, [other.rib], `section 12 row ${e.index}`);
+    }
   }
   return out;
 }
@@ -25386,7 +25497,7 @@ function lepJoncs(doc, table) {
   out.blocs = blocs;
 
   for (const b of blocs) {
-    if (b.type !== 1 && b.type !== 4) {
+    if (b.type !== 1 && b.type !== 3 && b.type !== 4) {
       out.notReproduced.push(`bloc ${b.bloc}, rod type ${b.type}`);
       continue;
     }
@@ -25395,6 +25506,18 @@ function lepJoncs(doc, table) {
       for (let i = from; i <= to; i++) {
         const rib = table.ribs[i - 1];
         if (!rib?.section) continue;
+        if (b.type === 3) {
+          // A shark nose: two rods a rib, each with its own pocket.
+          const pair = lepSharkNoseRods(rib, g);
+          if (!pair) { out.ok = false; out.notReproduced.push(`bloc ${b.bloc} rib ${i}: extents not found`); continue; }
+          for (const part of ['upper', 'lower']) {
+            out.joncs.push({
+              bloc: b.bloc, type: 3, part, rib: i, ribIndex: i - 1,
+              lengthCm: pair[part].length, points: pair[part].points, pocket: g.sjo,
+            });
+          }
+          continue;
+        }
         const j = lepJoncPolyline(rib, b.type, g.ex, g.inn);
         if (!j) { out.ok = false; out.notReproduced.push(`bloc ${b.bloc} rib ${i}: extents not found`); continue; }
         out.joncs.push({
@@ -25415,6 +25538,126 @@ function lepJoncs(doc, table) {
   out.totalM = sum(out.joncs) / 100;
   out.bothSidesM = (2 * sum(out.joncs)) / 100;
   return out;
+}
+
+/**
+ * A shark nose's two rods on one rib (rod type 3), as the program's
+ * `joncst3s` and `joncst3i` build them. Its group gives four rows:
+ *
+ *   ex    upper rod: where it leaves the upper surface (front and back of the
+ *         zone, % chord), how far it curves off it (% chord) and the exponent;
+ *   ex2   upper rod's tail: the station on the lower nose where it leaves
+ *         the section (% chord), the tail's length and rise (% chord) and
+ *         its exponent;
+ *   inn2  lower rod's head: the station on the intake where it starts, the
+ *         head's length and rise, and its exponent;
+ *   inn   lower rod: its zone along the lower surface, as `ex`.
+ *
+ * The UPPER rod runs from the back of its zone on the upper surface,
+ * forward round the leading edge to the lower nose, where a tail leaves
+ * the section and runs back into the cell — the intake's upper lip. The
+ * LOWER rod starts with a head inside the nose, comes down to the intake,
+ * and runs back along it and the lower surface to the back of its zone —
+ * the lower lip. Each curves off the section across its zone as a type 1
+ * rod does.
+ *
+ * Four things are the program's and kept: a tail's and a head's exponent
+ * is the stated number times the chord over 100, as the program scales
+ * it; the head's and tail's direction is taken with `atan`, not `atan2`
+ * (which turns the tail away from the nose it would otherwise point at);
+ * the upper rod keeps no point where its zone starts, the section point
+ * after it overwriting it; and the lower rod ends on its zone's end in
+ * place of the last section point before it.
+ */
+function lepSharkNoseRods(rib, g) {
+  const { ex, ex2, inn2, inn } = g;
+  if (![ex, ex2, inn2, inn].every((r) => Array.isArray(r) && r.length >= 4 && r.slice(0, 4).every(Number.isFinite))) {
+    return null;
+  }
+  const c = rib.chord;
+  const P = rib.section.points.map(([x, y]) => [x * c, y * c * rib.thickness]);
+  const n = P.length;
+  // 1-based, as the program counts.
+  const U = [NaN, ...P.map((q) => q[0])];
+  const V = [NaN, ...P.map((q) => q[1])];
+  const interp = (x1, y1, x2, y2, x3) => {
+    const m = (y2 - y1) / (x2 - x1);
+    return m * x3 + (y2 - m * x2);
+  };
+  const pct = (v) => (v * c) / 100;
+  const x1f = pct(ex[1]);
+  const x1i = pct(ex[0]);
+  const x2f = pct(inn[1]);
+  const x2i = pct(inn[0]);
+  const x3i = pct(ex2[0]);
+  const x4i = pct(inn2[0]);
+  // The tail and head: a curve y = b (x/a)^e from a station, turned to the
+  // direction the program takes.
+  const curve = (a, b, e, from, angle) => {
+    const out = [];
+    for (let k = 1; k <= 11; k++) {
+      const xl = (a * (k - 1)) / 10;
+      const yl = (b / a ** e) * xl ** e;
+      out.push([Math.cos(angle) * xl - Math.sin(angle) * yl + from[0],
+        Math.sin(angle) * xl + Math.cos(angle) * yl + from[1]]);
+    }
+    return out;
+  };
+  const length = (pts) => {
+    let s = 0;
+    for (let k = 1; k < pts.length; k++) s += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    return s;
+  };
+
+  // The upper rod.
+  let j1f; let j1i; let j3i; let p1f; let p3i;
+  for (let j = 1; j <= n - 1; j++) {
+    if (U[j] >= x1f && U[j + 1] < x1f && V[j] >= 0) { j1f = j; p1f = [x1f, interp(U[j + 1], V[j + 1], U[j], V[j], x1f)]; }
+    if (U[j] >= x1i && U[j + 1] < x1i && V[j] >= 0) j1i = j;
+    if (U[j] <= x3i && U[j + 1] > x3i && V[j] < 0) { j3i = j; p3i = [x3i, interp(U[j], V[j], U[j + 1], V[j + 1], x3i)]; }
+  }
+  if ([j1f, j1i, j3i].some((v) => v === undefined) || j3i - 2 < 1) return null;
+  const X = new Map();
+  X.set(j1f, p1f);
+  for (let j = j1f + 1; j <= j3i; j++) X.set(j, [U[j], V[j]]);
+  const tail = curve(pct(ex2[1]), pct(ex2[2]), pct(ex2[3]), p3i,
+    Math.atan((V[j3i - 2] - p3i[1]) / (U[j3i - 2] - p3i[0])));
+  tail.forEach((q, k) => X.set(j3i + k, q));
+  const k1 = pct(ex[2]) / (x1f - x1i) ** ex[3];
+  for (let j = j1i + 1; j >= j1f; j--) {
+    const q = X.get(j);
+    if (q) q[1] -= k1 * (q[0] - x1i) ** ex[3];
+  }
+  const upper = [];
+  for (let j = j1f; j <= j3i + 10; j++) upper.push(X.get(j));
+
+  // The lower rod.
+  let j4i; let j2i; let j2f; let p4i; let p2i; let p2f;
+  for (let j = 1; j <= n - 1; j++) {
+    if (U[j] <= x4i && U[j + 1] > x4i && V[j] < 0) { j4i = j; p4i = [x4i, interp(U[j], V[j], U[j + 1], V[j + 1], x4i)]; }
+    if (U[j] <= x2i && U[j + 1] > x2i && V[j] < 0) { j2i = j; p2i = [x2i, interp(U[j], V[j], U[j + 1], V[j + 1], x2i)]; }
+    if (U[j] <= x2f && U[j + 1] >= x2f && V[j] < 0) { j2f = j; p2f = [x2f, interp(U[j], V[j], U[j + 1], V[j + 1], x2f)]; }
+  }
+  if ([j4i, j2i, j2f].some((v) => v === undefined) || j4i + 2 > n || j2f <= j4i) return null;
+  const Y = new Map();
+  for (let j = j4i; j <= j2i; j++) Y.set(j, [U[j], V[j]]);
+  Y.set(j2i, p2i);
+  for (let j = j2i + 1; j <= j2f; j++) Y.set(j, [U[j], V[j]]);
+  Y.set(j2f, p2f);
+  const k2 = pct(inn[2]) / (x2f - x2i) ** inn[3];
+  for (let j = j2i + 2; j <= j2f; j++) {
+    const q = Y.get(j);
+    q[1] += k2 * (q[0] - x2i) ** inn[3];
+  }
+  const head = curve(pct(inn2[1]), -pct(inn2[2]), pct(inn2[3]), p4i,
+    -Math.PI + Math.atan((V[j4i + 2] - p4i[1]) / (U[j4i + 2] - p4i[0]))).reverse();
+  const lower = head.slice();
+  for (let j = j4i + 1; j <= j2f; j++) lower.push(Y.get(j));
+  if (upper.some((q) => !q) || lower.some((q) => !q)) return null;
+  return {
+    upper: { points: upper, length: length(upper) },
+    lower: { points: lower, length: length(lower) },
+  };
 }
 
 /** One rod's polyline and length, types 1 and 4, as the program builds it. */
@@ -25614,6 +25857,220 @@ function offsetEdge(edge, other, d) {
 }
 
 /**
+ * Section 5's last row, `ndif xndif`, and its table's third row: how the
+ * program makes each panel's sewing edges as long as the rib they are sewn
+ * to (`ndif` 1000, its "perfect matching"), over what last part of each
+ * edge (the row's per cent: upper, then lower), and how much of the
+ * difference it takes up (`xndif`).
+ */
+function lepSeamMatching(doc) {
+  const rows = sectionData(doc, 5).map((l) => l.trim().split(/\s+/).map(Number))
+    .filter((r) => r.length && r.every(Number.isFinite));
+  const table = rows.filter((r) => r.length >= 4).slice(0, 6);
+  const last = rows.filter((r) => r.length === 2).pop();
+  if (table.length < 3 || !last) return null;
+  return { ndif: last[0], xndif: last[1], upperPct: table[2][0], lowerPct: table[2][2] };
+}
+
+/**
+ * The program's "perfect matching" of a surface's panels to its ribs (its
+ * 8.2.4 above, 8.4.4 below, with `ndif` 1000), reproduced as it does it.
+ *
+ * Over-width moves a panel's sewing edge off the line it was developed
+ * along, and so changes its length. The program then stretches the last
+ * part of each edge — from where 85% of its length is left behind on the
+ * upper surface (section 5's 15), the first 20% on the lower — about the
+ * point where that part starts, so that the edge comes out exactly as long
+ * as the rib's own contour; its output's section 6 prints the result, 0.000
+ * mm. A stretched edge moves the end of the panel with it, and the end's
+ * width with it; five times over, it then turns the left edge's stretched
+ * part by the angle that would put the width back — `asin` of the width's
+ * change over the part's length, always positive and applied as the
+ * direction's absolute angle plus that angle, so it turns one way or the
+ * other with the quadrant the segment points into, exactly as the program's
+ * own code does.
+ *
+ * Its seam-allowance lines are worked out before this and not again: the
+ * cut line's sides stay where the unstretched edges put them, and only the
+ * panel's end — and a 3D-shaping cut inside the stretched part — moves.
+ *
+ * `edges` maps a panel's number to its two sewing edges as the program
+ * indexes them (1-based, section points: the upper surface 1 at the
+ * trailing edge to `np2` at the front, the lower `j0` at the front to
+ * `np1`), centimetres; `contour` a rib's surface contour length by its
+ * number. Edges are changed in place.
+ */
+function lepMatchSeams(edges, contour, ribCount, upper, lo, hi, pct, xndif) {
+  const N = ribCount;
+  const seg = (E, j) => Math.hypot(E[j + 1][0] - E[j][0], E[j + 1][1] - E[j][1]);
+  const span = (E, a, b) => {
+    let s = 0;
+    for (let j = a; j <= b; j++) s += seg(E, j);
+    return s;
+  };
+  const leftOf = (i) => edges.get(i - 1)?.R ?? null;   // the edge sewn to rib i from the panel inboard
+  const rightOf = (i) => edges.get(i)?.L ?? null;      // and from the panel outboard
+  const r30 = []; const r32 = []; const r90 = []; const r92 = [];
+  for (let i = 1; i <= N; i++) {
+    const a = leftOf(i);
+    const b = rightOf(i);
+    r30[i] = a ? span(a, lo, hi - 1) : NaN;
+    r32[i] = b ? span(b, lo, hi - 1) : NaN;
+    r90[i] = xndif * (contour[i] - r30[i]);
+    r92[i] = xndif * (contour[i] - r32[i]);
+  }
+  r30[0] = r32[1]; r32[0] = r30[1];
+  r90[0] = xndif * (contour[1] - r30[0]);
+  r92[0] = xndif * (contour[1] - r32[0]);
+  // Where each edge's stretched part starts.
+  const jirl = []; const jirr = [];
+  const start = (E, total) => {
+    if (!E) return null;
+    const keep = total * (pct / 100);
+    let at = null;
+    let s = 0;
+    if (upper) {
+      for (let j = lo; j <= hi - 1; j++) { s += seg(E, j); if (s < total - keep) at = j; }
+    } else {
+      for (let j = lo; j <= hi - 1; j++) { s += seg(E, j); if (s < keep) at = j; }
+    }
+    return at;
+  };
+  for (let i = 0; i <= N; i++) {
+    jirl[i] = start(i === 0 ? null : leftOf(i), r30[i]);
+    jirr[i] = start(rightOf(i), r32[i]);
+  }
+  jirl[0] = jirl[1]; jirr[0] = jirr[1];
+  // The program's working arrays, kept from one pass to the next as its are.
+  const ang = new Map(); const su = new Map(); const sv = new Map(); const dst = new Map();
+  const fill = (E, j, k, omega) => {
+    const xdv = E[k][1] - E[j][1];
+    const xdu = E[k][0] - E[j][0];
+    ang.set(j, (xdu !== 0 ? Math.abs(Math.atan(xdv / xdu)) : Math.PI / 2) + omega);
+    let siu; let siv;
+    if (xdu >= 0 && xdv >= 0) { siu = 1; siv = 1; }
+    if (xdu <= 0 && xdv >= 0) { siu = -1; siv = 1; }
+    if (xdu >= 0 && xdv <= 0) { siu = 1; siv = -1; }
+    if (xdu <= 0 && xdv <= 0) { siu = -1; siv = -1; }
+    su.set(j, siu); sv.set(j, siv);
+    dst.set(j, Math.hypot(E[k][0] - E[j][0], E[k][1] - E[j][1]));
+  };
+  const step = (E, from, j, to, k) => {
+    const d = k * dst.get(j);
+    E[to] = [E[from][0] + su.get(j) * d * Math.cos(ang.get(j)), E[from][1] + sv.get(j) * d * Math.sin(ang.get(j))];
+  };
+  const stretch = (E, jFit, jDist, extraLen) => {
+    if (!E || jFit == null || jDist == null) return;
+    if (upper) {
+      const dist2 = span(E, jDist, hi - 1);
+      const k = (dist2 + extraLen) / dist2;
+      for (let j = jFit; j <= hi - 1; j++) fill(E, j, j + 1, 0);
+      for (let j = jFit; j <= hi - 1; j++) step(E, j, j, j + 1, k);
+    } else {
+      const dist2 = span(E, lo, jDist - 1);
+      const k = (dist2 + extraLen) / dist2;
+      for (let j = jFit; j >= lo + 1; j--) fill(E, j, j - 1, 0);
+      for (let j = jFit; j >= lo + 1; j--) step(E, j, j, j - 1, k);
+    }
+  };
+  // The ends' widths before.
+  const endJ = upper ? hi : lo;
+  const width = (i) => {
+    const e = edges.get(i);
+    return e ? Math.hypot(e.L[endJ][0] - e.R[endJ][0], e.L[endJ][1] - e.R[endJ][1]) : NaN;
+  };
+  const before = new Map([...edges.keys()].map((i) => [i, width(i)]));
+  // Left side: the inboard panel's edge on each rib; right side: the outboard's.
+  for (let i = 1; i <= N; i++) stretch(leftOf(i), jirl[i], jirl[i], r90[i]);
+  for (let i = 0; i <= N; i++) stretch(rightOf(i), upper ? jirr[i] : jirl[i], jirr[i], r92[i]);
+  // The end's width put back, five times over, by turning the left edge.
+  for (let it = 0; it < 5; it++) {
+    const now = new Map([...edges.keys()].map((i) => [i, width(i)]));
+    for (let i = upper ? 1 : 2; i <= N - 1; i++) {
+      const e = edges.get(i);
+      if (!e || jirl[i] == null) continue;
+      const E = e.L;
+      const k1 = jirl[i];
+      const dist = Math.hypot(E[k1][0] - E[endJ][0], E[k1][1] - E[endJ][1]);
+      const eps = now.get(i) - before.get(i);
+      const omega = Math.abs(eps) < 0.01 ? 0 : Math.asin(eps / dist) * Math.sign(eps);
+      if (upper) {
+        for (let j = k1; j <= hi - 1; j++) fill(E, j, j + 1, omega);
+        for (let j = jirr[i]; j <= hi - 1; j++) step(E, j, j, j + 1, 1);
+      } else {
+        for (let j = k1; j >= lo + 1; j--) fill(E, j, j - 1, -omega);
+        for (let j = k1; j >= lo + 1; j--) step(E, j, j, j - 1, 1);
+      }
+    }
+  }
+  return { jirl, jirr };
+}
+
+/**
+ * Section 29, 3D shaping: where the program cuts a surface across, cell by
+ * cell. Groups of ribs, each with up to two cuts across its upper panels
+ * and one across its lower; a panel takes the group of the rib outboard of
+ * it, as the program's does.
+ *
+ * Each cut row is `n j2 j3 k`. The panel is cut at section point `j3`,
+ * counted as the program counts a surface's points (the upper from the
+ * trailing edge, the lower from the intake). `j2` was to begin the zone
+ * whose fullness `k` eases into the cut, but the program overwrites it —
+ * a statement left live when its condition was commented out sets it to
+ * the last point of the section for every rib — so the zone is always
+ * empty, as the gnuC2-23's own output prints it (zone 1, 0.00). The ease
+ * itself, `k` times the cell's billowed fullness, needs the program's
+ * ovalization and is not reproduced: a cut with `k` other than 0 is said.
+ *
+ * Section 29's second form, cuts in per cent of chord, the program reads
+ * and then never turns into points: said, not cut.
+ */
+function lepShaping(doc) {
+  const none = { mode: 0, cutsAt: () => [], notReproduced: [] };
+  const s = sectionData(doc, 29).map((l) => l.trim()).filter((l) => l && !l.startsWith('*'));
+  if (!s.length) return none;
+  const mode = parseInt(s[0], 10);
+  if (mode !== 1 && mode !== 2) return none;
+  if (mode === 2) return { ...none, mode, notReproduced: ['3D shaping given in per cent of chord (section 29, form 2)'] };
+  const f = (l) => l.split(/\s+/);
+  let p = 2;
+  const ng = parseInt(f(s[p++] ?? '')[1], 10);
+  if (!Number.isInteger(ng) || ng < 1) return none;
+  const groups = new Map();
+  const ribGroup = new Map();
+  const notReproduced = new Set();
+  for (let g = 1; g <= ng && p < s.length; g++) {
+    const [, k, from, to] = f(s[p++]).map(Number);
+    const up = f(s[p++] ?? '').map(Number);
+    const upper = [];
+    for (let c = 0; c < (up[1] || 0); c++) {
+      const r = f(s[p++] ?? '').map(Number);
+      upper.push({ at: r[2], ease: r[3] });
+    }
+    const low = f(s[p++] ?? '').map(Number);
+    const lower = [];
+    for (let c = 0; c < (low[1] || 0); c++) {
+      const r = f(s[p++] ?? '').map(Number);
+      lower.push({ at: r[2], ease: r[3] });
+    }
+    for (const c of [...upper, ...lower]) {
+      if (c.ease) notReproduced.add('the ease section 29 eases into a 3D-shaping cut');
+    }
+    groups.set(k, { upper, lower });
+    for (let i = from; i <= to; i++) ribGroup.set(i, k);
+  }
+  return {
+    mode,
+    /** The cut points of the panel between rib `outer - 1` and rib `outer` on `surface`. */
+    cutsAt: (outer, surface) => {
+      const g = groups.get(ribGroup.get(outer));
+      return g ? g[surface].map((c) => c.at).filter((j) => Number.isInteger(j) && j > 1) : [];
+    },
+    notReproduced: [...notReproduced],
+  };
+}
+
+/**
  * The design's own panels, as its program cuts them.
  *
  * Three things the tool's own panels do differently, each the program's
@@ -25647,6 +26104,7 @@ function lepPanels(doc, table) {
   const ribs = table.ribs;
   const skin = lepSkinTension(doc);
   const vents = lepVents(doc);
+  const shaping = lepShaping(doc);
   const allow = lepSeamAllowances(doc) ?? {
     upper: { side: 0, front: 0, back: 0 }, lower: { side: 0, front: 0, back: 0 },
   };
@@ -25701,6 +26159,11 @@ function lepPanels(doc, table) {
       return v.type >= 4 && v.type <= 6 ? [1 - v.p1 / 100, 1 - v.p2 / 100] : [0, 0];
     }
     if (v.type === -1) return [1, 1];
+    // Closed on a diagonal: over the whole intake at the outer rib (-2) or
+    // the inner (-3) and none of it at the other, its front edge the
+    // straight line between (the program's `dpanelcm2`, `dpanelcm3`).
+    if (v.type === -2) return [0, 1];
+    if (v.type === -3) return [1, 0];
     return v.type <= -4 && v.type >= -6 ? [v.p1 / 100, v.p2 / 100] : [0, 0];
   };
   const unread = new Set();
@@ -25730,7 +26193,7 @@ function lepPanels(doc, table) {
     // Ribs and rows are numbered from 1, the cell by the rib inboard of it.
     const cell = { cellNo, centre: cellNo === 0 };
     const vent = vents.of(cellNo + 1);
-    if (Math.abs(vent.type) === 5 || Math.abs(vent.type) === 6 || vent.type === -2 || vent.type === -3) {
+    if (Math.abs(vent.type) === 5 || Math.abs(vent.type) === 6) {
       unread.add(vent.type);
     }
     for (const surface of ['upper', 'lower']) {
@@ -25747,7 +26210,18 @@ function lepPanels(doc, table) {
         L = ext(a, fa).concat(L);
         R = ext(b, fb).concat(R);
       }
-      const dev = developPanel(L, R);
+      // Developed in the program's own order, as its `flatt` lays a strip
+      // out: the upper surface from the trailing edge forward, the lower
+      // from the intake back. The strip's far edge takes up the surface's
+      // twist step by step from where it starts, so the order is not
+      // indifferent on a twisted cell, and the program's seam matching
+      // below works in the frame this leaves.
+      const dev = surface === 'upper'
+        ? (() => {
+          const d = developPanel(L.slice().reverse(), R.slice().reverse());
+          return { ...d, left: d.left.slice().reverse(), right: d.right.slice().reverse() };
+        })()
+        : developPanel(L, R);
       const m = midIndex(a.section, surface) + extra;
       cell[surface] = {
         dev, extra, width: Math.hypot(dev.right[m][0] - dev.left[m][0], dev.right[m][1] - dev.left[m][1]),
@@ -25756,6 +26230,8 @@ function lepPanels(doc, table) {
     developed.push(cell);
   }
 
+  // The sewing edges: each cell's developed edges moved out by its skin
+  // tension.
   for (let i = 0; i < developed.length; i++) {
     const cell = developed[i];
     if (!cell) continue;
@@ -25780,33 +26256,200 @@ function lepPanels(doc, table) {
       };
       const vL = over(dev.left, tLeft, width);
       const vR = over(dev.right, tRight, widthRight);
-      const sewL = offsetEdge(dev.left, dev.right, vL);
-      const sewR = offsetEdge(dev.right, dev.left, vR);
+      cell[surface].sewL = offsetEdge(dev.left, dev.right, vL);
+      cell[surface].sewR = offsetEdge(dev.right, dev.left, vR);
+    }
+  }
+
+  // The program's perfect matching: each sewing edge stretched over its
+  // last part to the length of the rib it is sewn to, the panel's end
+  // moving with it (`lepMatchSeams`). Its ends only: the cut line's sides
+  // stay on the edges as they were.
+  const matching = lepSeamMatching(doc);
+  const matched = matching && matching.ndif === 1000 && ribs.every((r) => r.section);
+  if (matching && matching.ndif !== 1000) unread.add(`seam matching ${matching.ndif}`);
+  for (const surface of ['upper', 'lower']) {
+    const s0 = ribs[0]?.section;
+    if (!matched || !s0) break;
+    const upper = surface === 'upper';
+    const lo = upper ? 1 : s0.extrados + s0.intake - 1;
+    const hi = upper ? s0.extrados : s0.points.length;
+    // Program index j to this panel's index k, front first, after the run-on.
+    const kOf = (extra, j) => extra + (upper ? hi - j : j - lo);
+    const edges = new Map();
+    for (const cell of developed) {
+      if (!cell) continue;
+      const { sewL, sewR, extra } = cell[surface];
+      const L = []; const R = [];
+      for (let j = lo; j <= hi; j++) {
+        const k = kOf(extra, j);
+        L[j] = [sewL[k][0] * 100, sewL[k][1] * 100];
+        R[j] = [sewR[k][0] * 100, sewR[k][1] * 100];
+      }
+      edges.set(cell.cellNo, { L, R });
+    }
+    const contour = [];
+    for (let i = 1; i <= ribs.length; i++) {
+      const r = ribs[i - 1];
+      let t = 0;
+      for (let j = lo; j < hi; j++) {
+        const [x1, y1] = r.section.points[j - 1];
+        const [x2, y2] = r.section.points[j];
+        t += Math.hypot((x2 - x1) * r.chord, (y2 - y1) * r.chord * r.thickness);
+      }
+      contour[i] = t;
+    }
+    lepMatchSeams(edges, contour, ribs.length, upper, lo, hi,
+      upper ? matching.upperPct : matching.lowerPct, matching.xndif);
+    for (const cell of developed) {
+      if (!cell) continue;
+      const c = cell[surface];
+      const e = edges.get(cell.cellNo);
+      c.matchL = c.sewL.map((q) => q.slice());
+      c.matchR = c.sewR.map((q) => q.slice());
+      for (let j = lo; j <= hi; j++) {
+        const k = kOf(c.extra, j);
+        c.matchL[k] = [e.L[j][0] / 100, e.L[j][1] / 100];
+        c.matchR[k] = [e.R[j][0] / 100, e.R[j][1] / 100];
+      }
+      // A run-on over the intake goes with the panel's end, as the program
+      // attaches its vent to it: turned and moved, not stretched.
+      if (c.extra) {
+        const k0 = c.extra;
+        const [a0, b0] = [c.sewL[k0], c.sewR[k0]];
+        const [a1, b1] = [c.matchL[k0], c.matchR[k0]];
+        const turn = Math.atan2(b1[1] - a1[1], b1[0] - a1[0]) - Math.atan2(b0[1] - a0[1], b0[0] - a0[0]);
+        const m0 = [(a0[0] + b0[0]) / 2, (a0[1] + b0[1]) / 2];
+        const m1 = [(a1[0] + b1[0]) / 2, (a1[1] + b1[1]) / 2];
+        const move = (q) => {
+          const x = q[0] - m0[0];
+          const y = q[1] - m0[1];
+          return [m1[0] + x * Math.cos(turn) - y * Math.sin(turn), m1[1] + x * Math.sin(turn) + y * Math.cos(turn)];
+        };
+        for (let k = 0; k < k0; k++) {
+          c.matchL[k] = move(c.sewL[k]);
+          c.matchR[k] = move(c.sewR[k]);
+        }
+      }
+    }
+  }
+
+  // The cut line of a piece: its sides the sewing edges moved out by the
+  // side allowance, its ends the matched ends moved out by theirs — each
+  // corner where the end's line meets the side's last segment, as the
+  // program's `extpoints` puts it.
+  const cutOf = (L, R, Lm, Rm, A, dFront, dBack) => {
+    const m = L.length;
+    const ring = L.concat(R.slice().reverse());
+    const d = ring.map((_, k) => (k < m - 1 ? A.side : k === m - 1 ? dBack : k < 2 * m - 1 ? A.side : dFront));
+    const c = offsetOutline(ring, d.map((mm) => mm / 1000));
+    if (Lm && Rm) {
+      const line = (p, q, dist, away) => {
+        // The line through p and q moved `dist` to the side away from `away`.
+        const tx = q[0] - p[0];
+        const ty = q[1] - p[1];
+        const tl = Math.hypot(tx, ty) || 1;
+        let nx = -ty / tl;
+        let ny = tx / tl;
+        if (nx * (away[0] - p[0]) + ny * (away[1] - p[1]) > 0) { nx = -nx; ny = -ny; }
+        return { p: [p[0] + nx * dist, p[1] + ny * dist], t: [tx / tl, ty / tl] };
+      };
+      const meet = (l1, l2, fallback) => {
+        const den = l1.t[0] * l2.t[1] - l1.t[1] * l2.t[0];
+        if (Math.abs(den) < 1e-12) return fallback;
+        const s = ((l2.p[0] - l1.p[0]) * l2.t[1] - (l2.p[1] - l1.p[1]) * l2.t[0]) / den;
+        return [l1.p[0] + s * l1.t[0], l1.p[1] + s * l1.t[1]];
+      };
+      const ds = A.side / 1000;
+      // Out of the piece: away from its middle (a closure on a diagonal has
+      // a side of no length at one rib, so a point beside the end will not do).
+      const h = Math.floor(m / 2);
+      const mid = [(L[h][0] + R[h][0]) / 2, (L[h][1] + R[h][1]) / 2];
+      const front = line(Lm[0], Rm[0], dFront / 1000, mid);
+      const back = line(Lm[m - 1], Rm[m - 1], dBack / 1000, mid);
+      // A side's first and last segments of any length: where an intake
+      // closure runs on at one rib only, that side's end is a run of points
+      // a hair apart, and their direction is noise.
+      const real = (E, k, dir) => {
+        let j = k;
+        while (j + dir >= 0 && j + dir < m && Math.hypot(E[j + dir][0] - E[k][0], E[j + dir][1] - E[k][1]) < 1e-6) j += dir;
+        return j + dir >= 0 && j + dir < m ? j + dir : k + dir;
+      };
+      const sideL0 = line(L[0], L[real(L, 0, 1)], ds, R[0]);
+      const sideR0 = line(R[0], R[real(R, 0, 1)], ds, L[0]);
+      const sideL1 = line(L[real(L, m - 1, -1)], L[m - 1], ds, R[m - 1]);
+      const sideR1 = line(R[real(R, m - 1, -1)], R[m - 1], ds, L[m - 1]);
+      c[0] = meet(sideL0, front, c[0]);
+      c[2 * m - 1] = meet(sideR0, front, c[2 * m - 1]);
+      c[m - 1] = meet(sideL1, back, c[m - 1]);
+      c[m] = meet(sideR1, back, c[m]);
+    }
+    return { ring, c, m };
+  };
+
+  for (let i = 0; i < developed.length; i++) {
+    const cell = developed[i];
+    if (!cell) continue;
+    for (const surface of ['upper', 'lower']) {
+      const { dev, width, extra, sewL, sewR } = cell[surface];
+      const matchL = cell[surface].matchL ?? null;
+      const matchR = cell[surface].matchR ?? null;
       const A = allow[surface];
       // The cut line: every edge of the sewing outline moved out by its own
       // allowance — the sides, the front end (round an intake it closes, the
       // edge across the intake) and the trailing edge — corners mitred.
       const sewing = sewL.concat(sewR.slice().reverse());
       const n = sewL.length;
-      const kinds = sewing.map((_, k) => (k < n - 1 ? A.side : k === n - 1 ? A.back
-        : k < 2 * n - 1 ? A.side : A.front));
-      const cut = offsetOutline(sewing, kinds.map((mm) => mm / 1000));
+      const whole = cutOf(sewL, sewR, matchL, matchR, A, A.front, A.back);
+      const cut = whole.c;
+      // 3D shaping (section 29): the panel cut across at its points, each
+      // piece with the side allowance along the cut, as the program gives
+      // it, and its own front or trailing-edge allowance at the other end.
+      const s = (cell.cellNo === 0 ? ribs[0] : ribs[cell.cellNo - 1]).section;
+      const first = surface === 'upper' ? s.extrados : s.extrados + s.intake - 1;
+      const cutAt = shaping.cutsAt(cell.cellNo + 1, surface)
+        .map((j) => extra + (surface === 'upper' ? first - j : j - first))
+        .filter((k) => k > 0 && k < n - 1)
+        .sort((a, b) => a - b);
+      let pieces = null;
+      if (cutAt.length) {
+        const bounds = [0, ...cutAt, n - 1];
+        const names = bounds.length === 3 ? ['front', 'rear'] : ['front', 'middle', 'rear'];
+        pieces = names.map((part, q) => {
+          const a = bounds[q];
+          const b = bounds[q + 1];
+          const L = sewL.slice(a, b + 1);
+          const R = sewR.slice(a, b + 1);
+          const { ring, c, m } = cutOf(L, R, matchL?.slice(a, b + 1), matchR?.slice(a, b + 1), A,
+            q === 0 ? A.front : A.side, q === names.length - 1 ? A.back : A.side);
+          return {
+            part, from: a, to: b,
+            sewing: { left: L, right: R },
+            cut: { left: c.slice(0, m), right: c.slice(m).reverse() },
+            areaM2: shoelace(ring),
+            cutAreaM2: shoelace(c),
+          };
+        });
+      }
       out.push({
         cell: cell.cellNo,
         ...(cell.centre ? { centre: true } : {}),
         surface,
         // The sewing outline: what the tool's own panels are, with the cut
-        // line round it.
+        // line round it — or, cut across by 3D shaping, round each piece.
         panel: {
           left: sewL, right: sewR, seamLengths: dev.seamLengths,
           cut: { left: cut.slice(0, n), right: cut.slice(n).reverse() },
+          ...(matchL ? { matched: { left: matchL, right: matchR } } : {}),
+          ...(pieces ? { pieces } : {}),
         },
         developed: dev,
         cut,
+        ...(pieces ? { pieces } : {}),
         widthM: width,
         areaM2: shoelace(sewing),
         developedAreaM2: shoelace(dev.left.concat(dev.right.slice().reverse())),
-        cutAreaM2: shoelace(cut),
+        cutAreaM2: pieces ? pieces.reduce((t, x) => t + x.cutAreaM2, 0) : shoelace(cut),
       });
     }
   }
@@ -25820,7 +26463,7 @@ function lepPanels(doc, table) {
     vents: vents.mode,
     // Intake closures drawn as a straight edge where the design has an arc
     // or an ellipse, or a shape this does not draw at all.
-    notReproduced: [...unread].map((t) => `intake type ${t}`),
+    notReproduced: [...unread].map((t) => `intake type ${t}`).concat(shaping.notReproduced),
     allowances: allow,
     // One side of the wing.
     totals: {
@@ -25883,14 +26526,95 @@ function shoelace(pts) {
 }
 
 /**
+ * How many sides the program draws an ellipse with, as 3.30 draws it: 60,
+ * or what section 37's code 3002 says (the Swoop2's 55). Until 3.30 it was
+ * always 39 — the Tuluaq's 3.25 and the gnuC2-23's 3.28 drew theirs so.
+ */
+function lepEllipseSides(doc) {
+  let sides = 60;
+  const s37 = sectionData(doc, 37).map((l) => l.trim()).filter(Boolean);
+  if (s37.length && parseInt(s37[0], 10) === 1) {
+    for (const l of s37.slice(2)) {
+      const f = l.split(/\s+/);
+      if (f[0] === '3002' && Number(f[1]) > 2) sides = Math.round(Number(f[1]));
+    }
+  }
+  return sides;
+}
+
+/**
+ * A rib's cutting line as the program draws it (its 6.11, the same from 3.25
+ * to 3.30): every point of the section, at its own thickness, moved out by
+ * the rib's seam allowance along the mean of the angles of the segments
+ * either side of it, to the side its height above the chord line says — and
+ * down from the intake on — the leading-edge point straight forward, the two
+ * trailing-edge points along their one segment's normal, and the line closed
+ * through the trailing edge itself. `rib` is a `lepRibTable` rib (cm), the
+ * allowance in millimetres (section 6); the line comes back in the rib's
+ * section coordinates, metres, like `lepHoles`.
+ *
+ * It is not an offset curve, which is what was drawn instead: a point moves
+ * by the allowance, not its edges, and the trailing edge is notched to the
+ * sewing point rather than carried out to a mitred corner, whose 3 cm spike
+ * put 2 to 3 cm2 on every rib — 0.03% at the root, 0.35% on the gnuC2-23's
+ * rib 30 and 2.5% on the Swoop2's tip. This is every rib of all three
+ * designs' cutting files to 0.002%.
+ *
+ * A flat rib — the gnuC2-23's tip, section 30's 0.0 — has every point on
+ * the chord line, which the program reads as the upper side as far as the
+ * intake: its line runs out to the nose and back on itself, and the strip
+ * it encloses starts at the intake. That is what the program draws, and it
+ * is drawn here so.
+ */
+function lepRibCutLine(rib, allowanceMm) {
+  const xcos = allowanceMm / 10;
+  const P = rib.section.points.map(([x, y]) => [x * rib.chord, y * rib.chord * rib.thickness]);
+  const n = P.length;
+  const np2 = rib.section.extrados;
+  const u = (j) => P[j - 1][0];
+  const v = (j) => P[j - 1][1];
+  // Its angles are atan of a slope, not atan2: a vertical segment is +-90
+  // degrees whichever way it runs, which is what turns its mean the right way.
+  const slope = (a, b) => Math.atan((v(b) - v(a)) / (u(b) - u(a)));
+  const out = [];
+  for (let j = 1; j <= n; j++) {
+    const al = j === 1 ? slope(1, 2)
+      : j === n ? slope(n - 1, n)
+        : 0.5 * (slope(j, j + 1) + slope(j - 1, j));
+    const up = [u(j) - xcos * Math.sin(al), v(j) + xcos * Math.cos(al)];
+    const down = [u(j) + xcos * Math.sin(al), v(j) - xcos * Math.cos(al)];
+    let q;
+    if (j === 1) q = v(j) >= 0 ? up : down;
+    else if (j === n) q = v(j) > 0 ? up : down;
+    else if (u(j) === 0) q = [u(j) - xcos, v(j)];
+    else q = v(j) < 0 || j >= np2 ? down : up;
+    // Two coincident points make a 0/0 slope, which the program would draw
+    // to nowhere: there is no point to cut to there.
+    if (Number.isFinite(q[0]) && Number.isFinite(q[1])) out.push(q);
+  }
+  out.push([u(n), v(n)]);
+  return out.map(([a, b]) => [a / 100, b / 100]);
+}
+
+/**
  * Section 4, the lightening holes, per rib — the design's own, rather than
  * the ones this tool would generate. Type 1 is an ellipse: centre, semi-axes
  * and rotation, all in percent of chord. Other types are reported, not drawn.
  * Returns holes in the rib's section coordinates, metres.
+ *
+ * Each is the program's polygon (its subroutine `ellipse`), `sides` long:
+ * 3.30's by default (`lepEllipseSides`), 39 for a file as 3.25 or 3.28 drew
+ * it. They were 48-sided, 0.15% off every hole of both older designs'
+ * cutting files.
+ *
+ * The rotation is read as degrees, turned from the chord line toward the
+ * upper surface. The program hands the number to its ellipse as radians, in
+ * a drawing whose vertical runs down; no design here turns a hole, and one
+ * that does is said, not drawn the program's way.
  */
-function lepHoles(doc, table) {
+function lepHoles(doc, table, { sides = lepEllipseSides(doc) } = {}) {
   const s = sectionData(doc, 4).map((l) => l.trim()).filter(Boolean);
-  const out = { byRib: new Map(), notReproduced: [] };
+  const out = { byRib: new Map(), notReproduced: [], sides };
   if (!s.length) return out;
   const groups = parseInt(s[0], 10);
   let p = 1;
@@ -25908,10 +26632,13 @@ function lepHoles(doc, table) {
       for (const h of holes) {
         if (h[0] !== 1) { out.notReproduced.push(`rib ${i}: hole type ${h[0]}`); continue; }
         const [, x, y, a, b, rotDeg] = h;
+        if (rotDeg && !out.notReproduced.some((m) => /hole rotation/.test(m))) {
+          out.notReproduced.push(`hole rotation (rib ${i}: ${rotDeg}), read as degrees; the program's drawing takes it as radians`);
+        }
         const t = (rotDeg * Math.PI) / 180;
         const outline = [];
-        for (let q = 0; q <= 48; q++) {
-          const w = (2 * Math.PI * q) / 48;
+        for (let q = 0; q <= sides; q++) {
+          const w = (2 * Math.PI * q) / sides;
           const ex = ((a * c) / 100) * Math.cos(w);
           const ey = ((b * c) / 100) * Math.sin(w);
           outline.push([(x * c) / 100 + ex * Math.cos(t) - ey * Math.sin(t),
@@ -25950,9 +26677,9 @@ function lepHoles(doc, table) {
  *   section 21   a ROD POCKET: the strip beside each rod, its four widths
  *                from the rod's line.
  *
- * Not built: the trailing-edge mini-ribs (section 2's last column), which
- * the program cuts from the section as it billows the cell over it, from
- * its own ovalization. They are counted and said.
+ *   section 2    a TRAILING-EDGE MINI-RIB: the rear of the rib inboard of
+ *                its cell, raised at its front to meet the cell's billow
+ *                (section 37's code 3001), with section 38's type 9 holes.
  *
  * Types 11, 15 and 16 give widths in per cent of the rib's chord; 1, 5 and
  * 6 in centimetres — and the program scales 5's and 6's by the wing's scale
@@ -25968,8 +26695,9 @@ function lepHoles(doc, table) {
  * between ribs; section 37's code 3002 says how many sides the program
  * gives an ellipse (60 unless it says).
  *
- * Validated piece by piece against both complete designs' cutting files
- * (`data/reference/lep/*-cut-parts.tsv`): see `docs/internal-structure.md`.
+ * Validated piece by piece against the three complete designs' cutting
+ * files (`data/reference/lep/*-cut-parts.tsv`): see
+ * `docs/internal-structure.md`.
  *
  * Several things are the program's and not a choice, and reproduced as it
  * does them:
@@ -26261,15 +26989,9 @@ function lepStructureSettings(doc, table) {
       break;
     }
   }
-  let ellipseSides = 60;
+  const ellipseSides = lepEllipseSides(doc);
   const s37 = sectionData(doc, 37).map((l) => l.trim()).filter(Boolean);
-  if (s37.length && parseInt(s37[0], 10) === 1) {
-    for (const l of s37.slice(2)) {
-      const f = l.split(/\s+/);
-      if (f[0] === '3002' && Number(f[1]) > 2) ellipseSides = Math.round(Number(f[1]));
-    }
-  }
-  const holes = { diagonal: null, between: null };
+  const holes = { diagonal: null, between: null, minirib: null };
   const s38 = sectionData(doc, 38).map((l) => l.trim()).filter(Boolean);
   if (s38.length && parseInt(s38[0], 10) > 0) {
     const k = parseInt(s38[1], 10);
@@ -26278,11 +27000,25 @@ function lepStructureSettings(doc, table) {
       if (!(f[2] > 0)) continue;
       if (f[1] === 15 || f[1] === 5) holes.diagonal = { count: f[3], across: f[4], along: f[5], at: f[6] };
       if (f[1] === 16 || f[1] === 6) holes.between = { count: f[3], across: f[4], along: f[5], at: f[6] };
+      // Type 9, in each mini-rib: how many, their height in per cent of the
+      // mini-rib's front, their width to height, where they sit up or down
+      // as a fraction of that height, and their angle.
+      if (f[1] === 9) holes.minirib = { count: f[3], heightPct: f[4], ratio: f[5], yFactor: f[6], angleDeg: f[7] || 0 };
+    }
+  }
+  // Section 37's code 3001: how a mini-rib's edges rise to meet the cell's
+  // billow at its front — 0 not at all, 1 straight, 3 a half cosine — over a
+  // length in per cent of chord, by a fraction of the billow there.
+  let miniTransition = { mode: 0, lengthPct: 0, factor: 0 };
+  if (s37.length && parseInt(s37[0], 10) === 1) {
+    for (const l of s37.slice(2)) {
+      const f = l.split(/\s+/);
+      if (f[0] === '3001') miniTransition = { mode: Number(f[1]) || 0, lengthPct: Number(f[2]) || 0, factor: Number(f[3]) || 0 };
     }
   }
   return {
     ribAllowanceCm: ribMm / 10, vribAllowanceCm: vribMm / 10, strapShortening: Number.isFinite(tension) ? tension : 0,
-    ellipseSides, holes, scale: table.scale ?? 1,
+    ribAllowanceMm: ribMm, ellipseSides, holes, miniTransition, scale: table.scale ?? 1,
   };
 }
 
@@ -26559,7 +27295,67 @@ function lepStrap(table, st, e) {
   };
 }
 
-/** One end of a piece between two ribs: a line along rib `r` at `pct` of chord. */
+/**
+ * A V-rib (types 3, 13): from anchor row `e.row` on rib `e.rib`, a strip
+ * from its lower surface up to the upper surface of the rib before, and
+ * one to the rib after, as the row says — "V-ribs full but independent
+ * strips", the program's 16.3.1. Along the anchor rib, 21 points evenly
+ * from the lower half-width ahead of the anchor to as far behind; along
+ * the neighbour, its upper surface between the upper half-width either side
+ * of ITS OWN anchor of the row, resampled to 21 (the last section point
+ * before the end left out, as everywhere).
+ */
+function lepVRib(table, st, e) {
+  const ribs = table.ribs;
+  const rib = ribs[e.rib - 1];
+  if (!rib?.section) return { problem: `V-rib ${e.index}: no section on rib ${e.rib}` };
+  const at = (r) => (r.anchorsPct[e.row - 1] * r.chord) / 100;
+  const sides = [];
+  if (e.left) sides.push(['left', ribs[e.rib - 2]]);
+  if (e.right) sides.push(['right', ribs[e.rib]]);
+  // Half-widths. Type 13 in per cent of each rib's own chord; type 3 in
+  // centimetres scaled with the wing, or, with its ninth column 1, in per
+  // cent of the anchor rib's chord along it and of the neighbour's (of the
+  // anchor rib's when the row runs to both sides) along the neighbour.
+  const lowerHalf = e.percent ? (e.lower / 100) * rib.chord : e.lower * st.scale;
+  const upperHalf = (nb) => {
+    if (!e.percent) return e.upper * st.scale;
+    if (e.type === 13) return (e.upper / 100) * nb.chord;
+    return (e.upper / 100) * (e.left && e.right ? rib.chord : nb.chord);
+  };
+  const R = lepSectionCm(rib);
+  const u3 = at(rib);
+  const lower = lepLowerEven(R, u3 - lowerHalf, u3 + lowerHalf, 21).map(([u, v]) => lepRibPoint(rib, u, v));
+  const out = [];
+  for (const [side, nb] of sides) {
+    if (!nb?.section) return { problem: `V-rib ${e.index}: rib ${e.rib} has no rib to its ${side}` };
+    const Q = lepSectionCm(nb);
+    const w = upperHalf(nb);
+    const p9 = lepUpperAt(Q, at(nb) - w);
+    const p11 = lepUpperAt(Q, at(nb) + w);
+    if (!p9 || !p11) return { problem: `V-rib ${e.index}: it does not reach rib ${nb.index}'s upper surface` };
+    const upper = lepResample(lepUpperLine(Q, p9, p11), 21).map(([u, v]) => lepRibPoint(nb, u, v));
+    const { f, outline } = side === 'left'
+      ? lepStrip(upper, lower, st.vribAllowanceCm, 0)
+      : lepStrip(lower, upper, st.vribAllowanceCm, 0);
+    out.push({
+      kind: 'vrib', rib: e.rib, side, row: e.row, entry: e.index,
+      ribs: side === 'left' ? [e.rib - 1, e.rib] : [e.rib, e.rib + 1],
+      sewing: { left: f.pl1, right: f.pr1 }, outline, holes: [],
+    });
+  }
+  return { pieces: out };
+}
+
+/**
+ * One end of a piece between two ribs: a line along rib `r` at `pct` of
+ * chord. On the upper surface (height 100) it follows the surface; at any
+ * other height, the lower surface (0) included, it is the straight line
+ * between the heights at its two ends. The program builds the lower
+ * surface's curve for height 0 and then, its middle case being unguarded,
+ * draws the straight line over it — a chord across the curve, a millimetre
+ * inside it across the nose (the gnuC2-23's pieces at 10% of chord).
+ */
 function lepBetweenLine(r, pct, height, front, back) {
   const R = lepSectionCm(r);
   const u3 = (r.chord * pct) / 100;
@@ -26569,11 +27365,10 @@ function lepBetweenLine(r, pct, height, front, back) {
   const p4 = lepLowerAt(R, u4);
   const p9 = lepUpperAt(R, u2);
   const p11 = lepUpperAt(R, u4);
-  if (height === 0) return p2 && p4 ? lepResample(lepLowerLine(R, p2, p4), 21) : null;
   if (height === 100) return p9 && p11 ? lepResample(lepUpperLine(R, p9, p11), 21) : null;
-  if (!p2 || !p4 || !p9 || !p11) return null;
-  const v6 = p2.v + (p9.v - p2.v) * (height / 100);
-  const v8 = p4.v + (p11.v - p4.v) * (height / 100);
+  if (!p2 || !p4 || (height > 0 && (!p9 || !p11))) return null;
+  const v6 = height > 0 ? p2.v + (p9.v - p2.v) * (height / 100) : p2.v;
+  const v8 = height > 0 ? p4.v + (p11.v - p4.v) * (height / 100) : p4.v;
   const out = [];
   for (let k = 0; k <= 20; k++) out.push([u2 + ((u4 - u2) * k) / 20, v6 + ((v8 - v6) * k) / 20]);
   return out;
@@ -26684,6 +27479,211 @@ function lepRodPocket(jonc, before330 = false) {
 }
 
 /**
+ * How far a cell's cloth billows out between its ribs at a section point:
+ * the program's `panels3d`, its `hautok(i, j)`, for the cell between its
+ * ribs i-1 and i (the design's numbers). The panel's width there, as cut
+ * wider by the skin tension and matched (`sm`), spans the straight distance
+ * between the two ribs' points (`s`) as a circular arc, whose height is
+ * found as the program finds it: the arc's centre stepped 301 times towards
+ * the chord and the first whose arc reaches `s` taken. That is the
+ * program's value, to its own steps, not the exact sagitta. Centimetres.
+ * `panels` from `lepPanels`; null where it has no panel there.
+ */
+function lepBillow(table, panels, i, j) {
+  const a = table.ribs[i - 2];
+  const b = table.ribs[i - 1];
+  if (!a?.section || !b?.section) return null;
+  const A = lepSectionCm(a);
+  const B = lepSectionCm(b);
+  const np2 = a.section.extrados;
+  const lo = np2 + a.section.intake - 1;
+  // The intake between has a strip of its own; a mini-rib never asks there.
+  if (j > np2 && j < lo) return null;
+  const upper = j <= np2;
+  const p = panels?.panels?.find((q) => q.cell === i - 1 && q.surface === (upper ? 'upper' : 'lower'));
+  if (!p) return null;
+  const edges = p.panel.matched ?? { left: p.panel.left, right: p.panel.right };
+  const own = upper ? np2 : A.n - lo + 1;
+  const extra = edges.left.length - own;
+  const k = extra + (upper ? np2 - j : j - lo);
+  const L = edges.left[k];
+  const R = edges.right[k];
+  if (!L || !R) return null;
+  const sm = Math.hypot(L[0] - R[0], L[1] - R[1]) * 100;
+  const pa = lepRibPoint(a, A.U[j - 1], A.V[j - 1]);
+  const pb = lepRibPoint(b, B.U[j - 1], B.V[j - 1]);
+  const s = Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]);
+  const hautmax = 0.5 * Math.sqrt(Math.abs(sm * sm - s * s));
+  const q = (sm * s) / (8.0 * hautmax + 0.00001);
+  const hautmmax = q - hautmax;
+  let h = 0;
+  for (let l = 0; l <= 300; l++) {
+    const hautm = ((l + 0.00001) / 300.0) * hautmmax * 4.0;
+    const tetha = Math.atan((0.5 * s) / hautm);
+    const radi = sm / (2.0 * tetha);
+    if (2.0 * radi * Math.sin(tetha) >= s) {
+      h = Math.abs(sm - s) <= 0.01 ? 0 : radi - hautm;
+      break;
+    }
+  }
+  return h;
+}
+
+/**
+ * The trailing-edge mini-ribs: section 2's last column, as the program
+ * cuts them (its 6.12.0, moved to 8.5.0.1 in 3.28).
+ *
+ * Mini-rib i sits in the cell outboard of rib i-1 and is that rib's section
+ * from the trailing edge forward over `pct` of its chord, rib i's figure.
+ * Its two edges are raised and lowered at their front by what the cell's
+ * cloth billows there (`lepBillow`) times section 37's 3001 factor, back to
+ * nothing over its 3001 length — straight or by a half cosine — so that it
+ * meets the billowed panel; each point is then moved out by the rib
+ * allowance along its segment's normal, the line closed through the
+ * trailing edge and across the front, which is not sewn. Three details are
+ * the program's own:
+ *
+ * - The billow is the cell inboard's, `hautok(i-1)`: the cell between ribs
+ *   i-2 and i-1, not the mini-rib's own. The first two cells take the
+ *   third's (its "provisional fix"; 3.28 fixed the second only).
+ * - Each point's normal is taken from a segment whose far end still carries
+ *   this point's rise, not its own.
+ * - Section 38's type 9 holes (3.30): a row of ellipses aft from the front,
+ *   each smaller, sized by the section's thickness there.
+ *
+ * 3.25 drew them differently, from the rib's own cutting line (its 6.11)
+ * and with no transition: `drawnBefore330` is that. Centimetres in, pieces
+ * in the program's centimetres, as the others are.
+ */
+function lepMiniRibs(doc, table, st, panels) {
+  const air = readAirfoils(doc);
+  const T = st.miniTransition;
+  const pieces = [];
+  const problems = [];
+  const notes = [];
+  if (T.mode && T.mode !== 1 && T.mode !== 3) {
+    notes.push(`mini-rib transition ${T.mode}, which the program reads and does not draw: drawn without one`);
+  }
+  const mode = T.mode === 1 || T.mode === 3 ? T.mode : 0;
+  const d = st.ribAllowanceMm * 0.1;
+  for (let i = 1; i <= table.ribs.length; i++) {
+    const pct = air[i - 1]?.miniRibPct ?? 0;
+    if (!(pct > 1 && pct !== 100)) continue;
+    // Mini-rib 1 is in the centre cell, between the centre rib and its mirror.
+    const r = table.ribs[Math.max(0, i - 2)];
+    if (!r?.section) { problems.push(`mini-rib ${i}: rib ${i - 1} has no section`); continue; }
+    const X = lepSectionCm(r);
+    const u = (j) => X.U[j - 1];
+    const v = (j) => X.V[j - 1];
+    const n = X.n;
+    const np2 = X.top;
+    const len = (r.chord * pct) / 100;
+    let je = null; let xe = 0; let ye = 0;
+    for (let j = 1; j <= np2 - 1; j++) {
+      if (u(1) - u(j) < len && u(1) - u(j + 1) >= len) {
+        je = j;
+        const e = len - (u(1) - u(j));
+        xe = u(j) - e;
+        ye = v(j) - (e * (v(j) - v(j + 1))) / (u(j) - u(j + 1));
+      }
+    }
+    let ji = null; let xi = 0; let yi = 0;
+    for (let j = n; j >= np2; j--) {
+      if (u(1) - u(j) < len && u(1) - u(j - 1) >= len) {
+        ji = j;
+        const e = len - (u(1) - u(j));
+        xi = u(j) - e;
+        yi = v(j) - (e * (v(j) - v(j - 1))) / (u(j) - u(j - 1));
+      }
+    }
+    if (je === null || ji === null) { problems.push(`mini-rib ${i}: ${pct}% of chord does not cross its section`); continue; }
+    let up = 0;
+    let down = 0;
+    if (mode) {
+      const cellOf = Math.max(2, i - 1);
+      const he = lepBillow(table, panels, cellOf, je);
+      const hi = lepBillow(table, panels, cellOf, ji);
+      if (he === null || hi === null) { problems.push(`mini-rib ${i}: no panel to take the cell's billow from`); continue; }
+      up = T.factor * he;
+      down = T.factor * hi;
+    }
+    const zone = (r.chord * T.lengthPct) / 100;
+    const rise = (j, x0, amp) => {
+      if (!mode || !(u(j) >= u(1) - len && u(j) <= u(1) - len + zone)) return 0;
+      const x = u(j) - x0;
+      return mode === 1 ? amp * (1 - x / zone) : (amp / 2) * (1 + Math.cos((Math.PI * x) / zone));
+    };
+    // The upper edge, trailing edge first (vectors 71 and 72).
+    const e71 = [];
+    const e72 = [];
+    for (let j = 1; j <= je; j++) {
+      const y = rise(j, xe, up);
+      e71[j] = [u(j), v(j) + y];
+      e71[j + 1] = [u(j + 1), v(j + 1) + y];
+      const al = Math.atan(-(e71[j][1] - e71[j + 1][1]) / (e71[j][0] - e71[j + 1][0]));
+      e72[j] = [e71[j][0] + d * Math.sin(al), e71[j][1] + d * Math.cos(al)];
+    }
+    {
+      const al = Math.atan(-(e71[je][1] - e71[je + 1][1]) / (e71[je][0] - e71[je + 1][0]));
+      e71[je + 1] = [xe, ye + up];
+      e72[je + 1] = [xe + d * Math.sin(al), ye + up + d * Math.cos(al)];
+    }
+    // The lower edge, trailing edge first.
+    const i71 = [];
+    const i72 = [];
+    for (let j = n; j >= ji; j--) {
+      const y = rise(j, xi, down);
+      i71[j] = [u(j), v(j) - y];
+      i71[j - 1] = [u(j - 1), v(j - 1) - y];
+      const al = Math.atan((i71[j][1] - i71[j - 1][1]) / (i71[j][0] - i71[j - 1][0]));
+      i72[j] = [i71[j][0] + d * Math.sin(al), i71[j][1] - d * Math.cos(al)];
+    }
+    {
+      const al = Math.atan((i71[ji - 1][1] - i71[ji][1]) / (i71[ji - 1][0] - i71[ji][0]));
+      i71[ji - 1] = [xi, yi - down];
+      i72[ji - 1] = [xi + d * Math.sin(al), yi - down - d * Math.cos(al)];
+    }
+    // Cut out of the trailing edge, round the upper edge, across the front
+    // and back along the lower edge.
+    const outline = [e71[1]];
+    for (let j = 1; j <= je + 1; j++) outline.push(e72[j]);
+    outline.push(e71[je + 1], i71[ji - 1]);
+    for (let j = ji - 1; j <= n; j++) outline.push(i72[j]);
+    outline.push(i71[n]);
+    const sewing = { left: e71.slice(1, je + 2), right: i71.slice(ji - 1, n + 1).reverse() };
+    // Section 38's type 9: from the front aft, each a step smaller, sized by
+    // the section's own thickness at the front; the program puts the centre
+    // the trailing edge's height below where it means to (it is nil here).
+    const holes = [];
+    const hm = st.holes.minirib;
+    if (hm && hm.count > 0) {
+      const hmax = ye - yi;
+      for (let q = 1; q <= hm.count; q++) {
+        const f = (hm.count + 2 - q) / (hm.count + 2);
+        const b = (f * hmax * hm.heightPct) / 100 / 2;
+        holes.push(lepEllipse(u(1) - (f * len + 0.05 * len), f * hmax * hm.yFactor - v(1), hm.ratio * b, b,
+          (-hm.angleDeg * Math.PI) / 180, st.ellipseSides));
+      }
+    }
+    // 3.25: the rib's own cutting line to the front, out to the front point
+    // along the last segment's normal and in to it.
+    const c16 = lepRibCutLine(r, st.ribAllowanceMm).map(([a, b]) => [a * 100, b * 100]);
+    let before330 = null;
+    if (c16.length === n + 1) {
+      const ae = Math.atan(-(v(je) - v(je + 1)) / (u(je) - u(je + 1)));
+      const ai = Math.atan((v(ji) - v(ji - 1)) / (u(ji) - u(ji - 1)));
+      before330 = [[u(1), v(1)], ...c16.slice(0, je), [xe + d * Math.sin(ae), ye + d * Math.cos(ae)], [xe, ye], [xi, yi],
+        [xi + d * Math.sin(ai), yi - d * Math.cos(ai)], ...c16.slice(ji - 1, n), [u(n), v(n)]];
+    }
+    pieces.push({
+      kind: 'minirib', rib: i, ribs: [i - 1, i], lengthPct: pct, rise: [up, down],
+      sewing, outline, holes, before330,
+    });
+  }
+  return { pieces, problems, notes };
+}
+
+/**
  * The design's internal structure (section 12), as its program cuts it.
  *
  * @returns {{ok, problems, pieces, totals, notReproduced, droppedHoles, settings}}
@@ -26693,7 +27693,7 @@ function lepRodPocket(jonc, before330 = false) {
  *   line's length. A full diagonal also gives `drawnBefore330`: its cloth as
  *   the program drew it up to 3.25, the cut-outs inside a whole allowance.
  */
-function lepStructure(doc, table) {
+function lepStructure(doc, table, { panels = null } = {}) {
   const hv = parseHVRibs(doc);
   const st = lepStructureSettings(doc, table);
   const problems = [];
@@ -26742,6 +27742,11 @@ function lepStructure(doc, table) {
     droppedHoles += r.dropped;
     raw.push(r.piece);
   }
+  for (const e of hv.vribs ?? []) {
+    const r = lepVRib(table, st, e);
+    if (r.problem) { problems.push(r.problem); continue; }
+    raw.push(...r.pieces);
+  }
   for (const e of hv.other) notReproduced.add(`section 12 type ${e.type}`);
 
   // The rods' pockets (section 21), one a rod.
@@ -26751,16 +27756,27 @@ function lepStructure(doc, table) {
     const outline = lepRodPocket(j);
     if (!outline) { problems.push(`rib ${j.rib}: its rod (bloc ${j.bloc}) states no pocket`); continue; }
     raw.push({
-      kind: 'pocket', ribs: [j.rib, j.rib], rib: j.rib, bloc: j.bloc, rodType: j.type, sewing: null, outline, holes: [],
+      kind: 'pocket', ribs: [j.rib, j.rib], rib: j.rib, bloc: j.bloc, rodType: j.type, part: j.part,
+      sewing: null, outline, holes: [],
       before330: lepRodPocket(j, true),
     });
   }
 
-  // The trailing-edge mini-ribs (section 2's last column) are cut from the
-  // section as the program billows the cell over it, which this does not
-  // reproduce: counted, not built.
+  // The trailing-edge mini-ribs (section 2's last column), from the section
+  // and — where section 37 gives them a transition — from the billow of the
+  // cell, which takes the design's own panels.
   const miniRibs = readAirfoils(doc).filter((a) => a.miniRibPct > 1 && a.miniRibPct !== 100).length;
-  if (miniRibs) notReproduced.add(`${miniRibs} trailing-edge mini-ribs`);
+  if (miniRibs) {
+    let P = panels;
+    if (!P && (st.miniTransition.mode === 1 || st.miniTransition.mode === 3)) {
+      try { P = lepPanels(doc, table); } catch (e) { P = null; }
+    }
+    const mr = lepMiniRibs(doc, table, st, P);
+    // A mini-rib that cannot be built is said, and the rest of the structure
+    // stands without it.
+    for (const n of [...mr.problems, ...mr.notes]) notReproduced.add(n);
+    raw.push(...mr.pieces);
+  }
 
   // A piece on the centre rib alone — its rods' pockets — is cut once for
   // the wing; every other is cut once a side.
@@ -26774,9 +27790,12 @@ function lepStructure(doc, table) {
     const out = {
       kind: p.kind,
       ribs: p.ribs,
-      copies: centreRib && p.ribs[0] === 1 && p.ribs[1] === 1 ? 1 : 2,
+      // The centre cell's mini-rib, between the centre rib and its mirror, once too.
+      copies: (centreRib && p.ribs[0] === 1 && p.ribs[1] === 1) || (p.kind === 'minirib' && p.rib === 1) ? 1 : 2,
       ...(p.kind === 'diagonal' ? { rib: p.rib, side: p.side, rows: p.rows } : {}),
-      ...(p.kind === 'pocket' ? { rib: p.rib, bloc: p.bloc, rodType: p.rodType } : {}),
+      ...(p.kind === 'minirib' ? { rib: p.rib, lengthPct: p.lengthPct, riseM: p.rise.map((x) => x / 100) } : {}),
+      ...(p.kind === 'vrib' ? { rib: p.rib, side: p.side } : {}),
+      ...(p.kind === 'pocket' ? { rib: p.rib, bloc: p.bloc, rodType: p.rodType, ...(p.part ? { part: p.part } : {}) } : {}),
       ...(p.row ? { row: p.row } : {}),
       ...(p.chordPct ? { chordPct: p.chordPct } : {}),
       ...(p.sewing ? { sewing: { left: m(p.sewing.left), right: m(p.sewing.right) } } : {}),
@@ -26789,6 +27808,10 @@ function lepStructure(doc, table) {
       cutAreaM2: (outlineCm2 - holesCm2) / 1e4,
       perimeterM: lepRingLength(p.outline) / 100,
     };
+    if (p.kind === 'minirib' && p.before330) {
+      out.drawnBefore330 = { outlineAreaM2: lepRingArea(p.before330) / 1e4, cutAreaM2: lepRingArea(p.before330) / 1e4,
+        perimeterM: lepRingLength(p.before330) / 100 };
+    }
     if (p.kind === 'pocket' && p.before330) {
       out.drawnBefore330 = { outlineAreaM2: lepRingArea(p.before330) / 1e4, cutAreaM2: lepRingArea(p.before330) / 1e4,
         perimeterM: lepRingLength(p.before330) / 100 };
@@ -26805,7 +27828,7 @@ function lepStructure(doc, table) {
   });
 
   const totals = {};
-  for (const kind of ['diagonal', 'strap', 'between', 'pocket']) {
+  for (const kind of ['diagonal', 'vrib', 'strap', 'between', 'pocket', 'minirib']) {
     const of = pieces.filter((p) => p.kind === kind);
     totals[kind] = {
       count: of.length,
@@ -26834,17 +27857,21 @@ function lepStructure(doc, table) {
 /** What each kind of piece is called, one and many. */
 const LEP_PIECE_NAMES = {
   diagonal: ['full diagonal', 'full diagonals'],
+  vrib: ['V-rib strip', 'V-rib strips'],
   between: ['piece between two ribs', 'pieces between two ribs'],
   strap: ['strap', 'straps'],
   pocket: ['rod pocket', 'rod pockets'],
+  minirib: ['trailing-edge mini-rib', 'trailing-edge mini-ribs'],
 };
 
-/** A short label for a piece on a cutting file: D2L, S1-2/1, V4-5/11, P3/1. */
+/** A short label for a piece on a cutting file: D2L, S1-2/1, V4-5/11, P3/1, M5. */
 function lepPieceLabel(p) {
+  if (p.kind === 'minirib') return `M${p.rib}`;
   if (p.kind === 'diagonal') return `D${p.rib}${p.side === 'left' ? 'L' : 'R'}`;
+  if (p.kind === 'vrib') return `V${p.rib}${p.side === 'left' ? 'L' : 'R'}/${p.row}`;
   if (p.kind === 'strap') return `S${p.ribs[0]}-${p.ribs[1]}/${p.row}`;
   if (p.kind === 'between') return `V${p.ribs[0]}-${p.ribs[1]}/${p.chordPct[0]}`;
-  return `P${p.rib}/${p.bloc}`;
+  return `P${p.rib}/${p.bloc}${p.part ? p.part[0].toUpperCase() : ''}`;
 }
 
 /** The pieces as items the nester takes: each outline split into two runs. */
@@ -27199,6 +28226,8 @@ const SWOOP2_LEP = "************************************************************
 const SWOOP2_SECTIONS = {"gnuReflex.txt": "gnuReflex                                         \n 180\n 110\n   7\n  65\n 1.000000     0.000000\n 0.993538     0.001003\n 0.983052     0.002359\n 0.971425     0.003599\n 0.958609     0.004927\n 0.944821     0.006369\n 0.930241     0.007826\n 0.915007     0.009295\n 0.899393     0.010792\n 0.883695     0.012327\n 0.868094     0.013925\n 0.852688     0.015622\n 0.837494     0.017465\n 0.822421     0.019510\n 0.807310     0.021781\n 0.792027     0.024280\n 0.776476     0.026978\n 0.760631     0.029827\n 0.744554     0.032770\n 0.728363     0.035736\n 0.712095     0.038675\n 0.695723     0.041590\n 0.679265     0.044494\n 0.662774     0.047401\n 0.646302     0.050323\n 0.629877     0.053270\n 0.613491     0.056255\n 0.597112     0.059290\n 0.580697     0.062379\n 0.564225     0.065509\n 0.547714     0.068664\n 0.531225     0.071815\n 0.514821     0.074933\n 0.498526     0.077997\n 0.482349     0.080987\n 0.466294     0.083883\n 0.450330     0.086669\n 0.434399     0.089344\n 0.418446     0.091921\n 0.402444     0.094421\n 0.386429     0.096863\n 0.370508     0.099243\n 0.354842     0.101531\n 0.339545     0.103665\n 0.324644     0.105593\n 0.310122     0.107276\n 0.295946     0.108685\n 0.282079     0.109802\n 0.268488     0.110614\n 0.255151     0.111111\n 0.242054     0.111286\n 0.229183     0.111131\n 0.216528     0.110642\n 0.204087     0.109813\n 0.191859     0.108643\n 0.179841     0.107129\n 0.168039     0.105279\n 0.156476     0.103099\n 0.145179     0.100597\n 0.134173     0.097786\n 0.123489     0.094683\n 0.113167     0.091313\n 0.103261     0.087713\n 0.093825     0.083910\n 0.084887     0.079930\n 0.076471     0.075823\n 0.068606     0.071644\n 0.061313     0.067457\n 0.054603     0.063321\n 0.048468     0.059291\n 0.042889     0.055413\n 0.037841     0.051723\n 0.033296     0.048221\n 0.029217     0.044891\n 0.025558     0.041714\n 0.022276     0.038678\n 0.019327     0.035771\n 0.016679     0.032985\n 0.014305     0.030302\n 0.012177     0.027715\n 0.010267     0.025220\n 0.008552     0.022813\n 0.007013     0.020490\n 0.005633     0.018245\n 0.004398     0.016076\n 0.003312     0.013970\n 0.002378     0.011918\n 0.001597     0.009913\n 0.000967     0.007950\n 0.000498     0.006032\n 0.000186     0.004162\n 0.000017     0.002335\n 0.000000     0.000000\n 0.000170    -0.001261\n 0.000523    -0.003090\n 0.001029    -0.004956\n 0.001692    -0.006841\n 0.002529    -0.008735\n 0.003555    -0.010626\n 0.004780    -0.012505\n 0.006210    -0.014362\n 0.007845    -0.016196\n 0.009682    -0.018017\n 0.011726    -0.019829\n 0.013991    -0.021631\n 0.016477    -0.023453\n 0.019180    -0.025326\n 0.022129    -0.027234\n 0.025371    -0.029153\n 0.030000    -0.031639\n 0.032868    -0.033101\n 0.037186    -0.035154\n 0.041949    -0.037262\n 0.047209    -0.039428\n 0.053008    -0.041622\n 0.060000    -0.043936\n 0.066642    -0.045932\n 0.074561    -0.048178\n 0.083116    -0.050385\n 0.092364    -0.052449\n 0.102487    -0.054391\n 0.113519    -0.056257\n 0.125332    -0.058021\n 0.137824    -0.059655\n 0.150923    -0.061135\n 0.164543    -0.062442\n 0.178620    -0.063567\n 0.193124    -0.064517\n 0.208015    -0.065308\n 0.223247    -0.065953\n 0.238812    -0.066467\n 0.254714    -0.066880\n 0.270923    -0.067228\n 0.287356    -0.067546\n 0.303884    -0.067859\n 0.320380    -0.068180\n 0.336750    -0.068483\n 0.352951    -0.068723\n 0.368979    -0.068870\n 0.384842    -0.068900\n 0.400575    -0.068792\n 0.416242    -0.068530\n 0.431912    -0.068113\n 0.447644    -0.067549\n 0.463461    -0.066854\n 0.479357    -0.066040\n 0.495326    -0.065116\n 0.511369    -0.064087\n 0.527486    -0.062962\n 0.543673    -0.061748\n 0.559918    -0.060455\n 0.576216    -0.059086\n 0.592569    -0.057649\n 0.608959    -0.056157\n 0.625340    -0.054616\n 0.641680    -0.053023\n 0.657969    -0.051369\n 0.674220    -0.049648\n 0.690443    -0.047857\n 0.706613    -0.046000\n 0.722724    -0.044063\n 0.738818    -0.042036\n 0.754919    -0.039924\n 0.771010    -0.037735\n 0.787077    -0.035465\n 0.803125    -0.033111\n 0.819183    -0.030667\n 0.835268    -0.028139\n 0.851357    -0.025542\n 0.867423    -0.022881\n 0.883466    -0.020162\n 0.899420    -0.017422\n 0.915119    -0.014699\n 0.930386    -0.012018\n 0.945040    -0.009433\n 0.958830    -0.007006\n 0.971525    -0.004711\n 0.983045    -0.002611\n 0.993514    -0.000905\n 1.000000     0.000000\n"};
 const TULUAQ_LEP = "**************************************************************\n* LABORATORI D'ENVOL PARAGLIDING DESIGN                      *\n* Input data file version 3.25                               *\n**************************************************************\n* Version update 20250107                                    *\n**************************************************************\n*             1. GEOMETRY                                    *\n**************************************************************\n* Brand name\n\"CRAZY BIRD\"\n* Wing name\n\"TULUAQ_19\"\n* Drawing scale\n1.\n* Wing scale \n0.838404842\n* Number of cells\n\t34\n* Number of ribs\n\t35\n* Alpha max and parameter \n\t4.5\t1\n* Paraglider type and parameter\n  \"ds\" \t1\n* Rib geometric parameters\n*Rib\tx-rib       y-LE       y-TE   \t    xp         z\tbeta      RP        Washin\n 1       0.00      -0.00     309.33       0.00       0.00       0.00      33.33       0.00\n 2      38.45       0.45     309.10      38.43       1.14       3.39      33.33       0.00\n 3      76.72       1.78     308.40      76.54       4.53       6.68      33.33       0.00\n 4     114.70       3.99     307.24     114.10      10.10      10.17      33.33       0.00\n 5     152.26       7.09     305.62     150.87      17.77      13.46      33.33       0.00\n 6     189.30      11.05     303.55     186.63      27.39      16.75      33.33       0.00\n 7     225.70      15.89     301.02     221.19      38.83      19.84      33.33       0.00\n 8     261.35      21.59     298.06     254.26      52.10      23.91      33.33       0.00\n 9     296.12      28.16     294.66     285.51      67.34      28.01      33.33       0.00\n10     329.83      36.51     290.83     314.69      84.21      32.11      33.33       0.00\n11     362.26      47.03     286.60     341.59     102.30      35.78      33.33       0.00\n12     393.19      59.46     281.85     366.08     121.19      39.45      33.33       0.00\n13     422.44      73.57     276.59     388.01     140.53      44.30      33.33       0.00\n14     449.84      89.04     270.91     406.48     160.75      50.99      33.33       0.00\n15     475.27     105.60     264.89     421.40     181.33      57.30      33.33       0.00\n16     498.65     122.96     258.62     432.82     201.70      65.94      33.33       0.00\n17     519.90     140.86     252.19     439.35     221.88      78.25      33.33       0.00\n18     539.00     159.09     245.71     441.49     240.83      88.85      33.33       0.00\n**************************************************************\n*             2. AIRFOILS       \t                     *\n**************************************************************\n* Airfoil name, intake in, intake out, open , disp. rrw\n1\tgnua.txt\t1.6\t6.3\t1\t1.14\t1\t1\t\n2\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n3\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n4\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n5\tgnua.txt\t1.6\t6.3\t1\t1.07\t1\t15\n6\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n7\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n8\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n9\tgnua.txt\t1.6\t6.3\t1\t1.18\t1\t15\n10\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n11\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n12\tgnua.txt\t1.6\t6.3\t1\t0.99\t1\t15\n13\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n14\tgnua.txt\t1.6\t6.3\t1\t0\t1\t15\n15\tgnua.txt\t1.6\t6.3\t1\t1.40\t1\t15\n16      gnua.txt\t1.6\t6.3\t0\t0\t1\t15\n17\tgnua.txt\t1.6\t6.3\t0\t2.01\t1\t15\n18\tgnua.txt\t1.6\t6.3\t0\t0\t1\t1\n*************************************************************\n*            3. ANCHOR POINTS                               *\n*************************************************************\n* Airf\tAnch\tA\tB\tC\tD\tE\tF\n1\t4\t8.5\t27.5\t53\t77\t0\t0\n2\t4\t8.5\t27.5\t53\t77\t0\t100\n3\t4\t8.5\t27.5\t53\t77\t0\t100\n4\t4\t8.5\t27.5\t53\t77\t0\t100\n5\t4\t8.5\t27.5\t53\t77\t0\t100\n6\t4\t8.5\t27.5\t53\t77\t0\t100\n7\t4\t8.5\t27.5\t53\t77\t0\t100\n8\t4\t8.5\t27.5\t53\t77\t0\t100\n9\t4\t8.5\t27.5\t53\t77\t0\t100\n10\t4\t8.5\t27.5\t53\t77\t0\t100\n11\t4\t8.6\t27.5\t53\t77\t0\t100\n12\t4\t8.6\t27.5\t53\t77\t0\t100\n13\t4\t8.6\t27.5\t53\t77\t0\t100\n14\t4\t8.6\t27.5\t53\t77\t0\t100\n15\t4\t8.6\t27.5\t53\t77\t0\t100\n16\t4\t8.6\t27.5\t53\t77\t0\t100\n17\t4\t8.6\t27.5\t53\t77\t0\t100\n18\t4\t0.0\t30\t60\t90\t0\t0\n*************************************************************\n*          4. AIRFOIL HOLES                                 *\n*************************************************************\n1 \n1\t\n17 \t\n9\t\n1 14.59\t2.79\t2.735\t6.72\t0.\t0.\t0.\t0.\n1 22.18\t2.61\t2.375\t6.72\t0.\t0.\t0.\t0.\t\n1 33.36\t1.64\t2.5\t5.9\t0.\t0.\t0.\t0.\n1 40.32\t1.46\t2.4\t5.8\t0.\t0.\t0.\t0.\n1 47.41\t1.34\t2.23\t5.7\t0.\t0.\t0.\t0.\n1 59.17\t1.27\t1.84\t3.4\t0.\t0.\t0.\t0.\n1 65.23\t1.33\t1.7\t3.2\t0.\t0.\t0.\t0.\n1 71.21\t1.18\t1.6\t3.0\t0.\t0.\t0.\t0.\n1 81.87\t0.89\t1.6\t1.6\t0.\t0.\t0.\t0.\n*************************************************************\n*           5. SKIN TENSION                                 *\n*************************************************************\nExtrados\n0.\t\t0.\t0.\t\t0.\n7.5\t\t1.3\t10.\t\t1.33\n15.\t\t2.5\t20.\t\t2.5\n80.\t\t2.5\t80.\t\t2.5\n90.\t\t1.33\t90.\t\t1.33\n100.\t\t0.0\t100.\t\t0.\n0.0114\n1000\t1.0\n*************************************************************\n*           6. SEWING ALLOWANCES                            *\n*************************************************************\n15\t25\t10\tupper panels (mm)\n15\t25\t10\tlower panels (mm)\n15\tribs (mm)\n15\tvribs (mm)\n*************************************************************\n*           7. MARKS\n*************************************************************\n25.\t0.5\t0.15\n************************************************************\n*           8. Global angle of attack estimation           *\n*************************************************************\n* Finesse GR\n\t7.0\n* Center of pressure % of chord\n\t39\n* Calage %\n\t36\n* Risers lenght cm\n\t47\n* Line lenght cm\n\t680\n* Karabiners cm\n\t40\n***************************************************\n*          9. SUSPENSION LINES DESCRIPTION\n***************************************************\n3\n3\n10\n4\t1 1\t2 1\t3 1\t4 1 \t1 2\n4\t1 1\t2 1\t3 1\t4 2\t1 3\n4\t1 1\t2 1\t3 1\t4 3\t1 4\n4\t1 1\t2 1\t3 2\t4 4\t1 6\n4\t1 1\t2 1\t3 2\t4 5\t1 7\n4\t1 1\t2 1\t3 2\t4 6\t1 8\n4\t1 1\t2 2\t3 3\t4 7\t1 10\n4\t1 1\t2 2\t3 3\t4 8\t1 11\n4\t1 1\t2 2\t3 4\t4 9\t1 13\n4\t1 1\t2 2\t3 4\t4 10\t1 14\n18\n4\t1 1\t2 1\t3 1\t4 1 \t2 2\n4\t1 1\t2 1\t3 1\t4 2\t2 3\n4\t1 1\t2 1\t3 1\t4 3\t2 4\n4\t1 1\t2 1\t3 2\t4 4\t2 6\n4\t1 1\t2 1\t3 2\t4 5\t2 7\n4\t1 1\t2 1\t3 2\t4 6\t2 8\n4\t1 1\t2 2\t3 3\t4 7\t2 10\n4\t1 1\t2 2\t3 3\t4 8\t2 11\n4\t1 1\t2 2\t3 4\t4 9\t2 13\n4\t1 1\t2 2\t3 4\t4 10\t2 14\n3\t1 1\t2 3\t3 5\t0 0\t1 16\n3\t1 1\t2 3\t3 6\t0 0\t1 18\n3\t1 1\t2 3\t3 7\t0 0\t2 16\n3\t1 1\t2 3\t3 8\t0 0\t2 18\n3\t1 1\t2 3\t3 9\t0 0\t3 16\n3\t1 1\t2 3\t3 10\t0 0\t3 18\n3\t1 1\t2 3\t3 11\t0 0\t4 16\n3\t1 1\t2 3\t3 12\t0 0\t4 18\n20\n4\t1 1\t2 1\t3 1\t4 1 \t3 2\n4\t1 1\t2 1\t3 1\t4 2\t3 3\n4\t1 1\t2 1\t3 1\t4 3\t3 4\n4\t1 1\t2 1\t3 2\t4 4 \t4 2\n4\t1 1\t2 1\t3 2\t4 5\t4 3\n4\t1 1\t2 1\t3 2\t4 6\t4 4\n4\t1 1\t2 1\t3 3\t4 7\t3 6\n4\t1 1\t2 1\t3 3\t4 8\t3 7\n4\t1 1\t2 1\t3 3\t4 9\t3 8\n4\t1 1\t2 1\t3 4\t4 10\t4 6\n4\t1 1\t2 1\t3 4\t4 11\t4 7\n4\t1 1\t2 1\t3 4\t4 12\t4 8\n4\t1 1\t2 2\t3 5\t4 13\t3 10\n4\t1 1\t2 2\t3 5\t4 14\t3 11\n4\t1 1\t2 2\t3 6\t4 15\t4 10\n4\t1 1\t2 2\t3 6\t4 16\t4 11\n4\t1 1\t2 2\t3 7\t4 17\t3 13\n4\t1 1\t2 2\t3 7\t4 18\t3 14\n4\t1 1\t2 2\t3 8\t4 19\t4 13\n4\t1 1\t2 2\t3 8\t4 20\t4 14\n***************************************************\n*       10. BRAKES\n***************************************************\n270\n8\n4\t1 1\t2 1\t3 1\t4 1\t6 3\n4\t1 1\t2 1\t3 1\t4 2\t6 5\n4\t1 1\t2 1\t3 2\t4 3\t6 7\n4\t1 1\t2 1\t3 2\t4 4\t6 9\n4\t1 1\t2 2\t3 3\t4 5\t6 11\n4\t1 1\t2 2\t3 3\t4 6\t6 13\n4\t1 1\t2 2\t3 4\t4 7\t6 15\n4\t1 1\t2 2\t3 4\t4 8\t6 17\t\t\n* Brake distribution\n0\t25\t55\t70\t100\n0 \t0\t0\t0\t0\n***************************************************\n*       11. Ramification lengths\n***************************************************\n3\t180\n4\t300\t150\n3\t100\n4\t200\t80\n***************************************************\n*\t12. H V and VH ribs\n***************************************************\n60\n80    150\n1      5       2 1     1 0    60.0    60.0    80.     7.\n2      5       2 2     1 0    60.0    60.0    80.     7.\n3      5       2 3     1 0    60.0    60.0    80.     7.\n4      5       2 4     1 0    60.0    60.0    80.     7.\n5      5       4 1     0 1    60.0    60.0    80.     7.\n6      5       4 2     0 1    60.0    60.0    80.     7.\n7      5       4 3     0 1    60.0    60.0    80.     7.\n8      5       4 4     0 1    60.0    60.0    80.     7.\n9      5       6 1     1 0    60.0    60.0    80.     7.\n10     5       6 2     1 0    60.0    60.0    80.     7.\n11     5       6 3     1 0    60.0    60.0    80.     7.\n12     5       6 4     1 0    60.0    60.0    80.     7.\n13     5       8 1     0 1    60.0    60.0    80.     7.\n14     5       8 2     0 1    60.0    60.0    80.     7.\n15     5       8 3     0 1    60.0    60.0    80.     7.\n16     5       8 4     0 1    60.0    60.0    80.     7.\n17     5      10 1     1 0    60.0    60.0    80.     7.\n18     5      10 2     1 0    60.0    60.0    80.     7.\n19     5      10 3     1 0    60.0    60.0    80.     7.\n20     5      10 4     1 0    60.0    60.0    80.     7.\n21     5      11 1     0 1    60.0    60.0    80.     7.\n22     5      11 2     0 1    60.0    60.0    80.     7.\n23     5      11 3     0 1    60.0    60.0    80.     7.\n24     5      11 4     0 1    60.0    60.0    80.     7.\n25     5      13 1     1 0    60.0    60.0    80.     7.\n26     5      13 2     1 0    60.0    60.0    80.     7.\n27     5      13 3     1 0    60.0    60.0    80.     7.\n28     5      13 4     1 0    60.0    60.0    80.     7.\n29     5      14 1     0 1    60.0    60.0    80.     7.\n30     5      14 2     0 1    60.0    60.0    80.     7.\n31     5      14 3     0 1    60.0    60.0    80.     7.\n32     5      14 4     0 1    60.0    60.0    80.     7.\n33     5      16 1     1 1    60.0    60.0    80.     7.\n34     5      16 2     1 1    60.0    60.0    80.     7.\n35     5      16 3     1 1    60.0    60.0    80.     7.\n36     5      16 4     1 1    60.0    60.0    80.     7.\n37     1       2 1 3 1    5.0 0. 0. 0.\n38     1       3 1 4 1    5.0 0. 0. 0.\n39     1       6 1 7 1    5.0 0. 0. 0.\n40     1       7 1 8 1    5.0 0. 0. 0.\n41     1      10 1 11 1   5.0 0. 0. 0.\n42     1      13 1 14 1   5.0 0. 0. 0.\n43     1       2 2 3 2    5.0 0. 0. 0.\n44     1       3 2 4 2    5.0 0. 0. 0.\n45     1       6 2 7 2    5.0 0. 0. 0.\n46     1       7 2 8 2    5.0 0. 0. 0.\n47     1      10 2 11 2   5.0 0. 0. 0.\n48     1      13 2 14 2   5.0 0. 0. 0.\n49     1       2 3 3 3    5.0 0. 0. 0.\n50     1       3 3 4 3    5.0 0. 0. 0.\n51     1       6 3 7 3    5.0 0. 0. 0.\n52     1       7 3 8 3    5.0 0. 0. 0.\n53     1      10 3 11 3   5.0 0. 0. 0.\n54     1      13 3 14 3   5.0 0. 0. 0.\n55     1       2 4 3 4    5.0 0. 0. 0.\n56     1       3 4 4 4    5.0 0. 0. 0.\n57     1       6 4 7 4    5.0 0. 0. 0.\n58     1       7 4 8 4    5.0 0. 0. 0.\n59     1      10 4 11 4   5.0 0. 0. 0.\n60     1      13 4 14 4   5.0 0. 0. 0.\n*****************************************************\n*\t15. Extrados colors\n*****************************************************\n1\n1\t1\n1\t0.\t0.\n*****************************************************\n*\t16. Intrados colors\n*****************************************************\n1\n1\t1\n1\t0.\t0.\n*****************************************************\n*       17. Aditional rib points\n*****************************************************\n0\n*****************************************************\n*       18. Elastic lines corrections\n*****************************************************\n100\n75\t25\n40\t40\t20\n35\t35\t20\t10\n35\t35\t15\t10\t5\n1\t0.08\t0.2\t0.2\t\n2\t0.08\t0.2\t0.2\n3\t0.08\t0.2\t0.2\n4\t0.08\t0.2\t0.2\n5\t0.08\t0.2\t0.2\n******************************************************\n*       19. DXF layer names\n******************************************************\n10\ngeneral         default\nline-external\tcutexternal\nline-sewing     cutinternal\npoints\t\tpoints\ncircles\t\tcircles\ntriangles       triangle\nsquare          square\ntext\t\ttext\nreference       refer\nnotes           notes\n******************************************************\n*       20. Marks types\n******************************************************\n10\ntypepoint   1  0.25  1.2     2  0.3  1.2\ntypepoint2  1  0.25  1.2     2  0.2  1.2\ntypepoint3  1  0.25  1.2     2  0.2  1.2\ntypevent    1  10.   0.0     2  2.0  0.0\ntypetab     1  10.   0.0     3  2.0  0.0\ntypejonc    1  10.   0.0     2  2.0  0.0\ntyperef     1  5.0   1.      1  2.0  0.0\ntype8       1  0.2   5.0     1  0.0  5.0\ntype9       1  0.0   7.0     1  3.2  4.5\ntype10      1  0.0   6.0     1  0.0  3.33\n*******************************************************\n*       21. JONCS DEFINITION (NYLON RODS)\n*******************************************************\n1\n2\n1 1 10\n4.2   10.8    1.36   2.0\n3.67  10.8    0.79   2.0\n0.0   9.35    6.3   9.35\n2   11 14\n4.2   10.8    1.36   2.0\n3.67  10.8    0.79   2.0\n0.0   9.35    6.3   9.35\n*******************************************************\n*       22. NOSE MYLARS DEFINITION\n*******************************************************\n0\n*******************************************************\n*       23. TAB REINFORCEMENTS\n*******************************************************\n0\n*******************************************************\n*       24. GENERAL 2D DXF OPTIONS\n*******************************************************\n1\nA_lines_color\t1     red\nB_lines_color\t5     blue\nC_lines_color\t30    orange\nD_lines_color\t3     green\nE_lines_color   3     green\nF_lines_color\t2     yellow\n*******************************************************\n*       25. GENERAL 3D DXF OPTIONS\n*******************************************************\n1\nA_lines_color\t1     red\nB_lines_color\t5     blue\nC_lines_color\t30    orange\nD_lines_color\t3     green\nE_lines_color   3     green\nF_lines_color\t2     yellow\nExtrados\t0\t8       dark grey\nVents\t\t0\t1       red\nIntrados\t0\t3\tgreen\n*******************************************************\n*       26. GLUE VENTS\n*******************************************************\n1\n1\t4 50  50\n2\t4 50  50\n3\t4 50  100\n4      -4 0   100\n5\t4 0   100\n6\t0\n7\t0\n8      -4 0  100\n9       4 0  100\n10      0\n11\t0\n12     -4 0  100\n13\t4 0  100\n14\t0\n15\t0\n16     -4 0 100\n17\t-1\n18\t-1\n*******************************************************\n*       27. SPECIAL WING TIP\n*******************************************************\n0\n*******************************************************\n*       28. PARAMETERS FOR CALAGE VARIATION\n*******************************************************\n1\n3\n8.5\t27.5\t53\t77   0  0\n-4 4 4 4\n*******************************************************\n*       29. 3D SHAPING\n*******************************************************\n1\n1\ngroups \t1\ngroup   1       1       15\nupper\t0\t1\nlower\t0\t1\n* Print parameters\nInter3D 0\t1\t17\t1\nOvali3D 0\t1\t17\t0\ntesse3D 1\t1\t18\t1\nexteDXF 1\t1\t18\t1\nexteSTL 1\t1\t18\t0\n*******************************************************\n*       30. AIRFOIL THICKNESS MODIFICATION\n*******************************************************\n1\n1\t0.9\n2\t0.9\n3\t0.9\n4\t0.9\n5\t0.9\n6\t0.9\n7\t0.9\n8\t0.9\n9\t0.9\n10\t0.9\n11\t0.9\n12\t0.9\n13\t0.9\n14\t0.9\n15\t0.9\n16\t0.9\n17\t0.8\n18\t0.1   (0.0 modified for XFLR5 convergence!!!)\n*******************************************************\n*       31. NEW SKIN TENSION MODULE\n*******************************************************\n1\n1\n* Skin tension group number \"1\" from rib 1 to 18, 11 points, type \"1\"\n1      \t1\t18\t11\t1\n1\t0.\t\t0.05\t0.\t\t0.\n2\t3.5\t\t0.1\t10.\t\t0.525\n3\t7.0\t\t0.5\t20.\t\t1.25\n4\t14.\t\t1.3\t30.\t\t1.875\n5\t19\t\t2.38\t35\t\t2.1875\n6\t21.5\t\t2.6\t40.\t\t2.5\n7\t65.\t\t2.6\t65.\t\t2.5\n8\t72.5\t\t2.4\t70.\t\t2.4\n9\t80.\t\t2.0\t75.\t\t2.3\n10\t90.\t\t0.8\t87.5\t\t1.15\n11\t100.\t\t0.0\t100.\t\t0.1\n*******************************************************\n*       32. PARAMETERS FOR PARTS SEPARATION\n*******************************************************\n0\n*******************************************************\n*       33. DETAILED RISERS\n*******************************************************\n1\n1\nA\t47.0  cm\nB\t47.0  cm\nC\t47.0  cm\n*******************************************************\n*       34. LINES CHARACTERISTICS TABLE\n*******************************************************\n1\n6\n1  r  12.  2.5 Riser   1000 daN  aramid      15.0   g   s 12. cm 7\n2  c  1.80    TSL280    280 daN  s_technora  2.26   g   s 12. cm 1\n3  c  1.15    PPSL120   120 daN  s_dyneem    1.00   g   s 10. cm 30\n4  c  0.9     PPSL65     65 daN  s_dyneem    0.7    g   s 10. cm 5\n5  c  0.80    DSL70      70 daN  u_dyneem    0.43   g   p 8.  cm 7\n6  c  2.00    DSL350    350 daN  s_dynemm    3.10   g   s 12. cm 6\n*******************************************************\n*       35. SOLVE EQUILIBRIUM EQUATIONS\n*******************************************************\n0\n*******************************************************\n*       36. CREATE FILES FOR XFLR5 ANALYSIS\n*******************************************************\n1\n* Panel parameters\n80 chord nr\n2 per cell \n1 cosine distribution along chord\n0 uniform along span\n* Include billowed airfoils (more accuracy)\n0\n*******************************************************\n*       37. SOME SPECIAL PARAMETERS\n*******************************************************\n1\n1\n10291\t10   nsegments in transverse direction (stl surfaces)\n";
 const TULUAQ_SECTIONS = {"gnua.txt": "gnu-A                                             \n 111\n  66\n   9\n  38\n 1.000000     0.000000\n 0.988400     0.002589\n 0.968630     0.006956\n 0.945460     0.012044\n 0.918740     0.017833\n 0.889470     0.024100\n 0.859360     0.030456\n 0.829470     0.036656\n 0.799800     0.042700\n 0.770060     0.048644\n 0.740110     0.054489\n 0.709900     0.060222\n 0.679540     0.065844\n 0.649100     0.071311\n 0.618650     0.076644\n 0.588240     0.081833\n 0.557900     0.086900\n 0.527650     0.091811\n 0.497520     0.096567\n 0.467530     0.101144\n 0.437720     0.105522\n 0.408180     0.109678\n 0.378960     0.113578\n 0.350200     0.117222\n 0.322100     0.120533\n 0.294890     0.123433\n 0.268850     0.125844\n 0.244170     0.127722\n 0.220960     0.128956\n 0.199240     0.129478\n 0.179020     0.129211\n 0.160290     0.128156\n 0.143000     0.126278\n 0.127120     0.123622\n 0.112560     0.120200\n 0.099250     0.116033\n 0.087090     0.111167\n 0.076040     0.105711\n 0.066060     0.099844\n 0.057080     0.093711\n 0.049060     0.087467\n 0.041900     0.081167\n 0.035540     0.074900\n 0.029910     0.068711\n 0.024930     0.062656\n 0.020550     0.056722\n 0.016710     0.050944\n 0.013350     0.045278\n 0.010440     0.039744\n 0.007960     0.034356\n 0.005880     0.029133\n 0.004190     0.024111\n 0.002840     0.019222\n 0.001770     0.014556\n 0.000940     0.009789\n 0.000330     0.005756\n 0.000000     0.000000\n 0.000240    -0.003450\n 0.000480    -0.006900\n 0.001430    -0.009767\n 0.002880    -0.013311\n 0.004840    -0.016533\n 0.007320    -0.019544\n 0.010310    -0.022289\n 0.013810    -0.024889\n 0.016000    -0.026299\n 0.017780    -0.027444\n 0.022170    -0.029967\n 0.027020    -0.032444\n 0.032410    -0.034867\n 0.038410    -0.037256\n 0.045140    -0.039622\n 0.052000    -0.041789\n 0.063000    -0.044875\n 0.071040    -0.046911\n 0.082190    -0.049467\n 0.094980    -0.052111\n 0.109740    -0.054844\n 0.126740    -0.057633\n 0.146170    -0.060411\n 0.167990    -0.063022\n 0.191910    -0.065378\n 0.217390    -0.067400\n 0.244070    -0.069067\n 0.271630    -0.070344\n 0.299770    -0.071233\n 0.328210    -0.071700\n 0.356730    -0.071733\n 0.385260    -0.071300\n 0.413840    -0.070444\n 0.442560    -0.069189\n 0.471550    -0.067589\n 0.500840    -0.065667\n 0.530350    -0.063433\n 0.559990    -0.060922\n 0.589670    -0.058133\n 0.619380    -0.055078\n 0.649170    -0.051767\n 0.679060    -0.048211\n 0.709030    -0.044411\n 0.739020    -0.040411\n 0.768920    -0.036222\n 0.798690    -0.031900\n 0.828470    -0.027444\n 0.858480    -0.022856\n 0.888740    -0.018122\n 0.918160    -0.013433\n 0.945060    -0.009089\n 0.968410    -0.005256\n 0.988320    -0.001956\n 1.000000     0.000000\n"};
+const GNUC2_LEP = "**************************************************************\n* LABORATORI D'ENVOL PARAGLIDING DESIGN                      *\n* Input data file 3.28 version                               *\n**************************************************************\n* Version 2026-04-29                                         *\n**************************************************************\n*             1. GEOMETRY                                    *\n**************************************************************\n* Brand name\n\"Laboratori d'envol\"\n* Wing name\n\"gnuC2-23\"\n* Drawing scale\n1.5\n* Wing scale \n0.954973624\n* Number of cells\n\t60\n* Number of ribs\n\t61\n* Alpha wingtip, parameter, (alpha center) \n\t6.0        2         0.0\n* Paraglider type and parameter\n\"ds\" 0\n* Rib geometric parameters\n* Rib    x-rib       y-LE       y-TE         xp         z       beta      RP        Washin\tRot_z  Pos_z\n 1        .00        .00     246.74        .00        .00        .00      33.33        .00\t0.00\t50.0\n 2      25.06        .14     246.71      25.05        .48       2.16      33.33        .00\t0.17\t50.0\n 3      50.08        .56     246.60      50.03       1.90       4.42      33.33        .00\t0.35\t50.0\n 4      75.04       1.25     246.43      74.88       4.25       6.49      33.33        .00\t0.51\t50.0\n 5      99.91       2.23     246.20      99.53       7.53       8.75      33.33        .00\t0.68\t50.0\n 6     124.68       3.48     245.89     123.94      11.72      10.81      33.33        .00\t0.84\t50.0\n 7     149.30       5.01     245.52     148.04      16.78      12.88      33.33        .00\t1.00\t50.0\n 8     173.77       6.81     245.09     171.78      22.69      15.14      33.33        .00\t1.17\t50.0\n 9     198.06       8.90     244.59     195.11      29.43      17.21      33.33        .00\t1.33\t50.0\n10     222.13      11.27     244.02     217.98      36.96      19.34      33.33        .00\t1.49\t50.0\n11     245.97      13.93     243.40     240.30      45.34      21.81      33.33        .00\t1.67\t50.0\n12     269.56      16.87     242.71     262.00      54.56      24.28      33.33        .00\t1.85\t50.0\n13     292.86      20.10     241.96     283.04      64.57      26.55      33.33        .00\t2.01\t50.0\n14     315.85      23.62     241.16     303.38      75.30      29.02      33.33        .00\t2.18\t50.0\n15     338.51      27.44     240.29     322.97      86.68      31.28      33.33        .00\t2.34\t50.0\n16     360.82      31.56     239.38     341.78      98.66      33.54      33.33        .00\t2.49\t50.0\n17     382.74      35.98     238.41     359.79     111.15      35.81      33.33        .00\t2.63\t50.0\n18     404.24      40.73     237.39     376.97     124.09      38.07      33.33        .00\t2.77\t50.0\n19     425.32      45.80     236.32     393.27     137.44      40.74      33.33        .00\t2.94\t50.0\n20     445.92      51.28     235.22     408.56     151.25      43.54      33.33        .00\t3.10\t50.0\n21     466.00      57.44     234.07     422.78     165.42      46.19      33.33        .00\t3.25\t50.0\n22     485.51      64.31     232.89     435.94     179.83      49.00      33.33        .00\t3.40\t50.0\n23     504.40      71.89     231.69     448.01     194.35      51.48      33.33        .00\t3.52\t50.0\n24     522.62      80.15     230.60     459.03     208.86      54.12      33.33        .00\t3.65\t50.0\n25     540.14      89.10     229.62     468.99     223.27      56.88      33.33        .00\t3.77\t50.0\n26     556.91      98.74     228.73     477.72     237.58      60.31      33.33        .00\t3.91\t50.0\n27     572.88     109.14     227.95     485.26     251.66      63.34      33.33        .00\t4.02\t50.0\n28     588.00     120.34     227.25     491.66     265.36      66.37      33.33        .00\t4.12\t50.0\n29     602.22     132.53     226.63     497.02     278.53      69.20      33.33        .00\t4.21\t50.0\n30     615.43     146.04     226.08     501.41     290.99      71.83      33.33        .00\t4.28\t50.0\n31     627.50     161.65     225.60     506.32     307.72      74.26      33.33        .00\t4.33\t50.0\n**************************************************************\n*             2. AIRFOILS       \t                     *\n**************************************************************\n* Airfoil name. intake in. intake out. open. disp   rweight \n1\tgnuC2.txt       4.0      6.0\t1\t2.0\t1     1\n2\tgnuC2.txt       4.0      6.0\t1\t1.5\t1     17\n3\tgnuC2.txt       4.0      6.0\t1\t0\t1     17\n4\tgnuC2.txt       4.0      6.0\t1\t0\t1     17\n5\tgnuC2.txt       4.0      6.0\t1\t1.0\t1     17\n6\tgnuC2.txt       4.0      6.0\t1\t1.0\t1     15\n7\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n8\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n9\tgnuC2.txt       4.0      6.0\t1\t1.5\t1     15\n10\tgnuC2.txt       4.0      6.0\t1\t2.0\t1     15\n11\tgnuC2.txt       4.0      6.0\t1\t1.5\t1     15\n12\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n13\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n14\tgnuC2.txt       4.0      6.0\t1\t1.0\t1     15\n15\tgnuC2.txt       4.0      6.0\t1\t1.0\t1     15\n16\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n17\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n18\tgnuC2.txt       4.0      6.0\t1\t0.9\t1     15\n19\tgnuC2.txt       4.0      6.0\t1\t0.9\t1     15\n20\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n21\tgnuC2.txt       4.0      6.0\t1\t0.5\t1     15\n22\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n23\tgnuC2.txt       4.0      6.0\t1\t0.5\t1     15\n24\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n25\tgnuC2.txt       4.0      6.0\t1\t0.5\t1     15\n26\tgnuC2.txt       4.0      6.0\t1\t0\t1     15\n27\tgnuC2.txt       4.0      6.0\t0\t0.8\t1     15\n28\tgnuC2.txt       4.0      6.0\t0\t0.8\t1     15\n29\tgnuC2.txt       4.0      6.0\t0\t0\t1     15\n30\tgnuC2.txt       4.0      6.0\t0\t0\t1     15\n31\tgnuC2.txt  \t4.0      6.0\t0\t0\t1     1\n*************************************************************\n*            3. ANCHOR POINTS                               *\n*************************************************************\n* Airf\tAnch\tA     B\t    C\tD\tE\tF\n1\t3\t10    37    72\t0\t0\t0\n2\t3\t10    37    72  0\t0\t0\n3\t3\t10    37    72\t0 \t0\t100\n4\t3\t10    37    72\t0 \t0\t100\n5\t3\t10    37    72\t0 \t0\t100\n6\t3\t10    37    72\t0 \t0\t100\n7\t3\t10    37    72\t0 \t0\t100\n8\t3\t10    37    72\t0 \t0\t100\n9\t3\t10    37    72\t0 \t0\t100\n10\t3\t10    37    72\t0 \t0\t100\n11\t3\t10    37    72\t0 \t0\t100\n12\t3\t10    37    72\t0 \t0\t100\n13\t3\t10    37    72\t0 \t0\t100\n14\t3\t10    37    72\t0\t0\t100\n15\t3\t10    37    72  0\t0\t100\n16\t3\t10    37    72\t0 \t0\t100\n17\t3\t10    37    72\t0 \t0\t100\n18\t3\t10    37    72\t0 \t0\t100\n19\t3\t10    37    72\t0 \t0\t100\n20\t3\t10    37    72\t0 \t0\t100\n21\t3\t10    37    72\t0 \t0\t100\n22\t3\t10    37    72\t0 \t0\t100\n23\t3\t10    37    72\t0 \t0\t100\n24\t3\t10    37    72\t0 \t0\t100\n25\t3\t10    37    72\t0 \t0\t100\n26\t3\t10    37    72\t0 \t0\t100\n27\t3\t10    37    72\t0 \t0\t100\n28\t3\t10    37    72\t0 \t0\t100\n29\t3\t10    37    72\t0 \t0\t100\n30\t3\t10    37    72\t0 \t0\t100\n31\t3\t5.    40    77\t0\t0\t0\n*************************************************************\n*          4. AIRFOIL HOLES                                 *\n*************************************************************\n7\n1\n1\n9\n1 14.69\t2.40\t2.00\t5.3\t0.\t0.\t0.\t0.\n1 22.0\t2.40\t3.07\t7.15\t0.\t0.\t0.\t0.\n1 29.3\t2.40\t2.05\t5.3\t0.\t0.\t0.\t0.\n1 42.5\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 50.0\t1.52\t2.84\t5.89\t0.\t0.\t0.\t0.\n1 57.48\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 64.80\t0.75\t2.05\t2.8\t0.\t0.\t0.\t0.\n1 78.7\t0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.4\t0.25\t1.47\t1.47\t0.\t0.\t0.\t0.\n2\n2\n9\n1 14.69\t-0.39\t2.05\t4.06\t0.\t0.\t0.\t0.\n1 22.0\t2.40\t3.07\t7.15\t0.\t0.\t0.\t0.\n1 29.3\t0.59\t2.05\t5.3\t0.\t0.\t0.\t0.\n1 42.5\t-0.45\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 50.0\t1.52\t2.84\t5.89\t0.\t0.\t0.\t0.\n1 57.48\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 64.80\t0.75\t2.05\t2.8\t0.\t0.\t0.\t0.\n1 78.7\t0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.4\t0.25\t1.47\t1.47\t0.\t0.\t0.\t0.\n3\n8\n9\n1 14.69\t2.40\t2.00\t5.3\t0.\t0.\t0.\t0.\n1 22.0\t2.40\t3.07\t7.15\t0.\t0.\t0.\t0.\n1 29.3\t2.40\t2.05\t5.3\t0.\t0.\t0.\t0.\n1 42.5\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 50.0\t1.52\t2.84\t5.89\t0.\t0.\t0.\t0.\n1 57.48\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 64.80\t0.75\t2.05\t2.8\t0.\t0.\t0.\t0.\n1 78.7\t0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.4\t0.25\t1.47\t1.47\t0.\t0.\t0.\t0.\n9\n9\n9\n1 14.69\t-0.39\t2.05\t4.06\t0.\t0.\t0.\t0.\n1 22.0\t2.40\t3.07\t7.15\t0.\t0.\t0.\t0.\n1 29.3\t0.59\t2.05\t5.3\t0.\t0.\t0.\t0.\n1 42.5\t-0.45\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 50.0\t1.52\t2.84\t5.89\t0.\t0.\t0.\t0.\n1 57.48\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 64.80\t0.75\t2.05\t2.8\t0.\t0.\t0.\t0.\n1 78.7\t0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.4\t0.25\t1.47\t1.47\t0.\t0.\t0.\t0.\n10\n10\n9\n1 14.69\t2.40\t2.00\t5.3\t0.\t0.\t0.\t0.\n1 22.0\t2.40\t3.07\t7.15\t0.\t0.\t0.\t0.\n1 29.3\t2.40\t2.05\t5.3\t0.\t0.\t0.\t0.\n1 42.5\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 50.0\t1.52\t2.84\t5.89\t0.\t0.\t0.\t0.\n1 57.48\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 64.80\t0.75\t2.05\t2.8\t0.\t0.\t0.\t0.\n1 78.7\t0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.4\t0.25\t1.47\t1.47\t0.\t0.\t0.\t0.\n11\n11\n9\n1 14.69\t-0.39\t2.05\t4.06\t0.\t0.\t0.\t0.\n1 22.0\t2.40\t3.07\t7.15\t0.\t0.\t0.\t0.\n1 29.3\t0.59\t2.05\t5.3\t0.\t0.\t0.\t0.\n1 42.5\t-0.45\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 50.0\t1.52\t2.84\t5.89\t0.\t0.\t0.\t0.\n1 57.48\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 64.80\t0.75\t2.05\t2.8\t0.\t0.\t0.\t0.\n1 78.7\t0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.4\t0.25\t1.47\t1.47\t0.\t0.\t0.\t0.\n12\n30\n9\n1 14.69\t2.40\t2.00\t5.3\t0.\t0.\t0.\t0.\n1 22.0\t2.40\t3.07\t7.15\t0.\t0.\t0.\t0.\n1 29.3\t2.40\t2.05\t5.3\t0.\t0.\t0.\t0.\n1 42.5\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 50.0\t1.52\t2.84\t5.89\t0.\t0.\t0.\t0.\n1 57.48\t1.52\t2.05\t3.82\t0.\t0.\t0.\t0.\n1 64.80\t0.75\t2.05\t2.8\t0.\t0.\t0.\t0.\n1 78.7\t0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.4\t0.25\t1.47\t1.47\t0.\t0.\t0.\t0.\n*************************************************************\n*           5. SKIN TENSION                                 *\n*************************************************************\nExtrados\n0.\t\t0.0\t0.\t\t0.\n7.5\t\t1.3\t10.\t\t1.33\n15.\t\t2.5\t20.\t\t2.5\n80.\t\t2.5\t80.\t\t2.5\n90.\t\t1.33\t90.\t\t1.33\n100.\t\t0.0\t100.\t\t0.\n0.0114\n1000    1.0\n*************************************************************\n*           6. SEWING ALLOWANCES                            *\n*************************************************************\n12\t22\t22\tupper panels (mm)\n12\t22\t22\tlower panels (mm)\n12\tribs (mm)\n12\tvribs (mm)\n*************************************************************\n*           7. MARKS\n*************************************************************\n25.\t0.5\t0.15\n************************************************************\n*           8. Global angle of attack estimation           *\n*************************************************************\n* Finesse GR\n\t10.5\n* Plumb point % of chord\n\t38\n* Calage %\n\t33\n* Risers lenght cm\n\t47\n* Line lenght cm (without risers)\n\t708\n* Karabiners cm\n\t42\n***************************************************\n*          9. SUSPENSION LINES DESCRIPTION\n***************************************************\n3\n3\n12\n4\t1 1\t2 1\t3 1\t4 1 \t1 3\n4\t1 1\t2 1\t3 1\t4 2\t1 4\n4\t1 1\t2 1\t3 2\t4 3\t1 7\n4\t1 1\t2 1\t3 2\t4 4\t1 8\n4\t1 1\t2 2\t3 3\t4 5\t1 12\n4\t1 1\t2 2\t3 3\t4 6\t1 13\n4\t1 1\t2 2\t3 4\t4 7\t1 16\n4\t1 1\t2 2\t3 4\t4 8\t1 17\n4\t1 1\t2 3\t3 5\t4 9\t1 20\n4\t1 1\t2 3\t3 5\t4 10\t1 22\n4\t1 1\t2 3\t3 6\t4 11\t1 24\n4\t1 1\t2 3\t3 6\t4 12\t1 26\n12\n4\t1 1\t2 1\t3 1\t4 1 \t2 3\n4\t1 1\t2 1\t3 1\t4 2\t2 4\n4\t1 1\t2 1\t3 2\t4 3\t2 7\n4\t1 1\t2 1\t3 2\t4 4\t2 8\n4\t1 1\t2 2\t3 3\t4 5\t2 12\n4\t1 1\t2 2\t3 3\t4 6\t2 13\n4\t1 1\t2 2\t3 4\t4 7\t2 16\n4\t1 1\t2 2\t3 4\t4 8\t2 17\n4\t1 1\t2 3\t3 5\t4 9\t2 20\n4\t1 1\t2 3\t3 5\t4 10\t2 22\n4\t1 1\t2 3\t3 6\t4 11\t2 24\n4\t1 1\t2 3\t3 6\t4 12\t2 26\n18\n4\t1 1\t2 1\t3 1\t4 1 \t3 3\n4\t1 1\t2 1\t3 1\t4 2\t3 4\n4\t1 1\t2 1\t3 2\t4 3\t3 7\n4\t1 1\t2 1\t3 2\t4 4\t3 8\n4\t1 1\t2 2\t3 3\t4 5\t3 12\n4\t1 1\t2 2\t3 3\t4 6\t3 13\n4\t1 1\t2 2\t3 4\t4 7\t3 16\n4\t1 1\t2 2\t3 4\t4 8\t3 17\n4\t1 1\t2 3\t3 5\t4 9\t3 20\n4\t1 1\t2 3\t3 5\t4 10\t3 22\n4\t1 1\t2 3\t3 6\t4 11\t3 24\n4\t1 1\t2 3\t3 6\t4 12\t3 26\n3\t1 1\t2 4\t3 7\t0 0\t1 29\n3\t1 1\t2 4\t3 8\t0 0\t1 31\n3\t1 1\t2 4\t3 9\t0 0\t2 29\n3\t1 1\t2 4\t3 10\t0 0\t2 31\n3\t1 1\t2 4\t3 11\t0 0\t3 29\n3\t1 1\t2 4\t3 12\t0 0\t3 31\n***************************************************\n*       10. BRAKES\n***************************************************\n300\n12\n4\t1 1\t2 1\t3 1\t4 1 \t6 3.5\n4\t1 1\t2 1\t3 1\t4 2\t6 6\n4\t1 1\t2 1\t3 2\t4 3\t6 9\n4\t1 1\t2 1\t3 2\t4 4\t6 11\n4\t1 1\t2 2\t3 3\t4 5\t6 14\n4\t1 1\t2 2\t3 3\t4 6\t6 16\n4\t1 1\t2 2\t3 4\t4 7\t6 19\n4\t1 1\t2 2\t3 4\t4 8\t6 21\n4\t1 1\t2 3\t3 5\t4 9\t6 24\n4\t1 1\t2 3\t3 5\t4 10\t6 26\n4\t1 1\t2 3\t3 6\t4 11\t6 28\n4\t1 1\t2 3\t3 6\t4 12\t6 30\n* Brake distribution\n0\t25\t50\t80\t100\n0 \t0\t0\t0\t0\n***************************************************\n*       11. Ramification lengths\n***************************************************\n3\t180\n4\t275\t80\n3\t135\n4\t200\t80\n***************************************************\n*\t12. H V and VH ribs\n***************************************************\n117\n70\t120\n1\t1     1 1    2 1   5.0   0.   0.   0.  \n2       1     2 1    3 1   5.0   0.   0.   0.  \n3\t1     1 2    2 2   5.0   0.   0.   0.  \n4       1     2 2    3 2   5.0   0.   0.   0.  \n5\t1     1 3    2 3   5.0   0.   0.   0.  \n6       1     2 3    3 3   5.0   0.   0.   0.\n7       6     1  10 100 18.1 18.1   2  10  70 11.2 11.2\n8       6     2  10  70 11.2 11.2   3  10   0  5.0 5.0\n9       6     1  37 100 20.1 20.1   2  37  70 11.2 11.2\n10      6     2  37  70 11.2 11.2   3  37   0  5.0 5.0\n11      6     1  72 100 18.1 18.1   2  72  70 11.2 11.2\n12      6     2  72  70 11.2 11.2   3  72   0  5.0 5.0\n13      6     8  10   0  5.0  5.0   9  10  70 11.2 11.2\n14      6     9  10  70 11.2 11.2  10  10 100 16.1 16.1\n15      6     8  37   0  5.0  5.0   9  37  70 11.2 11.2\n16      6     9  37  70 11.2 11.2  10  37 100 18.1 18.1\n17      6     8  72   0  5.0  5.0   9  72  70 11.2 11.2\n18      6     9  72  70 11.2 11.2  10  72 100 16.1 16.1\n19      6     10 10 100 16.1 16.1  11  10  70 11.2 11.2\n20      6     11 10  70 11.2 11.2  12  10   0  5.0  5.0\n21      6     10 37 100 18.1 18.1  11  37  70 11.2 11.2\n22      6     11 37  70 11.2 11.2  12  37   0  5.0  5.0\n23      6     10 72 100 16.1 16.1  11  72  70 11.2  11.2\n24      6     11 72  70 11.2 11.2  12  72   0  5.0  5.0\n25      6     4  10 0.0  5.0  5.0   5  10 100 16.1 16.1\n26      6     4  37 0.0  5.0  5.0   5  37 100 18.1 18.1\n27      6     4  72 0.0  5.0  5.0   5  72 100 16.1 16.1\n28      6     6  10 100 16.1 16.1   7  10   0  5.0  5.0\n29      6     6  37 100 18.1 18.1   7  37   0  5.0  5.0\n30      6     6  72 100 16.1 16.1   7  72   0  5.0  5.0\n31      6     13 10 0.0  5.0  5.0  14  10 100 16.1 16.1\n32      6     13 37 0.0  5.0  5.0  14  37 100 16.1 16.1\n33      6     13 72 0.0  5.0  5.0  14  72 100 16.1 16.1\n34      6     15 10 100 16.1 16.1  16  10   0  5.0  5.0\n35      6     15 37 100 16.1 16.1  16  37   0  5.0  5.0\n36      6     15 72 100 16.1 16.1  16  72   0  5.0  5.0\n37      6     17 10 0.0  5.0  5.0  18  10 100 16.1 16.1\n38      6     17 37 0.0  5.0  5.0  18  37 100 16.1 16.1\n39      6     17 72 0.0  5.0  5.0  18  72 100 16.1 16.1\n40      6     19 10 100 16.1 16.1  20  10   0  5.0  5.0\n41      6     19 37 100 16.1 16.1  20  37   0  5.0  5.0\n42      6     19 72 100 16.1 16.1  20  72   0  5.0  5.0\n43      3     20  1  0  1  5.0 10.1 0. 0.\n44      3     20  2  0  1  5.0 10.1 0. 0.\n45      3     20  3  0  1  5.0 10.1 0. 0.\n46      3     22  1  1  1  5.0 10.1 0. 0.\n47      3     22  2  1  1  5.0 10.1 0. 0.\n48      3     22  3  1  1  5.0 10.1 0. 0.\n49      3     24  1  1  1  5.0 10.1 0. 0.\n50      3     24  2  1  1  5.0 10.1 0. 0.\n51      3     24  3  1  1  5.0 10.1 0. 0.\n52      3     26  1  1  0  5.0 10.1 0. 0.\n53      3     26  2  1  0  5.0 10.1 0. 0.\n54      3     26  3  1  0  5.0 10.1 0. 0.\n55      3     26  1  0  1  5.0 8.0 0. 0.\n56      3     26  2  0  1  5.0 8.0 0. 0.\n57      3     26  3  0  1  5.0 8.0 0. 0.\n58      3     29  1  1  0  5.0 8.0 0. 0.\n59      3     29  2  1  0  5.0 8.0 0. 0.\n60      3     29  3  1  0  5.0 8.0 0. 0.\n61      16     1  23.5  0.0 2.5 2.5   2  23.5  0.0 2.5 2.5\n62      16     2  23.5  0.0 2.5 2.5   3  23.5  0.0 2.5 2.5\n63      16     3  23.5  0.0 2.5 2.5   4  23.5  0.0 2.5 2.5\n64      16     4  23.5  0.0 2.5 2.5   5  23.5  0.0 2.5 2.5\n65      16     5  23.5  0.0 2.5 2.5   6  23.5  0.0 2.5 2.5\n66      16     6  23.5  0.0 2.5 2.5   7  23.5  0.0 2.5 2.5\n67      16     7  23.5  0.0 2.5 2.5   8  23.5  0.0 2.5 2.5\n68      16     8  23.5  0.0 2.5 2.5   9  23.5  0.0 2.5 2.5\n69      16     9  23.5  0.0 2.5 2.5   10 23.5  0.0 2.5 2.5\n70      16     10 23.5  0.0 2.5 2.5   11 23.5  0.0 2.5 2.5\n71      16     11 23.5  0.0 2.5 2.5   12 23.5  0.0 2.5 2.5\n72      16     12 23.5  0.0 2.5 2.5   13 23.5  0.0 2.5 2.5\n73      16     13 23.5  0.0 2.5 2.5   14 23.5  0.0 2.5 2.5\n74      16     14 23.5  0.0 2.5 2.5   15 23.5  0.0 2.5 2.5\n75      16     15 23.5  0.0 2.5 2.5   16 23.5  0.0 2.5 2.5\n76      16     16 23.5  0.0 2.5 2.5   17 23.5  0.0 2.5 2.5\n77      16     17 23.5  0.0 2.5 2.5   18 23.5  0.0 2.5 2.5\n78      16     18 23.5  0.0 2.5 2.5   19 23.5  0.0 2.5 2.5\n79      16     19 23.5  0.0 2.5 2.5   20 23.5  0.0 2.5 2.5\n80      16     20 23.5  0.0 2.5 2.5   21 23.5  0.0 2.5 2.5\n81      16     21 23.5  0.0 2.5 2.5   22 23.5  0.0 2.5 2.5\n82      16     22 23.5  0.0 2.5 2.5   23 23.5  0.0 2.5 2.5\n83      16     1  54.5  0.0 2.5 2.5   2  54.5  0.0 2.5 2.5\n84      16     2  54.5  0.0 2.5 2.5   3  54.5  0.0 2.5 2.5\n85      16     3  54.5  0.0 2.5 2.5   4  54.5  0.0 2.5 2.5\n86      16     4  54.5  0.0 2.5 2.5   5  54.5  0.0 2.5 2.5\n87      16     5  54.5  0.0 2.5 2.5   6  54.5  0.0 2.5 2.5\n88      16     6  54.5  0.0 2.5 2.5   7  54.5  0.0 2.5 2.5\n89      16     7  54.5  0.0 2.5 2.5   8  54.5  0.0 2.5 2.5\n90      16     8  54.5  0.0 2.5 2.5   9  54.5  0.0 2.5 2.5\n91      16     9  54.5  0.0 2.5 2.5   10 54.5  0.0 2.5 2.5\n92      16     10 54.5  0.0 2.5 2.5   11 54.5  0.0 2.5 2.5\n93      16     11 54.5  0.0 2.5 2.5   12 54.5  0.0 2.5 2.5\n94      16     12 54.5  0.0 2.5 2.5   13 54.5  0.0 2.5 2.5\n95      16     13 54.5  0.0 2.5 2.5   14 54.5  0.0 2.5 2.5\n96      16     14 54.5  0.0 2.5 2.5   15 54.5  0.0 2.5 2.5\n97      16     15 54.5  0.0 2.5 2.5   16 54.5  0.0 2.5 2.5\n98      16     16 54.5  0.0 2.5 2.5   17 54.5  0.0 2.5 2.5\n99      16     17 54.5  0.0 2.5 2.5   18 54.5  0.0 2.5 2.5\n100     16     18 54.5  0.0 2.5 2.5   19 54.5  0.0 2.5 2.5\n101     16     19 54.5  0.0 2.5 2.5   20 54.5  0.0 2.5 2.5\n102     16     20 54.5  0.0 2.5 2.5   21 54.5  0.0 2.5 2.5\n103     16     21 54.5  0.0 2.5 2.5   22 54.5  0.0 2.5 2.5\n104     16     22 54.5  0.0 2.5 2.5   23 54.5  0.0 2.5 2.5\n105     16     1  80.0  0.0 2.0 2.0   2  80.0  0.0 2.0 2.0\n106     16     2  80.0  0.0 2.0 2.0   3  80.0  0.0 2.0 2.0\n107     16     3  80.0  0.0 2.0 2.0   4  80.0  0.0 2.0 2.0\n108     16     4  80.0  0.0 2.0 2.0   5  80.0  0.0 2.0 2.0\n109     16     5  80.0  0.0 2.0 2.0   6  80.0  0.0 2.0 2.0\n110     16     6  80.0  0.0 2.0 2.0   7  80.0  0.0 2.0 2.0\n110     16     7  80.0  0.0 2.0 2.0   8  80.0  0.0 2.0 2.0\n112     16     8  80.0  0.0 2.0 2.0   9  80.0  0.0 2.0 2.0\n113     16     9  80.0  0.0 2.0 2.0   10 80.0  0.0 2.0 2.0\n114     16     10 80.0  0.0 2.0 2.0   11 80.0  0.0 2.0 2.0\n115     16     11 80.0  0.0 2.0 2.0   12 80.0  0.0 2.0 2.0\n116     16     12 80.0  0.0 2.0 2.0   13 80.0  0.0 2.0 2.0\n117     16     13 80.0  0.0 2.0 2.0   14 80.0  0.0 2.0 2.0\n*****************************************************\n*\t15. Extrados colors\n*****************************************************\n1\n1\t1\n1\t0.\t0.\n*****************************************************\n*\t16. Intrados colors\n*****************************************************\n1\n1\t1\n1\t0.\t0.\n*****************************************************\n*       17. Aditional rib points\n*****************************************************\n0\n*****************************************************\n*       18. Elastic lines corrections\n*****************************************************\n100\n75\t25\n40\t40\t20\n35\t35\t20\t10\n35\t35\t15\t10\t5\n1\t0.08\t0.2\t0.2\t\n2\t0.08\t0.2\t0.2\n3\t0.08\t0.2\t0.2\n4\t0.08\t0.2\t0.2\n5\t0.08\t0.2\t0.2\n******************************************************\n*       19. DXF layer names\n******************************************************\n10\ngeneral         default\nline-external\tcutexternal\nline-sewing     cutinternal\npoints\t\tpoints\ncircles\t\tcircles\ntriangles       triangle\nsquare          square\ntext\t\ttext\nreference       refer\nnotes           notes\n******************************************************\n*       20. Marks types\n******************************************************\n10\ntypepoint   1  1.2  1.2     2  0.3  1.2\ntypepoint2  1  0.25  1.2     2  0.2  1.2\ntypepoint3  1  0.25  1.2     2  0.2  1.2\ntypevent    1  10.   0.0     2  2.0  0.0\ntypetab     1  10.   0.0     3  2.0  0.0\ntypejonc    1  10.   0.0     2  2.0  0.0\ntyperef     1  5.0   1.      1  2.0  0.0\ntype8       1  0.2   5.0     1  0.0  5.0\ntype9       1  0.0   7.0     1  3.2  4.5\ntype10      1  0.0   6.0     1  0.0  3.33\n*******************************************************\n*       21. JONCS DEFINITION (NYLON RODS)\n*******************************************************\n2\n1\n1 3\n1\n1 1 30\n4.2   10.8    1.0   2.0\n3.5   5.0     1.0   0.7\n4.5   5.0     2.2   1.0\n3.67  12.1    0.79   2.0\n0.0   10.35    6.3   9.35\n*******************************************************\n*       22. NOSE MYLARS DEFINITION\n*******************************************************\n0\n*******************************************************\n*       23. TAB REINFORCEMENTS\n*******************************************************\n0\n*******************************************************\n*       24. GENERAL 2D DXF OPTIONS\n*******************************************************\n1\nA_lines_color\t1     red\nB_lines_color\t30    orange\nC_lines_color\t3     green\nD_lines_color\t4     cyan\nE_lines_color   6     magenta\nF_lines_color\t5     blue\n*******************************************************\n*       25. GENERAL 3D DXF OPTIONS\n*******************************************************\n1\nA_lines_color\t1     red\nB_lines_color\t8     grey\nC_lines_color\t8     grey\nD_lines_color\t8     grey\nE_lines_color   8     grey\nF_lines_color\t30    orange\nExtrados\t1\t5       blue\nVents\t\t0\t1       red\nIntrados\t1\t3\tgreen\n*******************************************************\n*       26. GLUE VENTS\n*******************************************************\n1\n1\t0\n2\t0\n3\t0\n4\t0\n5\t0\n6\t0\n7\t0\n8\t0\n9\t0\n10      0\n11\t0\n12\t0\n13\t0\n14\t0\n15\t0\n16\t0\n17\t0\n18\t0\n19\t0\n20      0\n21\t0\n22\t0\n23\t0\n24\t0\n25\t0\n26\t0\n27\t-2\n28\t-1\n29\t-1\n30\t-1\n31\t-1\n*******************************************************\n*       27. SPECIAL WING TIP\n*******************************************************\n0\n*******************************************************\n*       28. PARAMETERS FOR CALAGE VARIATION\n*******************************************************\n1\n3\n10.    37.    72.  0  0  0\n-4 20 4 20\n*******************************************************\n*       29. 3D SHAPING\n*******************************************************\n1\n1\ngroups   1\ngroup    1    1   31\nupper    1    1\n1       63   73   0.0\nlower    0    1\n* Print parameters\nInter3D 1    1    31    0\nOvali3D 1    1    31    0\ntesse3D 1    1    1     0\nexteDXF 0    1    1     0\nexteSTL 1    1    31     1\n*******************************************************\n*       30. AIRFOIL THICKNESS MODIFICATION\n*******************************************************\n1\n1\t1.0\n2\t1.0\n3\t1.0\n4\t1.0\n5\t1.0\n6\t1.0\n7\t1.0\n8\t1.0\n9\t1.0\n10\t1.0\n11\t1.0\n12\t1.0\n13\t1.0\n14\t1.0\n15\t1.0\n16\t1.0\n17\t1.0\n18\t1.0\n19\t1.0\n20\t1.0\n21\t1.0\n22\t1.0\n23\t1.0\n24\t1.0\n25\t1.0\n26\t1.0\n27\t1.0\n28\t1.0\n29\t1.0\n30\t1.0\n31\t0.0\n*******************************************************\n*       31. NEW SKIN TENSION MODULE\n*******************************************************\n1\n1\n* Skin tension group number \"1\" from rib 1 to 31, 10 points, type \"1\"\n1      \t1\t31\t10\t1\n1\t0.\t\t0.0\t0.\t\t0.\n2\t3.75\t\t0.5\t5.\t\t0.665\n3\t7.5\t\t1.2\t10.\t\t1.33\n4\t11.25\t\t1.83\t15.\t\t1.95\n5\t15.\t\t2.19\t20.\t\t2.32\n6\t25.\t\t2.5\t25.\t\t2.5\n7\t72.\t\t2.5\t75.\t\t2.5\n8\t80.\t\t2.2\t80.\t\t2.2\n9\t90.\t\t1.33\t90.\t\t1.3\n10\t100.\t\t0.0\t100.\t\t0.\n*******************************************************\n*       32. PARAMETERS FOR PARTS SEPARATION\n*******************************************************\n1\npanel_x\t\t1.2\npanel_x_min\t1.0\npanel_y\t\t0.8\nrib_x\t\t0.8\nrib_y\t\t1.0\nrib_1y\t\t1.8\njonc_x\t\t1.0\njonc_y\t\t1.0\njonc_i\t\t0.0\nparameter10\t1.0\n*******************************************************\n*       33. DETAILED RISERS\n*******************************************************\n1\n1\nA\t47.0  cm\nB\t47.0  cm\nC\t47.0  cm\n*******************************************************\n*       34. LINES CHARACTERISTICS TABLE\n*******************************************************\n1\n6\n1  c  5.0     Riser    1000 daN  u_dyneem    10.0   g   p 12. cm  7\n2  c  1.90    Line275   275 daN  s_dyneem    2.26   g   s 12. cm  1\n3  c  1.40    Line160   160 daN  s_dyneem    1.34   g   s 10. cm  3\n4  c  1.15    Line120   120 daN  s_dyneem    1.00   g   s 10. cm  5\n5  c  0.80    Line100U  100 daN  u_dyneem    0.43   g   p 8.  cm  2\n6  c  2.00    Line200B  200 daN  s_dynemm    3.10   g   s 12. cm  6\n*******************************************************\n*       35. SOLVE EQUILIBRIUM EQUATIONS\n*******************************************************\n1\ng        9.807  m/s2 gravity of Earth\nro       1.225  kg/m3 air mass density\nmu       18.46  muPa\u00c2\u00b7s air dynamic viscosity (microPascals)\nV        12.4   m/s  estimated flow speed\nAlpha    9.45    deg  estimated wing angle of attact at trim speed\nCl       0.67913       wing lift coefficient\ncle      1.0         lift correction coefficient\nCd\t 0.03790     wing drag coefficient\ncde      1.1        drag correction coefficient\nCm       0.0         wing moment coefficient\nSpilot\t 0.438  m2   pilot+harness frontal surface\nCdpilot  0.6         pilot+harness drag coefficient   \nMw       4.0    kg   wing mass\nMp       70   kg   pilot mass included harness and instruments\nPmc      0.2    m    pilot mass center below main karabiners\nMql      8.0    g    one quick link mass (riser-lines)\nYcp      0.575  m   y-coordinate center of pressure\nZcp      0.395  m   z-coordinate center of pressure\n*******************************************************\n*       36. CREATE FILES FOR XFLR5 ANALYSIS\n*******************************************************\n1\n* Panel parameters\n10 chord nr\n5 per cell \n1 cosine distribution along chord\n0 uniform along span\n* Include billowed airfoils (more accuracy)\n0\n*******************************************************\n*       37. SOME SPECIAL PARAMETERS\n*******************************************************\n1\n7\n1291\t8    nsegments in transverse direction (stl surfaces)\n1341    0    use CAD colors for each line type according table 34\n1146\t36.  gravity center in % of a typical section (default is 36%)\n1351\t1    Solve method (1 or 6)\n1352\t2    Use flat area (1) or projected area (2)\n1353    2    Print normal (0) or advanced detailed output (1),(2)\n3001\t3    6.0 0.8\n\n\n\t\t\n";
+const GNUC2_SECTIONS = {"gnuC2.txt": "gnuC2\n 175\n 116\n 4\n 57\n 1.00000     0.00000\n 0.99748     0.00055\n 0.99291     0.00155\n 0.98705     0.00282\n 0.98019     0.00430\n 0.97248     0.00595\n 0.96406     0.00773\n 0.95499     0.00963\n 0.94536     0.01163\n 0.93521     0.01371\n 0.92461     0.01587\n 0.91358     0.01808\n 0.90217     0.02035\n 0.89041     0.02266\n 0.87833     0.02500\n 0.86596     0.02738\n 0.85332     0.02977\n 0.84043     0.03219\n 0.82733     0.03462\n 0.81401     0.03705\n 0.80051     0.03949\n 0.78685     0.04194\n 0.77303     0.04437\n 0.75907     0.04680\n 0.74500     0.04922\n 0.73082     0.05163\n 0.71655     0.05402\n 0.70220     0.05639\n 0.68778     0.05874\n 0.67331     0.06106\n 0.65879     0.06336\n 0.64425     0.06562\n 0.62968     0.06785\n 0.61510     0.07005\n 0.60052     0.07221\n 0.58595     0.07433\n 0.57141     0.07641\n 0.55689     0.07844\n 0.54240     0.08043\n 0.52797     0.08237\n 0.51359     0.08426\n 0.49927     0.08610\n 0.48503     0.08788\n 0.47087     0.08961\n 0.45679     0.09128\n 0.44281     0.09288\n 0.42893     0.09442\n 0.41517     0.09590\n 0.40152     0.09731\n 0.38799     0.09865\n 0.37460     0.09992\n 0.36135     0.10111\n 0.34824     0.10222\n 0.33529     0.10326\n 0.32249     0.10421\n 0.30986     0.10507\n 0.29739     0.10585\n 0.28511     0.10653\n 0.27301     0.10710\n 0.26110     0.10753\n 0.24938     0.10782\n 0.23787     0.10794\n 0.22656     0.10790\n 0.21546     0.10768\n 0.20458     0.10730\n 0.19393     0.10673\n 0.18350     0.10599\n 0.17331     0.10505\n 0.16336     0.10393\n 0.15365     0.10262\n 0.14420     0.10111\n 0.13499     0.09940\n 0.12605     0.09750\n 0.11738     0.09541\n 0.10897     0.09313\n 0.10084     0.09066\n 0.09299     0.08802\n 0.08542     0.08520\n 0.07814     0.08222\n 0.07116     0.07909\n 0.06447     0.07582\n 0.05809     0.07241\n 0.05201     0.06888\n 0.04625     0.06524\n 0.04080     0.06150\n 0.03568     0.05767\n 0.03088     0.05376\n 0.02641     0.04979\n 0.02227     0.04577\n 0.01847     0.04169\n 0.01502     0.03758\n 0.01191     0.03344\n 0.00915     0.02928\n 0.00675     0.02510\n 0.00470     0.02093\n 0.00302     0.01668\n 0.00170     0.01268\n 0.00076     0.00809\n 0.00019     0.00443\n 0.000038    0.002151\n 0.00000     0.00000\n 0.00019    -0.00117\n 0.00076    -0.00369\n 0.00170    -0.00536\n 0.00302    -0.00689\n 0.00470    -0.00831\n 0.00675    -0.00962\n 0.00915    -0.01082\n 0.01191    -0.01192\n 0.01502    -0.01293\n 0.01847    -0.01386\n 0.02227    -0.01472\n 0.02641    -0.01551\n 0.03088    -0.01624\n 0.03568    -0.01692\n 0.04000    -0.01756\n 0.046667   -0.022373\n 0.053333   -0.027187 \n 0.06000    -0.03200\n 0.065020   -0.035699\n 0.07071    -0.03950\n 0.078416   -0.043561 \n 0.08687    -0.04719\n 0.096153   -0.050861\n 0.10564    -0.05435\n 0.114453   -0.057327\n 0.12272    -0.05997\n 0.128780   -0.061829 \n 0.13498    -0.06349\n 0.14419    -0.06536\n 0.15364    -0.06712\n 0.16335    -0.06878\n 0.17330    -0.07033\n 0.18349    -0.07176\n 0.19392    -0.07309\n 0.20457    -0.07432\n 0.21545    -0.07544\n 0.22654    -0.07645\n 0.23785    -0.07736\n 0.24937    -0.07818\n 0.26108    -0.07890\n 0.27300    -0.07953\n 0.28510    -0.08006\n 0.29738    -0.08051\n 0.315638   -0.081094\n 0.34135    -0.08122\n 0.36782    -0.08013\n 0.39488    -0.07867\n 0.42246    -0.07687\n 0.45050    -0.07474\n 0.47895    -0.07230\n 0.50774    -0.06957\n 0.53680    -0.06658\n 0.56607    -0.06335\n 0.59547    -0.05989\n 0.62492    -0.05624\n 0.65434    -0.05242\n 0.68365    -0.04844\n 0.71275    -0.04433\n 0.74154    -0.04013\n 0.76991    -0.03585\n 0.79774    -0.03152\n 0.82489    -0.02718\n 0.838085\t-0.02513\n 0.85128\t-0.02308\n 0.87052\t-0.020095\n 0.88976\t-0.01711\n 0.90669\t-0.014485\n 0.92362\t-0.01186\n 0.93419\t-0.010215\n 0.94476\t-0.00857\n 0.958235\t-0.00648\n 0.97171\t-0.00439\n 0.985855\t-0.002195\n 1.00000\t 0.00000\n\n\n"};
 /* app.js — UI layer. Owns the design state, renders the controls, redraws the
  * four viewports, and writes the export files. All geometry comes from the
  * core modules; nothing is recomputed here. */
@@ -27350,10 +28379,12 @@ let REMEMBERED = null;
  * brings its own ribs, sections and line plan, and loads through the import
  * path. The Swoop2 was the only one, and the importer had only ever read it;
  * the Tuluaq-19 is a second, from the same program, and reading it found
- * three faults the first could not.
+ * three faults the first could not. The gnuC2-23 is a third, with a shark
+ * nose, V-ribs, 3D-shaped upper panels and a flat tip rib.
  */
 const SWOOP2_ID = "Laboratori d'envol Swoop2  (complete design)";
 const TULUAQ_ID = "Crazy Bird Tuluaq-19  (complete design)";
+const GNUC2_ID = "Laboratori d'envol gnuC2-23  (complete design)";
 const COMPLETE_DESIGNS = [
   {
     id: SWOOP2_ID, name: 'Swoop2',
@@ -27364,6 +28395,11 @@ const COMPLETE_DESIGNS = [
     id: TULUAQ_ID, name: 'Tuluaq-19',
     lep: () => (typeof TULUAQ_LEP === 'string' ? TULUAQ_LEP : ''),
     sections: () => (typeof TULUAQ_SECTIONS === 'object' && TULUAQ_SECTIONS ? TULUAQ_SECTIONS : {}),
+  },
+  {
+    id: GNUC2_ID, name: 'gnuC2-23',
+    lep: () => (typeof GNUC2_LEP === 'string' ? GNUC2_LEP : ''),
+    sections: () => (typeof GNUC2_SECTIONS === 'object' && GNUC2_SECTIONS ? GNUC2_SECTIONS : {}),
   },
 ];
 /** A complete design by its picker id, when this build carries it. */
@@ -27660,7 +28696,8 @@ function loadLepDesign(doc, sectionTexts = {}) {
     // slider, so they are made once. And what it sews inside its cells —
     // diagonals, pieces between ribs, straps, rod pockets — the same way.
     try { panels = lepPanels(doc, table); } catch (e) { panels = null; }
-    try { structure = lepStructure(doc, table); } catch (e) { structure = null; }
+    // The mini-ribs' transitions take the cell's billow from these panels.
+    try { structure = lepStructure(doc, table, { panels }); } catch (e) { structure = null; }
   }
   // Section 12: what the design sews inside its cells.
   let hv = null;
@@ -28193,7 +29230,8 @@ function rebuild() {
         bothSidesM: ownRods.bothSidesM,
         byBloc: ownRods.byBloc,
         rods: ownRods.joncs.map((j) => ({
-          rib: j.ribIndex, group: `bloc ${j.bloc}`, bloc: j.bloc, type: j.type,
+          rib: j.ribIndex, group: `bloc ${j.bloc}${j.part ? `, ${j.part}` : ''}`, bloc: j.bloc, type: j.type,
+          ...(j.part ? { part: j.part } : {}),
           lengthM: j.lengthCm / 100,
           // In the rib's own section coordinates, metres.
           points: j.points.map(([u, v]) => [u / 100, v / 100]),
@@ -28240,7 +29278,7 @@ function rebuild() {
     // favour of 50 this tool invented with their apexes on ribs that carry
     // no line.
     const planAnchors = planAnchorRibs(linePlan);
-    const ownDiagonals = imported && LEP.hv ? lepDiagonalPieces(LEP.hv) : [];
+    const ownDiagonals = imported && LEP.hv ? lepDiagonalPieces(LEP.hv, LEP.table) : [];
     let vribs = { vribs: [], count: 0, totalAreaM2: 0, unsupportedRibs: [], skipped: [], notPlaced: [] };
     if (S.vribs) {
       vribs = buildVRibs({
@@ -28588,7 +29626,8 @@ function buildControls() {
       + 'families, which load the SIZE only: a specification does not say how '
       + 'elliptical the leading edge is, or what section the wing uses. '
       + (complete.length
-        ? `${complete.map((d) => `The ${d.name}`).join(' and ')} at the top `
+        ? `${complete.map((d, k) => `${k ? 'the' : 'The'} ${d.name}`)
+          .join(', ').replace(/, ([^,]*)$/, ' and $1')} at the top `
           + `${complete.length > 1 ? 'are' : 'is'} different — complete designs, geometry and all.`
         : ''));
   }
@@ -28911,7 +29950,10 @@ function buildControls() {
       const r = M.rods;
       if (!r || !r.own) return '';
       const blocs = Object.entries(r.byBloc || {})
-        .map(([b, x]) => `bloc ${b}: ${x.count} of ${(x.totalM / x.count * 100).toFixed(0)} cm on average`);
+        .map(([b, x]) => (x.type === 3
+          ? `bloc ${b}, a shark nose: ${x.count / 2} upper and ${x.count / 2} lower rods, `
+            + `${(x.totalM / x.count * 100).toFixed(0)} cm on average`
+          : `bloc ${b}: ${x.count} of ${(x.totalM / x.count * 100).toFixed(0)} cm on average`));
       return `The design's own: ${r.count} rods a side, ${r.totalM.toFixed(2)} m `
         + `(${r.bothSidesM.toFixed(2)} m for both sides), as its program lays them out `
         + `from section 21${blocs.length ? ` — ${blocs.join('; ')}` : ''}. Drawn on the Rib tab.`;
@@ -29004,8 +30046,14 @@ function buildControls() {
     hint(N, `${LEP.design.name}'s panels are its own: cut ${P.skin === 'groups' ? 'by its skin tension (section 31)' : 'by its skin tension (section 5)'}`
       + `, round its own intakes (${P.vents === 'glue' ? 'section 26' : 'section 2'}), with its own seam allowances — `
       + `${a.side} mm at the sides, ${a.front} at the front, ${a.back} at the trailing edge (section 6). `
-      + `${(P.totals.upper.cutM2 * 2).toFixed(2)} m2 of upper surface and ${(P.totals.lower.cutM2 * 2).toFixed(2)} m2 of lower as cut.`
-      + (P.notReproduced.length ? ` Drawn straight where it has ${P.notReproduced.join(', ')}.` : ''));
+      + `${(P.totals.upper.cutM2 * 2).toFixed(2)} m2 of upper surface and ${(P.totals.lower.cutM2 * 2).toFixed(2)} m2 of lower as cut`
+      + `, each sewing edge as long as its rib, as the program matches them (section 5)`
+      + (P.panels.some((x) => x.pieces)
+        ? `; its 3D shaping (section 29) cuts ${P.panels.filter((x) => x.pieces).length} of them across into `
+          + `${P.panels.filter((x) => x.pieces).reduce((t, x) => t + x.pieces.length, 0)} pieces, each with its own allowance at the cut`
+        : '')
+      + '.'
+      + (P.notReproduced.length ? ` Not reproduced: ${P.notReproduced.join(', ')}.` : ''));
   }
   if (!ownCut) checkField(N, 'ovalFromPressure', 'Billow from pressure, not a flat amount');
   if (S.ovalFromPressure && !ownCut) {
@@ -29847,13 +30895,19 @@ function buildControls() {
 }
 
 function seamed() {
-  return M.panels.map((p) => {
-    // An imported design's own cut line, with its own allowances.
-    if (p.panel.cut) {
-      return { ...p, panel: { left: p.panel.cut.left, right: p.panel.cut.right, seamLengths: p.panel.seamLengths } };
+  return M.panels.flatMap((p) => {
+    // An imported design's own cut line, with its own allowances — and, where
+    // its 3D shaping cuts a panel across, each piece by itself.
+    if (p.panel.pieces) {
+      return p.panel.pieces.map((q) => ({
+        ...p, part: q.part, panel: { left: q.cut.left, right: q.cut.right, seamLengths: p.panel.seamLengths },
+      }));
     }
-    if (!S.seamAllowance) return p;
-    return { ...p, panel: { ...addSeamAllowance(p.panel, S.seamAllowance), seamLengths: p.panel.seamLengths } };
+    if (p.panel.cut) {
+      return [{ ...p, panel: { left: p.panel.cut.left, right: p.panel.cut.right, seamLengths: p.panel.seamLengths } }];
+    }
+    if (!S.seamAllowance) return [p];
+    return [{ ...p, panel: { ...addSeamAllowance(p.panel, S.seamAllowance), seamLengths: p.panel.seamLengths } }];
   });
 }
 
@@ -31423,8 +32477,11 @@ function billOfMaterials() {
   // Ribs, with the openings the wing has: the design's own holes on an
   // imported design, this tool's otherwise, none with them turned off.
   const ownHoles = M.imported && LEP?.holes && LEP.holes.byRib.size ? LEP.holes.byRib : null;
+  // An imported design's ribs at their cut size, as its program cuts them.
+  const ownCuts = new Map(M.wing.ribs.map((rib) => [rib.index, programRibCut(rib)]).filter(([, c]) => c));
   const ribs = ribClothTotals(M.wing, M.airfoil, {
     ribCloth: cloth.rib, openings: !!S.ribHoles, ownHoles,
+    cutOutlines: ownCuts.size ? ownCuts : null,
     rodsByRib: Object.fromEntries(M.wing.ribs.map((rib) => [rib.index, rodLinesOn(rib.index)])),
     pullsByRib: Object.fromEntries(M.wing.ribs.map((rib) => [rib.index, linePullsOn(rib.index)])),
   });
@@ -31740,29 +32797,60 @@ function structureSummary() {
   // An imported design's own pieces are cut as its program cuts them; what
   // this summary describes is this tool's model of a diagonal at each place.
   const ownCut = v.own && M.imported && LEP?.structure?.ok ? LEP.structure : null;
-  const diagonalCut = ownCut
-    ? ownCut.pieces.filter((p) => p.kind === 'diagonal').reduce((t, p) => t + p.cutAreaM2 * p.copies, 0) : null;
+  // The file's straps across the top: pieces between two ribs under the
+  // upper surface at both ends.
+  const topStraps = (LEP?.hv?.general ?? []).filter((e) => e.ends.every((x) => x.rest[0] === 100)).length;
+  const cutOf = (kind) => (ownCut
+    ? ownCut.pieces.filter((p) => p.kind === kind).reduce((t, p) => t + p.cutAreaM2 * p.copies, 0) : 0);
+  // What the design cuts its diagonals from, in its own words: full
+  // diagonals, V-rib strips, and pieces between two ribs, which it uses
+  // both ways.
+  const cutWords = ownCut
+    ? [['diagonal', 'full diagonals'], ['vrib', 'V-rib strips'], ['between', 'pieces between two ribs']]
+      .filter(([k]) => cutOf(k) > 0).map(([k, w]) => `${w} from ${cutOf(k).toFixed(2)} m²`)
+    : [];
+  // The file's pieces between two ribs that are not anchored at one end are
+  // not diagonals in this tool's model, and the balance below is on the
+  // model: the gnuC2-23 joins its ribs with 66 such pieces, and the summary
+  // said ribs were held from one side, or not at all, that the design holds.
+  const modelled = new Set(v.vribs.map((x) => x.source).filter(Boolean));
+  const others = v.own && M.imported && LEP?.hv
+    ? (LEP.hv.general ?? []).filter((e) => !modelled.has(`section 12 row ${e.index}`)) : [];
+  const joinedByOthers = (r) => [...others, ...(LEP?.hv?.straps ?? [])]
+    .some((e) => e.fromRib === r + 1 || e.toRib === r + 1);
   const parts = [
     `${v.own ? 'The design\'s own' : 'Placed from the line plan'}: `
       + `${rows.map((row) => `${row} ${v.vribs.filter((x) => x.row === row).length}`).join(', ')} `
       + (ownCut
         ? `a side, modelled at this tool's base width: ${(v.totalAreaM2 * 2).toFixed(2)} m² of cloth on the whole wing, `
-          + `where its program cuts its full diagonals from ${diagonalCut.toFixed(2)} m².`
+          + `where its program cuts its ${cutWords.join(', its ').replace(/, its ([^,]*)$/, ' and its $1')}.`
         : `a side, ${(v.totalAreaM2 * 2).toFixed(2)} m² of cloth on the whole wing.`),
     f.tension.fullyTaut === f.tension.count
       ? 'All are in tension across their whole width.'
       : `${f.tension.count - f.tension.fullyTaut} of ${f.tension.count} are slack over part of their width.`,
     `${f.geom.note[0].toUpperCase()}${f.geom.note.slice(1)}.`,
     `${f.balance.note[0].toUpperCase()}${f.balance.note.slice(1)}`
-      + (v.own && f.balance.strapsNeeded.length && LEP?.hv?.general?.length
-        ? ` — the file states ${LEP.hv.general.length} such pieces`
+      + (v.own && f.balance.strapsNeeded.length && topStraps
+        ? ` — the file states ${topStraps} such pieces`
           + (ownCut ? ', cut as its program cuts them and not drawn here.' : ', which are not drawn or cut here.')
         : '.'),
   ];
+  // Less the straps across the top just said, which are among them.
+  const othersLeft = others.length - (f.balance.strapsNeeded.length ? topStraps : 0);
+  if (othersLeft > 0 && (f.balance.oneSided.length || f.balance.strapsNeeded.length)) {
+    parts.push(`That is on the ${v.vribs.length} diagonals this tool models: the design's other `
+      + `${othersLeft} pieces between two ribs join ribs too, and are not in it.`);
+  }
   if (free.length) {
+    const joined = free.filter(joinedByOthers);
     parts.push(`Rib${free.length > 1 ? 's' : ''} ${free.join(', ')} `
       + `${free.length > 1 ? 'have' : 'has'} no line and no diagonal reaching `
-      + `${free.length > 1 ? 'them' : 'it'}.`);
+      + `${free.length > 1 ? 'them' : 'it'}`
+      + (joined.length === free.length
+        ? `; the design joins ${free.length > 1 ? 'each' : 'it'} to a rib beside it with its own pieces between two ribs.`
+        : joined.length
+          ? `; the design joins ${joined.join(', ')} to a rib beside them with its own pieces between two ribs.`
+          : '.'));
   }
   if (v.notPlaced && v.notPlaced.length) {
     parts.push(`${v.notPlaced.length} stated in the file could not be placed (${v.notPlaced[0].why}).`);
@@ -31772,6 +32860,20 @@ function structureSummary() {
     parts.push('Ribs are numbered from 0 at the centre here; the file numbers them from 1.');
   }
   return parts.join(' ');
+}
+
+/**
+ * An imported design's rib as its own program cuts it — its section 6
+ * allowance, its 6.11 construction — in the rib's plane, metres; or null
+ * when the wing is not a design's own or cut with this tool's allowance.
+ * It matches every rib of the three complete designs' cutting files to
+ * 0.002%; an offset of the outline, mitred at the trailing edge, carried
+ * 2 to 3 cm2 more on every rib.
+ */
+function programRibCut(rib) {
+  const ownRib = M.panels?.some((p) => p.panel.cut) ? LEP?.panels?.allowances?.rib : null;
+  const row = M.imported && LEP?.table ? LEP.table.ribs[rib.index] : null;
+  return row && Number.isFinite(ownRib) && ownRib > 0 ? lepRibCutLine(row, ownRib) : null;
 }
 
 /**
@@ -31891,11 +32993,11 @@ function ribFeatures(rib) {
     ? [onLower(intakeSpec.start * rib.chord), onLower(intakeSpec.end * rib.chord)] : [];
 
   // What actually gets cut: the outline, a seam allowance outside it — an
-  // imported design's own for its ribs (its section 6), whose panels are
-  // cut with its own too.
+  // imported design's own for its ribs (its section 6), drawn as its
+  // program draws it, whose panels are cut with its own too.
   const ownRib = M.panels?.some((p) => p.panel.cut) ? LEP?.panels?.allowances?.rib : null;
   const allowance = (Number.isFinite(ownRib) ? ownRib : S.seamAllowance) / 1000;
-  const cutLine = allowance > 0 ? offsetClosedLoop(loop, allowance) : [];
+  const cutLine = programRibCut(rib) ?? (allowance > 0 ? offsetClosedLoop(loop, allowance) : []);
 
   // The load paths. Cloth only pulls, so each line loads its rib along
   // straight rays from the tab to the upper seam, round the way the line

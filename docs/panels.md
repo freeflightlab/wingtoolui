@@ -55,14 +55,14 @@ is what keeps sections 2 and 3 true after it is applied.
 
 ## 5. A design's own panels, against its own cutting file
 
-The two complete designs here come with the cutting files their program
+The three complete designs here come with the cutting files their program
 drew, and every piece in them is measured (`data/reference/lep/*-cut-parts.tsv`).
 The tool's own development of their panels — ovalised 6%, one 10 mm
 allowance all round — put the wrong amount of cloth on each surface: 4 to
 6% short on the upper, 5 to 8% over on the lower, which it ran over the
 intake and round to the leading edge. (11.24 and 10.52 m² a side on the
-Swoop2, against 11.72 and 9.75 cut.) Four things are the program's, read
-from its source in the design archives, and `lepPanels` does all four:
+Swoop2, against 11.72 and 9.75 cut.) Six things are the program's, read
+from its source in the design archives, and `lepPanels` does all six:
 
 - **Where the surfaces part.** The upper panel runs from the trailing edge
   over the top, round the nose and down to where the intake opens, 1.6% of
@@ -76,28 +76,53 @@ from its source in the design archives, and `lepPanels` does all four:
   surface and 3.2% on its lower.
 - **Intakes closed.** Section 26 closes part of some cells' intakes: the
   upper panel runs on over the front of the intake (type 4), the lower over
-  the rear (−4) or the whole of it (−1), to fractions given at each rib.
+  the rear (−4) or the whole of it (−1), to fractions given at each rib —
+  or across it on a diagonal, the whole intake at one rib and none at the
+  other (−2 and −3; the gnuC2-23's cell 26).
 - **Seam allowances** from section 6, by edge: 15 mm at the sides of the
   Tuluaq's panels, 25 at the front, 10 at the trailing edge; the Swoop2's 10,
-  10 and 20. Each edge of the outline is moved out by its own, corners
-  mitred.
+  10 and 20; the gnuC2-23's 12, 22 and 22. Each edge of the outline is moved
+  out by its own, corners mitred.
+- **Seam matching.** Over-width moves a panel's edge and changes its length.
+  Section 5's `1000 1.0`, in all three files, asks for the program's
+  "perfect matching": each sewing edge's last part — the last 15% on the
+  upper surface, the first 20% from the intake on the lower — is stretched
+  back to the length of the rib it is sewn to, and the panel's end is then
+  turned, five times over, to take up what that does to its neighbour. The
+  program's output prints every edge and its rib equal (its section 6); the
+  tool's are, to a millionth of a millimetre. Only the ends move: the sides
+  of the cut line stay on the edges as they were. The program lays an upper
+  panel out from its trailing edge forward, and the turning converges only
+  in that frame.
+- **3D shaping.** Section 29 cuts panels across at section points: the
+  gnuC2-23 cuts every upper panel at point 73, 12.6% of chord behind the
+  leading edge, into a front piece and a rear, each with the side allowance
+  at the cut. (The program's first zone is empty — the line that would fill
+  it is in a block its author commented out — and its easing of the cut
+  edges, nil in this file, is not reproduced.)
 
 | | upper, a side | lower, a side | worst panel |
 | --- | --- | --- | --- |
 | Swoop2, its cutting file | 11.7194 m² | 9.7496 m² | |
-| Swoop2, `lepPanels` | 11.7224 (+0.03%) | 9.7513 (+0.02%) | 0.04% |
+| Swoop2, `lepPanels` | 11.7203 (+0.01%) | 9.7512 (+0.02%) | 0.034% |
 | Tuluaq-19, its cutting file | 12.6151 m² | 10.2266 m² | |
-| Tuluaq-19, `lepPanels` | 12.6169 (+0.01%) | 10.2268 (+0.00%) | 0.14% |
+| Tuluaq-19, `lepPanels` | 12.6149 (−0.00%) | 10.2267 (+0.00%) | 0.011% |
+| gnuC2-23, its cutting file | 15.5406 m², 60 pieces | 12.7994 m² | |
+| gnuC2-23, `lepPanels` | 15.5416 (+0.01%) | 12.7994 (0.00%) | 0.007% |
 
-Piece by piece, the Tuluaq's lower panels are all within 0.04% of the file's
-and every one of its 34 cut lines is the file's length to 3 mm. Its worst
-panel is the upper one at the tip, 0.14% over: it was 0.12% before its
-lowered rib 17 was placed, for the surfaces, as its program places it
-(`docs/internal-structure.md`, section 4), which the diagonals beside that
-rib confirm to a part in a million. What is left at the tip is not
-explained. (The Swoop2's
-upper panel at the tip is drawn 1.4 cm open in its file and measured across
-the gap, so it is held to a per cent.)
+The Tuluaq's upper panel at the tip was 0.14% over and unexplained until
+the seam matching: it is the panel whose edges over-width changes most.
+Every cut line of both older designs is the file's length to 2 mm.
+
+What is left is where the program lays a closed intake out by itself and
+joins it to the panel. The Swoop2's lower panels of the odd cells run on
+over the rear of the intake (−4) and are 0.03% over; the gnuC2-23's four
+closed tip cells are 0.003 to 0.011% small, 0.3 mm at the intake's first
+points. The gnuC2-23's tip rib is flat (section 30, thickness 0), so the
+front piece of its last upper panel runs its edge to the leading edge and
+back on itself; that outline crosses itself and its signed area is 2.5% off
+the file's. (The Swoop2's upper panel at the tip is drawn 1.4 cm open in its
+file and measured across the gap, so it is held to a per cent.)
 
 The intakes were the last 0.8%. Before them, the cells the file closes came
 out 2% short, and the pattern was the design's own: the upper panels of
@@ -105,15 +130,25 @@ cells 1, 2, 4, 8 and 12, the lower of 3, 7, 11 and 15 — and a cell closed
 half-way at both ribs was short by as much as one closed all the way at one.
 
 An imported design's panels are its own in the interface: the Cut tab, the
-cutting files, the printed pattern and the bill all use them, and its ribs
-are cut with its own rib allowance — within 0.25% of its file on every rib
-but the tip, its section thinned to a sliver. The ovalization and seam
-allowance controls, this tool's stand-ins for what the design states, are
-not offered on it.
+cutting files, the printed pattern and the bill all use them. Its ribs are
+cut as its program cuts them (`lepRibCutLine`, its 6.11): each point of the
+section moved out by the rib allowance along the mean of the angles of the
+segments either side, the leading edge straight forward, the line closed
+through the trailing edge itself. Every rib of the three files comes out to
+0.002% of its area, and the gnuC2-23's — whose file was measured for it — to
+0.05 mm of its cut line's length. An offset of the outline, mitred at the
+trailing edge, had carried 2 to 3 cm² more on every rib: 0.03% at the root,
+0.35% on the gnuC2-23's rib 30 and 2.5% on the Swoop2's tip. Their holes are
+the program's polygons — 39 sides until 3.30, then 60 or what its section 37
+says (the Swoop2's 55) — and each rib's take out its file's area to the
+hundredth of a cm² it is written to. The bill weighs these ribs as cut. The
+ovalization and seam allowance controls, this tool's stand-ins for what the
+design states, are not offered on it.
 
-What they sew inside their cells — full diagonals, straps, pieces between two
-ribs and rod pockets — is now cut the same way, every piece to its cutting
-file's (`docs/internal-structure.md`), and the bill carries it: 11.87 m² for
-the Swoop2 and 10.48 for the Tuluaq, where it had 3.9 and 5.5 of this tool's
-own diagonals. Their trailing-edge mini-ribs, 0.84 and 0.89 m², are not yet
-built.
+What they sew inside their cells — full diagonals, V-rib strips, straps,
+pieces between two ribs and rod pockets — is cut the same way, every piece to
+its cutting file's (`docs/internal-structure.md`), and the bill carries it:
+11.87 m² for the Swoop2, 10.48 for the Tuluaq and 11.33 for the gnuC2-23.
+So are their trailing-edge mini-ribs, raised at the front to meet the
+billow of the cell, which the program finds from these panels: 0.82, 0.89
+and 1.50 m² of rib cloth for the wing.

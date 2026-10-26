@@ -117,22 +117,27 @@ surfaces, and the suite now holds the tool to all of them —
 | rib contour lengths | `lep-out.txt`, section 6 | 0.007 mm |
 | karabiner position, angle of attack 4.32°, assiette 1.39° | `lep-out.txt` | to the printed figure |
 | lineset weight 0.468 kg, frontal area 0.426 m² | the program's totals | to the printed figure |
-| every panel's cut area, upper and lower | its cutting file, measured | 0.04% |
+| every panel's cut area, upper and lower | its cutting file, measured | 0.034% |
+| every rib's cut area, its 10 mm allowance on, and its holes | its cutting file, measured | 0.0012%, 0.005 cm² |
 
 The panels came last. Its cutting file could not be read by joining
 segments (section 5), so every piece in it was measured as a closed outline
 (`swoop2-cut-parts.tsv`), and the design's own panels, as `lepPanels` cuts
-them from its file, are within 0.04% of every one but the tip's upper panel,
-which its file draws open: 11.722 and 9.751 m² a side against 11.719 and
-9.750. `docs/panels.md` has the four things that took.
+them from its file, are within 0.034% of every one but the tip's upper
+panel, which its file draws open: 11.720 and 9.751 m² a side against 11.719
+and 9.750. `docs/panels.md` has the six things that took. Its ribs are cut
+as its program cuts them, every one to 0.0012% of its file's area — the tip
+was 2.5% over on this tool's mitred offset — and their holes as its 55-sided
+polygons (section 37's code 3002).
 
 Its internal structure is cut the same way: its 13 full diagonals, 15 pieces
 between two ribs, 70 straps and 50 rod pockets a side, every one within a
 part in ten thousand of its file's, 11.87 m² for the wing
-(`docs/internal-structure.md`). What it still does **not** settle is its 25
-trailing-edge mini-ribs a side, cut from a billow the tool does not
-reproduce, and the aerodynamics: the design publishes no polar to compare a
-polar with.
+(`docs/internal-structure.md`), and its 25 trailing-edge mini-ribs a side
+and their 100 holes, raised at the front to the billow of the cell as its
+program raises them, to its file's in total. What it still does **not**
+settle is the aerodynamics: the design publishes no polar to compare a polar
+with.
 
 ---
 

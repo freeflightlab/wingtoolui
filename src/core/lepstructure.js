@@ -22,9 +22,9 @@
  *   section 21   a ROD POCKET: the strip beside each rod, its four widths
  *                from the rod's line.
  *
- * Not built: the trailing-edge mini-ribs (section 2's last column), which
- * the program cuts from the section as it billows the cell over it, from
- * its own ovalization. They are counted and said.
+ *   section 2    a TRAILING-EDGE MINI-RIB: the rear of the rib inboard of
+ *                its cell, raised at its front to meet the cell's billow
+ *                (section 37's code 3001), with section 38's type 9 holes.
  *
  * Types 11, 15 and 16 give widths in per cent of the rib's chord; 1, 5 and
  * 6 in centimetres — and the program scales 5's and 6's by the wing's scale
@@ -40,8 +40,9 @@
  * between ribs; section 37's code 3002 says how many sides the program
  * gives an ellipse (60 unless it says).
  *
- * Validated piece by piece against both complete designs' cutting files
- * (`data/reference/lep/*-cut-parts.tsv`): see `docs/internal-structure.md`.
+ * Validated piece by piece against the three complete designs' cutting
+ * files (`data/reference/lep/*-cut-parts.tsv`): see
+ * `docs/internal-structure.md`.
  *
  * Several things are the program's and not a choice, and reproduced as it
  * does them:
@@ -71,7 +72,7 @@
  */
 
 import { sectionData, parseHVRibs, readAirfoils } from './lep.js';
-import { lepRibPoint, lepJoncs } from './leplines.js';
+import { lepRibPoint, lepJoncs, lepEllipseSides, lepRibCutLine, lepPanels } from './leplines.js';
 import { dxfDocument, nestPanels, fabricEstimate } from './export.js';
 
 /**
@@ -335,15 +336,9 @@ function lepStructureSettings(doc, table) {
       break;
     }
   }
-  let ellipseSides = 60;
+  const ellipseSides = lepEllipseSides(doc);
   const s37 = sectionData(doc, 37).map((l) => l.trim()).filter(Boolean);
-  if (s37.length && parseInt(s37[0], 10) === 1) {
-    for (const l of s37.slice(2)) {
-      const f = l.split(/\s+/);
-      if (f[0] === '3002' && Number(f[1]) > 2) ellipseSides = Math.round(Number(f[1]));
-    }
-  }
-  const holes = { diagonal: null, between: null };
+  const holes = { diagonal: null, between: null, minirib: null };
   const s38 = sectionData(doc, 38).map((l) => l.trim()).filter(Boolean);
   if (s38.length && parseInt(s38[0], 10) > 0) {
     const k = parseInt(s38[1], 10);
@@ -352,11 +347,25 @@ function lepStructureSettings(doc, table) {
       if (!(f[2] > 0)) continue;
       if (f[1] === 15 || f[1] === 5) holes.diagonal = { count: f[3], across: f[4], along: f[5], at: f[6] };
       if (f[1] === 16 || f[1] === 6) holes.between = { count: f[3], across: f[4], along: f[5], at: f[6] };
+      // Type 9, in each mini-rib: how many, their height in per cent of the
+      // mini-rib's front, their width to height, where they sit up or down
+      // as a fraction of that height, and their angle.
+      if (f[1] === 9) holes.minirib = { count: f[3], heightPct: f[4], ratio: f[5], yFactor: f[6], angleDeg: f[7] || 0 };
+    }
+  }
+  // Section 37's code 3001: how a mini-rib's edges rise to meet the cell's
+  // billow at its front — 0 not at all, 1 straight, 3 a half cosine — over a
+  // length in per cent of chord, by a fraction of the billow there.
+  let miniTransition = { mode: 0, lengthPct: 0, factor: 0 };
+  if (s37.length && parseInt(s37[0], 10) === 1) {
+    for (const l of s37.slice(2)) {
+      const f = l.split(/\s+/);
+      if (f[0] === '3001') miniTransition = { mode: Number(f[1]) || 0, lengthPct: Number(f[2]) || 0, factor: Number(f[3]) || 0 };
     }
   }
   return {
     ribAllowanceCm: ribMm / 10, vribAllowanceCm: vribMm / 10, strapShortening: Number.isFinite(tension) ? tension : 0,
-    ellipseSides, holes, scale: table.scale ?? 1,
+    ribAllowanceMm: ribMm, ellipseSides, holes, miniTransition, scale: table.scale ?? 1,
   };
 }
 
@@ -633,7 +642,67 @@ function lepStrap(table, st, e) {
   };
 }
 
-/** One end of a piece between two ribs: a line along rib `r` at `pct` of chord. */
+/**
+ * A V-rib (types 3, 13): from anchor row `e.row` on rib `e.rib`, a strip
+ * from its lower surface up to the upper surface of the rib before, and
+ * one to the rib after, as the row says — "V-ribs full but independent
+ * strips", the program's 16.3.1. Along the anchor rib, 21 points evenly
+ * from the lower half-width ahead of the anchor to as far behind; along
+ * the neighbour, its upper surface between the upper half-width either side
+ * of ITS OWN anchor of the row, resampled to 21 (the last section point
+ * before the end left out, as everywhere).
+ */
+function lepVRib(table, st, e) {
+  const ribs = table.ribs;
+  const rib = ribs[e.rib - 1];
+  if (!rib?.section) return { problem: `V-rib ${e.index}: no section on rib ${e.rib}` };
+  const at = (r) => (r.anchorsPct[e.row - 1] * r.chord) / 100;
+  const sides = [];
+  if (e.left) sides.push(['left', ribs[e.rib - 2]]);
+  if (e.right) sides.push(['right', ribs[e.rib]]);
+  // Half-widths. Type 13 in per cent of each rib's own chord; type 3 in
+  // centimetres scaled with the wing, or, with its ninth column 1, in per
+  // cent of the anchor rib's chord along it and of the neighbour's (of the
+  // anchor rib's when the row runs to both sides) along the neighbour.
+  const lowerHalf = e.percent ? (e.lower / 100) * rib.chord : e.lower * st.scale;
+  const upperHalf = (nb) => {
+    if (!e.percent) return e.upper * st.scale;
+    if (e.type === 13) return (e.upper / 100) * nb.chord;
+    return (e.upper / 100) * (e.left && e.right ? rib.chord : nb.chord);
+  };
+  const R = lepSectionCm(rib);
+  const u3 = at(rib);
+  const lower = lepLowerEven(R, u3 - lowerHalf, u3 + lowerHalf, 21).map(([u, v]) => lepRibPoint(rib, u, v));
+  const out = [];
+  for (const [side, nb] of sides) {
+    if (!nb?.section) return { problem: `V-rib ${e.index}: rib ${e.rib} has no rib to its ${side}` };
+    const Q = lepSectionCm(nb);
+    const w = upperHalf(nb);
+    const p9 = lepUpperAt(Q, at(nb) - w);
+    const p11 = lepUpperAt(Q, at(nb) + w);
+    if (!p9 || !p11) return { problem: `V-rib ${e.index}: it does not reach rib ${nb.index}'s upper surface` };
+    const upper = lepResample(lepUpperLine(Q, p9, p11), 21).map(([u, v]) => lepRibPoint(nb, u, v));
+    const { f, outline } = side === 'left'
+      ? lepStrip(upper, lower, st.vribAllowanceCm, 0)
+      : lepStrip(lower, upper, st.vribAllowanceCm, 0);
+    out.push({
+      kind: 'vrib', rib: e.rib, side, row: e.row, entry: e.index,
+      ribs: side === 'left' ? [e.rib - 1, e.rib] : [e.rib, e.rib + 1],
+      sewing: { left: f.pl1, right: f.pr1 }, outline, holes: [],
+    });
+  }
+  return { pieces: out };
+}
+
+/**
+ * One end of a piece between two ribs: a line along rib `r` at `pct` of
+ * chord. On the upper surface (height 100) it follows the surface; at any
+ * other height, the lower surface (0) included, it is the straight line
+ * between the heights at its two ends. The program builds the lower
+ * surface's curve for height 0 and then, its middle case being unguarded,
+ * draws the straight line over it — a chord across the curve, a millimetre
+ * inside it across the nose (the gnuC2-23's pieces at 10% of chord).
+ */
 function lepBetweenLine(r, pct, height, front, back) {
   const R = lepSectionCm(r);
   const u3 = (r.chord * pct) / 100;
@@ -643,11 +712,10 @@ function lepBetweenLine(r, pct, height, front, back) {
   const p4 = lepLowerAt(R, u4);
   const p9 = lepUpperAt(R, u2);
   const p11 = lepUpperAt(R, u4);
-  if (height === 0) return p2 && p4 ? lepResample(lepLowerLine(R, p2, p4), 21) : null;
   if (height === 100) return p9 && p11 ? lepResample(lepUpperLine(R, p9, p11), 21) : null;
-  if (!p2 || !p4 || !p9 || !p11) return null;
-  const v6 = p2.v + (p9.v - p2.v) * (height / 100);
-  const v8 = p4.v + (p11.v - p4.v) * (height / 100);
+  if (!p2 || !p4 || (height > 0 && (!p9 || !p11))) return null;
+  const v6 = height > 0 ? p2.v + (p9.v - p2.v) * (height / 100) : p2.v;
+  const v8 = height > 0 ? p4.v + (p11.v - p4.v) * (height / 100) : p4.v;
   const out = [];
   for (let k = 0; k <= 20; k++) out.push([u2 + ((u4 - u2) * k) / 20, v6 + ((v8 - v6) * k) / 20]);
   return out;
@@ -758,6 +826,211 @@ function lepRodPocket(jonc, before330 = false) {
 }
 
 /**
+ * How far a cell's cloth billows out between its ribs at a section point:
+ * the program's `panels3d`, its `hautok(i, j)`, for the cell between its
+ * ribs i-1 and i (the design's numbers). The panel's width there, as cut
+ * wider by the skin tension and matched (`sm`), spans the straight distance
+ * between the two ribs' points (`s`) as a circular arc, whose height is
+ * found as the program finds it: the arc's centre stepped 301 times towards
+ * the chord and the first whose arc reaches `s` taken. That is the
+ * program's value, to its own steps, not the exact sagitta. Centimetres.
+ * `panels` from `lepPanels`; null where it has no panel there.
+ */
+function lepBillow(table, panels, i, j) {
+  const a = table.ribs[i - 2];
+  const b = table.ribs[i - 1];
+  if (!a?.section || !b?.section) return null;
+  const A = lepSectionCm(a);
+  const B = lepSectionCm(b);
+  const np2 = a.section.extrados;
+  const lo = np2 + a.section.intake - 1;
+  // The intake between has a strip of its own; a mini-rib never asks there.
+  if (j > np2 && j < lo) return null;
+  const upper = j <= np2;
+  const p = panels?.panels?.find((q) => q.cell === i - 1 && q.surface === (upper ? 'upper' : 'lower'));
+  if (!p) return null;
+  const edges = p.panel.matched ?? { left: p.panel.left, right: p.panel.right };
+  const own = upper ? np2 : A.n - lo + 1;
+  const extra = edges.left.length - own;
+  const k = extra + (upper ? np2 - j : j - lo);
+  const L = edges.left[k];
+  const R = edges.right[k];
+  if (!L || !R) return null;
+  const sm = Math.hypot(L[0] - R[0], L[1] - R[1]) * 100;
+  const pa = lepRibPoint(a, A.U[j - 1], A.V[j - 1]);
+  const pb = lepRibPoint(b, B.U[j - 1], B.V[j - 1]);
+  const s = Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]);
+  const hautmax = 0.5 * Math.sqrt(Math.abs(sm * sm - s * s));
+  const q = (sm * s) / (8.0 * hautmax + 0.00001);
+  const hautmmax = q - hautmax;
+  let h = 0;
+  for (let l = 0; l <= 300; l++) {
+    const hautm = ((l + 0.00001) / 300.0) * hautmmax * 4.0;
+    const tetha = Math.atan((0.5 * s) / hautm);
+    const radi = sm / (2.0 * tetha);
+    if (2.0 * radi * Math.sin(tetha) >= s) {
+      h = Math.abs(sm - s) <= 0.01 ? 0 : radi - hautm;
+      break;
+    }
+  }
+  return h;
+}
+
+/**
+ * The trailing-edge mini-ribs: section 2's last column, as the program
+ * cuts them (its 6.12.0, moved to 8.5.0.1 in 3.28).
+ *
+ * Mini-rib i sits in the cell outboard of rib i-1 and is that rib's section
+ * from the trailing edge forward over `pct` of its chord, rib i's figure.
+ * Its two edges are raised and lowered at their front by what the cell's
+ * cloth billows there (`lepBillow`) times section 37's 3001 factor, back to
+ * nothing over its 3001 length — straight or by a half cosine — so that it
+ * meets the billowed panel; each point is then moved out by the rib
+ * allowance along its segment's normal, the line closed through the
+ * trailing edge and across the front, which is not sewn. Three details are
+ * the program's own:
+ *
+ * - The billow is the cell inboard's, `hautok(i-1)`: the cell between ribs
+ *   i-2 and i-1, not the mini-rib's own. The first two cells take the
+ *   third's (its "provisional fix"; 3.28 fixed the second only).
+ * - Each point's normal is taken from a segment whose far end still carries
+ *   this point's rise, not its own.
+ * - Section 38's type 9 holes (3.30): a row of ellipses aft from the front,
+ *   each smaller, sized by the section's thickness there.
+ *
+ * 3.25 drew them differently, from the rib's own cutting line (its 6.11)
+ * and with no transition: `drawnBefore330` is that. Centimetres in, pieces
+ * in the program's centimetres, as the others are.
+ */
+function lepMiniRibs(doc, table, st, panels) {
+  const air = readAirfoils(doc);
+  const T = st.miniTransition;
+  const pieces = [];
+  const problems = [];
+  const notes = [];
+  if (T.mode && T.mode !== 1 && T.mode !== 3) {
+    notes.push(`mini-rib transition ${T.mode}, which the program reads and does not draw: drawn without one`);
+  }
+  const mode = T.mode === 1 || T.mode === 3 ? T.mode : 0;
+  const d = st.ribAllowanceMm * 0.1;
+  for (let i = 1; i <= table.ribs.length; i++) {
+    const pct = air[i - 1]?.miniRibPct ?? 0;
+    if (!(pct > 1 && pct !== 100)) continue;
+    // Mini-rib 1 is in the centre cell, between the centre rib and its mirror.
+    const r = table.ribs[Math.max(0, i - 2)];
+    if (!r?.section) { problems.push(`mini-rib ${i}: rib ${i - 1} has no section`); continue; }
+    const X = lepSectionCm(r);
+    const u = (j) => X.U[j - 1];
+    const v = (j) => X.V[j - 1];
+    const n = X.n;
+    const np2 = X.top;
+    const len = (r.chord * pct) / 100;
+    let je = null; let xe = 0; let ye = 0;
+    for (let j = 1; j <= np2 - 1; j++) {
+      if (u(1) - u(j) < len && u(1) - u(j + 1) >= len) {
+        je = j;
+        const e = len - (u(1) - u(j));
+        xe = u(j) - e;
+        ye = v(j) - (e * (v(j) - v(j + 1))) / (u(j) - u(j + 1));
+      }
+    }
+    let ji = null; let xi = 0; let yi = 0;
+    for (let j = n; j >= np2; j--) {
+      if (u(1) - u(j) < len && u(1) - u(j - 1) >= len) {
+        ji = j;
+        const e = len - (u(1) - u(j));
+        xi = u(j) - e;
+        yi = v(j) - (e * (v(j) - v(j - 1))) / (u(j) - u(j - 1));
+      }
+    }
+    if (je === null || ji === null) { problems.push(`mini-rib ${i}: ${pct}% of chord does not cross its section`); continue; }
+    let up = 0;
+    let down = 0;
+    if (mode) {
+      const cellOf = Math.max(2, i - 1);
+      const he = lepBillow(table, panels, cellOf, je);
+      const hi = lepBillow(table, panels, cellOf, ji);
+      if (he === null || hi === null) { problems.push(`mini-rib ${i}: no panel to take the cell's billow from`); continue; }
+      up = T.factor * he;
+      down = T.factor * hi;
+    }
+    const zone = (r.chord * T.lengthPct) / 100;
+    const rise = (j, x0, amp) => {
+      if (!mode || !(u(j) >= u(1) - len && u(j) <= u(1) - len + zone)) return 0;
+      const x = u(j) - x0;
+      return mode === 1 ? amp * (1 - x / zone) : (amp / 2) * (1 + Math.cos((Math.PI * x) / zone));
+    };
+    // The upper edge, trailing edge first (vectors 71 and 72).
+    const e71 = [];
+    const e72 = [];
+    for (let j = 1; j <= je; j++) {
+      const y = rise(j, xe, up);
+      e71[j] = [u(j), v(j) + y];
+      e71[j + 1] = [u(j + 1), v(j + 1) + y];
+      const al = Math.atan(-(e71[j][1] - e71[j + 1][1]) / (e71[j][0] - e71[j + 1][0]));
+      e72[j] = [e71[j][0] + d * Math.sin(al), e71[j][1] + d * Math.cos(al)];
+    }
+    {
+      const al = Math.atan(-(e71[je][1] - e71[je + 1][1]) / (e71[je][0] - e71[je + 1][0]));
+      e71[je + 1] = [xe, ye + up];
+      e72[je + 1] = [xe + d * Math.sin(al), ye + up + d * Math.cos(al)];
+    }
+    // The lower edge, trailing edge first.
+    const i71 = [];
+    const i72 = [];
+    for (let j = n; j >= ji; j--) {
+      const y = rise(j, xi, down);
+      i71[j] = [u(j), v(j) - y];
+      i71[j - 1] = [u(j - 1), v(j - 1) - y];
+      const al = Math.atan((i71[j][1] - i71[j - 1][1]) / (i71[j][0] - i71[j - 1][0]));
+      i72[j] = [i71[j][0] + d * Math.sin(al), i71[j][1] - d * Math.cos(al)];
+    }
+    {
+      const al = Math.atan((i71[ji - 1][1] - i71[ji][1]) / (i71[ji - 1][0] - i71[ji][0]));
+      i71[ji - 1] = [xi, yi - down];
+      i72[ji - 1] = [xi + d * Math.sin(al), yi - down - d * Math.cos(al)];
+    }
+    // Cut out of the trailing edge, round the upper edge, across the front
+    // and back along the lower edge.
+    const outline = [e71[1]];
+    for (let j = 1; j <= je + 1; j++) outline.push(e72[j]);
+    outline.push(e71[je + 1], i71[ji - 1]);
+    for (let j = ji - 1; j <= n; j++) outline.push(i72[j]);
+    outline.push(i71[n]);
+    const sewing = { left: e71.slice(1, je + 2), right: i71.slice(ji - 1, n + 1).reverse() };
+    // Section 38's type 9: from the front aft, each a step smaller, sized by
+    // the section's own thickness at the front; the program puts the centre
+    // the trailing edge's height below where it means to (it is nil here).
+    const holes = [];
+    const hm = st.holes.minirib;
+    if (hm && hm.count > 0) {
+      const hmax = ye - yi;
+      for (let q = 1; q <= hm.count; q++) {
+        const f = (hm.count + 2 - q) / (hm.count + 2);
+        const b = (f * hmax * hm.heightPct) / 100 / 2;
+        holes.push(lepEllipse(u(1) - (f * len + 0.05 * len), f * hmax * hm.yFactor - v(1), hm.ratio * b, b,
+          (-hm.angleDeg * Math.PI) / 180, st.ellipseSides));
+      }
+    }
+    // 3.25: the rib's own cutting line to the front, out to the front point
+    // along the last segment's normal and in to it.
+    const c16 = lepRibCutLine(r, st.ribAllowanceMm).map(([a, b]) => [a * 100, b * 100]);
+    let before330 = null;
+    if (c16.length === n + 1) {
+      const ae = Math.atan(-(v(je) - v(je + 1)) / (u(je) - u(je + 1)));
+      const ai = Math.atan((v(ji) - v(ji - 1)) / (u(ji) - u(ji - 1)));
+      before330 = [[u(1), v(1)], ...c16.slice(0, je), [xe + d * Math.sin(ae), ye + d * Math.cos(ae)], [xe, ye], [xi, yi],
+        [xi + d * Math.sin(ai), yi - d * Math.cos(ai)], ...c16.slice(ji - 1, n), [u(n), v(n)]];
+    }
+    pieces.push({
+      kind: 'minirib', rib: i, ribs: [i - 1, i], lengthPct: pct, rise: [up, down],
+      sewing, outline, holes, before330,
+    });
+  }
+  return { pieces, problems, notes };
+}
+
+/**
  * The design's internal structure (section 12), as its program cuts it.
  *
  * @returns {{ok, problems, pieces, totals, notReproduced, droppedHoles, settings}}
@@ -767,7 +1040,7 @@ function lepRodPocket(jonc, before330 = false) {
  *   line's length. A full diagonal also gives `drawnBefore330`: its cloth as
  *   the program drew it up to 3.25, the cut-outs inside a whole allowance.
  */
-export function lepStructure(doc, table) {
+export function lepStructure(doc, table, { panels = null } = {}) {
   const hv = parseHVRibs(doc);
   const st = lepStructureSettings(doc, table);
   const problems = [];
@@ -816,6 +1089,11 @@ export function lepStructure(doc, table) {
     droppedHoles += r.dropped;
     raw.push(r.piece);
   }
+  for (const e of hv.vribs ?? []) {
+    const r = lepVRib(table, st, e);
+    if (r.problem) { problems.push(r.problem); continue; }
+    raw.push(...r.pieces);
+  }
   for (const e of hv.other) notReproduced.add(`section 12 type ${e.type}`);
 
   // The rods' pockets (section 21), one a rod.
@@ -825,16 +1103,27 @@ export function lepStructure(doc, table) {
     const outline = lepRodPocket(j);
     if (!outline) { problems.push(`rib ${j.rib}: its rod (bloc ${j.bloc}) states no pocket`); continue; }
     raw.push({
-      kind: 'pocket', ribs: [j.rib, j.rib], rib: j.rib, bloc: j.bloc, rodType: j.type, sewing: null, outline, holes: [],
+      kind: 'pocket', ribs: [j.rib, j.rib], rib: j.rib, bloc: j.bloc, rodType: j.type, part: j.part,
+      sewing: null, outline, holes: [],
       before330: lepRodPocket(j, true),
     });
   }
 
-  // The trailing-edge mini-ribs (section 2's last column) are cut from the
-  // section as the program billows the cell over it, which this does not
-  // reproduce: counted, not built.
+  // The trailing-edge mini-ribs (section 2's last column), from the section
+  // and — where section 37 gives them a transition — from the billow of the
+  // cell, which takes the design's own panels.
   const miniRibs = readAirfoils(doc).filter((a) => a.miniRibPct > 1 && a.miniRibPct !== 100).length;
-  if (miniRibs) notReproduced.add(`${miniRibs} trailing-edge mini-ribs`);
+  if (miniRibs) {
+    let P = panels;
+    if (!P && (st.miniTransition.mode === 1 || st.miniTransition.mode === 3)) {
+      try { P = lepPanels(doc, table); } catch (e) { P = null; }
+    }
+    const mr = lepMiniRibs(doc, table, st, P);
+    // A mini-rib that cannot be built is said, and the rest of the structure
+    // stands without it.
+    for (const n of [...mr.problems, ...mr.notes]) notReproduced.add(n);
+    raw.push(...mr.pieces);
+  }
 
   // A piece on the centre rib alone — its rods' pockets — is cut once for
   // the wing; every other is cut once a side.
@@ -848,9 +1137,12 @@ export function lepStructure(doc, table) {
     const out = {
       kind: p.kind,
       ribs: p.ribs,
-      copies: centreRib && p.ribs[0] === 1 && p.ribs[1] === 1 ? 1 : 2,
+      // The centre cell's mini-rib, between the centre rib and its mirror, once too.
+      copies: (centreRib && p.ribs[0] === 1 && p.ribs[1] === 1) || (p.kind === 'minirib' && p.rib === 1) ? 1 : 2,
       ...(p.kind === 'diagonal' ? { rib: p.rib, side: p.side, rows: p.rows } : {}),
-      ...(p.kind === 'pocket' ? { rib: p.rib, bloc: p.bloc, rodType: p.rodType } : {}),
+      ...(p.kind === 'minirib' ? { rib: p.rib, lengthPct: p.lengthPct, riseM: p.rise.map((x) => x / 100) } : {}),
+      ...(p.kind === 'vrib' ? { rib: p.rib, side: p.side } : {}),
+      ...(p.kind === 'pocket' ? { rib: p.rib, bloc: p.bloc, rodType: p.rodType, ...(p.part ? { part: p.part } : {}) } : {}),
       ...(p.row ? { row: p.row } : {}),
       ...(p.chordPct ? { chordPct: p.chordPct } : {}),
       ...(p.sewing ? { sewing: { left: m(p.sewing.left), right: m(p.sewing.right) } } : {}),
@@ -863,6 +1155,10 @@ export function lepStructure(doc, table) {
       cutAreaM2: (outlineCm2 - holesCm2) / 1e4,
       perimeterM: lepRingLength(p.outline) / 100,
     };
+    if (p.kind === 'minirib' && p.before330) {
+      out.drawnBefore330 = { outlineAreaM2: lepRingArea(p.before330) / 1e4, cutAreaM2: lepRingArea(p.before330) / 1e4,
+        perimeterM: lepRingLength(p.before330) / 100 };
+    }
     if (p.kind === 'pocket' && p.before330) {
       out.drawnBefore330 = { outlineAreaM2: lepRingArea(p.before330) / 1e4, cutAreaM2: lepRingArea(p.before330) / 1e4,
         perimeterM: lepRingLength(p.before330) / 100 };
@@ -879,7 +1175,7 @@ export function lepStructure(doc, table) {
   });
 
   const totals = {};
-  for (const kind of ['diagonal', 'strap', 'between', 'pocket']) {
+  for (const kind of ['diagonal', 'vrib', 'strap', 'between', 'pocket', 'minirib']) {
     const of = pieces.filter((p) => p.kind === kind);
     totals[kind] = {
       count: of.length,
@@ -908,17 +1204,21 @@ export function lepStructure(doc, table) {
 /** What each kind of piece is called, one and many. */
 const LEP_PIECE_NAMES = {
   diagonal: ['full diagonal', 'full diagonals'],
+  vrib: ['V-rib strip', 'V-rib strips'],
   between: ['piece between two ribs', 'pieces between two ribs'],
   strap: ['strap', 'straps'],
   pocket: ['rod pocket', 'rod pockets'],
+  minirib: ['trailing-edge mini-rib', 'trailing-edge mini-ribs'],
 };
 
-/** A short label for a piece on a cutting file: D2L, S1-2/1, V4-5/11, P3/1. */
+/** A short label for a piece on a cutting file: D2L, S1-2/1, V4-5/11, P3/1, M5. */
 function lepPieceLabel(p) {
+  if (p.kind === 'minirib') return `M${p.rib}`;
   if (p.kind === 'diagonal') return `D${p.rib}${p.side === 'left' ? 'L' : 'R'}`;
+  if (p.kind === 'vrib') return `V${p.rib}${p.side === 'left' ? 'L' : 'R'}/${p.row}`;
   if (p.kind === 'strap') return `S${p.ribs[0]}-${p.ribs[1]}/${p.row}`;
   if (p.kind === 'between') return `V${p.ribs[0]}-${p.ribs[1]}/${p.chordPct[0]}`;
-  return `P${p.rib}/${p.bloc}`;
+  return `P${p.rib}/${p.bloc}${p.part ? p.part[0].toUpperCase() : ''}`;
 }
 
 /** The pieces as items the nester takes: each outline split into two runs. */

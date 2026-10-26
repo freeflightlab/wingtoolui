@@ -39,7 +39,7 @@ Source: <https://laboratoridenvol.com/paragliderdesign/index.html> (revised
 | `risers.html` §9.1–9.2 | Risers, 4-riser speed system | `risers.js`, `lineplan.js` (riser layouts) | Riser layouts in the interface; the speed system and accelerated polar in the core and the suite |
 | `risers.html` §9.3–9.4 | Trimmers, vario seat | `risers.js` (trimmers) | Trimmers in the core and the suite; no vario seat |
 | ch.10 | Materials | `loads.js`, `fabric.js`, `reinforcement.js`, `bom.js` | Lines, cloth, rods, tabs and the bill, from suppliers' figures where they publish them |
-| `leparagliding.en.html` | The author's own software | `lep.js`, `leplines.js`, `lepstructure.js` | The format read and written (`docs/lep-format.md`); a design's own ribs, lines, rods and holes computed as its program computes them (validation §2.6), and its internal structure cut as it cuts it (`docs/internal-structure.md`) |
+| `leparagliding.en.html` | The author's own software | `lep.js`, `leplines.js`, `lepstructure.js` | The format read and written (`docs/lep-format.md`); a design's own ribs, lines, rods and holes computed as its program computes them (validation §2.6), its panels and ribs cut as it cuts them (`docs/panels.md`), and its internal structure too (`docs/internal-structure.md`) |
 | `gnuLAB2` | Complete example wing | `data/reference/lep` | The Swoop2 stands in: a complete design from the same author, loadable in the interface |
 | `glossary.html` | EN/FR/ES/CA glossary | — | Not used |
 | `links.html` | References | — | Bibliography |
@@ -67,8 +67,8 @@ page describing it is not read as describing the tool.
 | `inflated.js` | the flying shape against the built one | core and suite |
 | `intake.js` | the cell opening and its stagnation point | the intake note on the rib view; the rest core and suite |
 | `lep.js` | the LEparagliding file, read and written | yes |
-| `leplines.js` | an imported design's own geometry and lines | yes |
-| `lepstructure.js` | an imported design's diagonals, straps, pieces between ribs and rod pockets, as its program cuts them | the bill and the Diagonals DXF |
+| `leplines.js` | an imported design's own geometry and lines, rods, holes, panels and rib cutting lines | yes |
+| `lepstructure.js` | an imported design's diagonals, V-rib strips, straps, pieces between ribs, rod pockets and trailing-edge mini-ribs, as its program cuts them | the bill and the Diagonals DXF |
 | `lineplan.js` | risers and cascade; readers for six makers' sheets | the plan; the sheet readers in the suite and tools |
 | `lines.js` | chapter 8's weighted-centroid cascade | core and suite; the interface's cascade is `lineplan.js` |
 | `loads.js` | loads, line choice, stretch, length chain, drag, load cases | yes; collapse, gust and envelope cases are core and suite |

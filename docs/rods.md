@@ -6,10 +6,11 @@ when it is not pressurised: above all, the radius of the nose.
 
 ## 1. Two kinds
 
-The one complete design in the repository, Laboratori d'envol's Swoop2,
+Laboratori d'envol's Swoop2, the first complete design in the repository,
 defines its rods in section 21 of its file, and its design program prints
 every rod it makes. That table is ground truth and is in
-`data/reference/swoop2-joncs.tsv`.
+`data/reference/swoop2-joncs.tsv`. (The Tuluaq-19 has a nose rod on each of
+its first fourteen ribs; the gnuC2-23 a shark nose, section 6.)
 
 | kind | where it runs | on the Swoop2 | length |
 | --- | --- | --- | --- |
@@ -147,9 +148,13 @@ It opens with a nose rod back to that 18.5%, which is what it meant.
 
 ## 6. Not covered
 
-- **LEparagliding's types 2, 3 and 5.** It has five kinds; types 1 and 4 are
-  the two the Swoop2 uses and the two built here. A file using another is
-  reported, not drawn.
+- **LEparagliding's types 2 and 5.** It has five kinds; types 1 and 4 are
+  the two the Swoop2 uses, and type 3 the gnuC2-23's shark nose — an upper
+  rod from the top round the nose to the intake and a lower one along the
+  intake, each bent by its own parabola at its end, built as its program
+  builds them and within its printed 0.05 cm on all 60
+  (`docs/gnuc2-23.md`). A file using another is reported, not drawn. For a
+  wing that is not a file, types 1 and 4 are what is built.
 - **Stiffness.** A rod is a length and a mass. Whether a 1.5 mm rod holds a
   nose that a 1.1 mm one lets fold is not computed.
 - **Pockets.** The pocket cloth is not weighed; the bill says so.

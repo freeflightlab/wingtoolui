@@ -93,21 +93,30 @@ shape the rows that carry the wing are 88 mm from the 28 sheets with
 per-anchor totals on average; the brake is 91 to 197 mm from them, and is not
 yet understood.
 
-**An imported design is cut as its program cuts it, all but its mini-ribs.**
-Every piece of both complete designs' cutting files was measured. Their
+**An imported design is cut as its program cuts it.**
+Every piece of the three complete designs' cutting files was measured. Their
 panels — surfaces parted under the nose, skin tension, intake closures, the
-design's own allowances — are within 0.04% of the Swoop2's and 0.14% of the
-Tuluaq's, piece by piece, and 0.03% in total. What they sew inside their
-cells — full diagonals, straps, pieces between two ribs and rod pockets, read
-from the program's own source — is within a part in ten thousand of every
-piece in both files, and the bill now carries it: 11.9 and 10.5 m² for the
-wing where it had 3.9 and 5.5. Their trailing-edge mini-ribs, which the
-program cuts from its own billow, are not built: 0.84 and 0.89 m², listed
-as missing. The Tuluaq's tip panel, the 0.14%, is not explained.
+design's own allowances, the program's seam matching and the gnuC2-23's 3D
+shaping — are within 0.034% of the Swoop2's and 0.011% of the Tuluaq's and
+the gnuC2-23's, piece by piece; the one exception is the gnuC2-23's tip
+front piece, whose outline crosses itself over its flat rib, 2.5% off. The
+Tuluaq's tip panel, 0.14% off and unexplained a round ago, was the seam
+matching. Every rib is cut as the program cuts it, to 0.002% on all three,
+and its holes are the program's polygons. What they sew inside their cells —
+full diagonals, V-rib strips, straps, pieces between two ribs and rod
+pockets, read from the program's own source — is within a part in ten
+thousand of every piece in the three files, or the file's own rounding, and
+the bill carries it, and the ribs at their cut size: 11.9, 10.5 and 11.3 m²
+of internal structure for the wing. So are their trailing-edge mini-ribs,
+the last pieces that were not built, raised at the front to the billow of
+the cell as the program finds it from the panels: all 70, to the files'
+totals, and the gnuC2-23's piece by piece. Where the program lays a closed
+intake out by itself and joins it to the panel, the tool is 0.01 to 0.03%
+off and does not yet know why.
 
 ## 5. What is missing
 
-**48 open items in the roadmap.** The substantial ones:
+**49 open items in the roadmap.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
@@ -115,8 +124,6 @@ as missing. The Tuluaq's tip panel, the 0.14%, is not explained.
 - Parts of the core with no way in from the interface: the speed system and
   trimmers, the coupled balance, the vortex lattice, the inflated shape and
   3D shaping. Each says so where it is documented.
-- An imported design's trailing-edge mini-ribs, cut from its program's own
-  billow.
 - Asymmetric and left/right-independent line plans.
 - Nesting: 63.5% of the roll on the default wing, against panels that fill
   94% of their own boxes.

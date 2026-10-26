@@ -13,8 +13,8 @@ wingtoolui/
 ├── tools/                 the other check stages, the interface harness,
 │                          importers, figures, and the search tool
 ├── data/reference/        143 tables of published and supplied data, and
-│                          two complete designs' own files in lep/
-├── docs/                  42 notes on what was built, and what it cost
+│                          three complete designs' own files in lep/
+├── docs/                  44 notes on what was built, and what it cost
 ├── build.py               bundles src/ into dist/, with a collision guard
 ├── package.json           named scripts; no dependencies to install
 ├── MANIFEST.txt           every file, generated

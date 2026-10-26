@@ -12,7 +12,8 @@ import { freeBodyCheck } from '../src/core/freebody.js';
 import {
   lepLineGeometry, lepPlanForTool, lepRibTable, lepAnchorPoint, readLepAirfoil, lepJoncs, lepHoles,
   lepLineSelection, lepLengthChain, lepLineTypes, lepRibPoint,
-  lepPanels, lepSeamAllowances, lepSkinTension, lepVents,
+  lepPanels, lepSeamAllowances, lepSkinTension, lepVents, lepShaping, lepSeamMatching,
+  lepRibCutLine, lepEllipseSides,
 } from '../src/core/leplines.js';
 import { toRibPlane, hasCentreRib, ribCopies, wholeWingCounts, ribSurfacePoint } from '../src/core/wing3d.js';
 import {
@@ -9059,7 +9060,8 @@ section('Tuluaq-19: a second complete design, reproduced');
   // Section 4 holes, against the design's own cutting file.
   const cut = readFileSync('data/reference/lep/tuluaq19-cut-parts.tsv', 'utf8').split('\n')
     .filter((l) => l.startsWith('rib\t')).map((l) => l.split('\t'));
-  const holesT = lepHoles(doc, t);
+  // Drawn by 3.25, whose ellipses have 39 sides.
+  const holesT = lepHoles(doc, t, { sides: 39 });
   const areaOf = (o) => {
     let a = 0;
     for (let i = 0, k = o.length - 1; i < o.length; k = i++) a += o[k][0] * o[i][1] - o[i][0] * o[k][1];
@@ -9071,12 +9073,13 @@ section('Tuluaq-19: a second complete design, reproduced');
     if (Number(n) !== mine.length) worstHole = Infinity;
     if (!mine.length) continue;
     const a = mine.reduce((s, h) => s + areaOf(h.outline), 0) * 1e4;
-    worstHole = Math.max(worstHole, Math.abs(a / Number(holesCm2) - 1));
+    // To the hundredth of a cm2 the file is rounded to.
+    worstHole = Math.max(worstHole, Math.abs(a - Number(holesCm2)));
   }
   check('nine holes on each of ribs 1-17 and none on the tip, as its cutting file cuts them',
     holesT.byRib.size === 17 && cut.length === 18 && Number.isFinite(worstHole));
-  check('each rib\'s holes take out the area its cutting file does, to its polygons\' 0.4%',
-    worstHole < 0.005, `worst ${(worstHole * 100).toFixed(2)}%`);
+  check('each rib\'s holes take out the area its cutting file does, its program\'s 39-sided polygons, to the file\'s hundredth of a cm2',
+    worstHole <= 0.006, `worst ${worstHole.toFixed(4)} cm2`);
 
   // Section 12, the internal structure: full diagonals and straps.
   const hvT = parseHVRibs(doc);
@@ -9085,6 +9088,211 @@ section('Tuluaq-19: a second complete design, reproduced');
     hvT.note);
   check('and the diagonals are 40 pieces: rib 16 hangs one each side',
     lepDiagonalPieces(hvT).length === 40);
+}
+
+section('gnuC2-23: a third complete design, reproduced');
+
+{
+  // Laboratori d'envol's gnuC2-23 (23 m2, 30 cells a side and a zero-width
+  // one at the centre, program 3.28, LF line ends) came with its program's
+  // output and its cutting files, and with what neither of the first two
+  // designs has: a shark nose (section 21's rod type 3, an upper and a lower
+  // rod on every rib), V-ribs from one anchor to the ribs beside it (section
+  // 12's type 3), a flat tip rib (section 30's 0.0), 3D shaping that cuts
+  // every upper panel in two and cells closed on a diagonal. Its panels and
+  // internal pieces are held to its cutting file in the two sections after
+  // this; here the design itself is held to its program's printed output.
+  // It found one fault here: the flat tip rib's phi came out 0.70 degrees
+  // against the program's 0.01, its plane taken from a lower surface that
+  // lies on its chord.
+  const text = readFileSync('data/reference/lep/gnuc2-23-20260429.lep', 'latin1');
+  const secText = readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1');
+  const out = readFileSync('data/reference/lep/gnuc2-23-lep-out.txt', 'latin1');
+  const doc = parseLep(text);
+  const t = lepRibTable(doc, { airfoils: { 'gnuC2.txt': secText } });
+  const g = lepLineGeometry(doc, { airfoils: { 'gnuC2.txt': secText } });
+  check('the line geometry builds from the file and its section, nothing noted', g.ok && g.notes.length === 0,
+    g.problems.concat(g.notes).join('; '));
+  check('and the file writes back byte for byte, its LF line ends and the sections not read included',
+    !text.includes('\r') && writeLep(doc) === text && doc.sections.length === 35);
+
+  // Section 4 of lep-out.txt: every line.
+  const ref = [];
+  for (const m of out.matchAll(/^\s*\d+\s+(\d+)\s+(\d+)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+L =\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s*$/gm)) {
+    ref.push({ plan: +m[1], level: +m[2], order: +m[3], L: +m[4], cut: +m[5], load: +m[6], type: +m[7] });
+  }
+  let worstL = 0; let worstCut = 0; let worstLoad = 0; let typeMiss = 0; let found = 0;
+  for (const r of ref) {
+    const l = g.lines.find((x) => x.plan === r.plan && x.level === r.level && x.order === r.order);
+    if (!l) continue;
+    found += 1;
+    worstL = Math.max(worstL, Math.abs(l.length - r.L));
+    worstCut = Math.max(worstCut, Math.abs(l.cutLength - r.cut));
+    worstLoad = Math.max(worstLoad, Math.abs(l.loadKg - r.load));
+    if (l.type !== r.type) typeMiss += 1;
+  }
+  check('all 95 lines are found, riser to brake', ref.length === 95 && found === 95 && g.lines.length === 95,
+    `${found} of ${ref.length}`);
+  check('every line length matches to a tenth of a millimetre', worstL < 0.01, `worst ${(worstL * 10).toFixed(3)} mm`);
+  check('and every corrected (cut) length', worstCut < 0.01, `worst ${(worstCut * 10).toFixed(3)} mm`);
+  check('and every load the program assigns', worstLoad < 0.006, `worst ${worstLoad.toFixed(4)} kg`);
+  check('and every line type', typeMiss === 0, `${typeMiss} differ`);
+  near('total without loops is the printed 274.50 m', g.totals.cutM, 274.50, 0.006, ' m');
+  near('and with loops the printed 312.42 m', g.totals.withLoopsM, 312.42, 0.006, ' m');
+  near('the lineset weighs the printed 0.526 kg, risers included', g.totals.weightKg, 0.526, 0.0006, ' kg');
+  near('and has the printed 0.481 m2 of frontal area', g.totals.lineAreaM2, 0.481, 0.0006, ' m2');
+  const printedByType = { 1: 4.26, 2: 94.55, 3: 113.54, 4: 98.14, 6: 6.20 };
+  check('the metres to buy of every type are the printed ones, and the type it does not use is not bought',
+    Object.entries(printedByType).every(([ty, m]) => Math.abs((g.totals.byType[ty]?.metres ?? 0) - m) < 0.006)
+    && !(g.totals.byType[5]?.metres > 0),
+    Object.values(g.totals.byType).map((x) => `${x.label} ${x.metres.toFixed(2)}`).join(', '));
+  const typesG = lepLineTypes(doc);
+  check('its section 16 types are read: six, a round 5 mm riser among them',
+    typesG.size === 6 && typesG.get(1).label === 'Riser' && typesG.get(1).section === 'round'
+    && typesG.get(1).diameterMM === 5 && typesG.get(5).label === 'Line100U' && typesG.get(5).gramsPerMetre === 0.43
+    && typesG.get(6).loopCm === 12,
+    [...typesG.values()].map((x) => `${x.label} ${x.diameterMM} mm`).join(', '));
+
+  // Sections 1 and 2.
+  near('karabiner depth 723.12 cm', g.karabiner[2], 723.12, 0.006, ' cm');
+  near('karabiner under the calage point, 77.76 cm', g.karabiner[1], 77.76, 0.006, ' cm');
+  near('and 21.00 cm out from the centre, as section 2 prints it', g.karabiner[0], 21.00, 0.006, ' cm');
+  near('angle of attack 4.51 degrees', g.aoaDeg, 4.51, 0.006, ' deg');
+  near('assiette 0.93 degrees', g.assietteDeg, 0.93, 0.006, ' deg');
+
+  // Section 3: chords; section 30: the tip rib flat.
+  const chords = [235.63, 235.47, 234.96, 234.14, 232.98, 231.50, 229.68, 227.55, 225.08, 222.27, 219.14,
+    215.67, 211.87, 207.74, 203.27, 198.46, 193.32, 187.81, 181.94, 175.66, 168.68, 160.99, 152.60,
+    143.68, 134.19, 124.14, 113.46, 102.10, 89.86, 76.44, 61.07];
+  check('every rib\'s chord is the printed one',
+    t.ribs.length === 31 && t.ribs.every((r, i) => Math.abs(r.chord - chords[i]) < 0.0051),
+    `worst ${Math.max(...t.ribs.map((r, i) => Math.abs(r.chord - chords[i]))).toFixed(4)} cm`);
+  check('and the tip rib\'s section is thinned to nothing, as section 30 says',
+    t.ribs.slice(0, 30).every((r) => r.thickness === 1) && t.ribs[30].thickness === 0);
+
+  // Section 6: contour lengths, mm, the flat tip rib's a chord and the
+  // nose's wrap to the intake.
+  const contour = { 1: [2590.91, 2231.67], 9: [2474.88, 2131.73], 30: [840.47, 723.93], 31: [635.13, 571.00] };
+  let worstContour = 0;
+  for (const [i, [ex, inn]] of Object.entries(contour)) {
+    const r = t.ribs[i - 1];
+    const c = r.chord * 10;
+    const P = r.section.points.map(([x, y]) => [x * c, y * c * r.thickness]);
+    const arc = (a, b) => {
+      let L = 0;
+      for (let k = a; k < b; k++) L += Math.hypot(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1]);
+      return L;
+    };
+    const s0 = r.section.extrados + r.section.intake - 1;
+    worstContour = Math.max(worstContour,
+      Math.abs(arc(0, r.section.extrados - 1) - ex), Math.abs(arc(s0, P.length - 1) - inn));
+  }
+  check('rib contour lengths match section 6, root to tip, the flat tip rib included',
+    worstContour < 0.02, `worst ${worstContour.toFixed(3)} mm`);
+
+  // Section 12: phi and chi on the tool's own wing. This design turns its
+  // ribs into the glide path (section 1's rotation), so phi is nil.
+  const afG = parseAirfoilText(secText, 'gnuC2');
+  const designG = lepToDesign(doc, { sections: { 'gnuC2.txt': afG } });
+  const wingG = buildWing({
+    planform: discretePlanform(designG.planformRows), lobe: null, airfoil: afG,
+    explicitRibs: designG.explicitRibs, pointsPerSurface: 80, alphaDeg: g.aoaDeg,
+  });
+  const phiG = [0, 0, 0, 0, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0, 0, 0.01, 0.01, 0,
+    0.01, 0.01, 0, 0.01, 0, 0.01, 0.01, 0.01, 0.01, 0, 0, 0.01];
+  const chiG = [4.51, 4.51, 4.51, 4.52, 4.52, 4.53, 4.54, 4.56, 4.57, 4.59, 4.60, 4.62, 4.64, 4.65, 4.67, 4.70,
+    4.73, 4.76, 4.78, 4.79, 4.82, 4.86, 4.92, 4.98, 5.04, 5.07, 5.13, 5.21, 5.31, 5.46, 7.22];
+  const dPhiG = Math.max(...wingG.ribs.map((rb, i) => Math.abs(rb.phiDeg - phiG[i])));
+  const dChiG = Math.max(...wingG.ribs.map((rb, i) => Math.abs(rb.chiDeg - chiG[i])));
+  check('phi matches every rib, the flat tip rib\'s 0.01 degrees included', wingG.ribs.length === 31 && dPhiG < 0.0101,
+    `worst ${dPhiG.toFixed(4)} deg; the tip ${wingG.ribs[30].phiDeg.toFixed(4)}`);
+  check('and chi, the local angle of attack, 7.22 at the tip', dChiG < 0.0101, `worst ${dChiG.toFixed(4)} deg`);
+
+  // Section 1: the main parameters, flat and projected, on the tool's own wing.
+  const mG = planformMetrics(discretePlanform(designG.planformRows));
+  const projG = projectedArea(wingG);
+  const mainG = [
+    ['flat area', mG.area, 23.00], ['flat span', mG.span, 11.98], ['flat aspect ratio', mG.aspectRatio, 6.25],
+    ['projected area', projG, 19.60], ['projected span', designG.projectedSpan, 9.67],
+    ['projected aspect ratio', designG.projectedSpan ** 2 / projG, 4.77],
+  ];
+  check('its main parameters are the printed ones: 23.00 m2, 11.98 m, 6.25 flat; 19.60 m2, 9.67 m, 4.77 projected',
+    mainG.every(([, v, p]) => Math.abs(v - p) < 0.0051),
+    mainG.map(([n, v]) => `${n} ${v.toFixed(3)}`).join(', '));
+
+  // Section 8: a shark nose, an upper and a lower rod on every rib but the
+  // flat tip.
+  const jG = lepJoncs(doc, t);
+  const sup = [56.8, 56.8, 56.6, 56.4, 56.2, 55.8, 55.4, 54.8, 54.2, 53.6, 52.8, 52.0, 51.1, 50.1, 49.0, 47.8,
+    46.6, 45.2, 43.8, 42.3, 40.6, 38.8, 36.8, 34.6, 32.3, 29.9, 27.3, 24.6, 21.7, 18.4];
+  const inf = [32.9, 32.8, 32.8, 32.6, 32.5, 32.3, 32.0, 31.7, 31.4, 31.0, 30.5, 30.0, 29.5, 28.9, 28.2, 27.6,
+    26.8, 26.1, 25.2, 24.3, 23.4, 22.3, 21.1, 19.8, 18.5, 17.1, 15.6, 14.1, 12.4, 10.5];
+  const rodsOf = (part) => jG.joncs.filter((x) => x.part === part).sort((a, b) => a.rib - b.rib);
+  const rodsOff = (part, printed) => Math.max(...rodsOf(part).map((x, i) => Math.abs(x.lengthCm - printed[x.rib - 1])));
+  check('its shark nose is read: 30 upper rods and 30 lower, one of each on ribs 1-30, bloc 1 of type 3',
+    jG.ok && jG.joncs.length === 60 && rodsOf('upper').length === 30 && rodsOf('lower').length === 30
+    && rodsOf('upper').every((x, i) => x.rib === i + 1 && x.type === 3 && x.bloc === 1),
+    `${jG.joncs.length} rods`);
+  check('and every rod is the printed length, upper and lower',
+    rodsOff('upper', sup) < 0.051 && rodsOff('lower', inf) < 0.051,
+    `worst ${rodsOff('upper', sup).toFixed(3)} cm above, ${rodsOff('lower', inf).toFixed(3)} below`);
+  near('and both sides come to the printed 42.32 m', jG.bothSidesM, 42.32, 0.006, ' m');
+
+  // Section 4 holes, against the design's own cutting file.
+  const cut = readFileSync('data/reference/lep/gnuc2-23-cut-parts.tsv', 'utf8').split('\n')
+    .filter((l) => l.startsWith('rib\t')).map((l) => l.split('\t'));
+  // Drawn by 3.28, whose ellipses have 39 sides too.
+  const holesG = lepHoles(doc, t, { sides: 39 });
+  const areaOf = (o) => {
+    let a = 0;
+    for (let i = 0, k = o.length - 1; i < o.length; k = i++) a += o[k][0] * o[i][1] - o[i][0] * o[k][1];
+    return Math.abs(a / 2);
+  };
+  let worstHole = 0;
+  for (const [, ribNo, , , n, holesCm2] of cut) {
+    const mine = holesG.byRib.get(Number(ribNo) - 1) ?? [];
+    if (Number(n) !== mine.length) worstHole = Infinity;
+    if (!mine.length) continue;
+    const a = mine.reduce((s, h) => s + areaOf(h.outline), 0) * 1e4;
+    // To the hundredth of a cm2 the file is rounded to.
+    worstHole = Math.max(worstHole, Math.abs(a - Number(holesCm2)));
+  }
+  check('nine holes on each of ribs 1-30 and none on the flat tip, as its cutting file cuts them',
+    holesG.byRib.size === 30 && cut.length === 31 && Number.isFinite(worstHole));
+  check('each rib\'s holes take out the area its cutting file does, its program\'s 39-sided polygons, to the file\'s hundredth of a cm2',
+    worstHole <= 0.006, `worst ${worstHole.toFixed(4)} cm2`);
+
+  // Section 12: what it sews inside, every entry read.
+  const hvG = parseHVRibs(doc);
+  check('its 117 internal entries are 6 straps, 93 pieces between two ribs and 18 V-ribs, none unread',
+    hvG.count === 117 && hvG.straps.length === 6 && hvG.general.length === 93 && hvG.vribs.length === 18
+    && hvG.diagonals.length === 0 && hvG.notUnderstood === 0,
+    hvG.note);
+  check('the V-ribs run to 24 strips: from ribs 20, 22, 24, 26 and 29, three rows, to one side or both',
+    lepDiagonalPieces(hvG).length === 24
+    && hvG.vribs.map((v) => `${v.rib}${v.left ? 'L' : ''}${v.right ? 'R' : ''}`).filter((x, i, a) => a.indexOf(x) === i).join() === '20R,22LR,24LR,26L,26R,29L');
+  check('and with the ribs to place them, the 27 pieces between ribs that run from an anchor to the next rib\'s top are diagonals too',
+    lepDiagonalPieces(hvG, t).length === 51);
+
+  // Three risers: the stabilo lines run from the C riser to the A and B
+  // rows of the last ribs, and the program puts 40, 40 and 20% on the rows.
+  const planG = lepPlanForTool(g);
+  const stabG = planG.lines.filter((l) => l.level === 'upper' && l.row === 'S');
+  check('three risers, and its four stabilo lines are on the C riser, to the A and B rows of ribs 29 and 31',
+    [...new Set(planG.lines.filter((l) => l.riser !== 'K').map((l) => l.riser))].sort().join() === 'A,B,C'
+    && stabG.length === 4 && stabG.every((l) => l.riser === 'C' && ['A', 'B'].includes(l.anchorRow) && [28, 30].includes(l.ribIndex)),
+    stabG.map((l) => `${l.name} ${l.riser}->${l.anchorRow} rib ${l.ribIndex + 1}`).join(', '));
+  const kgG = {};
+  for (const l of g.lines.filter((x) => x.terminal && !x.brake)) {
+    const r = 'ABC'[l.paths[0].row - 1];
+    kgG[r] = (kgG[r] ?? 0) + l.loadKg;
+  }
+  const kgAllG = Object.values(kgG).reduce((x, y) => x + y, 0);
+  check('which carry 40, 40 and 20% of the load',
+    Math.abs(kgG.A / kgAllG - 0.4) < 0.001 && Math.abs(kgG.B / kgAllG - 0.4) < 0.001 && Math.abs(kgG.C / kgAllG - 0.2) < 0.001,
+    Object.entries(kgG).map(([r, v]) => `${r} ${((100 * v) / kgAllG).toFixed(1)}%`).join(', '));
+  check('and its section 5 asks for the program\'s seam matching, 1000 and 1.0',
+    JSON.stringify(lepSeamMatching(doc)) === '{"ndif":1000,"xndif":1,"upperPct":15,"lowerPct":20}');
 }
 
 section('The panels a design cuts, as its program cuts them');
@@ -9129,15 +9337,17 @@ section('The panels a design cuts, as its program cuts them');
         return { cell: x.cell, d: (x.cutAreaM2 * 1e4) / m.cm2 - 1, open: name === 'Swoop2' && surface === 'upper' && x.cell === 25 };
       });
       const worst = off.filter((x) => !x.open).reduce((m, x) => (Math.abs(x.d) > Math.abs(m.d) ? x : m), { d: 0 });
-      check(`${name}: every ${surface} panel is cut to its cutting file's area`,
-        Math.abs(worst.d) < 0.0015 && off.filter((x) => x.open).every((x) => Math.abs(x.d) < 0.01),
+      // To five parts in ten thousand, since the program's seam matching is
+      // reproduced: the Tuluaq's tip panel was 0.14% off without it.
+      check(`${name}: every ${surface} panel is cut to its cutting file's area, to 0.05%`,
+        Math.abs(worst.d) < 0.0005 && off.filter((x) => x.open).every((x) => Math.abs(x.d) < 0.01),
         `worst ${(worst.d * 100).toFixed(3)}%, cell ${worst.cell}; the ${surface} surface ${(P.totals[surface].cutM2).toFixed(4)} m2 `
         + `against ${total.toFixed(4)} a side`);
       if (theirs.every((x) => Number.isFinite(x.cm) && x.cm > 0)) {
         const dP = Math.max(...mine.map((x) => Math.abs(perim(x.panel.cut.left.concat(x.panel.cut.right.slice().reverse())) * 100
           - theirs.find((y) => y.cell === x.cell).cm)));
-        check(`${name}: and to its outline: every ${surface} panel's cut line is the file's length to 3 mm`,
-          dP < 0.3, `worst ${(dP * 10).toFixed(1)} mm`);
+        check(`${name}: and to its outline: every ${surface} panel's cut line is the file's length to 2 mm`,
+          dP < 0.2, `worst ${(dP * 10).toFixed(1)} mm`);
       }
     }
   }
@@ -9173,6 +9383,198 @@ section('The panels a design cuts, as its program cuts them');
   check('the upper panel wraps the nose to the intake: its front end is on the lower surface',
     r1.developed.left.length === secQ.extrados && frontQ[1] < 0 && frontQ[0] > 0.01,
     `it ends ${(frontQ[0] * 100).toFixed(1)}% of chord back, ${(-frontQ[1] * 100).toFixed(1)}% under the chord line`);
+
+  // The program makes every sewing edge as long as the rib it is sewn to:
+  // over-width moves an edge and lengthens or shortens it, and its section
+  // 5's "1000 1.0" stretches the edge's last part back to the rib's length
+  // (its output's section 6 prints them equal). Without it the Tuluaq's
+  // tip panel was 0.14% off its file; it is the panel's END that moves.
+  check('the designs\' own seam matching is read: section 5\'s 1000 and 1.0, over the last 15% above and 20% below',
+    JSON.stringify(lepSeamMatching(docQ)) === '{"ndif":1000,"xndif":1,"upperPct":15,"lowerPct":20}');
+  const lenOf = (pts) => { let L = 0; for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); return L; };
+  const tQ = lepRibTable(docQ, { airfoils: { 'gnua.txt': readFileSync('data/reference/lep/tuluaq19-gnua.txt', 'latin1') } });
+  let worstSeam = 0;
+  for (const x of PQ.panels.filter((q) => q.surface === 'upper')) {
+    for (const [side, rib] of [['left', tQ.ribs[x.cell - 1]], ['right', tQ.ribs[x.cell]]]) {
+      const s0 = rib.section;
+      const contour = lenOf(s0.points.slice(0, s0.extrados).map(([u, v]) => [u * rib.chord / 100, v * rib.chord * rib.thickness / 100]));
+      const edge = x.panel.matched[side].slice(x.developed.left.length - s0.extrados);
+      worstSeam = Math.max(worstSeam, Math.abs(lenOf(edge) - contour));
+    }
+  }
+  check('and every upper sewing edge of the Tuluaq comes out its rib\'s length, as the program prints them',
+    worstSeam < 1e-6, `worst ${(worstSeam * 1000).toFixed(4)} mm`);
+
+  // The gnuC2-23: 3D shaping cuts every upper panel in two (section 29),
+  // its tip cells close their intakes on a diagonal (section 26's -2) and
+  // its tip rib is flat (section 30).
+  const docG = parseLep(readFileSync('data/reference/lep/gnuc2-23-20260429.lep', 'latin1'));
+  const tG = lepRibTable(docG, { airfoils: { 'gnuC2.txt': readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1') } });
+  const PG = lepPanels(docG, tG);
+  const rowsG = readFileSync('data/reference/lep/gnuc2-23-cut-parts.tsv', 'utf8').split('\n')
+    .filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
+  const shapingG = lepShaping(docG);
+  check('the gnuC2-23: its 3D shaping cuts every upper panel at section point 73, and no lower one',
+    shapingG.mode === 1 && [1, 15, 31].every((r) => shapingG.cutsAt(r, 'upper').join() === '73')
+    && shapingG.cutsAt(10, 'lower').length === 0 && shapingG.notReproduced.length === 0);
+  check('so its 30 upper panels are 60 pieces, front and rear, and its lower ones 30, none refused',
+    PG.ok && PG.notReproduced.length === 0 && PG.panels.length === 60
+    && PG.panels.filter((x) => x.surface === 'upper').every((x) => x.pieces?.length === 2)
+    && PG.panels.filter((x) => x.surface === 'lower').every((x) => !x.pieces));
+  const pieceRow = (part, cell) => rowsG.find((r) => r[0] === part && Number(r[1]) === cell);
+  // The four cells whose lower panels run on over a closed intake (26 to
+  // 30, section 26's -2 and -1) are held apart: the program lays the
+  // intake's strip out by itself and joins it to the panel, and they come
+  // out 0.003 to 0.011% small, 0.3 mm at the intake's first points.
+  const closedG = (x) => x.surface === 'lower' && x.cell >= 26;
+  let worstG = { d: 0 };
+  let worstClosed = { d: 0 };
+  let worstGP = 0;
+  for (const x of PG.panels) {
+    const parts = x.pieces ?? [{ part: null, cutAreaM2: x.cutAreaM2, cut: x.panel.cut }];
+    for (const q of parts) {
+      const r = pieceRow(x.surface === 'upper' ? `upper panel, ${q.part}` : 'lower panel', x.cell);
+      // The front piece of the tip cell crosses itself where the flat tip
+      // rib folds its edge back to the intake; it is held apart below.
+      if (x.surface === 'upper' && x.cell === 30 && q.part === 'front') continue;
+      const d = (q.cutAreaM2 * 1e4) / Number(r[3]) - 1;
+      const at = `${x.surface} ${x.cell} ${q.part ?? ''}`;
+      if (closedG(x)) {
+        if (Math.abs(d) > Math.abs(worstClosed.d)) worstClosed = { d, at };
+      } else if (Math.abs(d) > Math.abs(worstG.d)) worstG = { d, at };
+      if (x.surface === 'lower' || q.part === 'rear') {
+        worstGP = Math.max(worstGP, Math.abs(perim(q.cut.left.concat(q.cut.right.slice().reverse())) * 100 - Number(r[6])));
+      }
+    }
+  }
+  check('the gnuC2-23: every panel piece is cut to its file\'s area, to 0.01%',
+    Math.abs(worstG.d) < 1e-4, `worst ${(worstG.d * 100).toFixed(4)}% at ${worstG.at}`);
+  check('and the lower panels run on over a closed intake to 0.012%',
+    Math.abs(worstClosed.d) < 1.2e-4, `worst ${(worstClosed.d * 100).toFixed(4)}% at ${worstClosed.at}`);
+  check('and every lower panel and rear piece to its cut line\'s length, to a millimetre',
+    worstGP < 0.1, `worst ${(worstGP * 10).toFixed(2)} mm`);
+  const tipFront = PG.panels.find((x) => x.surface === 'upper' && x.cell === 30).pieces[0];
+  const tipRow = pieceRow('upper panel, front', 30);
+  check('the tip cell\'s front piece, whose outline crosses itself over the flat tip rib, is within 3% of its file\'s signed area',
+    tG.ribs[30].thickness === 0 && Math.abs((tipFront.cutAreaM2 * 1e4) / Number(tipRow[3]) - 1) < 0.03,
+    `${(tipFront.cutAreaM2 * 1e4).toFixed(2)} cm2 against ${tipRow[3]}`);
+  const ventsG = lepVents(docG);
+  const c26 = PG.panels.find((x) => x.surface === 'lower' && x.cell === 26);
+  const r26 = pieceRow('lower panel', 26);
+  check('a cell closed on a diagonal (section 26\'s -2) runs its lower panel over the whole intake at its outer rib and none at its inner',
+    ventsG.of(27).type === -2 && c26.developed.left.slice(0, 4).every((q) => Math.hypot(q[0] - c26.developed.left[4][0], q[1] - c26.developed.left[4][1]) < 1e-9)
+    && Math.abs((c26.cutAreaM2 * 1e4) / Number(r26[3]) - 1) < 1e-4,
+    `${(c26.cutAreaM2 * 1e4).toFixed(2)} cm2 against ${r26[3]}`);
+  const totG = (part) => Number(rowsG.find((r) => r[0] === part)[3]) / 1e4;
+  check('and its surfaces come to its file\'s totals: 15.54 m2 above and 12.80 below a side',
+    Math.abs(PG.totals.upper.cutM2 / totG('upper surface') - 1) < 2e-4
+    && Math.abs(PG.totals.lower.cutM2 / totG('lower surface') - 1) < 2e-5,
+    `${PG.totals.upper.cutM2.toFixed(4)} and ${PG.totals.lower.cutM2.toFixed(4)} m2`);
+}
+
+section('The ribs a design cuts, as its program cuts them');
+
+{
+  // An imported design's rib was cut on this tool's own offset of its
+  // outline, mitred at the trailing edge: 2 to 3 cm2 more than its program
+  // cuts on every rib, 0.03% at the root, 0.35% on the gnuC2-23's rib 30 and
+  // 2.5% on the Swoop2's tip. The program moves each point of the section by
+  // the allowance along the mean of its two segments' angles and closes the
+  // line through the trailing edge (its 6.11, the same in 3.25, 3.28 and
+  // 3.30); and it draws a hole as a polygon, 39-sided until 3.30 and 60 or
+  // section 37's code 3002 since. With both, every rib of the three designs'
+  // cutting files comes out as cut.
+  const signed = (o) => {
+    let a = 0;
+    for (let i = 0, k = o.length - 1; i < o.length; k = i++) a += o[k][0] * o[i][1] - o[i][0] * o[k][1];
+    return a / 2;
+  };
+  const ring = (o) => o.reduce((L, q, i) => L + Math.hypot(q[0] - o[(i + 1) % o.length][0], q[1] - o[(i + 1) % o.length][1]), 0);
+  const designs = [
+    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', null],
+    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', 39],
+    ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt', 39],
+  ];
+  const kept = {};
+  for (const [name, key, file, sf, sn, drawnSides] of designs) {
+    const doc = parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1'));
+    const t = lepRibTable(doc, { airfoils: { [sn]: readFileSync(`data/reference/lep/${sf}`, 'latin1') } });
+    const allowance = lepSeamAllowances(doc).rib;
+    const rows = readFileSync(`data/reference/lep/${key}-cut-parts.tsv`, 'utf8').split('\n')
+      .filter((l) => l.startsWith('rib\t')).map((l) => l.split('\t'));
+    const holes = lepHoles(doc, t, drawnSides ? { sides: drawnSides } : {});
+    kept[name] = { doc, t, allowance, rows };
+    let worst = { d: 0 };
+    let worstP = 0;
+    let worstH = { d: 0 };
+    let counts = true;
+    for (const r of rows) {
+      const i = Number(r[1]) - 1;
+      const cut = lepRibCutLine(t.ribs[i], allowance);
+      const d = (Math.abs(signed(cut)) * 1e4) / Number(r[3]) - 1;
+      if (Math.abs(d) > Math.abs(worst.d)) worst = { d, at: r[1] };
+      if (r[6]) worstP = Math.max(worstP, Math.abs(ring(cut) * 100 - Number(r[6])));
+      const mine = holes.byRib.get(i) ?? [];
+      if (mine.length !== Number(r[4])) counts = false;
+      if (!mine.length) continue;
+      // To the hundredth of a cm2 the file is rounded to.
+      const dh = mine.reduce((s, h) => s + Math.abs(signed(h.outline)), 0) * 1e4 - Number(r[5]);
+      if (Math.abs(dh) > Math.abs(worstH.d)) worstH = { d: dh, at: r[1] };
+    }
+    check(`${name}: every rib's cutting line is its file's, its ${allowance} mm allowance on as the program puts it, the tip's included`,
+      rows.length === t.ribs.length && Math.abs(worst.d) < 2e-5 && worstP < 0.01,
+      `worst ${(worst.d * 100).toFixed(5)}% at rib ${worst.at}${worstP ? `; its length to ${(worstP * 10).toFixed(3)} mm` : ''}`);
+    check(`${name}: and its holes are its file's, ${drawnSides ?? holes.sides}-sided as its program drew them, to its hundredth of a cm2`,
+      counts && Math.abs(worstH.d) <= 0.006,
+      `worst ${worstH.d.toFixed(4)} cm2 at rib ${worstH.at}`);
+  }
+  check('3.30 draws an ellipse with section 37\'s 3002 sides, 60 without; the older programs\' were 39',
+    lepEllipseSides(kept.Swoop2.doc) === 55 && lepEllipseSides(kept['gnuC2-23'].doc) === 60
+    && lepHoles(kept['gnuC2-23'].doc, kept['gnuC2-23'].t).byRib.get(0)[0].outline.length === 61);
+
+  // What it is: the trailing edge notched to the sewing point, not mitred
+  // out; and a flat rib's line out to the nose and back above the chord line
+  // as far as the intake, so the strip it cuts starts there.
+  const g = kept['gnuC2-23'];
+  const root = lepRibCutLine(g.t.ribs[0], g.allowance);
+  const te = root[root.length - 1];
+  const tip = lepRibCutLine(g.t.ribs[30], g.allowance);
+  const tipRib = g.t.ribs[30];
+  const intakeAt = tipRib.section.points[tipRib.section.extrados - 1][0] * tipRib.chord / 100;
+  const ahead = tip.filter((q) => q[0] < intakeAt - 1e-9);
+  const aft = Math.max(...root.map((q) => q[0])) - g.t.ribs[0].chord / 100;
+  check('the cutting line closes through the trailing edge itself, and runs millimetres aft of it, not a mitre\'s 3 cm',
+    Math.abs(te[0] - g.t.ribs[0].chord / 100) < 1e-12 && Math.abs(te[1]) < 1e-12
+    && aft > 0 && aft < 0.25 * g.allowance / 1000,
+    `${(aft * 1000).toFixed(2)} mm aft`);
+  check('the flat tip rib\'s line runs above the chord line all the way ahead of its intake, as the program draws it',
+    tipRib.thickness === 0 && ahead.length > 10
+    && ahead.every((q) => q[1] > 0 || Math.abs(q[0] + g.allowance / 1000) < 1e-12),
+    `${ahead.length} points ahead of ${(intakeAt * 100).toFixed(2)} cm`);
+
+  // The bill weighs them so: an imported design's ribs as cut, and with its
+  // sail and its internal structure as cut, no allowance left unweighed.
+  const afG = parseAirfoilText(readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1'), 'gnuC2');
+  const designG = lepToDesign(g.doc, { sections: { 'gnuC2.txt': afG } });
+  const wingG = buildWing({
+    planform: discretePlanform(designG.planformRows), lobe: null, airfoil: afG,
+    explicitRibs: designG.explicitRibs, pointsPerSurface: 80,
+  });
+  const cuts = new Map(wingG.ribs.map((rib) => [rib.index, lepRibCutLine(g.t.ribs[rib.index], g.allowance)]));
+  const asCut = ribClothTotals(wingG, afG, { openings: false, cutOutlines: cuts });
+  const finished = ribClothTotals(wingG, afG, { openings: false });
+  const filed = g.rows.reduce((s, r, i) => s + (Number(r[3]) / 1e4) * ribCopies(wingG, i), 0);
+  check('an imported design\'s ribs are weighed as its program cuts them: the whole wing\'s, to its file\'s',
+    asCut.asCut && !finished.asCut && Math.abs(asCut.ribAreaM2 / filed - 1) < 1e-5 && asCut.ribAreaM2 > finished.ribAreaM2 * 1.05,
+    `${asCut.ribAreaM2.toFixed(4)} m2 against ${filed.toFixed(4)}, ${finished.ribAreaM2.toFixed(4)} finished`);
+  const stG = lepStructure(g.doc, g.t);
+  const bomG = buildBOM({ ribHoles: asCut, structure: stG, seamAllowanceMM: 12 });
+  const bomF = buildBOM({ ribHoles: finished, structure: stG, seamAllowanceMM: 12 });
+  check('and the bill says so, and no longer lists their allowance as not weighed',
+    /as cut, with the design's own allowance/.test(bomG.fabric.find((f) => f.item === 'Rib cloth').note)
+    && !bomG.neverWeighed.some((m) => /allowance/.test(m))
+    && bomF.neverWeighed.some((m) => /allowance on ribs \(/.test(m)),
+    bomG.neverWeighed.join('; '));
 }
 
 section('What a design sews inside its cells, as its program cuts it');
@@ -9203,6 +9605,7 @@ section('What a design sews inside its cells, as its program cuts it');
   const designs = [
     ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', false],
     ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', true],
+    ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt', false],
   ];
   const built = {};
   for (const [name, key, file, sf, sn, before330] of designs) {
@@ -9221,15 +9624,20 @@ section('What a design sews inside its cells, as its program cuts it');
     const asDrawn = (p) => (before330 && p.drawnBefore330 ? p.drawnBefore330 : p);
     const cm2 = (m2) => m2 * 1e4;
 
+    const counted = (part) => Number(group(part)?.[2] ?? 0);
     check(`${name}: its internal structure is built, every kind its file has, piece for piece`,
       st.ok && of('diagonal').length === one('full diagonal,').length
+      && of('vrib').length === one('V-rib strip,').length
       && of('strap').length === one('strap,').length
       && of('between').length === one('piece between ribs,').length
       && of('pocket').length === one('rod pocket,').length
-      && of('diagonal').length === Number(group('full diagonal ribs')[2])
-      && of('strap').length === Number(group('straps between ribs')[2])
-      && of('pocket').length === Number(group('rod pockets')[2]),
-      `${st.problems.join('; ')} — ${['diagonal', 'strap', 'between', 'pocket'].map((k) => `${of(k).length} ${k}`).join(', ')}`);
+      && of('diagonal').length === counted('full diagonal ribs')
+      && of('vrib').length === counted('V-rib strips')
+      && of('strap').length === counted('straps between ribs')
+      && of('pocket').length === counted('rod pockets')
+      && of('minirib').length === counted('trailing-edge mini-ribs')
+      && of('minirib').length === st.miniRibs,
+      `${st.problems.join('; ')} — ${['diagonal', 'vrib', 'strap', 'between', 'pocket', 'minirib'].map((k) => `${of(k).length} ${k}`).join(', ')}`);
 
     // Full diagonals. Each to two parts in a hundred thousand: close enough
     // to tell a rib lowered before its twist from one lowered after, which
@@ -9252,48 +9660,62 @@ section('What a design sews inside its cells, as its program cuts it');
       if (Math.abs(dh) > Math.abs(worstH.d)) worstH = { d: dh, at: `${r[1]} ${side}` };
       if (r[6]) perimD = Math.max(perimD, Math.abs(asDrawn(p).perimeterM * 100 - Number(r[6])));
     }
-    check(`${name}: every full diagonal is its file's, to two parts in a hundred thousand`,
-      Math.abs(worstD.d) < 2e-5, `worst ${(worstD.d * 100).toFixed(5)}% at rib ${worstD.at}`);
-    check(`${name}: and so are its ${before330 ? 'cut-outs' : 'holes'}, piece by piece`,
-      holesRight && Math.abs(worstH.d) < 1e-4,
-      `worst ${(worstH.d * 100).toFixed(4)}% at rib ${worstH.at}${holesRight ? '' : '; a count differs'}`);
+    if (one('full diagonal,').length) {
+      check(`${name}: every full diagonal is its file's, to two parts in a hundred thousand`,
+        Math.abs(worstD.d) < 2e-5, `worst ${(worstD.d * 100).toFixed(5)}% at rib ${worstD.at}`);
+      check(`${name}: and so are its ${before330 ? 'cut-outs' : 'holes'}, piece by piece`,
+        holesRight && Math.abs(worstH.d) < 1e-4,
+        `worst ${(worstH.d * 100).toFixed(4)}% at rib ${worstH.at}${holesRight ? '' : '; a count differs'}`);
+    }
     if (before330) check(`${name}: and its diagonals' cut lines, to a millimetre`, perimD < 0.1, `worst ${(perimD * 10).toFixed(2)} mm`);
 
     // Straps, pieces between two ribs and pockets: each to a part in ten
     // thousand, the file's own rounding to a hundredth of a cm2 on the
     // smallest.
+    // A part in ten thousand, or the hundredth of a cm2 the file is rounded
+    // to, which is more on the smallest: a 40 cm2 pocket's is 0.0125%.
     const pieceCheck = (label, prefix, kind, find, holes) => {
-      let worst = { d: 0 };
+      let worst = { d: 0, e: 0 };
       let perim = 0;
+      const tally = (d, areaCm2, at) => {
+        const e = Math.abs(d) / Math.max(1e-4, 0.006 / areaCm2);
+        if (e > worst.e) worst = { d, e, at };
+      };
       for (const r of one(prefix)) {
         const p = find(r);
-        if (!p) { worst = { d: 1, at: r.slice(0, 2).join(' ') }; continue; }
-        const d = cm2(asDrawn(p).outlineAreaM2) / Number(r[3]) - 1;
-        if (Math.abs(d) > Math.abs(worst.d)) worst = { d, at: r.slice(0, 2).join(' ') };
-        if (holes) {
-          const dh = cm2(p.holesAreaM2) / Number(r[5]) - 1;
-          if (p.holes.length !== Number(r[4]) || Math.abs(dh) > 1e-4) worst = { d: Math.max(Math.abs(worst.d), Math.abs(dh), 1e-3), at: `${r[0]} ${r[1]} holes` };
-        }
+        if (!p) { worst = { d: 1, e: Infinity, at: r.slice(0, 2).join(' ') }; continue; }
+        tally(cm2(asDrawn(p).outlineAreaM2) / Number(r[3]) - 1, Number(r[3]), r.slice(0, 2).join(' '));
+        if (holes && Number(r[5]) > 0) tally(cm2(p.holesAreaM2) / Number(r[5]) - 1, Number(r[5]), `${r[0]} ${r[1]} holes`);
+        if (holes && p.holes.length !== Number(r[4])) worst = { d: 1, e: Infinity, at: `${r[0]} ${r[1]}: ${p.holes.length} holes` };
         if (r[6]) perim = Math.max(perim, Math.abs(asDrawn(p).perimeterM * 100 - Number(r[6])));
       }
-      check(`${name}: every ${label} is its file's, to a part in ten thousand${holes ? ', its holes too' : ''}`,
-        Math.abs(worst.d) < 1e-4 && perim < 0.1,
+      check(`${name}: every ${label} is its file's, to a part in ten thousand or its rounding${holes ? ', its holes too' : ''}`,
+        worst.e < 1 && perim < 0.1,
         `worst ${(worst.d * 100).toFixed(4)}% at ${worst.at}${perim ? `; cut line to ${(perim * 10).toFixed(2)} mm` : ''}`);
     };
     pieceCheck('strap', 'strap,', 'strap',
       (r) => of('strap').find((p) => p.ribs[0] === Number(r[1]) && p.row === Number(r[0].split('row ')[1])));
+    if (one('V-rib strip,').length) {
+      // "V-rib strip, left, row 1": by its anchor rib, the side it runs to and its row.
+      pieceCheck('V-rib strip', 'V-rib strip,', 'vrib',
+        (r) => of('vrib').find((p) => p.rib === Number(r[1]) && p.side === r[0].split(', ')[1]
+          && p.row === Number(r[0].split('row ')[1])));
+    }
     if (one('piece between ribs,').length) {
       pieceCheck('piece between two ribs', 'piece between ribs,', 'between',
         (r) => of('between').find((p) => p.ribs[0] === Number(r[1]) && p.chordPct[0] === Number(r[0].split(', ')[1].replace('%', ''))), true);
     }
+    // "rod pocket, bloc 1" — or, a shark nose's two a rib, "rod pocket, bloc 1, upper".
     pieceCheck('rod pocket', 'rod pocket,', 'pocket',
-      (r) => of('pocket').find((p) => p.rib === Number(r[1]) && p.bloc === Number(r[0].split('bloc ')[1])));
+      (r) => of('pocket').find((p) => p.rib === Number(r[1]) && p.bloc === parseInt(r[0].split('bloc ')[1], 10)
+        && (p.part ?? '') === (r[0].split(', ')[2] ?? '')));
 
     // The totals the file was measured as, cut lines included.
     const sum = (kind, f) => of(kind).reduce((a, p) => a + f(p), 0);
     const totals = [
-      ['full diagonal ribs', 'diagonal'], ['straps between ribs', 'strap'],
+      ['full diagonal ribs', 'diagonal'], ['V-rib strips', 'vrib'], ['straps between ribs', 'strap'],
       ['V-ribs between two ribs', 'between'], ['rod pockets', 'pocket'],
+      ['trailing-edge mini-ribs', 'minirib'],
     ].filter(([part]) => group(part));
     const off = totals.map(([part, kind]) => {
       const g = group(part);
@@ -9305,12 +9727,39 @@ section('What a design sews inside its cells, as its program cuts it');
       off.every((o) => Math.abs(o.dA) < 1e-4 && Math.abs(o.dP) < 0.1),
       off.map((o) => `${o.part} ${(o.dA * 100).toFixed(4)}%, ${(o.dP * 10).toFixed(2)} mm`).join('; '));
 
-    // What it does not build is said, and counted as the file counts it.
-    check(`${name}: its trailing-edge mini-ribs are counted, not built, and said`,
-      st.miniRibs === Number(group('trailing-edge mini-ribs')[2])
-      && st.notReproduced.some((x) => new RegExp(`^${st.miniRibs} trailing-edge mini-ribs$`).test(x)),
-      `${st.miniRibs} against ${group('trailing-edge mini-ribs')[2]}; ${st.notReproduced.join('; ')}`);
+    // Its trailing-edge mini-ribs, built as its program builds them: the
+    // rear of the rib inboard of each cell, raised at the front to meet the
+    // cell's billow. The gnuC2-23's file was measured piece by piece; the
+    // others' in total, the Swoop2's holes with them.
+    if (one('mini-rib').length) {
+      pieceCheck('trailing-edge mini-rib', 'mini-rib', 'minirib',
+        (r) => of('minirib').find((p) => p.rib === Number(r[1])));
+    }
+    const gm = group('trailing-edge mini-ribs');
+    const minis = of('minirib');
+    const mHoles = minis.reduce((a, p) => a + p.holes.length, 0);
+    const mHolesCm2 = cm2(minis.reduce((a, p) => a + p.holesAreaM2, 0));
+    check(`${name}: its ${minis.length} trailing-edge mini-ribs are its file's in total${mHoles ? `, and their ${mHoles} holes` : ''}, none unbuilt`,
+      minis.length === Number(gm[2]) && Math.abs(cm2(sum('minirib', (p) => asDrawn(p).outlineAreaM2)) - Number(gm[3])) < 0.02
+      && mHoles === Number(gm[4]) && Math.abs(mHolesCm2 - Number(gm[5])) < 0.02
+      && !st.notReproduced.some((x) => /mini-rib/.test(x)),
+      `${cm2(sum('minirib', (p) => asDrawn(p).outlineAreaM2)).toFixed(2)} cm2 against ${gm[3]}; holes ${mHoles}, `
+      + `${mHolesCm2.toFixed(2)} against ${gm[4]}, ${gm[5]}`);
   }
+
+  // The billow they take is the program's: the cloth of a cell as cut wider
+  // by its skin tension, standing over the straight line between its ribs
+  // as an arc. On the gnuC2-23 the first mini-rib rises 2.25 cm at its front
+  // above and 2.36 below — 0.8 of the cell's 2.81 and 2.95 cm — and the last
+  // 1.34 and 1.41; drawn without it, as 3.25 drew them, they are 8 to 11%
+  // smaller.
+  const gm2 = built['gnuC2-23'].st.pieces.filter((p) => p.kind === 'minirib');
+  check('the gnuC2-23: its mini-ribs rise at the front to 0.8 of the billow of the cell inboard of theirs',
+    gm2.length === 29 && Math.abs(gm2[0].riseM[0] - 0.8 * 0.02807) < 2e-4 && Math.abs(gm2[0].riseM[1] - 0.8 * 0.02950) < 2e-4
+    && gm2.every((p) => p.riseM[0] > 0.01 && p.riseM[1] > 0.01)
+    && gm2.every((p) => p.cutAreaM2 > (p.drawnBefore330?.cutAreaM2 ?? Infinity)),
+    gm2.filter((p, k) => k === 0 || k === gm2.length - 1).map((p) => `M${p.rib} ${(p.riseM[0] * 100).toFixed(2)} and `
+      + `${(p.riseM[1] * 100).toFixed(2)} cm`).join(', '));
 
   // The one hole the Swoop2's file does not have is the one the program
   // computes off its piece: at the first anchor of the rib-23 diagonal.
@@ -9334,18 +9783,24 @@ section('What a design sews inside its cells, as its program cuts it');
     `${asCut.toFixed(4)} m2 against ${asDrawn325.toFixed(4)} a side; the allowance across ${openings.toFixed(2)} m of openings is `
     + `${(openings * tu.settings.ribAllowanceCm / 100).toFixed(4)} m2`);
 
-  // The bill takes them, for the whole wing: the centre rib's pockets once.
+  // The bill takes them, for the whole wing: the centre rib's pockets once,
+  // and the centre cell's mini-rib; the mini-ribs in the rib cloth.
   for (const [name, { st }] of Object.entries(built)) {
     const bom = buildBOM({ structure: st, name });
     const item = bom.fabric.find((f) => f.item === 'Internal structure cloth');
-    const wing = st.pieces.reduce((a, p) => a + p.cutAreaM2 * p.copies, 0);
+    const mItem = bom.fabric.find((f) => f.item === 'Mini-rib cloth');
+    const inside = st.pieces.filter((p) => p.kind !== 'minirib');
+    const minis = st.pieces.filter((p) => p.kind === 'minirib');
+    const wing = (list) => list.reduce((a, p) => a + p.cutAreaM2 * p.copies, 0);
     const centre = st.pieces.filter((p) => p.copies === 1);
-    check(`${name}: the bill counts its internal structure for the whole wing, the centre rib's pieces once`,
-      item && Math.abs(item.panelAreaM2 - wing) < 1e-9 && item.count === 2 * st.pieces.length - centre.length
-      && centre.every((p) => p.kind === 'pocket' && p.rib === 1)
+    check(`${name}: the bill counts its internal structure for the whole wing, the centre rib's pieces once, its mini-ribs as rib cloth`,
+      item && Math.abs(item.panelAreaM2 - wing(inside)) < 1e-9 && item.count === 2 * inside.length - centre.filter((p) => p.kind !== 'minirib').length
+      && mItem && Math.abs(mItem.panelAreaM2 - wing(minis)) < 1e-9 && Math.abs(mItem.massKg - wing(minis) * DEFAULT_CLOTH.rib) < 1e-12
+      && centre.every((p) => (p.kind === 'pocket' && p.rib === 1) || (p.kind === 'minirib' && p.rib === 1))
       && !bom.fabric.some((f) => f.item === 'Diagonal cloth')
-      && bom.missing.some((m) => /trailing-edge mini-ribs/.test(m)),
-      `${item?.count} pieces, ${item?.panelAreaM2?.toFixed(2)} m2: ${lepStructureWords(st.pieces)}`);
+      && !bom.missing.some((m) => /mini-ribs/.test(m)),
+      `${item?.count} pieces, ${item?.panelAreaM2?.toFixed(2)} m2; mini-ribs ${mItem?.count}, ${mItem?.panelAreaM2?.toFixed(2)} m2: `
+      + `${lepStructureWords(st.pieces)}`);
   }
 
   // And its own cutting file: every piece of a side, its holes on their layer.

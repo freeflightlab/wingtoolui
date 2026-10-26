@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2566 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2632 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -26,11 +26,13 @@ aerofoil, arc and twist, equilibrium, line plan and risers, loads and line
 sizing, rib openings and diagonals, panel development, nesting, and DXF or
 printed patterns. It reads and writes LEparagliding files, and it is validated
 against the line sheets of **21 wings from five manufacturers**, the published
-specifications of **55 sizes**, and two complete designs from the method's
-own program — Laboratori d'envol's Swoop2 and Crazy Bird's Tuluaq-19 — whose
-area, span, chords, cells, ribs and every line (93 and 89: lengths, loads and
-types) it reproduces as that program computes them, and whose cutting files
-it matches piece by piece: panels, ribs, diagonals, straps and rod pockets.
+specifications of **55 sizes**, and three complete designs from the
+method's own program — Laboratori d'envol's Swoop2 and gnuC2-23 and Crazy
+Bird's Tuluaq-19 — whose area, span, chords, cells, ribs and every line (93,
+89 and 95: lengths, loads and types) it reproduces as that program computes
+them, and whose cutting files it matches piece by piece: panels, ribs and
+their holes, diagonals, V-rib strips, straps, rod pockets and trailing-edge
+mini-ribs.
 
 What it is not: certified, tested, or flown. See **Safety** below.
 
@@ -68,7 +70,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2566 unit checks against known geometry and the sources |
+| `npm test` | 2632 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -219,15 +221,16 @@ tests/             the unit suite, the Phase 1 audit, the full pipeline, the
                    reference sweep, the benchmark
 tools/             the other check stages, the interface harness, figures,
                    importers, and readers for legacy sheets
-docs/              forty-two notes; see below
+docs/              forty-four notes; see below
 data/reference/    143 tables: line sheets of 21 wings from five makers, six
                    of their line-plan drawings transcribed line by line, 55
                    published sizes and the makers' own specifications to check
                    them against, cell counts, the suppliers' line data, PHI's
                    measured 78-line materials table, inspection records, a
                    published riser geometry, fabric schedules and
-                   certification reports; and in lep/ the own files of two
-                   complete designs, the Swoop2 and the Tuluaq-19
+                   certification reports; and in lep/ the own files of three
+                   complete designs, the Swoop2, the Tuluaq-19 and the
+                   gnuC2-23
 build.py           bundler
 ```
 
@@ -282,7 +285,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2566 checks |
+| unit suite | the maths, 2632 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -346,6 +349,7 @@ cascade: its riser layout, its counts, its tip lines and its stabilo's line.
 | `docs/niviuk-import.md` | importing a sixth manufacturer, and what its data said |
 | `docs/swoop2.md` | validating against the source method's own design |
 | `docs/tuluaq19.md` | a second complete design, and three details of the program it found |
+| `docs/gnuc2-23.md` | a third: a shark nose, V-rib strips, a flat tip rib, and every rib cut as the program cuts it |
 | `docs/internal-structure.md` | what a design sews inside its cells, cut as its program cuts it |
 | `docs/scaling.md` | size families, and what does and does not transfer |
 | `docs/brakes.md` | brake cascades and engagement |

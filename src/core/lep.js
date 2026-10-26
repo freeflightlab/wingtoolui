@@ -802,7 +802,18 @@ export function designToLep(model, template = null) {
  *             rib's chord. Fifteen on the Swoop2, at 11, 39 and 72% on the
  *             rib pairs 4-5, 8-9 ... 20-21 — exactly the pairs of ribs that
  *             carry no line, between the tops of the diagonals either side —
- *             all at height 100: under the upper surface.
+ *             all at height 100: under the upper surface. The gnuC2-23's
+ *             93 run at heights 0, 70 and 100, most from one rib's lower
+ *             surface to the next one's upper.
+ *
+ *   type 3    `n 3  i r  L R  f u p 0`
+ *             A V-rib from anchor row `r` on rib `i`: a strip from its lower
+ *             surface, `f` either side of the anchor, up to the upper surface
+ *             of the rib before (`L` = 1) and of the rib after (`R` = 1), `u`
+ *             either side of that rib's own anchor of the row. Centimetres
+ *             of the unscaled wing, or per cent of chord when `p` is 1; type
+ *             13 gives both in per cent of each rib's own chord. Eighteen on
+ *             the gnuC2-23, at its three rows on ribs 20 to 29.
  *
  * The four numbers that close a type-15 row (`60.0 28.0 85. 2.` on every one
  * of the Swoop2's) are the angles, from the chord, at which the piece rises
@@ -828,7 +839,7 @@ export function parseHVRibs(doc) {
     .filter((l) => typeof l === 'string' && l.trim() && !l.startsWith('*'));
   const empty = {
     count: 0, declared: 0, entries: [], byType: {}, straps: [], diagonals: [],
-    general: [], other: [], hRibs: [], notUnderstood: 0, modelled: false,
+    general: [], vribs: [], other: [], hRibs: [], notUnderstood: 0, modelled: false,
   };
   if (!lines.length) return { ...empty, note: 'no section 12' };
 
@@ -837,6 +848,7 @@ export function parseHVRibs(doc) {
   const straps = [];
   const diagonals = [];
   const general = [];
+  const vribs = [];
   const other = [];
   const whole = (v) => Number.isInteger(v) && v > 0;
 
@@ -878,6 +890,16 @@ export function parseHVRibs(doc) {
         ],
       });
       general.push(e);
+    } else if (kind === 3 && whole(f[2]) && whole(f[3]) && f.length >= 10) {
+      Object.assign(e, {
+        kind: 'vrib', rib: f[2], row: f[3], left: f[4] === 1, right: f[5] === 1,
+        // Half-widths: along the anchor rib's lower surface, and along each
+        // neighbour's upper surface. Centimetres of the unscaled wing for
+        // type 3 unless its ninth column is 1, per cent of chord for 13.
+        lower: f[6], upper: f[7], percent: type === 13 || f[8] === 1,
+        fromRib: f[4] === 1 ? f[2] - 1 : f[2], toRib: f[5] === 1 ? f[2] + 1 : f[2],
+      });
+      vribs.push(e);
     } else {
       Object.assign(e, { kind: 'other', fromRib: f[2], toRib: f[4] });
       other.push(e);
@@ -892,6 +914,7 @@ export function parseHVRibs(doc) {
   if (diagonals.length) said.push(`${diagonals.length} diagonals`);
   if (straps.length) said.push(`${straps.length} straps between adjacent ribs`);
   if (general.length) said.push(`${general.length} pieces between two ribs at a chord position`);
+  if (vribs.length) said.push(`${vribs.length} V-ribs from an anchor to the ribs beside it`);
   if (other.length) {
     said.push(`${other.length} of type ${[...new Set(other.map((e) => e.type))].join(', ')}`
       + ' whose columns are not read');
@@ -908,6 +931,8 @@ export function parseHVRibs(doc) {
     diagonals,
     /** Types 6 and 16: a piece between two ribs, each end at a chord position. */
     general,
+    /** Types 3 and 13: a V-rib, an anchor's strip to each rib beside it. */
+    vribs,
     /** Anything else in the section, counted and not read. */
     other,
     /** The straps, under the name the H-rib builder was written against. */
@@ -920,18 +945,44 @@ export function parseHVRibs(doc) {
 }
 
 /**
- * The file's own diagonals, as the pieces `buildVRibs` places.
+ * The file's own diagonals, as the pieces `buildVRibs` places: every piece
+ * that runs from an anchor on one rib's lower surface up to the rib beside
+ * it.
+ *
+ * Full diagonals (types 5, 15) and V-ribs (3, 13) say their anchor row; a
+ * piece between two ribs (6, 16) with one end on the lower surface (height
+ * 0) at a rib's anchor and the other above it is one too, its row the anchor
+ * it starts at — `table` (`lepRibTable`) gives the anchors. A piece with
+ * neither end on the lower surface carries a diagonal on over the next rib
+ * and is not one by itself; a strip along the lower surface is none.
  *
  * Rib numbers in the file start at 1 at the centre; rows are 1 for A.
  */
-export function lepDiagonalPieces(hv) {
+export function lepDiagonalPieces(hv, table = null) {
   const out = [];
+  const add = (r, from, sides, source) => {
+    const row = 'ABCDE'[r - 1];
+    if (!row) return;
+    for (const to of sides) out.push({ row, fromRib: from - 1, toRib: to - 1, source });
+  };
   for (const d of hv?.diagonals ?? []) {
-    const row = 'ABCDE'[d.row - 1];
-    if (!row) continue;
-    const from = d.rib - 1;
-    if (d.left) out.push({ row, fromRib: from, toRib: from - 1, source: `section 12 row ${d.index}` });
-    if (d.right) out.push({ row, fromRib: from, toRib: from + 1, source: `section 12 row ${d.index}` });
+    add(d.row, d.rib, [...(d.left ? [d.rib - 1] : []), ...(d.right ? [d.rib + 1] : [])], `section 12 row ${d.index}`);
+  }
+  for (const d of hv?.vribs ?? []) {
+    add(d.row, d.rib, [...(d.left ? [d.rib - 1] : []), ...(d.right ? [d.rib + 1] : [])], `section 12 row ${d.index}`);
+  }
+  if (table) {
+    for (const e of hv?.general ?? []) {
+      const [a, b] = e.ends;
+      const low = [a, b].filter((x) => x.rest[0] === 0);
+      if (low.length !== 1) continue;
+      const anchor = low[0];
+      const other = anchor === a ? b : a;
+      const rib = table.ribs?.[anchor.rib - 1];
+      const r = (rib?.anchorsPct ?? []).findIndex((p) => Math.abs(p - anchor.chordPct) < 0.5);
+      if (r < 0) continue;
+      add(r + 1, anchor.rib, [other.rib], `section 12 row ${e.index}`);
+    }
   }
   return out;
 }

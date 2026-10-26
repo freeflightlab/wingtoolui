@@ -943,7 +943,7 @@ export function lepJoncs(doc, table) {
   out.blocs = blocs;
 
   for (const b of blocs) {
-    if (b.type !== 1 && b.type !== 4) {
+    if (b.type !== 1 && b.type !== 3 && b.type !== 4) {
       out.notReproduced.push(`bloc ${b.bloc}, rod type ${b.type}`);
       continue;
     }
@@ -952,6 +952,18 @@ export function lepJoncs(doc, table) {
       for (let i = from; i <= to; i++) {
         const rib = table.ribs[i - 1];
         if (!rib?.section) continue;
+        if (b.type === 3) {
+          // A shark nose: two rods a rib, each with its own pocket.
+          const pair = lepSharkNoseRods(rib, g);
+          if (!pair) { out.ok = false; out.notReproduced.push(`bloc ${b.bloc} rib ${i}: extents not found`); continue; }
+          for (const part of ['upper', 'lower']) {
+            out.joncs.push({
+              bloc: b.bloc, type: 3, part, rib: i, ribIndex: i - 1,
+              lengthCm: pair[part].length, points: pair[part].points, pocket: g.sjo,
+            });
+          }
+          continue;
+        }
         const j = lepJoncPolyline(rib, b.type, g.ex, g.inn);
         if (!j) { out.ok = false; out.notReproduced.push(`bloc ${b.bloc} rib ${i}: extents not found`); continue; }
         out.joncs.push({
@@ -972,6 +984,126 @@ export function lepJoncs(doc, table) {
   out.totalM = sum(out.joncs) / 100;
   out.bothSidesM = (2 * sum(out.joncs)) / 100;
   return out;
+}
+
+/**
+ * A shark nose's two rods on one rib (rod type 3), as the program's
+ * `joncst3s` and `joncst3i` build them. Its group gives four rows:
+ *
+ *   ex    upper rod: where it leaves the upper surface (front and back of the
+ *         zone, % chord), how far it curves off it (% chord) and the exponent;
+ *   ex2   upper rod's tail: the station on the lower nose where it leaves
+ *         the section (% chord), the tail's length and rise (% chord) and
+ *         its exponent;
+ *   inn2  lower rod's head: the station on the intake where it starts, the
+ *         head's length and rise, and its exponent;
+ *   inn   lower rod: its zone along the lower surface, as `ex`.
+ *
+ * The UPPER rod runs from the back of its zone on the upper surface,
+ * forward round the leading edge to the lower nose, where a tail leaves
+ * the section and runs back into the cell — the intake's upper lip. The
+ * LOWER rod starts with a head inside the nose, comes down to the intake,
+ * and runs back along it and the lower surface to the back of its zone —
+ * the lower lip. Each curves off the section across its zone as a type 1
+ * rod does.
+ *
+ * Four things are the program's and kept: a tail's and a head's exponent
+ * is the stated number times the chord over 100, as the program scales
+ * it; the head's and tail's direction is taken with `atan`, not `atan2`
+ * (which turns the tail away from the nose it would otherwise point at);
+ * the upper rod keeps no point where its zone starts, the section point
+ * after it overwriting it; and the lower rod ends on its zone's end in
+ * place of the last section point before it.
+ */
+function lepSharkNoseRods(rib, g) {
+  const { ex, ex2, inn2, inn } = g;
+  if (![ex, ex2, inn2, inn].every((r) => Array.isArray(r) && r.length >= 4 && r.slice(0, 4).every(Number.isFinite))) {
+    return null;
+  }
+  const c = rib.chord;
+  const P = rib.section.points.map(([x, y]) => [x * c, y * c * rib.thickness]);
+  const n = P.length;
+  // 1-based, as the program counts.
+  const U = [NaN, ...P.map((q) => q[0])];
+  const V = [NaN, ...P.map((q) => q[1])];
+  const interp = (x1, y1, x2, y2, x3) => {
+    const m = (y2 - y1) / (x2 - x1);
+    return m * x3 + (y2 - m * x2);
+  };
+  const pct = (v) => (v * c) / 100;
+  const x1f = pct(ex[1]);
+  const x1i = pct(ex[0]);
+  const x2f = pct(inn[1]);
+  const x2i = pct(inn[0]);
+  const x3i = pct(ex2[0]);
+  const x4i = pct(inn2[0]);
+  // The tail and head: a curve y = b (x/a)^e from a station, turned to the
+  // direction the program takes.
+  const curve = (a, b, e, from, angle) => {
+    const out = [];
+    for (let k = 1; k <= 11; k++) {
+      const xl = (a * (k - 1)) / 10;
+      const yl = (b / a ** e) * xl ** e;
+      out.push([Math.cos(angle) * xl - Math.sin(angle) * yl + from[0],
+        Math.sin(angle) * xl + Math.cos(angle) * yl + from[1]]);
+    }
+    return out;
+  };
+  const length = (pts) => {
+    let s = 0;
+    for (let k = 1; k < pts.length; k++) s += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    return s;
+  };
+
+  // The upper rod.
+  let j1f; let j1i; let j3i; let p1f; let p3i;
+  for (let j = 1; j <= n - 1; j++) {
+    if (U[j] >= x1f && U[j + 1] < x1f && V[j] >= 0) { j1f = j; p1f = [x1f, interp(U[j + 1], V[j + 1], U[j], V[j], x1f)]; }
+    if (U[j] >= x1i && U[j + 1] < x1i && V[j] >= 0) j1i = j;
+    if (U[j] <= x3i && U[j + 1] > x3i && V[j] < 0) { j3i = j; p3i = [x3i, interp(U[j], V[j], U[j + 1], V[j + 1], x3i)]; }
+  }
+  if ([j1f, j1i, j3i].some((v) => v === undefined) || j3i - 2 < 1) return null;
+  const X = new Map();
+  X.set(j1f, p1f);
+  for (let j = j1f + 1; j <= j3i; j++) X.set(j, [U[j], V[j]]);
+  const tail = curve(pct(ex2[1]), pct(ex2[2]), pct(ex2[3]), p3i,
+    Math.atan((V[j3i - 2] - p3i[1]) / (U[j3i - 2] - p3i[0])));
+  tail.forEach((q, k) => X.set(j3i + k, q));
+  const k1 = pct(ex[2]) / (x1f - x1i) ** ex[3];
+  for (let j = j1i + 1; j >= j1f; j--) {
+    const q = X.get(j);
+    if (q) q[1] -= k1 * (q[0] - x1i) ** ex[3];
+  }
+  const upper = [];
+  for (let j = j1f; j <= j3i + 10; j++) upper.push(X.get(j));
+
+  // The lower rod.
+  let j4i; let j2i; let j2f; let p4i; let p2i; let p2f;
+  for (let j = 1; j <= n - 1; j++) {
+    if (U[j] <= x4i && U[j + 1] > x4i && V[j] < 0) { j4i = j; p4i = [x4i, interp(U[j], V[j], U[j + 1], V[j + 1], x4i)]; }
+    if (U[j] <= x2i && U[j + 1] > x2i && V[j] < 0) { j2i = j; p2i = [x2i, interp(U[j], V[j], U[j + 1], V[j + 1], x2i)]; }
+    if (U[j] <= x2f && U[j + 1] >= x2f && V[j] < 0) { j2f = j; p2f = [x2f, interp(U[j], V[j], U[j + 1], V[j + 1], x2f)]; }
+  }
+  if ([j4i, j2i, j2f].some((v) => v === undefined) || j4i + 2 > n || j2f <= j4i) return null;
+  const Y = new Map();
+  for (let j = j4i; j <= j2i; j++) Y.set(j, [U[j], V[j]]);
+  Y.set(j2i, p2i);
+  for (let j = j2i + 1; j <= j2f; j++) Y.set(j, [U[j], V[j]]);
+  Y.set(j2f, p2f);
+  const k2 = pct(inn[2]) / (x2f - x2i) ** inn[3];
+  for (let j = j2i + 2; j <= j2f; j++) {
+    const q = Y.get(j);
+    q[1] += k2 * (q[0] - x2i) ** inn[3];
+  }
+  const head = curve(pct(inn2[1]), -pct(inn2[2]), pct(inn2[3]), p4i,
+    -Math.PI + Math.atan((V[j4i + 2] - p4i[1]) / (U[j4i + 2] - p4i[0]))).reverse();
+  const lower = head.slice();
+  for (let j = j4i + 1; j <= j2f; j++) lower.push(Y.get(j));
+  if (upper.some((q) => !q) || lower.some((q) => !q)) return null;
+  return {
+    upper: { points: upper, length: length(upper) },
+    lower: { points: lower, length: length(lower) },
+  };
 }
 
 /** One rod's polyline and length, types 1 and 4, as the program builds it. */
@@ -1171,6 +1303,220 @@ function offsetEdge(edge, other, d) {
 }
 
 /**
+ * Section 5's last row, `ndif xndif`, and its table's third row: how the
+ * program makes each panel's sewing edges as long as the rib they are sewn
+ * to (`ndif` 1000, its "perfect matching"), over what last part of each
+ * edge (the row's per cent: upper, then lower), and how much of the
+ * difference it takes up (`xndif`).
+ */
+export function lepSeamMatching(doc) {
+  const rows = sectionData(doc, 5).map((l) => l.trim().split(/\s+/).map(Number))
+    .filter((r) => r.length && r.every(Number.isFinite));
+  const table = rows.filter((r) => r.length >= 4).slice(0, 6);
+  const last = rows.filter((r) => r.length === 2).pop();
+  if (table.length < 3 || !last) return null;
+  return { ndif: last[0], xndif: last[1], upperPct: table[2][0], lowerPct: table[2][2] };
+}
+
+/**
+ * The program's "perfect matching" of a surface's panels to its ribs (its
+ * 8.2.4 above, 8.4.4 below, with `ndif` 1000), reproduced as it does it.
+ *
+ * Over-width moves a panel's sewing edge off the line it was developed
+ * along, and so changes its length. The program then stretches the last
+ * part of each edge — from where 85% of its length is left behind on the
+ * upper surface (section 5's 15), the first 20% on the lower — about the
+ * point where that part starts, so that the edge comes out exactly as long
+ * as the rib's own contour; its output's section 6 prints the result, 0.000
+ * mm. A stretched edge moves the end of the panel with it, and the end's
+ * width with it; five times over, it then turns the left edge's stretched
+ * part by the angle that would put the width back — `asin` of the width's
+ * change over the part's length, always positive and applied as the
+ * direction's absolute angle plus that angle, so it turns one way or the
+ * other with the quadrant the segment points into, exactly as the program's
+ * own code does.
+ *
+ * Its seam-allowance lines are worked out before this and not again: the
+ * cut line's sides stay where the unstretched edges put them, and only the
+ * panel's end — and a 3D-shaping cut inside the stretched part — moves.
+ *
+ * `edges` maps a panel's number to its two sewing edges as the program
+ * indexes them (1-based, section points: the upper surface 1 at the
+ * trailing edge to `np2` at the front, the lower `j0` at the front to
+ * `np1`), centimetres; `contour` a rib's surface contour length by its
+ * number. Edges are changed in place.
+ */
+function lepMatchSeams(edges, contour, ribCount, upper, lo, hi, pct, xndif) {
+  const N = ribCount;
+  const seg = (E, j) => Math.hypot(E[j + 1][0] - E[j][0], E[j + 1][1] - E[j][1]);
+  const span = (E, a, b) => {
+    let s = 0;
+    for (let j = a; j <= b; j++) s += seg(E, j);
+    return s;
+  };
+  const leftOf = (i) => edges.get(i - 1)?.R ?? null;   // the edge sewn to rib i from the panel inboard
+  const rightOf = (i) => edges.get(i)?.L ?? null;      // and from the panel outboard
+  const r30 = []; const r32 = []; const r90 = []; const r92 = [];
+  for (let i = 1; i <= N; i++) {
+    const a = leftOf(i);
+    const b = rightOf(i);
+    r30[i] = a ? span(a, lo, hi - 1) : NaN;
+    r32[i] = b ? span(b, lo, hi - 1) : NaN;
+    r90[i] = xndif * (contour[i] - r30[i]);
+    r92[i] = xndif * (contour[i] - r32[i]);
+  }
+  r30[0] = r32[1]; r32[0] = r30[1];
+  r90[0] = xndif * (contour[1] - r30[0]);
+  r92[0] = xndif * (contour[1] - r32[0]);
+  // Where each edge's stretched part starts.
+  const jirl = []; const jirr = [];
+  const start = (E, total) => {
+    if (!E) return null;
+    const keep = total * (pct / 100);
+    let at = null;
+    let s = 0;
+    if (upper) {
+      for (let j = lo; j <= hi - 1; j++) { s += seg(E, j); if (s < total - keep) at = j; }
+    } else {
+      for (let j = lo; j <= hi - 1; j++) { s += seg(E, j); if (s < keep) at = j; }
+    }
+    return at;
+  };
+  for (let i = 0; i <= N; i++) {
+    jirl[i] = start(i === 0 ? null : leftOf(i), r30[i]);
+    jirr[i] = start(rightOf(i), r32[i]);
+  }
+  jirl[0] = jirl[1]; jirr[0] = jirr[1];
+  // The program's working arrays, kept from one pass to the next as its are.
+  const ang = new Map(); const su = new Map(); const sv = new Map(); const dst = new Map();
+  const fill = (E, j, k, omega) => {
+    const xdv = E[k][1] - E[j][1];
+    const xdu = E[k][0] - E[j][0];
+    ang.set(j, (xdu !== 0 ? Math.abs(Math.atan(xdv / xdu)) : Math.PI / 2) + omega);
+    let siu; let siv;
+    if (xdu >= 0 && xdv >= 0) { siu = 1; siv = 1; }
+    if (xdu <= 0 && xdv >= 0) { siu = -1; siv = 1; }
+    if (xdu >= 0 && xdv <= 0) { siu = 1; siv = -1; }
+    if (xdu <= 0 && xdv <= 0) { siu = -1; siv = -1; }
+    su.set(j, siu); sv.set(j, siv);
+    dst.set(j, Math.hypot(E[k][0] - E[j][0], E[k][1] - E[j][1]));
+  };
+  const step = (E, from, j, to, k) => {
+    const d = k * dst.get(j);
+    E[to] = [E[from][0] + su.get(j) * d * Math.cos(ang.get(j)), E[from][1] + sv.get(j) * d * Math.sin(ang.get(j))];
+  };
+  const stretch = (E, jFit, jDist, extraLen) => {
+    if (!E || jFit == null || jDist == null) return;
+    if (upper) {
+      const dist2 = span(E, jDist, hi - 1);
+      const k = (dist2 + extraLen) / dist2;
+      for (let j = jFit; j <= hi - 1; j++) fill(E, j, j + 1, 0);
+      for (let j = jFit; j <= hi - 1; j++) step(E, j, j, j + 1, k);
+    } else {
+      const dist2 = span(E, lo, jDist - 1);
+      const k = (dist2 + extraLen) / dist2;
+      for (let j = jFit; j >= lo + 1; j--) fill(E, j, j - 1, 0);
+      for (let j = jFit; j >= lo + 1; j--) step(E, j, j, j - 1, k);
+    }
+  };
+  // The ends' widths before.
+  const endJ = upper ? hi : lo;
+  const width = (i) => {
+    const e = edges.get(i);
+    return e ? Math.hypot(e.L[endJ][0] - e.R[endJ][0], e.L[endJ][1] - e.R[endJ][1]) : NaN;
+  };
+  const before = new Map([...edges.keys()].map((i) => [i, width(i)]));
+  // Left side: the inboard panel's edge on each rib; right side: the outboard's.
+  for (let i = 1; i <= N; i++) stretch(leftOf(i), jirl[i], jirl[i], r90[i]);
+  for (let i = 0; i <= N; i++) stretch(rightOf(i), upper ? jirr[i] : jirl[i], jirr[i], r92[i]);
+  // The end's width put back, five times over, by turning the left edge.
+  for (let it = 0; it < 5; it++) {
+    const now = new Map([...edges.keys()].map((i) => [i, width(i)]));
+    for (let i = upper ? 1 : 2; i <= N - 1; i++) {
+      const e = edges.get(i);
+      if (!e || jirl[i] == null) continue;
+      const E = e.L;
+      const k1 = jirl[i];
+      const dist = Math.hypot(E[k1][0] - E[endJ][0], E[k1][1] - E[endJ][1]);
+      const eps = now.get(i) - before.get(i);
+      const omega = Math.abs(eps) < 0.01 ? 0 : Math.asin(eps / dist) * Math.sign(eps);
+      if (upper) {
+        for (let j = k1; j <= hi - 1; j++) fill(E, j, j + 1, omega);
+        for (let j = jirr[i]; j <= hi - 1; j++) step(E, j, j, j + 1, 1);
+      } else {
+        for (let j = k1; j >= lo + 1; j--) fill(E, j, j - 1, -omega);
+        for (let j = k1; j >= lo + 1; j--) step(E, j, j, j - 1, 1);
+      }
+    }
+  }
+  return { jirl, jirr };
+}
+
+/**
+ * Section 29, 3D shaping: where the program cuts a surface across, cell by
+ * cell. Groups of ribs, each with up to two cuts across its upper panels
+ * and one across its lower; a panel takes the group of the rib outboard of
+ * it, as the program's does.
+ *
+ * Each cut row is `n j2 j3 k`. The panel is cut at section point `j3`,
+ * counted as the program counts a surface's points (the upper from the
+ * trailing edge, the lower from the intake). `j2` was to begin the zone
+ * whose fullness `k` eases into the cut, but the program overwrites it —
+ * a statement left live when its condition was commented out sets it to
+ * the last point of the section for every rib — so the zone is always
+ * empty, as the gnuC2-23's own output prints it (zone 1, 0.00). The ease
+ * itself, `k` times the cell's billowed fullness, needs the program's
+ * ovalization and is not reproduced: a cut with `k` other than 0 is said.
+ *
+ * Section 29's second form, cuts in per cent of chord, the program reads
+ * and then never turns into points: said, not cut.
+ */
+export function lepShaping(doc) {
+  const none = { mode: 0, cutsAt: () => [], notReproduced: [] };
+  const s = sectionData(doc, 29).map((l) => l.trim()).filter((l) => l && !l.startsWith('*'));
+  if (!s.length) return none;
+  const mode = parseInt(s[0], 10);
+  if (mode !== 1 && mode !== 2) return none;
+  if (mode === 2) return { ...none, mode, notReproduced: ['3D shaping given in per cent of chord (section 29, form 2)'] };
+  const f = (l) => l.split(/\s+/);
+  let p = 2;
+  const ng = parseInt(f(s[p++] ?? '')[1], 10);
+  if (!Number.isInteger(ng) || ng < 1) return none;
+  const groups = new Map();
+  const ribGroup = new Map();
+  const notReproduced = new Set();
+  for (let g = 1; g <= ng && p < s.length; g++) {
+    const [, k, from, to] = f(s[p++]).map(Number);
+    const up = f(s[p++] ?? '').map(Number);
+    const upper = [];
+    for (let c = 0; c < (up[1] || 0); c++) {
+      const r = f(s[p++] ?? '').map(Number);
+      upper.push({ at: r[2], ease: r[3] });
+    }
+    const low = f(s[p++] ?? '').map(Number);
+    const lower = [];
+    for (let c = 0; c < (low[1] || 0); c++) {
+      const r = f(s[p++] ?? '').map(Number);
+      lower.push({ at: r[2], ease: r[3] });
+    }
+    for (const c of [...upper, ...lower]) {
+      if (c.ease) notReproduced.add('the ease section 29 eases into a 3D-shaping cut');
+    }
+    groups.set(k, { upper, lower });
+    for (let i = from; i <= to; i++) ribGroup.set(i, k);
+  }
+  return {
+    mode,
+    /** The cut points of the panel between rib `outer - 1` and rib `outer` on `surface`. */
+    cutsAt: (outer, surface) => {
+      const g = groups.get(ribGroup.get(outer));
+      return g ? g[surface].map((c) => c.at).filter((j) => Number.isInteger(j) && j > 1) : [];
+    },
+    notReproduced: [...notReproduced],
+  };
+}
+
+/**
  * The design's own panels, as its program cuts them.
  *
  * Three things the tool's own panels do differently, each the program's
@@ -1204,6 +1550,7 @@ export function lepPanels(doc, table) {
   const ribs = table.ribs;
   const skin = lepSkinTension(doc);
   const vents = lepVents(doc);
+  const shaping = lepShaping(doc);
   const allow = lepSeamAllowances(doc) ?? {
     upper: { side: 0, front: 0, back: 0 }, lower: { side: 0, front: 0, back: 0 },
   };
@@ -1258,6 +1605,11 @@ export function lepPanels(doc, table) {
       return v.type >= 4 && v.type <= 6 ? [1 - v.p1 / 100, 1 - v.p2 / 100] : [0, 0];
     }
     if (v.type === -1) return [1, 1];
+    // Closed on a diagonal: over the whole intake at the outer rib (-2) or
+    // the inner (-3) and none of it at the other, its front edge the
+    // straight line between (the program's `dpanelcm2`, `dpanelcm3`).
+    if (v.type === -2) return [0, 1];
+    if (v.type === -3) return [1, 0];
     return v.type <= -4 && v.type >= -6 ? [v.p1 / 100, v.p2 / 100] : [0, 0];
   };
   const unread = new Set();
@@ -1287,7 +1639,7 @@ export function lepPanels(doc, table) {
     // Ribs and rows are numbered from 1, the cell by the rib inboard of it.
     const cell = { cellNo, centre: cellNo === 0 };
     const vent = vents.of(cellNo + 1);
-    if (Math.abs(vent.type) === 5 || Math.abs(vent.type) === 6 || vent.type === -2 || vent.type === -3) {
+    if (Math.abs(vent.type) === 5 || Math.abs(vent.type) === 6) {
       unread.add(vent.type);
     }
     for (const surface of ['upper', 'lower']) {
@@ -1304,7 +1656,18 @@ export function lepPanels(doc, table) {
         L = ext(a, fa).concat(L);
         R = ext(b, fb).concat(R);
       }
-      const dev = developPanel(L, R);
+      // Developed in the program's own order, as its `flatt` lays a strip
+      // out: the upper surface from the trailing edge forward, the lower
+      // from the intake back. The strip's far edge takes up the surface's
+      // twist step by step from where it starts, so the order is not
+      // indifferent on a twisted cell, and the program's seam matching
+      // below works in the frame this leaves.
+      const dev = surface === 'upper'
+        ? (() => {
+          const d = developPanel(L.slice().reverse(), R.slice().reverse());
+          return { ...d, left: d.left.slice().reverse(), right: d.right.slice().reverse() };
+        })()
+        : developPanel(L, R);
       const m = midIndex(a.section, surface) + extra;
       cell[surface] = {
         dev, extra, width: Math.hypot(dev.right[m][0] - dev.left[m][0], dev.right[m][1] - dev.left[m][1]),
@@ -1313,6 +1676,8 @@ export function lepPanels(doc, table) {
     developed.push(cell);
   }
 
+  // The sewing edges: each cell's developed edges moved out by its skin
+  // tension.
   for (let i = 0; i < developed.length; i++) {
     const cell = developed[i];
     if (!cell) continue;
@@ -1337,33 +1702,200 @@ export function lepPanels(doc, table) {
       };
       const vL = over(dev.left, tLeft, width);
       const vR = over(dev.right, tRight, widthRight);
-      const sewL = offsetEdge(dev.left, dev.right, vL);
-      const sewR = offsetEdge(dev.right, dev.left, vR);
+      cell[surface].sewL = offsetEdge(dev.left, dev.right, vL);
+      cell[surface].sewR = offsetEdge(dev.right, dev.left, vR);
+    }
+  }
+
+  // The program's perfect matching: each sewing edge stretched over its
+  // last part to the length of the rib it is sewn to, the panel's end
+  // moving with it (`lepMatchSeams`). Its ends only: the cut line's sides
+  // stay on the edges as they were.
+  const matching = lepSeamMatching(doc);
+  const matched = matching && matching.ndif === 1000 && ribs.every((r) => r.section);
+  if (matching && matching.ndif !== 1000) unread.add(`seam matching ${matching.ndif}`);
+  for (const surface of ['upper', 'lower']) {
+    const s0 = ribs[0]?.section;
+    if (!matched || !s0) break;
+    const upper = surface === 'upper';
+    const lo = upper ? 1 : s0.extrados + s0.intake - 1;
+    const hi = upper ? s0.extrados : s0.points.length;
+    // Program index j to this panel's index k, front first, after the run-on.
+    const kOf = (extra, j) => extra + (upper ? hi - j : j - lo);
+    const edges = new Map();
+    for (const cell of developed) {
+      if (!cell) continue;
+      const { sewL, sewR, extra } = cell[surface];
+      const L = []; const R = [];
+      for (let j = lo; j <= hi; j++) {
+        const k = kOf(extra, j);
+        L[j] = [sewL[k][0] * 100, sewL[k][1] * 100];
+        R[j] = [sewR[k][0] * 100, sewR[k][1] * 100];
+      }
+      edges.set(cell.cellNo, { L, R });
+    }
+    const contour = [];
+    for (let i = 1; i <= ribs.length; i++) {
+      const r = ribs[i - 1];
+      let t = 0;
+      for (let j = lo; j < hi; j++) {
+        const [x1, y1] = r.section.points[j - 1];
+        const [x2, y2] = r.section.points[j];
+        t += Math.hypot((x2 - x1) * r.chord, (y2 - y1) * r.chord * r.thickness);
+      }
+      contour[i] = t;
+    }
+    lepMatchSeams(edges, contour, ribs.length, upper, lo, hi,
+      upper ? matching.upperPct : matching.lowerPct, matching.xndif);
+    for (const cell of developed) {
+      if (!cell) continue;
+      const c = cell[surface];
+      const e = edges.get(cell.cellNo);
+      c.matchL = c.sewL.map((q) => q.slice());
+      c.matchR = c.sewR.map((q) => q.slice());
+      for (let j = lo; j <= hi; j++) {
+        const k = kOf(c.extra, j);
+        c.matchL[k] = [e.L[j][0] / 100, e.L[j][1] / 100];
+        c.matchR[k] = [e.R[j][0] / 100, e.R[j][1] / 100];
+      }
+      // A run-on over the intake goes with the panel's end, as the program
+      // attaches its vent to it: turned and moved, not stretched.
+      if (c.extra) {
+        const k0 = c.extra;
+        const [a0, b0] = [c.sewL[k0], c.sewR[k0]];
+        const [a1, b1] = [c.matchL[k0], c.matchR[k0]];
+        const turn = Math.atan2(b1[1] - a1[1], b1[0] - a1[0]) - Math.atan2(b0[1] - a0[1], b0[0] - a0[0]);
+        const m0 = [(a0[0] + b0[0]) / 2, (a0[1] + b0[1]) / 2];
+        const m1 = [(a1[0] + b1[0]) / 2, (a1[1] + b1[1]) / 2];
+        const move = (q) => {
+          const x = q[0] - m0[0];
+          const y = q[1] - m0[1];
+          return [m1[0] + x * Math.cos(turn) - y * Math.sin(turn), m1[1] + x * Math.sin(turn) + y * Math.cos(turn)];
+        };
+        for (let k = 0; k < k0; k++) {
+          c.matchL[k] = move(c.sewL[k]);
+          c.matchR[k] = move(c.sewR[k]);
+        }
+      }
+    }
+  }
+
+  // The cut line of a piece: its sides the sewing edges moved out by the
+  // side allowance, its ends the matched ends moved out by theirs — each
+  // corner where the end's line meets the side's last segment, as the
+  // program's `extpoints` puts it.
+  const cutOf = (L, R, Lm, Rm, A, dFront, dBack) => {
+    const m = L.length;
+    const ring = L.concat(R.slice().reverse());
+    const d = ring.map((_, k) => (k < m - 1 ? A.side : k === m - 1 ? dBack : k < 2 * m - 1 ? A.side : dFront));
+    const c = offsetOutline(ring, d.map((mm) => mm / 1000));
+    if (Lm && Rm) {
+      const line = (p, q, dist, away) => {
+        // The line through p and q moved `dist` to the side away from `away`.
+        const tx = q[0] - p[0];
+        const ty = q[1] - p[1];
+        const tl = Math.hypot(tx, ty) || 1;
+        let nx = -ty / tl;
+        let ny = tx / tl;
+        if (nx * (away[0] - p[0]) + ny * (away[1] - p[1]) > 0) { nx = -nx; ny = -ny; }
+        return { p: [p[0] + nx * dist, p[1] + ny * dist], t: [tx / tl, ty / tl] };
+      };
+      const meet = (l1, l2, fallback) => {
+        const den = l1.t[0] * l2.t[1] - l1.t[1] * l2.t[0];
+        if (Math.abs(den) < 1e-12) return fallback;
+        const s = ((l2.p[0] - l1.p[0]) * l2.t[1] - (l2.p[1] - l1.p[1]) * l2.t[0]) / den;
+        return [l1.p[0] + s * l1.t[0], l1.p[1] + s * l1.t[1]];
+      };
+      const ds = A.side / 1000;
+      // Out of the piece: away from its middle (a closure on a diagonal has
+      // a side of no length at one rib, so a point beside the end will not do).
+      const h = Math.floor(m / 2);
+      const mid = [(L[h][0] + R[h][0]) / 2, (L[h][1] + R[h][1]) / 2];
+      const front = line(Lm[0], Rm[0], dFront / 1000, mid);
+      const back = line(Lm[m - 1], Rm[m - 1], dBack / 1000, mid);
+      // A side's first and last segments of any length: where an intake
+      // closure runs on at one rib only, that side's end is a run of points
+      // a hair apart, and their direction is noise.
+      const real = (E, k, dir) => {
+        let j = k;
+        while (j + dir >= 0 && j + dir < m && Math.hypot(E[j + dir][0] - E[k][0], E[j + dir][1] - E[k][1]) < 1e-6) j += dir;
+        return j + dir >= 0 && j + dir < m ? j + dir : k + dir;
+      };
+      const sideL0 = line(L[0], L[real(L, 0, 1)], ds, R[0]);
+      const sideR0 = line(R[0], R[real(R, 0, 1)], ds, L[0]);
+      const sideL1 = line(L[real(L, m - 1, -1)], L[m - 1], ds, R[m - 1]);
+      const sideR1 = line(R[real(R, m - 1, -1)], R[m - 1], ds, L[m - 1]);
+      c[0] = meet(sideL0, front, c[0]);
+      c[2 * m - 1] = meet(sideR0, front, c[2 * m - 1]);
+      c[m - 1] = meet(sideL1, back, c[m - 1]);
+      c[m] = meet(sideR1, back, c[m]);
+    }
+    return { ring, c, m };
+  };
+
+  for (let i = 0; i < developed.length; i++) {
+    const cell = developed[i];
+    if (!cell) continue;
+    for (const surface of ['upper', 'lower']) {
+      const { dev, width, extra, sewL, sewR } = cell[surface];
+      const matchL = cell[surface].matchL ?? null;
+      const matchR = cell[surface].matchR ?? null;
       const A = allow[surface];
       // The cut line: every edge of the sewing outline moved out by its own
       // allowance — the sides, the front end (round an intake it closes, the
       // edge across the intake) and the trailing edge — corners mitred.
       const sewing = sewL.concat(sewR.slice().reverse());
       const n = sewL.length;
-      const kinds = sewing.map((_, k) => (k < n - 1 ? A.side : k === n - 1 ? A.back
-        : k < 2 * n - 1 ? A.side : A.front));
-      const cut = offsetOutline(sewing, kinds.map((mm) => mm / 1000));
+      const whole = cutOf(sewL, sewR, matchL, matchR, A, A.front, A.back);
+      const cut = whole.c;
+      // 3D shaping (section 29): the panel cut across at its points, each
+      // piece with the side allowance along the cut, as the program gives
+      // it, and its own front or trailing-edge allowance at the other end.
+      const s = (cell.cellNo === 0 ? ribs[0] : ribs[cell.cellNo - 1]).section;
+      const first = surface === 'upper' ? s.extrados : s.extrados + s.intake - 1;
+      const cutAt = shaping.cutsAt(cell.cellNo + 1, surface)
+        .map((j) => extra + (surface === 'upper' ? first - j : j - first))
+        .filter((k) => k > 0 && k < n - 1)
+        .sort((a, b) => a - b);
+      let pieces = null;
+      if (cutAt.length) {
+        const bounds = [0, ...cutAt, n - 1];
+        const names = bounds.length === 3 ? ['front', 'rear'] : ['front', 'middle', 'rear'];
+        pieces = names.map((part, q) => {
+          const a = bounds[q];
+          const b = bounds[q + 1];
+          const L = sewL.slice(a, b + 1);
+          const R = sewR.slice(a, b + 1);
+          const { ring, c, m } = cutOf(L, R, matchL?.slice(a, b + 1), matchR?.slice(a, b + 1), A,
+            q === 0 ? A.front : A.side, q === names.length - 1 ? A.back : A.side);
+          return {
+            part, from: a, to: b,
+            sewing: { left: L, right: R },
+            cut: { left: c.slice(0, m), right: c.slice(m).reverse() },
+            areaM2: shoelace(ring),
+            cutAreaM2: shoelace(c),
+          };
+        });
+      }
       out.push({
         cell: cell.cellNo,
         ...(cell.centre ? { centre: true } : {}),
         surface,
         // The sewing outline: what the tool's own panels are, with the cut
-        // line round it.
+        // line round it — or, cut across by 3D shaping, round each piece.
         panel: {
           left: sewL, right: sewR, seamLengths: dev.seamLengths,
           cut: { left: cut.slice(0, n), right: cut.slice(n).reverse() },
+          ...(matchL ? { matched: { left: matchL, right: matchR } } : {}),
+          ...(pieces ? { pieces } : {}),
         },
         developed: dev,
         cut,
+        ...(pieces ? { pieces } : {}),
         widthM: width,
         areaM2: shoelace(sewing),
         developedAreaM2: shoelace(dev.left.concat(dev.right.slice().reverse())),
-        cutAreaM2: shoelace(cut),
+        cutAreaM2: pieces ? pieces.reduce((t, x) => t + x.cutAreaM2, 0) : shoelace(cut),
       });
     }
   }
@@ -1377,7 +1909,7 @@ export function lepPanels(doc, table) {
     vents: vents.mode,
     // Intake closures drawn as a straight edge where the design has an arc
     // or an ellipse, or a shape this does not draw at all.
-    notReproduced: [...unread].map((t) => `intake type ${t}`),
+    notReproduced: [...unread].map((t) => `intake type ${t}`).concat(shaping.notReproduced),
     allowances: allow,
     // One side of the wing.
     totals: {
@@ -1440,14 +1972,95 @@ function shoelace(pts) {
 }
 
 /**
+ * How many sides the program draws an ellipse with, as 3.30 draws it: 60,
+ * or what section 37's code 3002 says (the Swoop2's 55). Until 3.30 it was
+ * always 39 — the Tuluaq's 3.25 and the gnuC2-23's 3.28 drew theirs so.
+ */
+export function lepEllipseSides(doc) {
+  let sides = 60;
+  const s37 = sectionData(doc, 37).map((l) => l.trim()).filter(Boolean);
+  if (s37.length && parseInt(s37[0], 10) === 1) {
+    for (const l of s37.slice(2)) {
+      const f = l.split(/\s+/);
+      if (f[0] === '3002' && Number(f[1]) > 2) sides = Math.round(Number(f[1]));
+    }
+  }
+  return sides;
+}
+
+/**
+ * A rib's cutting line as the program draws it (its 6.11, the same from 3.25
+ * to 3.30): every point of the section, at its own thickness, moved out by
+ * the rib's seam allowance along the mean of the angles of the segments
+ * either side of it, to the side its height above the chord line says — and
+ * down from the intake on — the leading-edge point straight forward, the two
+ * trailing-edge points along their one segment's normal, and the line closed
+ * through the trailing edge itself. `rib` is a `lepRibTable` rib (cm), the
+ * allowance in millimetres (section 6); the line comes back in the rib's
+ * section coordinates, metres, like `lepHoles`.
+ *
+ * It is not an offset curve, which is what was drawn instead: a point moves
+ * by the allowance, not its edges, and the trailing edge is notched to the
+ * sewing point rather than carried out to a mitred corner, whose 3 cm spike
+ * put 2 to 3 cm2 on every rib — 0.03% at the root, 0.35% on the gnuC2-23's
+ * rib 30 and 2.5% on the Swoop2's tip. This is every rib of all three
+ * designs' cutting files to 0.002%.
+ *
+ * A flat rib — the gnuC2-23's tip, section 30's 0.0 — has every point on
+ * the chord line, which the program reads as the upper side as far as the
+ * intake: its line runs out to the nose and back on itself, and the strip
+ * it encloses starts at the intake. That is what the program draws, and it
+ * is drawn here so.
+ */
+export function lepRibCutLine(rib, allowanceMm) {
+  const xcos = allowanceMm / 10;
+  const P = rib.section.points.map(([x, y]) => [x * rib.chord, y * rib.chord * rib.thickness]);
+  const n = P.length;
+  const np2 = rib.section.extrados;
+  const u = (j) => P[j - 1][0];
+  const v = (j) => P[j - 1][1];
+  // Its angles are atan of a slope, not atan2: a vertical segment is +-90
+  // degrees whichever way it runs, which is what turns its mean the right way.
+  const slope = (a, b) => Math.atan((v(b) - v(a)) / (u(b) - u(a)));
+  const out = [];
+  for (let j = 1; j <= n; j++) {
+    const al = j === 1 ? slope(1, 2)
+      : j === n ? slope(n - 1, n)
+        : 0.5 * (slope(j, j + 1) + slope(j - 1, j));
+    const up = [u(j) - xcos * Math.sin(al), v(j) + xcos * Math.cos(al)];
+    const down = [u(j) + xcos * Math.sin(al), v(j) - xcos * Math.cos(al)];
+    let q;
+    if (j === 1) q = v(j) >= 0 ? up : down;
+    else if (j === n) q = v(j) > 0 ? up : down;
+    else if (u(j) === 0) q = [u(j) - xcos, v(j)];
+    else q = v(j) < 0 || j >= np2 ? down : up;
+    // Two coincident points make a 0/0 slope, which the program would draw
+    // to nowhere: there is no point to cut to there.
+    if (Number.isFinite(q[0]) && Number.isFinite(q[1])) out.push(q);
+  }
+  out.push([u(n), v(n)]);
+  return out.map(([a, b]) => [a / 100, b / 100]);
+}
+
+/**
  * Section 4, the lightening holes, per rib — the design's own, rather than
  * the ones this tool would generate. Type 1 is an ellipse: centre, semi-axes
  * and rotation, all in percent of chord. Other types are reported, not drawn.
  * Returns holes in the rib's section coordinates, metres.
+ *
+ * Each is the program's polygon (its subroutine `ellipse`), `sides` long:
+ * 3.30's by default (`lepEllipseSides`), 39 for a file as 3.25 or 3.28 drew
+ * it. They were 48-sided, 0.15% off every hole of both older designs'
+ * cutting files.
+ *
+ * The rotation is read as degrees, turned from the chord line toward the
+ * upper surface. The program hands the number to its ellipse as radians, in
+ * a drawing whose vertical runs down; no design here turns a hole, and one
+ * that does is said, not drawn the program's way.
  */
-export function lepHoles(doc, table) {
+export function lepHoles(doc, table, { sides = lepEllipseSides(doc) } = {}) {
   const s = sectionData(doc, 4).map((l) => l.trim()).filter(Boolean);
-  const out = { byRib: new Map(), notReproduced: [] };
+  const out = { byRib: new Map(), notReproduced: [], sides };
   if (!s.length) return out;
   const groups = parseInt(s[0], 10);
   let p = 1;
@@ -1465,10 +2078,13 @@ export function lepHoles(doc, table) {
       for (const h of holes) {
         if (h[0] !== 1) { out.notReproduced.push(`rib ${i}: hole type ${h[0]}`); continue; }
         const [, x, y, a, b, rotDeg] = h;
+        if (rotDeg && !out.notReproduced.some((m) => /hole rotation/.test(m))) {
+          out.notReproduced.push(`hole rotation (rib ${i}: ${rotDeg}), read as degrees; the program's drawing takes it as radians`);
+        }
         const t = (rotDeg * Math.PI) / 180;
         const outline = [];
-        for (let q = 0; q <= 48; q++) {
-          const w = (2 * Math.PI * q) / 48;
+        for (let q = 0; q <= sides; q++) {
+          const w = (2 * Math.PI * q) / sides;
           const ex = ((a * c) / 100) * Math.cos(w);
           const ey = ((b * c) / 100) * Math.sin(w);
           outline.push([(x * c) / 100 + ex * Math.cos(t) - ey * Math.sin(t),

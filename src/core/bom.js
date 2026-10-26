@@ -159,10 +159,11 @@ export function buildBOM({
       removedFraction: ribHoles.removedFraction,
       massKg: ribHoles.holedMassKg,
       count: ribHoles.ribCount ?? null,
-      note: ribHoles.holeAreaM2 > 0
+      note: (ribHoles.holeAreaM2 > 0
         ? `${(ribHoles.removedFraction * 100).toFixed(0)}% of ${ribHoles.ribAreaM2.toFixed(2)} m2 `
           + `removed as openings${ribHoles.source ? ` (${ribHoles.source})` : ''}`
-        : 'solid ribs, no openings',
+        : 'solid ribs, no openings')
+        + (ribHoles.asCut ? '; as cut, with the design\'s own allowance, as its program cuts them' : ''),
     });
   } else {
     // Said as what it is. This read "rib holes (rib area counted solid)" when
@@ -172,26 +173,48 @@ export function buildBOM({
   }
 
   // ---- diagonals and the rest of the internal structure -------------------
-  const inside = structure && structure.pieces && structure.pieces.length ? structure : null;
-  if (inside) {
-    const est = lepStructureNesting(inside.pieces, { rollWidth, gap });
-    const copies = (p) => p.copies ?? 2;
-    const area = inside.pieces.reduce((t, p) => t + p.cutAreaM2 * copies(p), 0);
+  // An imported design's trailing-edge mini-ribs are rib cloth, and billed
+  // as their own item; everything else it sews inside is the diagonals'.
+  const copies = (p) => p.copies ?? 2;
+  const minis = (structure?.pieces ?? []).filter((p) => p.kind === 'minirib');
+  const insidePieces = (structure?.pieces ?? []).filter((p) => p.kind !== 'minirib');
+  const inside = structure && (insidePieces.length || minis.length) ? structure : null;
+  if (insidePieces.length) {
+    const est = lepStructureNesting(insidePieces, { rollWidth, gap });
+    const area = insidePieces.reduce((t, p) => t + p.cutAreaM2 * copies(p), 0);
     fabric.push({
       item: 'Internal structure cloth',
       rollMetres: est.linearMetres * 2,
       rollWidth,
       panelAreaM2: area,
       utilisation: est.utilisation,
-      count: inside.pieces.reduce((t, p) => t + copies(p), 0),
+      count: insidePieces.reduce((t, p) => t + copies(p), 0),
       massKg: area * C.diagonal,
-      note: `the design's own, as its program cuts them: ${lepStructureWords(inside.pieces)}; `
+      note: `the design's own, as its program cuts them: ${lepStructureWords(insidePieces)}; `
         + 'nested and ordered on their own, apart from the sail',
     });
-    if (inside.miniRibs) {
-      missing.push(`trailing-edge mini-ribs (${inside.miniRibs} a side in the design, not reproduced)`);
-    }
-  } else if (vribs && vribs.count) {
+  }
+  if (minis.length) {
+    const est = lepStructureNesting(minis, { rollWidth, gap });
+    const area = minis.reduce((t, p) => t + p.cutAreaM2 * copies(p), 0);
+    const holes = minis.reduce((t, p) => t + p.holes.length * copies(p), 0);
+    fabric.push({
+      item: 'Mini-rib cloth',
+      rollMetres: est.linearMetres * 2,
+      rollWidth,
+      panelAreaM2: area,
+      utilisation: est.utilisation,
+      count: minis.reduce((t, p) => t + copies(p), 0),
+      massKg: area * C.rib,
+      note: `the design's own trailing-edge mini-ribs, as its program cuts them, in the rib cloth`
+        + (holes ? `, ${holes} holes out` : '')
+        + '; nested on their own',
+    });
+  }
+  if (inside && structure.miniRibs > minis.length) {
+    missing.push(`trailing-edge mini-ribs (${structure.miniRibs - minis.length} of ${structure.miniRibs} a side in the design, not built)`);
+  }
+  if (!inside && vribs && vribs.count) {
     const est = vribFabricEstimate(vribs, { rollWidth, gap });
     fabric.push({
       item: 'Diagonal cloth',
@@ -287,14 +310,19 @@ export function buildBOM({
 
   // What no part of this bill weighs, whatever was passed in. Named, so the
   // total is not read as the weight of a wing.
+  // This said "seam allowances folded under" whatever it had been given,
+  // under a sail that had been weighed with its allowance on. And it named
+  // the ribs' and the diagonals' after an imported design's were weighed as
+  // its program cuts them.
+  const allowanceLeft = (() => {
+    if (!(seamAllowanceMM > 0)) return 'seam allowances folded under';
+    const left = [...(ribHoles?.asCut ? [] : ['ribs']), ...(inside ? [] : ['diagonals'])];
+    return left.length ? `the seam allowance on ${left.join(' and ')} (the sail is weighed as cut)` : null;
+  })();
   const neverWeighed = [
     'riser webbing and its hardware (maillons, pulleys, handles)',
     'thread',
-    // This said "seam allowances folded under" whatever it had been given,
-    // under a sail that had been weighed with its allowance on.
-    seamAllowanceMM > 0
-      ? 'the seam allowance on ribs and diagonals (the sail is weighed as cut)'
-      : 'seam allowances folded under',
+    ...(allowanceLeft ? [allowanceLeft] : []),
     'labels and the stuff a wing is delivered with',
   ];
   if (rodItems.some((r) => r.massKg == null)) {

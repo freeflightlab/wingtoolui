@@ -210,13 +210,18 @@ its own aerofoils and its own line plan, so it takes the import path instead:
 
 > Swoop2: a complete design from Laboratori d'envol — 50 cells, 51 ribs, 90
 > lines a side as its program computes them. The planform, arc and section
-> sliders do not apply to it. Not reproduced: 25 trailing-edge mini-ribs.
+> sliders do not apply to it.
 
-The last sentence is what of the design the tool reads and does not build.
-It said, until this round, that the straps and pieces between two ribs of
-section 12 were listed rather than given an invented shape; every one of
-them is now cut as the design's program cuts it (`docs/internal-structure.md`),
-and what is left are the mini-ribs its program cuts from its own billow.
+It used to end with what of the design the tool reads and does not build:
+first the straps and pieces between two ribs of section 12, listed rather
+than given an invented shape, then the 25 trailing-edge mini-ribs its
+program cuts from the billow of the cell. Every one of them is now cut as
+the design's program cuts it (`docs/internal-structure.md`), and the note
+has nothing left to say there.
+
+The Tuluaq-19 and the gnuC2-23 have joined it there since, each a complete
+design with its own program's output (`docs/tuluaq19.md`,
+`docs/gnuc2-23.md`).
 
 Choosing any specification afterwards clears the imported geometry, or the
 tool would show a Geo 7 built out of Swoop2 ribs. That is asserted, because

@@ -181,7 +181,9 @@ export function markPanel(item, spec = {}, counts = null) {
   return {
     cell: item.cell,
     surface: item.surface,
-    label: `${item.cell}${item.surface === 'upper' ? 'U' : 'L'}`,
+    // A panel cut across by 3D shaping is two or three pieces.
+    ...(item.part ? { part: item.part } : {}),
+    label: `${item.cell}${item.surface === 'upper' ? 'U' : 'L'}${item.part ? item.part[0] : ''}`,
     labelAt: [cx, cy],
     leftNotches,
     rightNotches,
@@ -209,8 +211,11 @@ export function markPanels(items, spec = {}) {
   // seams that will be sewn together, then hand those counts to the panels.
   // Otherwise two panels sharing a seam can disagree about how many notches
   // it carries.
+  // Pieces are sewn to the pieces beside them: a panel cut across by 3D
+  // shaping has its front pieces joined across the span, and its rear ones.
+  const run = (it) => `${it.surface}${it.part ? `/${it.part}` : ''}`;
   const bySurfaceItems = {};
-  for (const it of items) (bySurfaceItems[it.surface] ||= []).push(it);
+  for (const it of items) (bySurfaceItems[run(it)] ||= []).push(it);
   for (const list of Object.values(bySurfaceItems)) list.sort((a, b) => a.cell - b.cell);
 
   const countFor = new Map();          // key: `${surface}:${cellA}-${cellB}`
@@ -224,7 +229,7 @@ export function markPanels(items, spec = {}) {
   }
 
   const marks = items.map((it) => {
-    const list = bySurfaceItems[it.surface];
+    const list = bySurfaceItems[run(it)];
     const i = list.indexOf(it);
     const left = i > 0
       ? countFor.get(`${it.surface}:${list[i - 1].cell}-${it.cell}`) : null;
@@ -234,7 +239,7 @@ export function markPanels(items, spec = {}) {
   });
 
   const bySurface = {};
-  for (const m of marks) (bySurface[m.surface] ||= []).push(m);
+  for (const m of marks) (bySurface[run(m)] ||= []).push(m);
   for (const list of Object.values(bySurface)) list.sort((a, b) => a.cell - b.cell);
 
   const joins = [];

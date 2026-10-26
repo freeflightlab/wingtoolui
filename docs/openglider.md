@@ -9,7 +9,7 @@ and did not. This is that review.
 
 | | OpenGlider | here |
 | --- | --- | --- |
-| **mini-ribs** | modelled, in its own screenshots | **not built** |
+| **mini-ribs** | modelled, in its own screenshots | **not built** on a wing of its own; an imported design's trailing-edge ones as its program cuts them |
 | **3D panel method** | VSAERO / `parabem` | lifting line |
 | **nonlinear FEM** | `paraFEM`, membrane and truss | none |
 | **CFD export** | OBJ for OpenFOAM | OBJ, same choice |
@@ -47,7 +47,8 @@ cut-out between anchors, and the width of cloth at each.
 
 On loading the Swoop2 the interface now cuts every one of them as its
 program does, piece for piece to its cutting file (`docs/internal-structure.md`),
-and the import note lists what that leaves: its trailing-edge mini-ribs.
+and its trailing-edge mini-ribs too, so the import note has nothing left to
+list.
 The straps run along the two ribs' lower surfaces at the anchors, 2% of
 chord either side. The fifteen pieces between two ribs sit under the upper
 surface, at height 100 — exactly the fifteen top straps that the diagonals'
