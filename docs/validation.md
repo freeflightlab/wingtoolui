@@ -199,6 +199,25 @@ two and three digits. The sums of its line sheets go with it to within 0.01,
 and each level of the cascade to within 0.02. Its published *total line
 length* does not: §3.2.
 
+### 2.9 The balance, against its author's own program
+
+LEparagliding, by the handbook's author, solves chapter 4's equations with
+each force at a point it computes rather than by rule. The gnuC2-23 asks it
+to (section 35); every figure its output's section 17 prints reproduces
+(`lepBalance`). Solved where its coefficients balance (k = 1; the file was
+left at 0.578), on the same coefficients, masses and drag:
+
+| | the program's equations | the handbook's (`solveEquilibrium`) |
+| --- | --- | --- |
+| speed, glide | 33.97 km/h, 8.267 | 33.97 km/h, 8.267 |
+| calage | 47.88% of chord | 48.00% |
+
+The forces agree to rounding; the calage is close only because two of the
+handbook's rules for where forces act, each worth nearly 2% of chord here,
+cancel (`docs/gnuc2-23.md` has all five). The program's line Cd, 1 + 10
+Re^-2/3, is 1.085 over this lineset; `lineDrag` takes 1.1, 5% more if
+sheathed, and counts each line's inclination, which the program does not.
+
 ---
 
 ## 3. Where sources disagree with each other

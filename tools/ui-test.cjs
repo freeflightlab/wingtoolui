@@ -724,6 +724,7 @@ try {
     globalThis.__controls();
     const before = globalThis.__getM();
     const beforeSpan = S3.span;
+    const beforeMasses = [S3.pilotMass, S3.wingMass];
     S3.reference = TID;
     globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
     const m3 = globalThis.__getM();
@@ -840,6 +841,32 @@ try {
       + `drawn, ${v4.count} diagonal places on rows ${rows4}, 60 shark-nose rods, ${pieces4} upper panels cut in two `
       + `(${pieceLayers4.size} pieces labelled in its panels file); ${ran4} exports, ${Object.keys(globalThis.__saved).length} files`);
 
+    // Its section 35 balance, under Balance: as its program prints it and
+    // solved to k = 1; and the pilot and wing it was balanced for are the
+    // ones the tool's own balance flies.
+    {
+      globalThis.__rebuild();
+      const rowsB = [];
+      const walkB = (n) => {
+        if (!n) return;
+        if (/^tr$/i.test(n.tagName ?? '')) rowsB.push((n.children || []).map((c) => c._text ?? c.textContent ?? '').join(' | '));
+        for (const c of n.children || []) walkB(c);
+      };
+      walkB(document.getElementById('balanceTable'));
+      const has = (re) => rowsB.some((r) => re.test(r));
+      if (!(S3.pilotMass === 70 && S3.wingMass === 4
+        && has(/^As it prints it \| 44\.56 km\/h, glide 6\.13, sink 1\.99 m\/s, calage 44\.2% c — k 0\.578 at the 12\.4 m\/s it estimates, not converged$/)
+        && has(/^Solved to k = 1 \| 33\.97 km\/h, glide 8\.27, sink 1\.13 m\/s, calage 47\.9% c$/)
+        && has(/^Its lines \| 0\.526 kg with the risers; Cd 1\.085 by Reynolds number, the drag centred 3\.42 m down, 47% of the way/)
+        && /section 35 balance is solved as its program solves it, under Balance, and its pilot \(70 kg\) and wing \(4 kg\)/.test(S3._referenceNote))) {
+        console.log(`  FAIL the gnuC2-23's section 35 balance is not under Balance: pilot ${S3.pilotMass} kg, wing ${S3.wingMass} kg; `
+          + `${rowsB.filter((r) => /k = 1|prints|^Its lines/.test(r)).join(' / ') || rowsB.length + ' rows'}`);
+        process.exit(1);
+      }
+      console.log('  ok   the gnuC2-23\'s section 35 balance is under Balance: 44.56 km/h as its program prints it, left at '
+        + 'k 0.578, and 33.97 km/h solved to k = 1; the 70 kg pilot and 4 kg wing it was balanced for are the balance\'s');
+    }
+
     // Its panels and ribs are cut as its cutting file cuts them, and the bill
     // weighs them at that size. The tool's own development, with its 6%
     // ovalization and one seam allowance, missed the panels by a tenth.
@@ -941,6 +968,11 @@ try {
     const back3 = globalThis.__getM();
     if (back3.imported || S3._appliedReference) {
       console.log('  FAIL choosing "—" after the Tuluaq-19 left the import in place');
+      process.exit(1);
+    }
+    if (S3.pilotMass !== beforeMasses[0] || S3.wingMass !== beforeMasses[1]) {
+      console.log(`  FAIL leaving the imports kept their pilot and wing: ${S3.pilotMass} and ${S3.wingMass} kg, `
+        + `not the ${beforeMasses.join(' and ')} kg before them`);
       process.exit(1);
     }
     console.log(`  ok   and "—" in the picker returns to the parametric wing, ${back3.wing.ribs.length} ribs`

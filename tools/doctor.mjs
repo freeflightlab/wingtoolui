@@ -58,8 +58,8 @@ if (!existsSync('MANIFEST.txt')) {
     .map((m) => m[1].trim())
     // The trailing summary line reads `223 files, 2032 KB`, which matches the
     // size-then-text shape as surely as a real entry does. A path has an
-    // extension and no spaces.
-    .filter((f) => /\.[a-z0-9]+$/i.test(f) && !/\s/.test(f));
+    // extension and no spaces — or is the LICENSE, which has neither.
+    .filter((f) => (/\.[a-z0-9]+$/i.test(f) || f === 'LICENSE') && !/\s/.test(f));
   const absent = listed.filter((f) => !existsSync(f));
   if (absent.length) {
     problems.push(`${absent.length} of ${listed.length} files in MANIFEST.txt `

@@ -217,6 +217,64 @@ export function readAnchors(doc) {
   }).filter((r) => Number.isFinite(r.rib));
 }
 
+/**
+ * Section 37: the special codes. The section is a switch, a count, then a
+ * line per code — the code, its values, and free text the program does not
+ * read: 1146 the mass centre of a typical section in per cent of its chord,
+ * 1351 the balance's solve method, 1352 whether it uses the flat (1) or the
+ * projected (2) area, 3001 the mini-ribs' transitions, 3002 an ellipse's
+ * sides. A map from each code to its leading numbers; empty when the section
+ * is switched off.
+ */
+export function readSpecialCodes(doc) {
+  const out = new Map();
+  const d = sectionData(doc, 37).map((l) => l.trim()).filter(Boolean);
+  if (!d.length || parseInt(fields(d[0])[0], 10) !== 1) return out;
+  const count = parseInt(fields(d[1] ?? '')[0], 10);
+  const rows = d.slice(2, Number.isFinite(count) ? 2 + count : undefined);
+  for (const l of rows) {
+    const f = fields(l);
+    const code = parseInt(f[0], 10);
+    if (!Number.isFinite(code)) continue;
+    const values = [];
+    for (const x of f.slice(1)) {
+      const n = num(x);
+      if (!Number.isFinite(n)) break;
+      values.push(n);
+    }
+    out.set(code, values);
+  }
+  return out;
+}
+
+/**
+ * Section 35: the inputs of the balance the program solves when asked to —
+ * eighteen values in its own order, each line a name and a number (the
+ * program reads the name and throws it away, so the order is what counts).
+ * `null` when the file has no section 35, `{ active: false }` when it is
+ * there and off; `missing` names any value that did not read as a number.
+ */
+export const EQUILIBRIUM_KEYS = [
+  'g', 'rho', 'muMicroPaS', 'speedMS', 'alphaDeg', 'cl', 'cle', 'cd', 'cde', 'cm',
+  'pilotAreaM2', 'pilotCd', 'wingKg', 'pilotKg', 'pilotBelowM', 'quicklinkG', 'cpYM', 'cpZM',
+];
+// The names the program's own template gives them, for saying which is wrong.
+export const EQUILIBRIUM_NAMES = [
+  'g', 'ro', 'mu', 'V', 'Alpha', 'Cl', 'cle', 'Cd', 'cde', 'Cm',
+  'Spilot', 'Cdpilot', 'Mw', 'Mp', 'Pmc', 'Mql', 'Ycp', 'Zcp',
+];
+
+export function readEquilibrium(doc) {
+  const d = sectionData(doc, 35).map((l) => l.trim()).filter(Boolean);
+  if (!d.length) return null;
+  if (parseInt(fields(d[0])[0], 10) !== 1) return { active: false };
+  const rows = d.slice(1, 1 + EQUILIBRIUM_KEYS.length);
+  const out = { active: true };
+  EQUILIBRIUM_KEYS.forEach((k, i) => { out[k] = rows[i] ? num(fields(rows[i])[1]) : NaN; });
+  out.missing = EQUILIBRIUM_KEYS.filter((k) => !Number.isFinite(out[k]));
+  return out;
+}
+
 /** Section 8: the designer's angle-of-attack and line-length estimate. */
 export function readAoA(doc) {
   const d = sectionData(doc, 8).map((l) => num(fields(l)[0]));

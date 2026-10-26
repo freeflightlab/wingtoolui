@@ -85,6 +85,7 @@ MODULES = [
     "lep.js",
     "leplines.js",
     "lepstructure.js",
+    "lepbalance.js",
     "xfoil.js",
 ]
 

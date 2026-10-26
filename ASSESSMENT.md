@@ -11,7 +11,7 @@ patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
 One offline HTML file, 1.2 MB, no build step and no network. That constraint
-drove the architecture: 39 core modules bundled into a single scope, with the
+drove the architecture: 40 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
 **About 63,000 lines**: 24,200 core, 5,800 interface, 16,700 tests, 5,400
@@ -114,9 +114,17 @@ totals, and the gnuC2-23's piece by piece. Where the program lays a closed
 intake out by itself and joins it to the panel, the tool is 0.01 to 0.03%
 off and does not yet know why.
 
+The gnuC2-23 also asks its program to solve its longitudinal balance, and
+every figure the program prints of it reproduces to the last digit. On the
+same coefficients, this tool's own balance — the handbook's — flies the same
+speed and glide and hangs the pilot within 0.12% of chord of the program's.
+That agreement is partly luck: two of the handbook's rules for where forces
+act are each worth nearly 2% of chord, and on that wing they cancel
+(`docs/validation.md` §2.9).
+
 ## 5. What is missing
 
-**49 open items in the roadmap.** The substantial ones:
+**48 open items in the roadmap.** The substantial ones:
 
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
@@ -159,7 +167,9 @@ own estimates.
 vortex lattice now solves the wing as it actually sits in the air — the arc
 included, rather than corrected for afterwards — and it is validated against
 the cases with known exact answers: the lift slope approaches 2 pi at high
-aspect ratio, and an elliptical wing gives a span efficiency of 1.006. It is
+aspect ratio, an elliptical wing gives a span efficiency of 1.006, and a
+wake turned in its own plane keeps its drag — which, until this round, on an
+arc it did not: the arc's gain in efficiency was overstated threefold. It is
 good enough to compare designs and rank trades; it is not good enough to
 predict a polar a manufacturer would publish.
 

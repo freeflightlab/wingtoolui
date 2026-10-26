@@ -7,18 +7,19 @@
  * property the algorithm must obey, or a number printed in the handbook.
  */
 
-import { vortexLattice, stripsFromWing } from '../src/core/vlm.js';
+import { vortexLattice, stripsFromWing, trefftzDrag } from '../src/core/vlm.js';
 import { freeBodyCheck } from '../src/core/freebody.js';
 import {
   lepLineGeometry, lepPlanForTool, lepRibTable, lepAnchorPoint, readLepAirfoil, lepJoncs, lepHoles,
   lepLineSelection, lepLengthChain, lepLineTypes, lepRibPoint,
   lepPanels, lepSeamAllowances, lepSkinTension, lepVents, lepShaping, lepSeamMatching,
-  lepRibCutLine, lepEllipseSides,
+  lepRibCutLine, lepEllipseSides, lepCalageVariation,
 } from '../src/core/leplines.js';
 import { toRibPlane, hasCentreRib, ribCopies, wholeWingCounts, ribSurfacePoint } from '../src/core/wing3d.js';
 import {
   lepStructure, lepResample, lepFlatten, lepStructureToDXF, lepStructureNesting, lepStructureWords,
 } from '../src/core/lepstructure.js';
+import { lepMainParameters, lepBalance, lepCalageFromMoments } from '../src/core/lepbalance.js';
 import { gridRowsFromNames, labelsForRow } from '../tools/niviuk-totals-labels.mjs';
 import { referenceLines, designOf, statedTopologyOf } from '../tools/reference-files.mjs';
 import { figures as diagramFigures } from '../tools/make-diagrams.mjs';
@@ -50,6 +51,7 @@ import {
 import {
   parseLep, parseHVRibs, lepDiagonalPieces, writeLep, blankLepDocument, lepToDesign, writeDesignIntoLep,
   designToLep, describeLep, readGeometry, readAoA, section as lepSection,
+  readSpecialCodes, readEquilibrium,
 } from '../src/core/lep.js';
 import { discretePlanform } from '../src/core/planform.js';
 import { readFileSync, existsSync, readdirSync } from 'fs';
@@ -9577,6 +9579,314 @@ section('The ribs a design cuts, as its program cuts them');
     bomG.neverWeighed.join('; '));
 }
 
+section('The speed system and trimmers, as the program tables them');
+
+{
+  // Section 28 has the program print how the risers and the calage change
+  // as the wing turns (its output's section 7). They were not compared: the
+  // three designs' tables are on file, and reproduced here as the program
+  // computes them, each by its own version — 3.30 measures the speed
+  // system's calage from the root rib's leading edge, 3.25 and 3.28 from a
+  // place set by the tip rib's chord, an index left over from a loop.
+  const designs = [
+    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', 3.3],
+    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', 3.25],
+    ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt', 3.28],
+  ];
+  const kinds = ['speedPivotLast', 'speedPivotFirst', 'trimPivotFirst', 'trimPivotLast'];
+  const printed = (out) => {
+    const i0 = out.indexOf('7. CALAGE AND RISERS');
+    const block = out.slice(i0, out.indexOf('8. NYLON', i0));
+    return block.split(/\n\s*[abcd]\) /).slice(1)
+      .map((part) => part.split('\n').filter((l) => /^\s*\d+\s+-?\d/.test(l)).map((l) => l.trim().split(/\s+/).map(Number)));
+  };
+  let modelWorst = 0;
+  for (const [name, key, file, sf, sn, version] of designs) {
+    const doc = parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1'));
+    const t = lepRibTable(doc, { airfoils: { [sn]: readFileSync(`data/reference/lep/${sf}`, 'latin1') } });
+    const tables = printed(readFileSync(`data/reference/lep/${key}-lep-out.txt`, 'latin1'));
+    const cv = lepCalageVariation(doc, t, { version });
+    let rows = 0; let worstR = 0; let worstC = 0; let counts = tables.length === 4;
+    kinds.forEach((k, q) => {
+      if (!tables[q] || tables[q].length !== cv[k].length) { counts = false; return; }
+      tables[q].forEach((f, j) => {
+        const row = cv[k][j];
+        rows += 1;
+        if (Math.abs(row.alphaDeg - f[1]) > 0.0051) counts = false;
+        row.risersCm.forEach((r, m) => { worstR = Math.max(worstR, Math.abs(r - f[2 + m])); });
+        worstC = Math.max(worstC, Math.abs(row.calagePct - f[2 + row.risersCm.length]));
+      });
+    });
+    check(`${name}: its ${rows} rows of risers and calage are the program's, to the hundredth it prints`,
+      counts && worstR <= 0.0051 && worstC <= 0.0051,
+      `${cv.risers} risers at ${cv.positionsPct.join(', ')}%; worst ${worstR.toFixed(4)} cm and ${worstC.toFixed(4)}%`);
+    // The tool's own speed system turns the wing by atan(travel / lever),
+    // the risers taken as vertical: against the program's rotation.
+    for (const row of cv.speedPivotLast.slice(1)) {
+      const dA = -row.risersCm[0];
+      const rowsR = ['A', 'B', 'C', 'D'].slice(0, cv.risers);
+      const rs = riserSet({
+        rows: rowsR, lengthMM: 1000, travelMM: Math.abs(dA) * 10,
+        anchors: Object.fromEntries(rowsR.map((r, i) => [r, cv.positionsPct[i] / 100])),
+        share: Object.fromEntries(rowsR.map((r, i) => [r, -row.risersCm[i] / dA])),
+      });
+      modelWorst = Math.max(modelWorst, Math.abs(alphaChange(rs, 1, cv.chordCm / 100) / row.alphaDeg - 1));
+    }
+    if (name === 'gnuC2-23') {
+      const as330 = lepCalageVariation(doc, t);
+      const d = Math.max(...as330.speedPivotLast.map((r, j) => Math.abs(r.calagePct - cv.speedPivotLast[j].calagePct)));
+      check('and its tip-chord leftover is the program\'s: 3.30 would have printed its speed system\'s calage up to 0.45% apart',
+        d > 0.4 && d < 0.5 && as330.trimPivotLast.every((r, j) => r.calagePct === cv.trimPivotLast[j].calagePct),
+        `${d.toFixed(3)}%`);
+    }
+  }
+  check('the tool\'s own speed system turns the wing by the program\'s angle for the program\'s travel, to 1.3%',
+    modelWorst < 0.013, `worst ${(modelWorst * 100).toFixed(2)}%`);
+}
+
+section('The wing as a whole, and its balance, as the program prints them');
+
+{
+  // Section 1 of each output prints, besides the areas and spans held
+  // elsewhere, the vault's arrow, the line height, the karabiners' distance
+  // to the tip, the planform's centroid and an estimate of the wing's mass
+  // centre; the gnuC2-23 asks its program (section 35) to solve its
+  // longitudinal balance too, and its section 17 prints the solve. Neither
+  // had been compared. `lepbalance.js` computes both as the program does.
+  const designs = [
+    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt'],
+    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt'],
+    ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt'],
+  ];
+  const built = {};
+  for (const [name, key, file, sf, sn] of designs) {
+    const doc = parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1'));
+    const airfoils = { [sn]: readFileSync(`data/reference/lep/${sf}`, 'latin1') };
+    const t = lepRibTable(doc, { airfoils });
+    const g = lepLineGeometry(doc, { airfoils });
+    const out = readFileSync(`data/reference/lep/${key}-lep-out.txt`, 'latin1');
+    built[key] = { doc, t, g, out };
+    const m = lepMainParameters(doc, t, g);
+    const grab = (re) => Number(out.match(re)?.[1]);
+    // 3.30 prints the flattening in per cent, 3.25 and 3.28 as a fraction.
+    const flat = grab(/Flattening =\s+([\d.]+)/);
+    const pairs = [
+      ['flattening', flat > 1 ? m.flatteningPct : m.flatteningPct / 100, flat],
+      ['vault arrow', m.arrowPrintedM, grab(/Vault arrow =\s+([\d.]+)/)],
+      ['span over arrow', m.projSpanOverArrowPrinted, grab(/Proj_span\/arrow =\s+([\d.]+)/)],
+      ['line height', m.lineHeightM, grab(/Line heigth \(included risers\) =\s+([\d.]+)/)],
+      ['span over line height', m.projSpanOverLineHeightPrinted, grab(/Proj_span\/Line_heigth =\s+([\d.]+)/)],
+      ['karabiners to tip', m.karabinerToTipPrintedM, grab(/Karabiners - wingtip =\s+([\d.]+)/)],
+      ['span over that', m.projSpanOverKarabinerToTipPrinted, grab(/Proj_span\/\(Karabiners - wingtip\) =\s+([\d.]+)/)],
+      ['planform centroid', m.planformCentroidPct, grab(/center of gravity at\s*([\d.]+)/)],
+      ['mass centre y', m.wingMassCentreCm.y, grab(/^y=\s+([\d.]+) cm/m)],
+      ['mass centre z', m.wingMassCentreCm.z, grab(/^z=\s+([\d.]+) cm/m)],
+    ];
+    const off = pairs.filter(([, v, p]) => !(Math.abs(v - p) <= 0.00501));
+    check(`${name}: section 1's other figures are the printed ones — arrow, line height, karabiners to tip, `
+      + 'their ratios, flattening, the planform\'s centroid and the wing\'s mass centre',
+    pairs.every(([, , p]) => Number.isFinite(p)) && off.length === 0,
+    off.map(([n, v, p]) => `${n} ${v.toFixed(4)} against ${p}`).join('; ')
+      || `arrow ${m.arrowPrintedM.toFixed(3)} m, mass centre ${m.wingMassCentreCm.y.toFixed(2)}, ${m.wingMassCentreCm.z.toFixed(2)} cm`);
+    built[key].m = m;
+  }
+  const arrows = designs.map(([, key]) => built[key]);
+  check('the arrow it prints is the arc\'s height scaled a second time: 2.81 m for 2.94 on the gnuC2-23, '
+    + '2.18 for 2.57 on the Swoop2, 1.69 for 2.02 on the Tuluaq',
+  arrows.every((b) => Math.abs(b.m.arrowPrintedM - b.m.arrowM * b.t.scale) < 1e-12)
+    && Math.abs(built['gnuc2-23'].m.arrowM - 2.939) < 0.0005 && Math.abs(built.swoop2.m.arrowM - 2.570) < 0.0005
+    && Math.abs(built.tuluaq19.m.arrowM - 2.019) < 0.0005,
+  arrows.map((b) => `${b.m.arrowM.toFixed(3)} m at scale ${b.t.scale.toFixed(4)}`).join('; '));
+  check('and its karabiners-to-tip leaves the risers out and scales the tip twice: with them, 6.47 m on the gnuC2-23 for its printed 6.25',
+    Math.abs(built['gnuc2-23'].m.karabinerToTipM - 6.466) < 0.0005
+    && arrows.every((b) => b.m.karabinerToTipM > b.m.karabinerToTipPrintedM),
+  arrows.map((b) => `${b.m.karabinerToTipM.toFixed(3)} against ${b.m.karabinerToTipPrintedM.toFixed(3)}`).join('; '));
+
+  // Section 37's codes and section 35's inputs, read.
+  const { doc, t, g, out } = built['gnuc2-23'];
+  const codes = readSpecialCodes(doc);
+  check('section 37\'s special codes are read, each with its numbers: the gnuC2-23\'s seven, the Swoop2\'s ellipse of 55 sides',
+    codes.size === 7 && codes.get(1146)[0] === 36 && codes.get(1351)[0] === 1 && codes.get(1352)[0] === 2
+    && codes.get(1353)[0] === 2 && codes.get(3001).join(' ') === '3 6 0.8'
+    && readSpecialCodes(built.swoop2.doc).get(3002)[0] === 55 && readSpecialCodes(built.swoop2.doc).size === 6,
+  [...codes].map(([c, v]) => `${c}: ${v.join(' ')}`).join(', '));
+  const e = readEquilibrium(doc);
+  check('and section 35\'s eighteen inputs, in the program\'s order; the other two designs have it switched off',
+    e.active && e.missing.length === 0 && e.cl === 0.67913 && e.cde === 1.1 && e.pilotKg === 70
+    && e.quicklinkG === 8 && e.cpYM === 0.575 && e.cpZM === 0.395
+    && !readEquilibrium(built.swoop2.doc).active && !readEquilibrium(built.tuluaq19.doc).active,
+  `V ${e.speedMS} m/s, alpha ${e.alphaDeg}, Cl ${e.cl}, Cd ${e.cd} x ${e.cde}`);
+
+  // Section 17, figure for figure. Every "label= numbers" line after
+  // "Results:", in order; each expected figure takes the next line of its
+  // label and is held to half the last digit printed.
+  const b = lepBalance(doc, t, g);
+  check('its balance is solved, by method 1 on the projected area, its notes saying the solve was left at k = 0.578',
+    b.active && b.ok && b.method === 1 && b.area === 'projected' && b.notReproduced.length === 0
+    && b.notes.length === 1 && /k = 0\.578/.test(b.notes[0]),
+  b.problems.concat(b.notes).join('; '));
+  const i17 = out.indexOf('17. LONGITUDINAL');
+  const block = out.slice(out.indexOf('Results:', i17), out.indexOf('Detailed lines drag', i17));
+  const printedRows = [...block.matchAll(/^\s*([^=\n]+?)=\s*(-?[\d.]+)(?:\s+[a-zA-Z/%]*\s*(-?[\d.]+))?(?:\s+(-?[\d.]+))?/gm)]
+    .map((x) => ({ label: x[1].trim(), nums: x.slice(2).filter((v) => v !== undefined).map(Number) }));
+  let cursor = 0;
+  const take = (label) => {
+    while (cursor < printedRows.length && printedRows[cursor].label !== label) cursor += 1;
+    return cursor < printedRows.length ? printedRows[cursor++].nums : null;
+  };
+  const p = b.printed;
+  const F = p.forces;
+  const mc = p.massCentres;
+  const cpl = p.complements;
+  // [label, [value, decimals] ...] — decimals 0 for the program's truncated mm.
+  const groups = {
+    'masses, areas and wing loads': [
+      ['Lines mass', [b.masses.linesKg, 3]], ['Risers mass', [b.masses.risersKg, 3]],
+      ['Quickli mass', [b.masses.quicklinksKg, 3], [b.masses.quicklinks, 0]], ['Total mass', [b.masses.totalKg, 3]],
+      ['Wing flatS', [b.flatAreaM2, 4]], ['Wing projS', [b.projAreaM2, 4]],
+      ['Wingload', [b.masses.wingLoadFlat, 3]], ['Wingload', [b.masses.wingLoadProj, 3]],
+    ],
+    'the lines\' surface, drag centre and coefficient': [
+      ['Lines surf', [b.lines.surfaceM2, 4]], ['Risers surf', [b.lines.risersSurfaceM2, 4]],
+      ['y-Lines drag', [b.lines.dragCentreM.y, 4]], ['z-Lines drag', [b.lines.dragCentreM.z, 4]],
+      ['Global Cdlines', [b.lines.cdLines, 4]],
+    ],
+    'k1, k2, k and every force': [
+      ['k1,k2,k', [p.k1, 4], [p.k2, 4], [p.k, 4]],
+      ['Wing lift', [F.lift, 4]], ['Wing lift ex', [F.liftExtra, 4]], ['Wing lift tot', [F.liftTotal, 4]],
+      ['Wing drag', [F.drag, 4]], ['Wing drag ex', [F.dragExtra, 4]], ['Wing drag tot', [F.dragTotal, 4]],
+      ['Lines drag', [F.lines, 4]], ['Pilot drag', [F.pilot, 4]], ['Total drag', [F.total, 4]],
+      ['Induced drag', [F.induced, 4]],
+    ],
+    'the four lift-to-drag ratios': [
+      ['Wing Cl/Cd', [p.ratios.clcd, 4]], ['Cl*Cle/(Cd*Cde)', [p.ratios.clcdAdjusted, 4]],
+      ['L/(D+Dextra)', [p.ratios.liftOverWingDrag, 4]], ['L/(Drag total)', [p.ratios.liftOverTotalDrag, 4]],
+    ],
+    'the three speeds': [
+      ['Theoric speed', [p.speedMS, 3], [p.speedMS * 3.6, 2]],
+      ['Horiz speed', [p.horizontalMS, 3], [p.horizontalMS * 3.6, 2]],
+      ['Vert speed', [p.sinkMS, 3], [p.sinkMS * 3.6, 2]],
+    ],
+    'the five mass centres': ['wing', 'lines', 'quicklinks', 'pilot', 'total']
+      .flatMap((w) => [['y', [mc[w].y, 3]], ['z', [mc[w].z, 3]]]),
+    'the angles, the karabiners, the centre of pressure, plumb point and calage': [
+      ['Theta', [p.thetaDeg, 3]], ['Gamma', [p.gammaDeg, 3]], ['Glide ratio', [p.glideRatio, 3]],
+      ['Main-K x-coord', [p.karabinerM.x, 3]], ['Main-K y-coord', [p.karabinerM.y, 3]],
+      ['Main-K z-coord', [p.karabinerM.z, 3]],
+      ['Cp %', [p.cpPct, 2], [Math.trunc(e.cpYM * 1000), 0]],
+      ['Pp %', [p.plumbPct, 2], [Math.trunc(p.plumbM * 1000), 0]],
+      ['Calage %', [p.calagePct, 2], [Math.trunc(p.karabinerM.y * 1000), 0]],
+    ],
+    'the complements, on the chord of the rib the program\'s left-over index points at': [
+      ['Pp-Py %', [cpl.printedPct.plumbLessCalage, 2], [cpl.mm.plumbLessCalage, 0]],
+      ['Py-Cp %', [cpl.printedPct.calageLessCp, 2], [cpl.mm.calageLessCp, 0]],
+      ['Pp-Cp %', [cpl.printedPct.plumbLessCp, 2], [cpl.mm.plumbLessCp, 0]],
+      ['wcg-wcp', [cpl.mm.wingCgToCp, 0]], ['wcg_y-wcp_y', [cpl.mm.wingCgToCpY, 0]],
+      ['wcg_z-wcp_z', [cpl.mm.wingCgToCpZ, 0]],
+    ],
+  };
+  for (const [what, rows] of Object.entries(groups)) {
+    const bad = [];
+    let n = 0;
+    for (const [label, ...vals] of rows) {
+      const nums = take(label);
+      if (!nums || nums.length < vals.length) { bad.push(`${label}: not printed`); continue; }
+      vals.forEach(([v, d], i) => {
+        n += 1;
+        const ok = d === 0 ? v === nums[i] : Math.abs(v - nums[i]) <= 0.5 * 10 ** -d + 1e-9;
+        if (!ok) bad.push(`${label} ${v} against ${nums[i]}`);
+      });
+    }
+    check(`section 17: ${what} — ${n} figures, each to the digit printed`, bad.length === 0, bad.join('; '));
+  }
+  check('and the complements divide by rib 7\'s chord, the index left from printing six line types: by the central chord, 19.76% where it prints 20.28',
+    cpl.chordRib === 7 && cpl.pct.calageLessCp < cpl.printedPct.calageLessCp
+    && Math.abs(cpl.printedPct.calageLessCp - cpl.pct.calageLessCp - 0.512) < 0.001,
+  `${cpl.pct.calageLessCp.toFixed(2)}% by the central chord against the printed ${cpl.printedPct.calageLessCp.toFixed(2)}`);
+
+  // The 95 lines' table: frontal area, Reynolds number, Cd and drag.
+  const det = [...out.slice(out.indexOf('Detailed lines drag', i17)).matchAll(/^\s+(\d+)\s+(\d+)\.\s+(\d+)\.\s+([\d.]+)\s+([\d.]+)\s*$/gm)]
+    .map((x) => x.slice(1).map(Number));
+  let worst = [0, 0, 0, 0];
+  det.forEach(([i, area, re, cd, drag]) => {
+    const l = b.lines.perLine[i - 1];
+    worst = [Math.max(worst[0], Math.abs(l.areaMM2 - area)), Math.max(worst[1], Math.abs(l.reynolds - re)),
+      Math.max(worst[2], Math.abs(l.cd - cd)), Math.max(worst[3], Math.abs(l.dragN - drag))];
+  });
+  check('and its table of 95 lines: each one\'s frontal area, Reynolds number, Cd = 1 + 10 Re^-2/3 and drag, as printed',
+    det.length === 95 && b.lines.perLine.length === 95
+    && worst[0] <= 0.5 && worst[1] <= 0.5 && worst[2] <= 0.0005 && worst[3] <= 0.005,
+  `worst ${worst.map((w) => w.toFixed(4)).join(', ')}`);
+  check('the lines it weighs and measures are the ones the line geometry totals: 0.526 kg and 0.481 m2',
+    Math.abs(b.masses.linesKg - g.totals.weightKg) < 1e-12 && Math.abs(b.lines.surfaceM2 - g.totals.lineAreaM2) < 1e-12);
+
+  // Solved where the typed coefficients balance.
+  const c = b.converged;
+  const W = b.masses.totalKg * e.g;
+  const gam = (c.gammaDeg * Math.PI) / 180;
+  check('solved to k = 1, as the program asks, both balances hold: lift W cos gamma, drag W sin gamma',
+    Math.abs(c.forces.liftTotal / (W * Math.cos(gam)) - 1) < 1e-9 && Math.abs(c.forces.total / (W * Math.sin(gam)) - 1) < 1e-9,
+  `${c.iterations} iterations`);
+  check('and that is 33.97 km/h, a glide of 8.27 and 1.13 m/s of sink, the pilot hung at 47.9% of the chord',
+    Math.abs(c.speedKMH - 33.97) < 0.005 && Math.abs(c.glideRatio - 8.267) < 0.0005
+    && Math.abs(c.sinkMS - 1.133) < 0.0005 && Math.abs(c.calagePct - 47.88) < 0.005,
+  `${c.speedKMH.toFixed(3)} km/h, ${c.glideRatio.toFixed(4)}, ${c.sinkMS.toFixed(4)} m/s, ${c.calagePct.toFixed(3)}%`);
+
+  // Against this tool's own balance — the handbook's chapter 4 — on the same
+  // coefficients, masses and drag: the forces are the same physics, so the
+  // speed and glide must agree; the moments place the forces by the
+  // handbook's rules, and the calage shows what they cost.
+  const q = 0.5 * e.rho * c.speedMS ** 2;
+  const span = built['gnuc2-23'].m.projSpanM;
+  const cxi = (e.cl ** 2) / (Math.PI * ((span ** 2) / b.areaM2) * 0.9);
+  const hb = solveEquilibrium({
+    area: b.areaM2, span, chord: b.chordM, lineLength: b.hcpM, pilotMass: e.pilotKg, wingMass: e.wingKg,
+    lineMass: b.masses.linesKg + b.masses.quicklinksKg, g: e.g, rho: e.rho, oswald: 0.9,
+    cxPilot: (e.pilotCd * e.pilotAreaM2) / b.areaM2, cxLines: c.forces.lines / (q * b.areaM2),
+    alphaDeg: e.alphaDeg, cz: e.cl * e.cle, cx0a: e.cd * e.cde - cxi, cm: (0.25 - e.cpYM / b.chordM) * e.cl * e.cle,
+    apply3D: false,
+  });
+  check('the handbook\'s balance on the same coefficients flies the same speed and glide, and hangs the pilot within 0.15% of chord of it',
+    Math.abs(hb.speedKMH / c.speedKMH - 1) < 1e-9 && Math.abs(hb.gammaDeg - c.gammaDeg) < 1e-9
+    && Math.abs(hb.calageFraction * 100 - c.calagePct) < 0.15,
+  `${(hb.calageFraction * 100).toFixed(2)}% against ${c.calagePct.toFixed(2)}%`);
+  // Why so close: the handbook's rules, one at a time, in the program's
+  // moments. Two are worth about 1.8% of chord each, in opposite senses.
+  const st = { ...c, wing: c.massCentres.wing, linesMc: b.lines.massCentreM, dragCentre: c.lineDrag.centreM };
+  const calageWith = (o) => {
+    const s = { ...st, ...o };
+    const py = lepCalageFromMoments({
+      e: { ...e, ...(o.e ?? {}) }, theta: (c.thetaDeg * Math.PI) / 180, alpha: (e.alphaDeg * Math.PI) / 180,
+      wing: s.wing, linesKg: b.masses.linesKg, linesMc: s.linesMc, linesDragN: c.forces.lines,
+      dragCentre: s.dragCentre, pilotDragN: c.forces.pilot, hcpM: b.hcpM,
+    });
+    return (py / b.chordM) * 100 - c.calagePct;
+  };
+  const sens = {
+    cpOnChord: calageWith({ e: { cpZM: 0 } }),
+    dragAtThird: calageWith({ dragCentre: { y: c.lineDrag.centreM.y, z: b.hcpM / 3 } }),
+    wingOnChord: calageWith({ wing: { y: b.chordM / 3, z: 0 } }),
+    pilotAtKarabiners: calageWith({ e: { pilotBelowM: 0 } }),
+  };
+  check('the handbook\'s rules measured in the program\'s moments: the centre of pressure on the chord moves the calage +1.85% '
+    + 'and the line drag a third of the way down -1.77%, cancelling; the wing\'s mass on the chord +0.52, the pilot at the karabiners -0.18',
+  Math.abs(sens.cpOnChord - 1.85) < 0.01 && Math.abs(sens.dragAtThird + 1.77) < 0.01
+    && Math.abs(sens.wingOnChord - 0.52) < 0.01 && Math.abs(sens.pilotAtKarabiners + 0.18) < 0.01
+    && Math.abs(calageWith({}) ) < 1e-9,
+  Object.entries(sens).map(([k, v]) => `${k} ${v.toFixed(3)}`).join(', '));
+  check('the line drag sits 47% of the way down to the karabiners, its weight 53%',
+    Math.abs(b.lines.dragCentreM.z / b.hcpM - 0.472) < 0.0005 && Math.abs(b.lines.massCentreM.z / b.hcpM - 0.525) < 0.0005,
+  `${(b.lines.dragCentreM.z / b.hcpM).toFixed(4)}, ${(b.lines.massCentreM.z / b.hcpM).toFixed(4)}`);
+
+  // A section 35 that cannot be read says what it lacks.
+  const broken = parseLep(readFileSync('data/reference/lep/gnuc2-23-20260429.lep', 'latin1').replace(/^Zcp\s+0\.395/m, 'Zcp      x'));
+  const bb = lepBalance(broken, t, g);
+  check('a section 35 with a value missing is not solved, and says which, by the name the file gives it',
+    bb.active && !bb.ok && /does not give Zcp as a number/.test(bb.problems[0]),
+    bb.problems.join('; '));
+  check('and a design with section 35 off has no balance to show', !lepBalance(built.swoop2.doc, built.swoop2.t, built.swoop2.g).active);
+}
+
 section('What a design sews inside its cells, as its program cuts it');
 
 {
@@ -14104,9 +14414,43 @@ section('A vortex lattice over the wing as it sits');
   // sheds its wake in a non-planar sheet, which is MORE efficient — the same
   // reason a winglet works. A correction factor on a flat solution cannot
   // produce that.
-  check('but the span efficiency rises, because the wake is not planar',
-    bent.oswald > flat.oswald * 1.05,
+  //
+  // By 3% on this arc, not the 11% this held: the Trefftz integral took the
+  // vertical wash, which is the wash normal to the wake only where the wake
+  // lies flat. Out on the arc its trace tilts, and the sidewash across it
+  // carries drag too.
+  check('but the span efficiency rises, because the wake is not planar: 3% on an arc whose tips stand at 37 degrees',
+    bent.oswald > flat.oswald * 1.02 && bent.oswald < flat.oswald * 1.05,
     `${flat.oswald.toFixed(3)} becomes ${bent.oswald.toFixed(3)}`);
+
+  // The drag is the integral of the NORMAL wash: the same wake turned bodily
+  // in its own plane, which cannot change its drag, keeps it.
+  const qcOf = (le, te) => le.map((c, k) => c + (te[k] - c) * 0.25);
+  const traceOf = (st) => st.map((s) => [qcOf(s.leftLE, s.leftTE), qcOf(s.rightLE, s.rightTE)].map((p) => [p[1], p[2]]));
+  const turn = (tr, deg) => {
+    const a = (deg * Math.PI) / 180;
+    return tr.map((seg) => seg.map(([y, z]) => [y * Math.cos(a) - z * Math.sin(a), y * Math.sin(a) + z * Math.cos(a)]));
+  };
+  const bentTrace = traceOf(arced(0.80, 48));
+  const d0 = trefftzDrag(bentTrace, bent.gamma);
+  const turned = [30, 60, 90].map((deg) => trefftzDrag(turn(bentTrace, deg), bent.gamma) / d0 - 1);
+  check('its induced drag is the Trefftz integral of the wash normal to the wake: the wake turned 30, 60 or 90 degrees in its own plane keeps it',
+    Math.abs(d0 / bent.inducedDragN - 1) < 1e-12 && turned.every((x) => Math.abs(x) < 1e-12),
+    turned.map((x) => x.toExponential(1)).join(', '));
+
+  // And on a real arc, the gnuC2-23's: 2.94 m deep under a projected span of
+  // 9.67 m.
+  const afV = parseAirfoilText(readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1'), 'gnuC2');
+  const dV = lepToDesign(parseLep(readFileSync('data/reference/lep/gnuc2-23-20260429.lep', 'latin1')),
+    { sections: { 'gnuC2.txt': afV } });
+  const wV = buildWing({
+    planform: discretePlanform(dV.planformRows), lobe: null, airfoil: afV,
+    explicitRibs: dV.explicitRibs, pointsPerSurface: 80, alphaDeg: 9.45,
+  });
+  const gV = vortexLattice({ strips: stripsFromWing(wV), alphaDeg: 9.45 });
+  check('on the gnuC2-23\'s arc the span efficiency is 1.21 on its projected span, where the vertical wash alone made it 1.52',
+    Math.abs(gV.oswald - 1.208) < 0.005 && Math.abs(gV.spanM - 9.687) < 0.005,
+    `${gV.oswald.toFixed(4)} on ${gV.spanM.toFixed(3)} m, CL ${gV.CL.toFixed(4)}`);
 
   // It runs on a real wing.
   const wingV = demoWing();

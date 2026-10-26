@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2632-test validation suite and a benchmark with regression budgets
+- [x] 2665-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -310,10 +310,13 @@ material published after the handbook:
       against the printed pages.
 - [ ] **Ozone and PHI totals** — several of those sheets carry a
       total-line-length table too, in their own formats.
-- [ ] **Read the remaining LEP sections into the model** — 9-11 (the line
+- [x] **Read the remaining LEP sections into the model** — 9-11 (the line
       cascade matrix, richer than this project's centroid method), 12 (V-ribs),
       29 (3D shaping), 34 (line characteristics), 35 (equilibrium inputs).
-      All are round-trip safe today; mapping them into the model is next.
+      All five are read now: 9-11 into the line plan as the program builds
+      it, 12 into every piece sewn inside a cell, 29 into where the panels
+      are cut across, 34 into the design's own line types and 35 into the
+      balance its program solves (`docs/lep-format.md`).
 - [ ] **Reference wings from the gnuLAB / gnuA / BHL series** — dozens of
       complete published designs with airfoils and areas, usable as both
       starting points and validation cases.
@@ -972,10 +975,47 @@ validation notes flagged.
       Swoop2's lower panels run over the rear of the intake are 0.034%
       over, the gnuC2-23's closed tip cells 0.011% under, 0.3 mm at the
       intake's first points.
-- [ ] **The calage and riser variations the program prints** (its section
-      28 and its output's section 7) are not compared with this tool's speed
-      system, which has its own model (`docs/speed-system.md`); the three
-      designs' tables are on file.
+- [x] **The calage and riser variations the program prints** (its section
+      28 and its output's section 7): `lepCalageVariation` gives all three
+      designs' tables to the printed hundredth, 168 rows, the program's
+      leftover tip-chord index in 3.25 and 3.28 included; this tool's own
+      speed-system model gives the program's angles for its travel to 1.3%.
+      See `docs/speed-system.md`, section 8.
+
+### Round of 2026-10-26: the balance its program solves
+
+- [x] **The program's longitudinal balance** (section 35, its output's
+      section 17): `lepBalance` reproduces every figure the gnuC2-23's
+      output prints — masses, the lines' surface and drag with each line's
+      Cd from its Reynolds number, the factor k and every force, the speeds,
+      five mass centres, the angles and the calage — and its 95 lines' drag
+      table, to the last digit. Its solve was left at k = 0.578; at k = 1,
+      as the program asks, 33.97 km/h, glide 8.27, calage 47.9%. Under
+      Balance for an imported design, with the pilot and wing it was
+      balanced for taken for the tool's own. See `docs/gnuc2-23.md`.
+- [x] **The handbook's balance against it** — on the same coefficients the
+      same speed and glide, and a calage 0.12% of chord apart, because two
+      of the handbook's rules for where forces act, worth nearly 2% each,
+      cancel on this wing. Validation §2.9.
+- [x] **The whole-wing figures of section 1** on all three designs —
+      `lepMainParameters`: the vault arrow, line height, karabiners to tip,
+      the planform's centroid and the wing's mass centre, as printed. The
+      program scales the arc's height twice (2.81 m printed for 2.94), leaves
+      the risers out of "karabiners - wingtip", and divides section 17's
+      complements by rib 7's chord, an index left from a loop.
+- [x] **The lattice's induced drag on an arc** — the Trefftz integral took
+      the vertical wash, which is the wash normal to the wake only where the
+      wake lies flat; a wake turned in its own plane changed its drag. With
+      the normal wash (`trefftzDrag`) it keeps it, an elliptical wing is still
+      1.006, and the gnuC2-23's span efficiency is 1.21 on its projected span,
+      not 1.52; the 37° test arc gains 3% over the flat wing, not 11%.
+- [ ] **This tool's balance with every force where it acts** — the
+      handbook's rules cancel on the gnuC2-23 because its centre of
+      pressure sits 0.395 m below the chord, a figure its designer typed
+      from XFLR5. With the arched wing's own centre of pressure (the vortex
+      lattice gives it) and the line plan's own drag and mass centres, the
+      tool's designs could be balanced the way the program balances them
+      rather than on a cancellation measured once.
 
 ## Phase 3 — construction detail
 

@@ -11,6 +11,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
+import { createHash } from 'crypto';
 
 const problems = [];
 const notes = [];
@@ -242,6 +243,30 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
   }
   say(unresolved.length === 0, 'and every relative import resolves',
     unresolved.slice(0, 3).join(', ') || `${imports} imports`);
+}
+
+/* ---- 1x. the licence is the one the repository carries ----------------- */
+//
+// The LICENSE was created on GitHub — the GNU GPL, version 3, as the Free
+// Software Foundation publishes it — and the repository is updated by
+// replacing its whole tree with a release (PUBLISHING.md). A release without
+// the file deleted it at the next commit; one whose copy differed by a byte,
+// a line end or the final newline would rewrite it. So the file is held to
+// the text's own checksum, and what the project says of its licence to it.
+{
+  const GPL3_SHA256 = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986';
+  const has = existsSync('LICENSE');
+  const sha = has ? createHash('sha256').update(readFileSync('LICENSE')).digest('hex') : null;
+  say(sha === GPL3_SHA256, 'LICENSE is the GNU GPL v3, byte for byte as the repository carries it',
+    !has ? 'missing' : sha === GPL3_SHA256 ? '35149 bytes' : `sha256 ${sha.slice(0, 12)}..., not the GPL's text`);
+  let declared = null;
+  try { declared = JSON.parse(readFileSync('package.json', 'utf8')).license; } catch (e) { declared = null; }
+  say(declared === 'GPL-3.0-only', "package.json declares it", `"${declared}"`);
+  const readme = readFileSync('README.md', 'utf8');
+  const licensing = existsSync('LICENSING.md') ? readFileSync('LICENSING.md', 'utf8') : '';
+  say(/GNU General Public License, version 3/.test(readme) && /GNU General Public License, version\s+3/.test(licensing)
+    && !/no licen[cs]e is set|no `LICENSE` file/i.test(readme + licensing),
+  'and the README and LICENSING.md say so', '');
 }
 
 /* ---- 1y. the assessment's numbers are current --------------------------- */

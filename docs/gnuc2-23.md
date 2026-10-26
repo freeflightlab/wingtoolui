@@ -40,6 +40,11 @@ which its README calls "not edited" — and the program's source. On file in
   inner, and cells 27 to 30 are closed outright.
 - **Three risers** and 40, 40 and 20% of the load on their rows, with the
   stabilo lines from the C riser to the A and B anchors of ribs 29 and 31.
+- **A balance to solve.** Section 35 is on: the coefficients its designer
+  typed (Cl 0.679 and Cd 0.0379 at 9.45°, from XFLR5), a pilot of 70 kg, a
+  wing of 4.0 kg and a centre of pressure 0.575 m back and 0.395 m down; its
+  output's section 17 prints the program's longitudinal balance from them,
+  the "advanced" form with every line's drag.
 
 ## 2. What reproduces
 
@@ -60,6 +65,9 @@ Held to the program's printed output, as the other two are:
 | angle of attack 4.51°, assiette 0.93° | section 2 | to the printed figure | |
 | 30 upper and 30 lower rods, 42.32 m both sides | section 8 | every rod | 0.05 cm |
 | 117 internal entries: 6 straps, 93 pieces between ribs, 18 V-ribs | its input, section 12 | none unread | |
+| vault arrow, line height, karabiners to tip, their ratios, the planform's centroid 54.63% | section 1 | as printed (see §3) | |
+| the wing's mass centre, 103.83 cm back and 88.71 down | section 1 | to the printed figure | |
+| the longitudinal balance: 68 figures, and 95 lines' area, Reynolds number, Cd and drag | section 17 | every figure to its last digit | |
 
 The lines, the main parameters and the chords matched on the first load: the
 importer needed nothing new for them. The rods, the V-ribs and the pieces on
@@ -91,6 +99,50 @@ before 3.30 and of 60, or what section 37's code 3002 says, after. The
 tool's had 48, and every hole of the two designs drawn before 3.30 was 0.15%
 off; each rib's now takes out its file's area to the hundredth of a cm² the
 file is written to.
+
+**The speed system's table.** Section 28 has the program print how the
+risers and the calage change as the wing is turned. All three designs'
+tables are reproduced to the hundredth printed, 168 rows (`docs/speed-system.md`,
+section 8) — and in this design's, the program's 3.28 measures the speed
+system's calage from a leading edge set by the tip rib's chord, an index
+left over from a loop; 3.30 corrects it.
+
+**The balance its program solves.** Section 17 is reproduced figure for
+figure (`lepBalance`): masses, the lines' surface and drag, the factor k,
+every force, the speeds, five mass centres, the angles and the calage, 44.17%.
+The model is the handbook's chapter 4 with each force where it acts — the
+wing's mass at its arc's centroid, 0.89 m below the nose; the lines' drag at
+its own centre, 47% of the way to the karabiners where the handbook puts a
+third, each line's Cd from its Reynolds number; the pilot 0.2 m below the
+karabiners; the centre of pressure at a height. The program solves it on a
+grid and asks for its inputs to be iterated until k is 1; this design's was
+left at k = 0.578, so the 44.56 km/h and glide of 6.13 it prints are the wing
+on 58% of its typed lift. Solved at the speed where k is 1, the same
+equations give **33.97 km/h, a glide of 8.27 and a calage of 47.9%** — and
+this tool's own balance, the handbook's, on the same coefficients, the same
+speed and glide and a calage 0.12% of chord from it (validation §2.9). The
+handbook's rules cost little here because two of them cancel. Each put
+into the program's moments by itself (`lepCalageFromMoments`):
+
+| the handbook's rule | where the program puts it | the calage moves |
+| --- | --- | --- |
+| centre of pressure on the chord | 0.395 m below it | +1.85% of chord |
+| line drag a third of the way down | 47% of the way | −1.77% |
+| the wing's mass on the chord, a third back | 44% back, 0.89 m down | +0.52% |
+| the pilot at the karabiners | 0.2 m below them | −0.18% |
+| line weight half way down | 53% of the way | none |
+
+How well the first two cancel on another wing depends on its centre of
+pressure's height, which the program takes typed, from XFLR5: the agreement
+is a measurement on this design, not a licence for the rules.
+
+**Three figures it prints that are not what they say.** Reproduced as
+printed, with what the label describes beside them: the vault arrow scales
+the tip's height by the wing's scale a second time (2.81 m for an arc
+2.94 m high; the Swoop2's 2.18 for 2.57); "karabiners - wingtip" leaves the
+risers out as well (6.25 m for 6.47); and section 17's complements divide
+by the chord of rib 7, an index left over from the loop that prints section
+16's six line types, not by the central chord (20.28% for 19.76).
 
 **Seam matching.** Section 5's `1000 1.0` — in all three files — is the
 program's perfect matching, which stretches each panel's sewing edge back
@@ -141,6 +193,13 @@ with its centre rib once, like its sail and its internal structure: nothing
 it has is left with its allowance off. Its 29 trailing-edge mini-ribs a side
 are rib cloth too, and their own item: 58 for the wing, 1.50 m².
 
+Its section 35 balance is under Balance, beside the tool's own: as its
+program prints it, 44.56 km/h at k = 0.578 and "not converged", and solved
+to k = 1, 33.97 km/h and a calage of 47.9%; its lines, 0.526 kg, their drag
+centred 3.42 m down. The pilot (70 kg) and wing (4.0 kg) it was balanced for
+are the ones the tool's own balance flies; leaving the design puts back the
+ones it replaced.
+
 The Diagonals summary is this tool's model at 51 of its places — the V-rib
 strips, and the 27 pieces between ribs that run from an anchor to the rib
 beside it. Its other 66 pieces join ribs too, and the summary says that its
@@ -149,8 +208,6 @@ model.
 
 ## 6. Not compared
 
-- Section 28 and the program's output section 7, the calage and risers as
-  the speed system or trimmers move: the tool does not read section 28.
 - Its 3D drawing: the panels and pieces are checked against the 2D cutting
   file, the geometry against the printed output.
 - Its section 9, the 3D shaping's ovalization at each rib (d1, d2).

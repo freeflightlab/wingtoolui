@@ -424,7 +424,7 @@ function applyReference() {
  */
 const IMPORT_OVERWRITES = [
   'name', 'span', 'rootChord', 'tipChord', 'cells', 'centreRib',
-  'lineLength', 'karabinerSep', 'alphaDeg', 'lineMass', 'cxLinesFromPlan',
+  'lineLength', 'karabinerSep', 'alphaDeg', 'lineMass', 'cxLinesFromPlan', 'pilotMass', 'wingMass',
   'anchorA', 'anchorB', 'anchorC', 'anchorD', 'intakeStart', 'intakeEnd',
 ];
 
@@ -457,6 +457,7 @@ function loadLepDesign(doc, sectionTexts = {}) {
   let holes = null;
   let panels = null;
   let structure = null;
+  let balance = null;
   if (haveAll) {
     table = lepRibTable(doc, { airfoils: texts });
     geom = lepLineGeometry(doc, { airfoils: texts });
@@ -468,11 +469,15 @@ function loadLepDesign(doc, sectionTexts = {}) {
     try { panels = lepPanels(doc, table); } catch (e) { panels = null; }
     // The mini-ribs' transitions take the cell's billow from these panels.
     try { structure = lepStructure(doc, table, { panels }); } catch (e) { structure = null; }
+    // Its longitudinal balance, when its section 35 asks the program for
+    // one: solved as the program solves it, and at the speed its typed
+    // coefficients balance at.
+    try { balance = lepBalance(doc, table, geom); } catch (e) { balance = null; }
   }
   // Section 12: what the design sews inside its cells.
   let hv = null;
   try { hv = parseHVRibs(doc); } catch (e) { hv = null; }
-  LEP = { doc, design, info: describeLep(doc), texts, parsed, geom, table, joncs, holes, hv, panels, structure };
+  LEP = { doc, design, info: describeLep(doc), texts, parsed, geom, table, joncs, holes, hv, panels, structure, balance };
   S.name = design.name || S.name;
   const nameField = document.getElementById('wingName');
   if (nameField) nameField.value = S.name;
@@ -511,6 +516,13 @@ function loadLepDesign(doc, sectionTexts = {}) {
     S.lineMass = Math.round(geom.totals.weightKg * 1000) / 1000;
     S.cxLinesFromPlan = true;
   }
+  // The pilot and the wing its section 35 was balanced for, when it says.
+  const e35 = balance?.active ? balance.inputs : null;
+  const masses35 = e35 && e35.pilotKg >= 40 && e35.pilotKg <= 140 && e35.wingKg >= 1 && e35.wingKg <= 12;
+  if (masses35) {
+    S.pilotMass = e35.pilotKg;
+    S.wingMass = e35.wingKg;
+  }
   const said = [];
   if (!haveAll) {
     said.push(`the file names ${design.missingSections.join(', ')} — load it `
@@ -535,6 +547,12 @@ function loadLepDesign(doc, sectionTexts = {}) {
     }
   }
   if (missing.length) said.push(`not reproduced: ${missing.join('; ')}`);
+  if (balance?.active) {
+    said.push(balance.ok
+      ? 'its section 35 balance is solved as its program solves it, under Balance'
+        + (masses35 ? `, and its pilot (${e35.pilotKg} kg) and wing (${e35.wingKg} kg) are the ones this tool's balance flies` : '')
+      : `its section 35 balance is not solved: ${balance.problems[0]}`);
+  }
   S._referenceNote = `${design.name || 'LEP design'}: a complete design from `
     + `${design.brand || 'LEparagliding'} — ${design.cells} cells, `
     + `${design.geometry.ribCount} ribs`
@@ -3755,6 +3773,27 @@ function drawBalanceTable() {
       ['Attitude (assiette)', `${g.assietteDeg.toFixed(2)}°`],
       ['Angle of attack', `${g.aoaDeg.toFixed(2)}°`],
     );
+  }
+  // And its section 35 balance: the program's own solve, which it prints
+  // "for informational purposes" and asks to be iterated, and the same
+  // equations at the speed its typed coefficients balance at.
+  const bal = M.imported && LEP?.balance?.active ? LEP.balance : null;
+  if (bal && !bal.ok) rows.push(['— its section 35 balance —', `not solved: ${bal.problems[0]}`, true]);
+  else if (bal) {
+    const e = bal.inputs;
+    const said = (x) => `${x.speedKMH.toFixed(2)} km/h, glide ${x.glideRatio.toFixed(2)}, `
+      + `sink ${x.sinkMS.toFixed(2)} m/s, calage ${x.calagePct.toFixed(1)}% c`;
+    rows.push(['— its section 35 balance —', `as its program solves it: Cl ${e.cl} and Cd ${e.cd}`
+      + `${e.cde !== 1 ? ` × ${e.cde}` : ''} at ${e.alphaDeg}°, centre of pressure ${(bal.printed?.cpPct
+        ?? bal.converged.cpPct).toFixed(1)}% c and ${e.cpZM} m down`]);
+    if (bal.printed) {
+      rows.push(['As it prints it', `${said(bal.printed)} — k ${bal.printed.k.toFixed(3)} at the `
+        + `${e.speedMS} m/s it estimates${Math.abs(bal.printed.k - 1) > 0.02 ? ', not converged' : ''}`]);
+    }
+    if (bal.converged) rows.push(['Solved to k = 1', said(bal.converged), true]);
+    rows.push(['Its lines', `${bal.masses.linesKg.toFixed(3)} kg with the risers; Cd ${bal.lines.cdLines.toFixed(3)} `
+      + `by Reynolds number, the drag centred ${bal.lines.dragCentreM.z.toFixed(2)} m down, `
+      + `${((bal.lines.dragCentreM.z / bal.hcpM) * 100).toFixed(0)}% of the way to the karabiners`]);
   }
   const t = el('table', 'tbl');
   for (const [k, v, em] of rows) {

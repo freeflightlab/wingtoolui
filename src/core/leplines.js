@@ -1319,6 +1319,98 @@ export function lepSeamMatching(doc) {
 }
 
 /**
+ * Section 28: the program's table of how the risers and the calage change as
+ * the speed system or the trimmers turn the wing (its 18.3, printed as its
+ * output's section 7), reproduced as it computes it.
+ *
+ * In the plane of rib 1: its chord from the leading edge, the risers fixed
+ * to it at section 28's positions, the pilot at the calage point a line
+ * height below (section 8's lines, scaled with the wing, and risers). The
+ * chord turns by each angle in turn about the last riser or the first; a
+ * riser's change is how much its distance to the pilot changes, as the
+ * program prints it — nearer less farther with the last riser held, farther
+ * less nearer with the first — and the calage is where the line from the
+ * pilot, turned with the wing, meets the chord, in per cent of it from where
+ * the leading edge has gone. Four tables: the speed system's angles (section
+ * 28's first pair, negative) about the last riser (a) and the first (b), the
+ * trimmers' (its second pair) about the first (c) and the last (d).
+ *
+ * The leading edge it measures the calage from, about the last riser, is
+ * taken at the last riser's per cent of the TIP rib's chord — an index left
+ * over from a loop before it (rib(i,5), i past the last rib). 3.30 corrects
+ * that in its table (a), not (d); `version` says which program's table to
+ * give. Centimetres and degrees.
+ */
+export function lepCalageVariation(doc, table, { version = 3.3 } = {}) {
+  const s = sectionData(doc, 28).map((l) => l.trim()).filter(Boolean);
+  if (!s.length || parseInt(s[0], 10) !== 1 || s.length < 4) return null;
+  const n = parseInt(s[1], 10);
+  const p = s[2].split(/\s+/).map(Number).slice(0, n);
+  const [a1, n1, a2, n2] = s[3].split(/\s+/).map(Number);
+  const aoa = readAoA(doc);
+  if (!aoa || !table?.ribs?.length || !(n >= 2) || p.length < n || !p.every(Number.isFinite)
+    || !(n1 > 0) || !(n2 > 0)) return null;
+  const c = table.ribs[0].chord;
+  const cTip = table.ribs[table.ribs.length - 1].chord;
+  const h = aoa.lineLengthCm * (table.scale ?? 1) + aoa.riserLengthCm;
+  const pilot = [(aoa.calagePct * c) / 100, h];
+  const dist = (x, y) => Math.hypot(pilot[0] - x, pilot[1] - y);
+  const X = (pct) => (pct * c) / 100;
+  const rad = Math.PI / 180;
+  // The program's `xrxs`: where two lines, each through two points, cross.
+  const cross = (ru, rv, su, sv) => {
+    const mr = (rv[1] - rv[0]) / (ru[1] - ru[0]);
+    const br = rv[0] - mr * ru[0];
+    const ms = (sv[1] - sv[0]) / (su[1] - su[0]);
+    const bs = sv[0] - ms * su[0];
+    let u = (bs - br) / (mr - ms);
+    let v = mr * u + br;
+    if (Math.abs(su[1] - su[0]) <= 0.0001) { u = su[0]; v = mr * su[0] + br; }
+    if (Math.abs(ru[1] - ru[0]) <= 0.0001) { u = ru[0]; v = ms * ru[0] + bs; }
+    return [u, v];
+  };
+  const tableOf = (angle, steps, pivotLast, leChord) => {
+    const rows = [];
+    for (let j = 1; j <= steps + 1; j++) {
+      const deg = (angle / steps) * (j - 1);
+      const al = deg * rad;
+      const risersCm = p.map((pk) => {
+        const L0 = dist(X(pk), 0);
+        if (pivotLast) {
+          const hh = X(p[n - 1] - pk);
+          return L0 - dist(X(pk) + hh - hh * Math.cos(al), hh * Math.sin(al));
+        }
+        const hh = X(pk - p[0]);
+        return dist(X(p[0]) + hh * Math.cos(al), hh * Math.sin(al)) - L0;
+      });
+      const hh = X(p[n - 1] - p[0]);
+      let ru; let rv; let le;
+      if (pivotLast) {
+        ru = [X(p[n - 1]), X(p[0]) + hh - hh * Math.cos(al)];
+        rv = [0, -hh * Math.sin(al)];
+        const pm = (p[n - 1] * leChord) / 100;
+        le = [pm * (1 - Math.cos(al)), -pm * Math.sin(al)];
+      } else {
+        ru = [X(p[0]), X(p[0]) + hh * Math.cos(al)];
+        rv = [0, hh * Math.sin(al)];
+        le = [X(p[0]) * (1 - Math.cos(al)), -X(p[0]) * Math.sin(al)];
+      }
+      const t = al === 0 ? [pilot[0], 0]
+        : cross(ru, rv, [pilot[0], pilot[0] + 100 * Math.tan(al)], [pilot[1], pilot[1] - 100]);
+      rows.push({ alphaDeg: deg, risersCm, calagePct: (Math.hypot(t[0] - le[0], t[1] - le[1]) * 100) / c });
+    }
+    return rows;
+  };
+  return {
+    risers: n, positionsPct: p, chordCm: c, heightCm: h, calagePct: aoa.calagePct,
+    speedPivotLast: tableOf(a1, n1, true, version >= 3.3 ? c : cTip),
+    speedPivotFirst: tableOf(a1, n1, false, c),
+    trimPivotFirst: tableOf(a2, n2, false, c),
+    trimPivotLast: tableOf(a2, n2, true, cTip),
+  };
+}
+
+/**
  * The program's "perfect matching" of a surface's panels to its ribs (its
  * 8.2.4 above, 8.4.4 below, with `ndif` 1000), reproduced as it does it.
  *

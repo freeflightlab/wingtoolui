@@ -103,6 +103,59 @@ function solveDense(A, rhs) {
 }
 
 /**
+ * Induced drag in the Trefftz plane, far downstream, where each trailing leg
+ * is an infinite vortex seen end on and the wake is seen as its trace:
+ *
+ *     Di = (rho / 2) * sum( Gamma_i * Vn_i * s_i )
+ *
+ * with Vn the wash normal to the trace at the middle of segment i and s_i
+ * its length. `trace[i]` is segment i's two ends, [y, z] each; it carries
+ * `gamma[i]` from the first to the second, so a vortex of +gamma[i] leaves
+ * the first end and one of -gamma[i] the second.
+ *
+ * The half is not optional. The wash in the Trefftz plane comes from
+ * vortices infinite both ways and is twice the wash at the lifting line,
+ * which sees them start; the energy left in the wake is half of circulation
+ * times that wash. Without it an elliptical wing came out at an Oswald
+ * factor of 0.503 where it must be 1.0 — exactly double the drag, which is
+ * the shape of error that tells you which factor is missing rather than
+ * leaving you to hunt.
+ *
+ * Nor is the normal wash the vertical one. On a flat wing the trace lies
+ * along y and the two are the same, which is why the elliptical wing came
+ * out right on the vertical wash alone. On a paraglider's arc the trace
+ * turns toward the vertical at the tips, and the sidewash across a tilted
+ * segment carries drag too. Left out, the drag of a wake turned bodily in
+ * its own plane — which cannot change — changed with the angle, and the
+ * gnuC2-23's induced drag came out 21% low, its span efficiency 1.52 on its
+ * projected span. It is 1.21.
+ */
+export function trefftzDrag(trace, gamma, rho = 1.225) {
+  let di = 0;
+  for (let i = 0; i < trace.length; i++) {
+    const [[ya, za], [yb, zb]] = trace[i];
+    const yc = (ya + yb) / 2;
+    const zc = (za + zb) / 2;
+    let v = 0;
+    let w = 0;
+    for (let j = 0; j < trace.length; j++) {
+      for (const [[yv, zv], sign] of [[trace[j][0], 1], [trace[j][1], -1]]) {
+        const dy = yc - yv;
+        const dz = zc - zv;
+        const r2 = dy * dy + dz * dz;
+        if (r2 < 1e-9) continue;
+        const k = (sign * gamma[j]) / (2 * Math.PI * r2);
+        v -= k * dz;
+        w += k * dy;
+      }
+    }
+    // The normal wash by the length: the tangent (dy, dz), turned a quarter.
+    di += 0.5 * rho * gamma[i] * (w * (yb - ya) - v * (zb - za));
+  }
+  return Math.abs(di);
+}
+
+/**
  * Solve the wing as a vortex lattice.
  *
  * `strips` describe the wing geometry directly: each is a spanwise slice with
@@ -203,37 +256,8 @@ export function vortexLattice({
     });
   }
 
-  // Induced drag in the Trefftz plane: the wake far downstream carries the
-  // whole of it, and the downwash there is half its far-field value.
-  let di = 0;
-  for (let i = 0; i < n; i++) {
-    let w = 0;
-    for (let j = 0; j < n; j++) {
-      // Trailing legs only, seen edge-on in the wake plane.
-      const yc = (panels[i].a[1] + panels[i].b[1]) / 2;
-      const zc = (panels[i].a[2] + panels[i].b[2]) / 2;
-      for (const [yv, zv, sign] of [
-        [panels[j].a[1], panels[j].a[2], 1],
-        [panels[j].b[1], panels[j].b[2], -1],
-      ]) {
-        const dy = yc - yv;
-        const dz = zc - zv;
-        const r2 = dy * dy + dz * dz;
-        if (r2 < 1e-9) continue;
-        w += (sign * gamma[j] * dy) / (2 * Math.PI * r2);
-      }
-    }
-    // The half is not optional: induced drag in the Trefftz plane is
-    // `Di = (rho/2) * integral(Gamma * w)`, because the wake rolls up over
-    // the distance to that plane and the downwash there is twice what it is
-    // at the lifting line.
-    //
-    // Without it an elliptical wing came out at an Oswald factor of 0.503
-    // where it must be 1.0 — exactly double the drag, which is the shape of
-    // error that tells you which factor is missing rather than leaving you
-    // to hunt.
-    di += 0.5 * rho * gamma[i] * w * Math.abs(panels[i].span[1]);
-  }
+  // Induced drag in the Trefftz plane, from the wake's trace.
+  const di = trefftzDrag(panels.map((p) => [[p.a[1], p.a[2]], [p.b[1], p.b[2]]]), gamma, rho);
 
   const area = strips.reduce((s, st) => {
     const c = (vNorm(vSub(st.leftTE, st.leftLE)) + vNorm(vSub(st.rightTE, st.rightLE))) / 2;

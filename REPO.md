@@ -6,7 +6,7 @@ Where things are, and why they are there rather than somewhere else.
 wingtoolui/
 ├── dist/                  the built tool — one HTML file, committed on purpose
 ├── src/
-│   ├── core/              39 modules, one per chapter or concern
+│   ├── core/              40 modules, one per chapter or concern
 │   └── ui/                index.html, style.css, app.js
 ├── tests/                 five programs: the unit suite, the Phase 1 audit,
 │                          the full pipeline, the reference sweep, the benchmark
@@ -18,6 +18,7 @@ wingtoolui/
 ├── build.py               bundles src/ into dist/, with a collision guard
 ├── package.json           named scripts; no dependencies to install
 ├── MANIFEST.txt           every file, generated
+├── LICENSE                the GNU GPL v3, the file the repository carries
 └── ROADMAP.md             done and open, item by item
 ```
 
@@ -30,7 +31,7 @@ carries the line to exclude it, commented out, if that ever changes.
 
 ## Why `src/core/` is flat inside itself
 
-Thirty-eight modules with no sub-folders. Grouping them by phase was tried on
+Forty modules with no sub-folders. Grouping them by phase was tried on
 paper and abandoned: `loads.js` is Phase 2 for line tension, Phase 3 for
 attachment tabs and Phase 5 for the collapse envelope. Any grouping would put
 half of it in the wrong place. One module per concern, named for the concern,

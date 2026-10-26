@@ -84,12 +84,21 @@ What that buys, on one wing of 10 m bent into an arc whose tip sits at 37°
 | | flat | arced |
 | --- | --- | --- |
 | CL | 0.468 | **0.418** |
-| span efficiency | 1.020 | **1.130** |
+| span efficiency | 1.020 | **1.052** |
 
 The lift loss a correction factor can approximate. **The efficiency gain it
 cannot** — an arced wing sheds a non-planar wake, which is more efficient for
 the same reason a winglet is. That is real information the old model could not
 produce.
+
+It said 1.130 until the third complete design was flown on it. The Trefftz
+integral took the vertical wash, which is the wash normal to the wake only
+where the wake lies flat; out on an arc the wake's trace tilts, and the
+sidewash across a tilted piece of it carries drag too. The check that found
+it has a known answer of another kind: a wake turned bodily in its own plane
+cannot change its drag, and on the vertical wash alone it did. With the
+normal wash, the gnuC2-23's span efficiency is 1.21 on its projected span,
+not 1.52, and its induced drag a quarter more.
 
 Validated where the answer is known: the lift slope approaches 2 pi at high
 aspect ratio, and an elliptical wing gives a span efficiency of 1.006.

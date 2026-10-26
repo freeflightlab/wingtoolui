@@ -62,12 +62,20 @@ git add -A
 git status
 ```
 
-`-A` stages everything, including the deletions and the dotfiles. `git status`
-should report roughly **99 deletions and 245 additions**, and the additions
-should have paths with slashes in them — `src/core/...`, `data/reference/...`.
+`-A` stages everything, including the deletions and the dotfiles. Over the
+tree GitHub holds now, `git status` reports what the release changed —
+modified files, and added ones for anything new, all with slashes in their
+paths: `src/core/...`, `docs/...`. A deletion means the release retired a
+file, and its notes say which. (The first replacement, of the flat copy,
+reported 99 deletions and 245 additions.)
 
 > **If the additions have no slashes, stop.** The tree is flat and committing
 > it will break the repository again.
+
+`LICENSE` should not be in the list at all. The release carries the
+repository's own file, byte for byte, so replacing the tree leaves it as it
+was. If `git status` shows it modified or deleted, stop: the release is not
+the one the checks passed (see `LICENSING.md`).
 
 ```bash
 git commit -m "Replace flat tree with the complete release"
@@ -111,8 +119,8 @@ Using git is simpler and is the only way that is hard to get wrong.
 ## What a complete tree looks like
 
 ```
-build.py  package.json  MANIFEST.txt  README.md  …
-src/core/        39 modules
+build.py  package.json  MANIFEST.txt  README.md  LICENSE  …
+src/core/        40 modules
 src/ui/          index.html, app.js, style.css
 data/reference/  143 tables, CATALOGUE.md, and lep/ with three designs' files
 docs/            documents and figures

@@ -117,6 +117,7 @@ surfaces, and the suite now holds the tool to all of them —
 | rib contour lengths | `lep-out.txt`, section 6 | 0.007 mm |
 | karabiner position, angle of attack 4.32°, assiette 1.39° | `lep-out.txt` | to the printed figure |
 | lineset weight 0.468 kg, frontal area 0.426 m² | the program's totals | to the printed figure |
+| vault arrow 2.18 m, line height 6.47 m, karabiners to tip 5.70 m, centroid 54.54%, the wing's mass centre 91.75 and 78.51 cm | `lep-out.txt`, section 1 | to the printed figure; the arrow is the arc's 2.57 m scaled twice (`docs/gnuc2-23.md`) |
 | every panel's cut area, upper and lower | its cutting file, measured | 0.034% |
 | every rib's cut area, its 10 mm allowance on, and its holes | its cutting file, measured | 0.0012%, 0.005 cm² |
 

@@ -255,3 +255,21 @@ flyable range of the bar: `docs/validation.md` §5.1.
 
 **The collapse floor.** Inverted from published data, never predicted.
 Predicting it needs internal pressure and rib support modelling.
+
+**Against LEparagliding's own table.** Section 28 of a design's file has the
+program print how the risers and the calage change as the wing is turned
+(its output's section 7): the speed system's angles about the last riser and
+the first, the trimmers' about each. `lepCalageVariation` computes them as
+the program does — the chord of rib 1 turned about the riser held, each
+riser's change the change in its distance to the pilot, the calage where the
+line from the pilot meets the turned chord — and gives all three designs'
+tables to the printed hundredth: 168 rows, every riser to 0.005 cm and every
+calage to 0.005%. Two of the program's own details are in it: about the
+last riser it measures the calage from a leading edge placed by the tip
+rib's chord, an index left over from a loop, which 3.30 corrects for the
+speed system and not for the trimmers; and its risers lengthen and shorten
+with the signs it prints. Section 1's `alphaChange`, which takes the risers
+as vertical, gives the angles the program's rotation gives to 1.3% on the
+Tuluaq and 0.8% and 0.6% on the others, a little short of them: the risers
+converge on the pilot, and a riser's travel is a little less than its
+anchor's rise.

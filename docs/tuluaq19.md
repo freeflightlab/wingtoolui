@@ -64,6 +64,7 @@ Held to the program's printed output, as the Swoop2 is:
 | 14 nose rods a side, 17.80 m both sides | section 8 | to the printed figure | |
 | nine holes on ribs 1 to 17, none on the tip | its cutting file | area per rib | 0.006 cm² |
 | 36 diagonals and 24 straps, 40 diagonal pieces | its input, section 12 | none unread | |
+| vault arrow 1.69 m, line height 6.17 m, karabiners to tip 5.46 m, centroid 52.62%, the wing's mass centre 108.38 and 60.32 cm | section 1 | to the printed figure; the arrow is the arc's 2.02 m scaled twice (`docs/gnuc2-23.md`) | |
 
 The holes are checked against the design's own cutting file rather than its
 output, which prints no hole areas: each rib's holes, as the tool builds them

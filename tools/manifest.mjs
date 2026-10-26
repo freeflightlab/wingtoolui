@@ -27,7 +27,9 @@ const groups = [
   ['data/reference/lep', 'complete LEparagliding designs: input, section, the program\'s own output, cut parts',
     /\.(lep|txt|tsv)$/],
 ];
-const roots = ['build.py', 'README.md', 'ROADMAP.md'];
+// LICENSE among them: the repository carries it, and a release that did not
+// deleted it on the next commit (LICENSING.md).
+const roots = ['build.py', 'README.md', 'ROADMAP.md', 'LICENSE'];
 
 const lines = [
   'MANIFEST — every file a working checkout needs.',

@@ -16,7 +16,7 @@ a comment that is not ASCII.
 ## The governing constraint
 
 The Swoop2's file has **37 sections**, numbered up to 39. This project writes
-four of them and reads twenty-one.
+four of them and reads twenty-three.
 
 | Section | Content | Here |
 | --- | --- | --- |
@@ -36,9 +36,11 @@ four of them and reads twenty-one.
 | 30 | Airfoil thickness modification | read, to a section thinned to nothing |
 | 26 | Glue vents | read: which panel closes how much of each cell's intake, or across it on a diagonal |
 | 34 | Lines characteristics table | read: the design's own line types, round lines and webbing |
-| 37 | Special parameters | read in part: how many sides the program gives an ellipse (code 3002), and how a mini-rib rises to the cell's billow (code 3001) |
+| 37 | Special parameters | read in part: how many sides the program gives an ellipse (code 3002), how a mini-rib rises to the cell's billow (code 3001), and what the balance is solved on (1146, 1351, 1352) |
 | 38 | HVR holes | read: the holes cut in diagonals, in pieces between two ribs and in mini-ribs |
-| 7, 15–17, 19, 20, 22–25, 28, 32, 33, 35, 36, 39 | Marks, colours, extra rib points, DXF options, mylars, tabs, calage variation, parts separation, detailed risers, the program's own equilibrium solver, XFLR5 export… | **carried through untouched** |
+| 28 | Parameters for calage variation | read: the program's table of risers and calage as the speed system or trimmers turn the wing (`docs/speed-system.md`) |
+| 35 | Solve equilibrium equations | read and solved: the program's longitudinal balance, every figure its output's section 17 prints, and the same equations at the speed its coefficients balance at (`docs/gnuc2-23.md`, validation §2.9) |
+| 7, 15–17, 19, 20, 22–25, 32, 33, 36, 39 | Marks, colours, extra rib points, DXF options, mylars, tabs, parts separation, detailed risers, XFLR5 export… | **carried through untouched** |
 
 So the design rule is: **never discard what is not understood**. A file is
 parsed into an ordered list of sections, each keeping its exact original
@@ -169,9 +171,8 @@ It was checked once, is not in the repository, and nothing here holds it.)
 
 ## Not read
 
-Section 7 (marks), 22 and 23 (mylars and tab reinforcements), 28 (calage
-variation), 33 (detailed risers) and 35 (the program's own equilibrium
-solver inputs). All are round-trip safe.
+Section 7 (marks), 22 and 23 (mylars and tab reinforcements) and 33
+(detailed risers). All are round-trip safe.
 
 Sections 5, 6, 26, 29 and 31 are read for the design's own panels
 (`lepPanels`), which come out as its cutting file cuts them: see
