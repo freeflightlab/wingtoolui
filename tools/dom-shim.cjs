@@ -28,11 +28,20 @@ for (const m of html.matchAll(/<(div|button)[^>]*\bclass="([^"]+)"[^>]*\bdata-ta
 }
 
 const nodes = {};
-// Every node created, so the selectors below can be implemented rather than
-// stubbed. A registry is the difference between a selector that finds things
-// and one that can only ever return nothing.
+// The selectors below are implemented, not stubbed: a selector that can only
+// ever return nothing agrees with every test. They search the page as a
+// browser does, from what is in it — the named nodes, the body and the
+// nodes the markup seeds — down through each node's children.
+//
+// They searched a registry of every node ever made, which a browser does not
+// keep: each redraw of the ten views left its thousands of nodes in it, 6.5
+// MB a rebuild, and the interface test ran out of memory once the panel grew
+// a table. The control probe still asks what a panel rebuild made; it turns
+// the registry on for that (`__recordNodes`) and empties it as it goes.
 const created = [];
 globalThis.__createdNodes = created;
+globalThis.__recordNodes = false;
+const seeded = [];
 function mk(tag='div'){
   const n = {
     tagName:tag, children:[], _text:'', className:'', style:{}, files:[],
@@ -75,7 +84,7 @@ function mk(tag='div'){
     set: (v) => { ownId = String(v); if (ownId) nodes[ownId] = n; },
     enumerable: true,
   });
-  created.push(n);
+  if (globalThis.__recordNodes) created.push(n);
   return n;
 }
 for (const id of ids) nodes[id]=mk();
@@ -86,6 +95,23 @@ for (const sd of SEED) {
   n.className = sd.className;
   n.dataset.tab = sd.dataTab;
   if (sd.id) nodes[sd.id] = n;
+  seeded.push(n);
+}
+
+// Every node in the page: from the roots down, each once.
+globalThis.__inPage = () => inPage();
+function inPage() {
+  const out = [];
+  const seen = new Set();
+  const stack = [document.body, ...seeded, ...Object.values(nodes)];
+  while (stack.length) {
+    const n = stack.pop();
+    if (!n || typeof n !== 'object' || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+    for (const c of n.children || []) stack.push(c);
+  }
+  return out;
 }
 
 global.document = {
@@ -103,7 +129,7 @@ global.document = {
   querySelectorAll:(sel)=>{
     const m=/^\.(.+)$/.exec(sel);
     const cls=m?m[1]:null;
-    return created.filter((n)=>(cls
+    return inPage().filter((n)=>(cls
       ? String(n.className||'').split(/\s+/).includes(cls)
       : String(n.tagName||'').toLowerCase()===sel.toLowerCase()));
   },
@@ -126,7 +152,7 @@ const origErr = console.error;
 const REPLACES_DESIGN = /^(Load the Swoop2|Import LEP|Return to parametric)/;
 
 try {
-  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__getLEP=()=>LEP; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__ribFeatures=(r)=>ribFeatures(r); globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__REFERENCE_TOTALS=typeof REFERENCE_TOTALS==="object"?REFERENCE_TOTALS:{}; globalThis.__parseDXF=parseDXF; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
+  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__setStatus=setStatus; globalThis.__importLep=(text,sections)=>{loadLepDesign(parseLep(text),sections||{}); S.reference=\'\'; S._appliedReference=null; buildControls(); rebuild();}; globalThis.__getLEP=()=>LEP; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__ribFeatures=(r)=>ribFeatures(r); globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__REFERENCE_TOTALS=typeof REFERENCE_TOTALS==="object"?REFERENCE_TOTALS:{}; globalThis.__parseDXF=parseDXF; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
 } catch(e){ errors.push('boot: '+e.message+'\n'+e.stack.split('\n').slice(0,4).join('\n')); }
 
 module.exports = { errors, REPLACES_DESIGN };

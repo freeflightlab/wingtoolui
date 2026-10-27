@@ -206,11 +206,15 @@ Zeno 2: A11 on the interface's solve against its 30). Right metres, a sparser
 wing, and each line carrying more of the load. The length follows and is
 reported; building the bridle level is the open item.
 
-**Minimum sink runs 0.772 to 1.175 m/s** over the 55, the lowest the Skywalk
-SAGE 75 (0.772), the PHI Allegro light XS (0.775) and the Geo 7 XS (0.780).
-None is under the 0.7 floor. (Two wings at 0.69 m/s were reported here when
-the polar was not capped at the usable lift coefficient.) Trim speed runs 33.2
-to 47.5 km/h, glide 9.78 to 12.23, and the lightest are the smallest sizes
+**Each wing flies in its arc**, as the interface flies it: the lattice's
+ratios of the wing as built against itself laid flat (`arcFactors`), which
+leave it 0.72 to 0.79 of the flat wing's lift slope. **Minimum sink runs
+0.842 to 1.306 m/s** over the 55, the lowest the Skywalk SAGE 75 (0.842), the
+PHI Allegro light XS (0.846) and the Niviuk Artik R 2 20 (0.862). None is
+under the 0.7 floor. (Flat they ran 0.772 to 1.175; two wings at 0.69 m/s
+were reported here when the polar was not capped at the usable lift
+coefficient.) Trim speed runs 39.2 to 53.8 km/h on the handbook's typed Cz
+of 0.90 at 6°, glide 8.65 to 10.63, and the lightest are the smallest sizes
 of light wings at about 3 kg/m², as they should be.
 
 **Every line of every wing is sized**, from the full catalogue the interface
@@ -245,11 +249,13 @@ on.)
 
 **The interface does not use it.** Its balance is the handbook's, from the
 typed "Cz at alpha" (0.90), "Cm" (−0.042) and "Oswald e" (0.90), and changing
-the section there still changes nothing about the trim: 37.69 km/h, glide 8.48
-and calage 34.19% with NACA 4415, 4412, 2414 or 0012. The polar beside it is
-the section's. The balance table now shows the planform's own Oswald factor
-next to the typed one (0.960 on the default wing) so the two can be compared;
-taking the coupled solve into the interface is an open item, not a claim.
+the section there still changes nothing about the trim: 41.99 km/h, glide 7.50
+and calage 33.22% in the wing's arc, 37.69, 8.48 and 34.19% flown flat, with
+NACA 4415, 4412, 2414 or 0012. The polar beside it is the section's. The
+balance table shows the polar's own Oswald factor next to the typed one
+(0.960 on the default wing flat, 0.814 in its arc on the flat span) so the
+two can be compared; taking the coupled solve into the interface is an open
+item, not a claim.
 
 ### Two mistakes worth recording
 

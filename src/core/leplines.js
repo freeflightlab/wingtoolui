@@ -32,7 +32,7 @@
  * this project's metres, x aft, y out, z up.
  */
 
-import { readAoA, sectionData, lepRibs } from './lep.js';
+import { readAoA, sectionData, lepRibs, lepProgramVersion, LEP_PROGRAM_NEWEST } from './lep.js';
 import { DEFAULT_LOAD_CASE } from './loads.js';
 import { developPanel } from './flatdev.js';
 
@@ -177,12 +177,61 @@ export function lepAnchorPoint(rib, pct) {
   return pt;
 }
 
+/**
+ * A design file read wrong says where: which section, and which of its
+ * lines. Read without checks, a file that runs short or has text where a
+ * number goes threw a TypeError from deep inside the geometry —
+ * "Cannot read properties of undefined (reading '1')" — and that is what a
+ * designer saw. 1,440 damaged copies of the three designs on file (lines
+ * dropped, repeated, cut short, garbled) threw 158 of them from eight places.
+ */
+export class LepReadError extends Error {
+  constructor(section, what) {
+    super(`section ${section}: ${what}`);
+    this.name = 'LepReadError';
+    this.section = section;
+  }
+}
+
+/** The numbers of a line, at least `min` of them, or a LepReadError. */
+export function lepNumbers(line, section, what, min = 1) {
+  if (line == null) throw new LepReadError(section, `the file ends before ${what}`);
+  const f = String(line).trim().split(/\s+/).map(Number);
+  if (f.length < min || f.slice(0, min).some((x) => !Number.isFinite(x))) {
+    throw new LepReadError(section, `${what} needs ${min} number${min > 1 ? 's' : ''}: `
+      + `"${String(line).trim().slice(0, 48)}"`);
+  }
+  return f;
+}
+
+/** A count on a line of its own, within [min, max], or a LepReadError. */
+export function lepCount(line, section, what, { min = 0, max = 10000 } = {}) {
+  if (line == null) throw new LepReadError(section, `the file ends before ${what}`);
+  const v = Number(String(line).trim().split(/\s+/)[0]);
+  if (!Number.isInteger(v) || v < min || v > max) {
+    throw new LepReadError(section, `${what} should be a whole number from ${min} to ${max}: `
+      + `"${String(line).trim().slice(0, 30)}"`);
+  }
+  return v;
+}
+
 /** Paths of section 9 or 10: levels, (level, order) pairs, final row, rib. */
-function lepPaths(lines, start, count, brake) {
+function lepPaths(lines, start, count, brake, ribCount = Infinity, plan = null) {
   const out = [];
+  const section = brake ? 10 : 9;
   for (let i = 0; i < count; i++) {
-    const f = lines[start + i].trim().split(/\s+/).map(Number);
+    const what = `${brake ? 'brake path' : `riser ${plan}'s path`} ${i + 1}`;
+    const f = lepNumbers(lines[start + i], section, what, 11);
     const levels = f[0];
+    if (!Number.isInteger(levels) || levels < 1 || levels > 4) {
+      throw new LepReadError(section, `${what} has ${levels} levels; the program builds 1 to 4`);
+    }
+    if (!(f[10] >= 1 && Math.trunc(f[10]) <= ribCount)) {
+      throw new LepReadError(section, `${what} ends on rib ${f[10]}, and the wing has ribs 1 to ${ribCount}`);
+    }
+    if (!(f[9] >= 1 && f[9] <= 6)) {
+      throw new LepReadError(section, `${what} ends on row ${f[9]}; rows run from 1 (A) to 6 (the brake)`);
+    }
     out.push({
       levels,
       orders: [f[2], f[4], f[6], f[8]],
@@ -226,7 +275,13 @@ export function lepLineGeometry(doc, { airfoils = {} } = {}) {
 
   // Section 8.
   const aoa = readAoA(doc);
-  if (!aoa) return { ok: false, table, problems: ['no section 8'] };
+  const aoaNames = ['glide ratio', 'centre of pressure', 'calage', 'riser length', 'line length', 'karabiner separation'];
+  if (!aoa) {
+    return { ok: false, table, problems: [`section 8: it needs six values — ${aoaNames.join(', ')} — and has fewer`] };
+  }
+  const badAoA = ['glideRatio', 'cpPct', 'calagePct', 'riserLengthCm', 'lineLengthCm', 'karabinerCm']
+    .findIndex((key) => !Number.isFinite(aoa[key]));
+  if (badAoA >= 0) return { ok: false, table, problems: [`section 8: its ${aoaNames[badAoA]} is not a number`] };
   const lineLength = aoa.lineLengthCm * k;           // scaled
   const riserLength = aoa.riserLengthCm;             // not scaled
   const calage = (aoa.calagePct / 100) * ribs[0].chord;
@@ -236,38 +291,67 @@ export function lepLineGeometry(doc, { airfoils = {} } = {}) {
   const assietteDeg = (Math.asin((cple - calage) / hcp) * 180) / Math.PI;
   const glideDeg = (Math.atan(1 / aoa.glideRatio) * 180) / Math.PI;
 
-  // Section 9.
-  const s9 = sectionData(doc, 9).map((l) => l.trim()).filter(Boolean);
-  const zcontrol = parseInt(s9[0], 10);
-  const planCount = parseInt(s9[1], 10);
-  let p = 2;
-  const plans = [];
-  for (let ii = 0; ii < planCount; ii++) {
-    const cam = parseInt(s9[p], 10);
-    plans.push(lepPaths(s9, p + 1, cam, false));
-    p += 1 + cam;
+  // Every rib needs its section: one missing from section 2 has no
+  // surface to hang an anchor on.
+  const bare = ribs.filter((r) => !r.section).map((r) => r.index);
+  if (bare.length) {
+    return {
+      ok: false,
+      table,
+      problems: [`section 2: rib${bare.length > 1 ? 's' : ''} ${bare.slice(0, 6).join(', ')} `
+        + `${bare.length > 1 ? 'have' : 'has'} no section file`],
+    };
   }
 
-  // Section 10, the brakes: main length, paths, distribution.
-  const s10 = sectionData(doc, 10).map((l) => l.trim()).filter(Boolean);
-  const brakeMain = parseFloat(s10[0]) * k;
-  const bcam = parseInt(s10[1], 10);
-  const brakePaths = lepPaths(s10, 2, bcam, true);
-  const bdPos = s10[2 + bcam] ? s10[2 + bcam].split(/\s+/).map(Number) : [0, 25, 50, 80, 100];
-  const bdLen = s10[3 + bcam] ? s10[3 + bcam].split(/\s+/).map((v) => Number(v) * k) : [0, 0, 0, 0, 0];
+  // Sections 9, 10, 11 and 18, read with their shapes checked: a file that
+  // runs short or has text where a number goes is said by section and line.
+  let zcontrol; let planCount; let plans; let brakeMain; let brakePaths; let bdPos; let bdLen;
+  let raml; let totalLoadKg; let cdis; let csus;
+  try {
+    // Section 9.
+    const s9 = sectionData(doc, 9).map((l) => l.trim()).filter(Boolean);
+    zcontrol = lepCount(s9[0], 9, 'the anchor weighting (0 to 3)', { min: 0, max: 3 });
+    planCount = lepCount(s9[1], 9, 'the number of risers', { min: 1, max: 9 });
+    let p = 2;
+    plans = [];
+    for (let ii = 0; ii < planCount; ii++) {
+      const cam = lepCount(s9[p], 9, `riser ${ii + 1}'s number of paths`, { min: 1, max: 999 });
+      plans.push(lepPaths(s9, p + 1, cam, false, ribs.length, ii + 1));
+      p += 1 + cam;
+    }
 
-  // Section 11, ramification lengths, scaled.
-  const s11 = sectionData(doc, 11).map((l) => l.trim().split(/\s+/).map(Number));
-  const raml = {
-    '3,3': s11[0][1] * k, '4,3': s11[1][1] * k, '4,4': s11[1][2] * k,
-    '5,3': s11[2][1] * k, '6,3': s11[3][1] * k, '6,4': s11[3][2] * k,
-  };
+    // Section 10, the brakes: main length, paths, distribution.
+    const s10 = sectionData(doc, 10).map((l) => l.trim()).filter(Boolean);
+    brakeMain = lepNumbers(s10[0], 10, 'the main brake line\'s length')[0] * k;
+    const bcam = lepCount(s10[1], 10, 'the number of brake paths', { min: 0, max: 999 });
+    brakePaths = lepPaths(s10, 2, bcam, true, ribs.length);
+    bdPos = s10[2 + bcam] ? lepNumbers(s10[2 + bcam], 10, 'the brake distribution\'s span stations', 5)
+      : [0, 25, 50, 80, 100];
+    bdLen = s10[3 + bcam] ? lepNumbers(s10[3 + bcam], 10, 'the brake distribution\'s lengths', 5).map((v) => v * k)
+      : [0, 0, 0, 0, 0];
 
-  // Section 18: the load and elasticity model the program uses.
-  const s18 = sectionData(doc, 18).map((l) => l.trim().split(/\s+/).map(Number));
-  const totalLoadKg = s18[0][0];
-  const cdis = { 2: s18[1], 3: s18[2], 4: s18[3], 5: s18[4] };
-  const csus = s18.slice(5, 10);   // [plan][level-1], percent per 10 kg
+    // Section 11, ramification lengths, scaled.
+    // Blank lines skipped, as the program's list-directed reads skip them.
+    const s11 = sectionData(doc, 11).map((l) => l.trim()).filter(Boolean);
+    const r11 = [2, 3, 2, 3].map((n, i) => lepNumbers(s11[i], 11, `ramification row ${i + 1}`, n));
+    raml = {
+      '3,3': r11[0][1] * k, '4,3': r11[1][1] * k, '4,4': r11[1][2] * k,
+      '5,3': r11[2][1] * k, '6,3': r11[3][1] * k, '6,4': r11[3][2] * k,
+    };
+
+    // Section 18: the load and elasticity model the program uses — the
+    // total load, the split for 2 to 5 anchors on a rib, and a row of
+    // stretch per 10 kg for each riser.
+    const s18 = sectionData(doc, 18).map((l) => l.trim()).filter(Boolean);
+    totalLoadKg = lepNumbers(s18[0], 18, 'the total load')[0];
+    cdis = {};
+    for (let n = 2; n <= 5; n++) cdis[n] = lepNumbers(s18[n - 1], 18, `the split of the load over ${n} anchors`, n);
+    csus = [];
+    for (let i = 0; i < planCount; i++) csus.push(lepNumbers(s18[5 + i], 18, `riser ${i + 1}'s elasticity row`, 4));
+  } catch (e) {
+    if (e instanceof LepReadError) return { ok: false, table, problems: [e.message] };
+    throw e;
+  }
 
   // Section 34: line types, so each line carries the material the designer
   // chose rather than one this tool would pick.
@@ -906,38 +990,51 @@ export function lepJoncs(doc, table) {
   const out = { joncs: [], blocs: [], notReproduced: [], ok: true };
   if (!s.length || parseInt(s[0], 10) === 0) return out;
   const scheme = parseInt(s[0], 10);
-  const nums = (l) => l.split(/\s+/).map(Number);
+  // Every record read with its shape checked: a file cut short in its rods
+  // is said as such, by section and line, rather than thrown from here.
   let p = 1;
+  const nums = (what, min = 2) => lepNumbers(s[p++], 21, what, min);
   const blocs = [];
-  if (scheme === 1) {
-    const groups = parseInt(s[p++], 10);
-    const g = [];
-    for (let k = 0; k < groups; k++) {
-      g.push({ ribs: nums(s[p++]), ex: nums(s[p++]), inn: nums(s[p++]), sjo: nums(s[p++]) });
-    }
-    blocs.push({ bloc: 1, type: 1, groups: g });
-  } else if (scheme === 2) {
-    const nb = parseInt(s[p++], 10);
-    for (let m = 0; m < nb; m++) {
-      const [bloc, type] = nums(s[p++]);
-      const groups = parseInt(s[p++], 10);
+  try {
+    if (scheme === 1) {
+      const groups = lepCount(s[p++], 21, 'the number of groups of rods', { min: 0, max: 999 });
       const g = [];
       for (let k = 0; k < groups; k++) {
-        if (type === 2) {
-          // Arc rods: a different record, not reproduced.
-          g.push({ ribs: nums(s[p++]), x21: nums(s[p++]), sjo: nums(s[p++]) });
-        } else if (type === 3) {
-          g.push({ ribs: nums(s[p++]), ex: nums(s[p++]), ex2: nums(s[p++]),
-            inn2: nums(s[p++]), inn: nums(s[p++]), sjo: nums(s[p++]) });
-        } else {
-          g.push({ ribs: nums(s[p++]), ex: nums(s[p++]), inn: nums(s[p++]), sjo: nums(s[p++]) });
-        }
+        const w = `group ${k + 1}`;
+        g.push({ ribs: nums(`${w}'s ribs`), ex: nums(`${w}'s upper extent`), inn: nums(`${w}'s lower extent`),
+          sjo: nums(`${w}'s rod sizes`) });
       }
-      blocs.push({ bloc, type, groups: g });
+      blocs.push({ bloc: 1, type: 1, groups: g });
+    } else if (scheme === 2) {
+      const nb = lepCount(s[p++], 21, 'the number of blocs of rods', { min: 0, max: 99 });
+      for (let m = 0; m < nb; m++) {
+        const [bloc, type] = nums(`bloc ${m + 1}'s number and type`);
+        const groups = lepCount(s[p++], 21, `bloc ${bloc}'s number of groups`, { min: 0, max: 999 });
+        const g = [];
+        for (let k = 0; k < groups; k++) {
+          const w = `bloc ${bloc} group ${k + 1}`;
+          if (type === 2) {
+            // Arc rods: a different record, not reproduced.
+            g.push({ ribs: nums(`${w}'s ribs`), x21: nums(`${w}'s arc`, 1), sjo: nums(`${w}'s rod sizes`, 1) });
+          } else if (type === 3) {
+            g.push({ ribs: nums(`${w}'s ribs`), ex: nums(`${w}'s upper extent`), ex2: nums(`${w}'s upper bend`),
+              inn2: nums(`${w}'s lower bend`), inn: nums(`${w}'s lower extent`), sjo: nums(`${w}'s rod sizes`) });
+          } else {
+            g.push({ ribs: nums(`${w}'s ribs`), ex: nums(`${w}'s upper extent`), inn: nums(`${w}'s lower extent`),
+              sjo: nums(`${w}'s rod sizes`) });
+          }
+        }
+        blocs.push({ bloc, type, groups: g });
+      }
+    } else {
+      out.ok = false;
+      out.notReproduced.push(`rod scheme ${scheme}`);
+      return out;
     }
-  } else {
+  } catch (e) {
+    if (!(e instanceof LepReadError)) throw e;
     out.ok = false;
-    out.notReproduced.push(`rod scheme ${scheme}`);
+    out.notReproduced.push(`rods not read: ${e.message}`);
     return out;
   }
   out.blocs = blocs;
@@ -1191,16 +1288,19 @@ export function lepSeamAllowances(doc) {
  * rib number, 1-based as the file numbers them.
  */
 export function lepSkinTension(doc) {
-  const rows = (n) => sectionData(doc, n).map((l) => l.trim().split(/\s+/).map(Number));
+  const rows = (n) => sectionData(doc, n).map((l) => l.trim()).filter(Boolean).map((l) => l.split(/\s+/).map(Number));
   const s31 = rows(31);
   const byRib = new Map();
   let mode = 'classic';
   if (s31.length && s31[0][0] === 1) {
     mode = 'groups';
-    const groups = s31[1][0];
+    const raw = sectionData(doc, 31).map((l) => l.trim()).filter(Boolean);
+    const groups = lepCount(raw[1], 31, 'the number of groups', { min: 0, max: 999 });
     let p = 2;
     for (let g = 0; g < groups && p < s31.length; g++) {
-      const [, from, to, count] = s31[p++];
+      const [, from, to, count] = lepNumbers(raw[p], 31, `group ${g + 1}'s ribs and number of points`, 4);
+      p += 1;
+      for (let q = 0; q < count; q++) lepNumbers(raw[p + q], 31, `group ${g + 1}'s point ${q + 1}`, 5);
       const pts = s31.slice(p, p + count);
       p += count;
       const table = {
@@ -1338,10 +1438,12 @@ export function lepSeamMatching(doc) {
  * The leading edge it measures the calage from, about the last riser, is
  * taken at the last riser's per cent of the TIP rib's chord — an index left
  * over from a loop before it (rib(i,5), i past the last rib). 3.30 corrects
- * that in its table (a), not (d); `version` says which program's table to
- * give. Centimetres and degrees.
+ * that in its table (a), not (d). The corrected table is given, whatever
+ * program the file was written for; `version` gives an older program's, as
+ * its own output printed it — `lepProgramVersion(doc)` the file's (3.29's is
+ * not known, and taken as 3.30's). Centimetres and degrees.
  */
-export function lepCalageVariation(doc, table, { version = 3.3 } = {}) {
+export function lepCalageVariation(doc, table, { version = LEP_PROGRAM_NEWEST } = {}) {
   const s = sectionData(doc, 28).map((l) => l.trim()).filter(Boolean);
   if (!s.length || parseInt(s[0], 10) !== 1 || s.length < 4) return null;
   const n = parseInt(s[1], 10);
@@ -1403,7 +1505,7 @@ export function lepCalageVariation(doc, table, { version = 3.3 } = {}) {
   };
   return {
     risers: n, positionsPct: p, chordCm: c, heightCm: h, calagePct: aoa.calagePct,
-    speedPivotLast: tableOf(a1, n1, true, version >= 3.3 ? c : cTip),
+    speedPivotLast: tableOf(a1, n1, true, version >= 3.29 ? c : cTip),
     speedPivotFirst: tableOf(a1, n1, false, c),
     trimPivotFirst: tableOf(a2, n2, false, c),
     trimPivotLast: tableOf(a2, n2, true, cTip),
@@ -2064,11 +2166,14 @@ function shoelace(pts) {
 }
 
 /**
- * How many sides the program draws an ellipse with, as 3.30 draws it: 60,
- * or what section 37's code 3002 says (the Swoop2's 55). Until 3.30 it was
- * always 39 — the Tuluaq's 3.25 and the gnuC2-23's 3.28 drew theirs so.
+ * How many sides the program draws an ellipse with. 3.30 draws 60, or what
+ * section 37's code 3002 says (the Swoop2's 55); 3.28 and 3.25 drew 39, and
+ * read no code 3002 — the gnuC2-23's and the Tuluaq's cutting files have
+ * theirs so. Which program is the file's header's (`lepProgramVersion`), or
+ * `version`. 3.29's is not known, and taken as 3.30's.
  */
-export function lepEllipseSides(doc) {
+export function lepEllipseSides(doc, { version = lepProgramVersion(doc) } = {}) {
+  if (version < 3.29) return 39;
   let sides = 60;
   const s37 = sectionData(doc, 37).map((l) => l.trim()).filter(Boolean);
   if (s37.length && parseInt(s37[0], 10) === 1) {
@@ -2141,9 +2246,9 @@ export function lepRibCutLine(rib, allowanceMm) {
  * Returns holes in the rib's section coordinates, metres.
  *
  * Each is the program's polygon (its subroutine `ellipse`), `sides` long:
- * 3.30's by default (`lepEllipseSides`), 39 for a file as 3.25 or 3.28 drew
- * it. They were 48-sided, 0.15% off every hole of both older designs'
- * cutting files.
+ * as the file's own program drew it (`lepEllipseSides`) — 39 sides for the
+ * Tuluaq's 3.25 and the gnuC2-23's 3.28, the Swoop2's 55 for its 3.30. They
+ * were 48-sided, 0.15% off every hole of both older designs' cutting files.
  *
  * The rotation is read as degrees, turned from the chord line toward the
  * upper surface. The program hands the number to its ellipse as radians, in
@@ -2154,14 +2259,26 @@ export function lepHoles(doc, table, { sides = lepEllipseSides(doc) } = {}) {
   const s = sectionData(doc, 4).map((l) => l.trim()).filter(Boolean);
   const out = { byRib: new Map(), notReproduced: [], sides };
   if (!s.length) return out;
-  const groups = parseInt(s[0], 10);
+  let groups;
+  try { groups = lepCount(s[0], 4, 'the number of groups of holes', { min: 0, max: 999 }); } catch (e) {
+    if (!(e instanceof LepReadError)) throw e;
+    out.notReproduced.push(`holes not read: ${e.message}`);
+    return out;
+  }
   let p = 1;
   for (let m = 0; m < groups && p < s.length; m++) {
-    const r1 = parseInt(s[p++], 10);
-    const r2 = parseInt(s[p++], 10);
-    const n = parseInt(s[p++], 10);
-    const holes = [];
-    for (let k = 0; k < n; k++) holes.push(s[p++].split(/\s+/).map(Number));
+    let r1; let r2; let holes;
+    try {
+      r1 = lepCount(s[p++], 4, `group ${m + 1}'s first rib`, { min: 1, max: 999 });
+      r2 = lepCount(s[p++], 4, `group ${m + 1}'s last rib`, { min: 1, max: 999 });
+      const n = lepCount(s[p++], 4, `group ${m + 1}'s number of holes`, { min: 0, max: 99 });
+      holes = [];
+      for (let k = 0; k < n; k++) holes.push(lepNumbers(s[p++], 4, `group ${m + 1}'s hole ${k + 1}`, 1));
+    } catch (e) {
+      if (!(e instanceof LepReadError)) throw e;
+      out.notReproduced.push(`holes from group ${m + 1} on not read: ${e.message}`);
+      break;
+    }
     for (let i = r1; i <= r2; i++) {
       const rib = table.ribs[i - 1];
       if (!rib) continue;

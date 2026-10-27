@@ -117,8 +117,8 @@ Its internal structure is cut as its program cuts it: its ten full
 diagonals a side, each one piece across all four rows with three parabolic
 cut-outs, its 24 straps and its 14 rod pockets, every piece within a part in
 ten thousand of its file's (`docs/internal-structure.md`). Its file was drawn
-by the program's 3.25, which left the seam allowance whole across each
-cut-out: the bill counts the pieces as 3.30 cuts them, 10.48 m² for the
-wing, 0.30 m² less than its file draws. Its 16 trailing-edge mini-ribs a
+by the program's 3.25, as its header says, which left the seam allowance
+whole across each cut-out, and the tool cuts it so: 10.77 m² for the wing
+in the bill, 0.30 m² more than 3.30 would cut. Its 16 trailing-edge mini-ribs a
 side are built too, as its program drew them, to its file's 4455.32 cm² in
 total.

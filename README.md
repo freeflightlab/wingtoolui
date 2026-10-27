@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2665 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2687 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -70,7 +70,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2665 unit checks against known geometry and the sources |
+| `npm test` | 2687 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -108,8 +108,8 @@ full 3D wing, with diagonal ribs carrying the span that has no line on it. Panel
 and nested onto a fabric roll.
 
 **Flight.** Longitudinal balance, section and wing polars from thin-aerofoil
-theory and lifting line, atmosphere to 20 km, and an accelerated polar across
-the speedbar range.
+theory and lifting line, the wing flown in its arc by a vortex lattice,
+atmosphere to 20 km, and an accelerated polar across the speedbar range.
 
 **Lines.** Riser-based cascades with industry naming and optional merged rows, brakes with their own
 four-level cascade, load from lift distribution through to line tension, line
@@ -222,7 +222,7 @@ tests/             the unit suite, the Phase 1 audit, the full pipeline, the
                    reference sweep, the benchmark
 tools/             the other check stages, the interface harness, figures,
                    importers, and readers for legacy sheets
-docs/              forty-four notes; see below
+docs/              forty-five notes; see below
 data/reference/    143 tables: line sheets of 21 wings from five makers, six
                    of their line-plan drawings transcribed line by line, 55
                    published sizes and the makers' own specifications to check
@@ -286,7 +286,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2665 checks |
+| unit suite | the maths, 2687 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -328,6 +328,7 @@ cascade: its riser layout, its counts, its tip lines and its stabilo's line.
 | `docs/line-sheets.md` | what can be recovered from a maker's published numbers |
 | `docs/environment-and-aero.md` | atmosphere, Reynolds number, and the wing polar |
 | `docs/validation.md` | every discrepancy found in the sources, and why |
+| `docs/load-cases.md` | what sizes a line — the speed bar, a collapse, a gust — and a real lineset against this tool's loads |
 | `docs/source-map.md` | handbook chapter to implementation |
 | `docs/lep-format.md` | LEparagliding interoperability |
 | `docs/inflated.md` | the built shape against the flying one |
@@ -383,9 +384,14 @@ untested wing safe to fly.
 ## Credit and licence
 
 **Free software under the GNU General Public License, version 3** — the
-`LICENSE` file, the same file the repository on GitHub carries. It comes with
-no warranty. `LICENSING.md` has what the licence does and does not cover: not
-the manufacturers' data in `data/reference/`.
+`LICENSE` file, the one the repository on GitHub carries, kept byte for byte
+(the self-audit holds it to the GPL's checksum). It comes with no warranty:
+see **Safety** above.
+
+The licence covers the code. It does not cover the manufacturers' data in
+`data/reference/`, which is here so the calculations can be checked, each file
+with its source; removing any of it on a manufacturer's request is the default
+answer.
 
 The design method, equations and worked example are the work of **Laboratori
 d'envol**, published freely at laboratoridenvol.com, whose software is released

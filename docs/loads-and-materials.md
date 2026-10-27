@@ -398,7 +398,7 @@ The sharp-edged figure of 11.13 **exceeds the 8 g certification case**, which
 would say gusts govern the design. Alleviated, it is 2.00 — well under. So the
 8 g case is not gust-driven. Nor is it collapse-driven: half the span folded
 in level flight, with a dynamic factor of 1.5, works the lines that are left
-2.5 times as hard as level flight does (`docs/validation.md` §5.2).
+2.5 times as hard as level flight does (`docs/load-cases.md` §2).
 
 That is where a large part of the conservatism in the 8 g case comes from, and
 it is worth knowing rather than assuming the margin is spent on gusts.

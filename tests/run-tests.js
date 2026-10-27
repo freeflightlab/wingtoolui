@@ -7,7 +7,7 @@
  * property the algorithm must obey, or a number printed in the handbook.
  */
 
-import { vortexLattice, stripsFromWing, trefftzDrag } from '../src/core/vlm.js';
+import { vortexLattice, stripsFromWing, trefftzDrag, wingStrips, arcFactors } from '../src/core/vlm.js';
 import { freeBodyCheck } from '../src/core/freebody.js';
 import {
   lepLineGeometry, lepPlanForTool, lepRibTable, lepAnchorPoint, readLepAirfoil, lepJoncs, lepHoles,
@@ -51,7 +51,7 @@ import {
 import {
   parseLep, parseHVRibs, lepDiagonalPieces, writeLep, blankLepDocument, lepToDesign, writeDesignIntoLep,
   designToLep, describeLep, readGeometry, readAoA, section as lepSection,
-  readSpecialCodes, readEquilibrium,
+  readSpecialCodes, readEquilibrium, readProgramVersion, lepProgramVersion, LEP_PROGRAM_NEWEST,
 } from '../src/core/lep.js';
 import { discretePlanform } from '../src/core/planform.js';
 import { readFileSync, existsSync, readdirSync } from 'fs';
@@ -1783,12 +1783,23 @@ section('Risers, speed system and accelerated flight');
   const derived = acceleratedPolarFromWing({
     riser: rs, base: { ...base }, chordM: 2.4, liftModel: lm,
   });
-  check('trim speed from derived lift is still near the published figure',
-    Math.abs(derived.trimSpeedKMH - 39) / 39 < 0.12,
-    `${derived.trimSpeedKMH.toFixed(1)} vs 39 km/h`);
-  check('best glide from derived lift is near the published figure',
-    Math.abs(derived.bestGlide.glideRatio - 11) / 11 < 0.12,
-    `${derived.bestGlide.glideRatio.toFixed(1)} vs 11`);
+  // The model's coefficient is the wing's, and the balance flies it as it is:
+  // handed over as a section's, the handbook's finite-span factor took a
+  // quarter off it a second time — 0.845 flown as 0.62, 35.1 km/h for 30.1.
+  const flown = solveEquilibrium({ ...base, cz: lm.czAt(6), apply3D: false, oswald: lm.oswaldAt(6) });
+  const pt6 = lm.polar.points.find((q) => q.alphaDeg === 6);
+  check('the derived lift is flown as the wing\'s, its finite span taken once, its induced drag its own',
+    derived.rows[0].cz === lm.czAt(6) && Math.abs(derived.trimSpeedKMH - flown.speedKMH) < 1e-9
+    && Math.abs(flown.cxi / pt6.CDi - 1) < 0.01,
+    `Cz ${lm.czAt(6).toFixed(3)}, ${derived.trimSpeedKMH.toFixed(1)} km/h; induced ${flown.cxi.toFixed(4)} against the line's ${pt6.CDi.toFixed(4)}`);
+  // And at the assumed 6 degrees, on a flat wing, it trims a quarter slow of
+  // the published 39 km/h and glides a tenth better than the published 11:
+  // the residual ASSESSMENT.md section 4 explains. Held here so that a
+  // change that moves it is seen.
+  check('at the assumed angle, flat, the derived lift trims a quarter slow of the published figure and glides a tenth high',
+    derived.trimSpeedKMH > 28 && derived.trimSpeedKMH < 32
+    && derived.bestGlide.glideRatio > 11 && derived.bestGlide.glideRatio < 12.7,
+    `${derived.trimSpeedKMH.toFixed(1)} vs 39 km/h; glide ${derived.bestGlide.glideRatio.toFixed(1)} vs 11`);
   check('the derived range is partly outside the flyable band',
     derived.validRows < derived.rows.length,
     `${derived.validRows}/${derived.rows.length}`);
@@ -9062,8 +9073,8 @@ section('Tuluaq-19: a second complete design, reproduced');
   // Section 4 holes, against the design's own cutting file.
   const cut = readFileSync('data/reference/lep/tuluaq19-cut-parts.tsv', 'utf8').split('\n')
     .filter((l) => l.startsWith('rib\t')).map((l) => l.split('\t'));
-  // Drawn by 3.25, whose ellipses have 39 sides.
-  const holesT = lepHoles(doc, t, { sides: 39 });
+  // Drawn by 3.25, whose ellipses have 39 sides: its header says so.
+  const holesT = lepHoles(doc, t);
   const areaOf = (o) => {
     let a = 0;
     for (let i = 0, k = o.length - 1; i < o.length; k = i++) a += o[k][0] * o[i][1] - o[i][0] * o[k][1];
@@ -9243,8 +9254,8 @@ section('gnuC2-23: a third complete design, reproduced');
   // Section 4 holes, against the design's own cutting file.
   const cut = readFileSync('data/reference/lep/gnuc2-23-cut-parts.tsv', 'utf8').split('\n')
     .filter((l) => l.startsWith('rib\t')).map((l) => l.split('\t'));
-  // Drawn by 3.28, whose ellipses have 39 sides too.
-  const holesG = lepHoles(doc, t, { sides: 39 });
+  // Drawn by 3.28, whose ellipses have 39 sides too: its header says so.
+  const holesG = lepHoles(doc, t);
   const areaOf = (o) => {
     let a = 0;
     for (let i = 0, k = o.length - 1; i < o.length; k = i++) a += o[k][0] * o[i][1] - o[i][0] * o[k][1];
@@ -9493,7 +9504,7 @@ section('The ribs a design cuts, as its program cuts them');
   };
   const ring = (o) => o.reduce((L, q, i) => L + Math.hypot(q[0] - o[(i + 1) % o.length][0], q[1] - o[(i + 1) % o.length][1]), 0);
   const designs = [
-    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', null],
+    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', 55],
     ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', 39],
     ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt', 39],
   ];
@@ -9504,7 +9515,8 @@ section('The ribs a design cuts, as its program cuts them');
     const allowance = lepSeamAllowances(doc).rib;
     const rows = readFileSync(`data/reference/lep/${key}-cut-parts.tsv`, 'utf8').split('\n')
       .filter((l) => l.startsWith('rib\t')).map((l) => l.split('\t'));
-    const holes = lepHoles(doc, t, drawnSides ? { sides: drawnSides } : {});
+    // Each drawn as its header's program drew it.
+    const holes = lepHoles(doc, t);
     kept[name] = { doc, t, allowance, rows };
     let worst = { d: 0 };
     let worstP = 0;
@@ -9526,13 +9538,25 @@ section('The ribs a design cuts, as its program cuts them');
     check(`${name}: every rib's cutting line is its file's, its ${allowance} mm allowance on as the program puts it, the tip's included`,
       rows.length === t.ribs.length && Math.abs(worst.d) < 2e-5 && worstP < 0.01,
       `worst ${(worst.d * 100).toFixed(5)}% at rib ${worst.at}${worstP ? `; its length to ${(worstP * 10).toFixed(3)} mm` : ''}`);
-    check(`${name}: and its holes are its file's, ${drawnSides ?? holes.sides}-sided as its program drew them, to its hundredth of a cm2`,
-      counts && Math.abs(worstH.d) <= 0.006,
+    check(`${name}: and its holes are its file's, ${holes.sides}-sided as its program drew them, to its hundredth of a cm2`,
+      holes.sides === drawnSides && counts && Math.abs(worstH.d) <= 0.006,
       `worst ${worstH.d.toFixed(4)} cm2 at rib ${worstH.at}`);
   }
-  check('3.30 draws an ellipse with section 37\'s 3002 sides, 60 without; the older programs\' were 39',
-    lepEllipseSides(kept.Swoop2.doc) === 55 && lepEllipseSides(kept['gnuC2-23'].doc) === 60
-    && lepHoles(kept['gnuC2-23'].doc, kept['gnuC2-23'].t).byRib.get(0)[0].outline.length === 61);
+  // The program is the header's: "Input data file 3.30p version", "3.28
+  // version", "version 3.25".
+  const versions = Object.values(kept).map(({ doc }) => readProgramVersion(doc));
+  check('each file says which program it was written for, and is drawn as that program drew it',
+    versions.map((v) => v?.text).join() === '3.30p,3.25,3.28' && versions.map((v) => v.number).join() === '3.3,3.25,3.28'
+    && Object.values(kept).every(({ doc }, k) => lepProgramVersion(doc) === versions[k].number)
+    && readProgramVersion(blankLepDocument(5))?.number === 3.28
+    && lepProgramVersion(parseLep(writeLep(kept.Swoop2.doc).replace(/Input data file 3\.30p version/, 'Input data file'))) === LEP_PROGRAM_NEWEST,
+    versions.map((v) => v?.text).join(', '));
+  check('3.30 draws an ellipse with section 37\'s 3002 sides, 60 without; the older programs\' were 39, and read no 3002',
+    lepEllipseSides(kept.Swoop2.doc) === 55 && lepEllipseSides(kept['gnuC2-23'].doc) === 39
+    && lepEllipseSides(kept['Tuluaq-19'].doc) === 39
+    && lepEllipseSides(kept['gnuC2-23'].doc, { version: 3.3 }) === 60
+    && lepEllipseSides(kept.Swoop2.doc, { version: 3.28 }) === 39
+    && lepHoles(kept['gnuC2-23'].doc, kept['gnuC2-23'].t).byRib.get(0)[0].outline.length === 40);
 
   // What it is: the trailing edge notched to the sewing point, not mitred
   // out; and a flat rib's line out to the nose and back above the chord line
@@ -9589,9 +9613,9 @@ section('The speed system and trimmers, as the program tables them');
   // system's calage from the root rib's leading edge, 3.25 and 3.28 from a
   // place set by the tip rib's chord, an index left over from a loop.
   const designs = [
-    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', 3.3],
-    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', 3.25],
-    ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt', 3.28],
+    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt'],
+    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt'],
+    ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt'],
   ];
   const kinds = ['speedPivotLast', 'speedPivotFirst', 'trimPivotFirst', 'trimPivotLast'];
   const printed = (out) => {
@@ -9601,11 +9625,12 @@ section('The speed system and trimmers, as the program tables them');
       .map((part) => part.split('\n').filter((l) => /^\s*\d+\s+-?\d/.test(l)).map((l) => l.trim().split(/\s+/).map(Number)));
   };
   let modelWorst = 0;
-  for (const [name, key, file, sf, sn, version] of designs) {
+  for (const [name, key, file, sf, sn] of designs) {
     const doc = parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1'));
     const t = lepRibTable(doc, { airfoils: { [sn]: readFileSync(`data/reference/lep/${sf}`, 'latin1') } });
     const tables = printed(readFileSync(`data/reference/lep/${key}-lep-out.txt`, 'latin1'));
-    const cv = lepCalageVariation(doc, t, { version });
+    // As the program its header names printed it.
+    const cv = lepCalageVariation(doc, t, { version: lepProgramVersion(doc) });
     let rows = 0; let worstR = 0; let worstC = 0; let counts = tables.length === 4;
     kinds.forEach((k, q) => {
       if (!tables[q] || tables[q].length !== cv[k].length) { counts = false; return; }
@@ -9887,6 +9912,90 @@ section('The wing as a whole, and its balance, as the program prints them');
   check('and a design with section 35 off has no balance to show', !lepBalance(built.swoop2.doc, built.swoop2.t, built.swoop2.g).active);
 }
 
+section('A damaged design file says where it is damaged');
+
+{
+  // Design files are typed by hand and passed around. Read without checks,
+  // one that ran short or had text where a number goes threw a TypeError
+  // from deep in the geometry — "Cannot read properties of undefined
+  // (reading '1')" — and that is what the interface showed: 158 of 1,440
+  // damaged copies of the three designs did. Every stage the import runs
+  // must now either build, say what it could not build, or throw an error
+  // that names the section.
+  const files = [
+    ['gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt'],
+    ['swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt'],
+    ['tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt'],
+  ];
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const kinds = ['truncate', 'dropline', 'dupline', 'garble', 'zero', 'big', 'negative', 'blank'];
+  const raw = [];
+  const said = [];
+  let runs = 0;
+  let damagedLines = 0;
+  for (const [file, sf, sn] of files) {
+    const lines = readFileSync(`data/reference/lep/${file}`, 'latin1').split(/\r?\n/);
+    const sec = readFileSync(`data/reference/lep/${sf}`, 'latin1');
+    for (const kind of kinds) {
+      for (let n = 0; n < 6; n++) {
+        const ls = lines.slice();
+        const i = Math.floor(rnd() * ls.length);
+        if (kind === 'truncate') ls.length = i;
+        else if (kind === 'dropline') ls.splice(i, 1);
+        else if (kind === 'dupline') ls.splice(i, 0, ls[i]);
+        else if (kind === 'garble') ls[i] = ls[i].replace(/[0-9.]+/, 'x');
+        else if (kind === 'zero') ls[i] = ls[i].replace(/[0-9.]+/, '0');
+        else if (kind === 'big') ls[i] = ls[i].replace(/[0-9.]+/, '999');
+        else if (kind === 'negative') ls[i] = ls[i].replace(/([0-9.]+)/, '-$1');
+        else ls[i] = '';
+        runs += 1;
+        let stage = 'parse';
+        try {
+          const doc = parseLep(ls.join('\n'));
+          stage = 'describe'; describeLep(doc);
+          stage = 'design'; lepToDesign(doc, { sections: { [sn]: parseAirfoilText(sec, sn) } });
+          stage = 'table'; const tb = lepRibTable(doc, { airfoils: { [sn]: sec } });
+          stage = 'lines'; const g = lepLineGeometry(doc, { airfoils: { [sn]: sec } });
+          if (!g.ok && !/^section \d+|section files/.test(g.problems[0])) said.push(`lines: ${g.problems[0]}`);
+          if (!g.ok) damagedLines += 1;
+          stage = 'rods'; lepJoncs(doc, tb);
+          stage = 'holes'; lepHoles(doc, tb);
+          stage = 'section 12'; parseHVRibs(doc);
+          stage = 'panels'; const pn = lepPanels(doc, tb);
+          stage = 'structure'; lepStructure(doc, tb, { panels: pn });
+          stage = 'balance'; lepBalance(doc, tb, g);
+          stage = 'calage'; lepCalageVariation(doc, tb);
+        } catch (e) {
+          if (e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError) {
+            raw.push(`${file} ${kind} line ${i + 1}, ${stage}: ${e.message}`);
+          } else if (!/section \d+|LEparagliding sections/i.test(e.message)) {
+            said.push(`${stage}: ${e.message}`);
+          }
+        }
+      }
+    }
+  }
+  check(`${runs} damaged copies of the three designs: no stage throws a raw TypeError, RangeError or ReferenceError`,
+    raw.length === 0, raw.slice(0, 3).join(' | '));
+  check('and every one that cannot be read says which section', said.length === 0, said.slice(0, 3).join(' | '));
+  check('some of them damage the line sections, and those come back unbuilt with the reason rather than thrown',
+    damagedLines > 5, `${damagedLines} of ${runs}`);
+
+  // Two by hand, so the words are seen as well as their shape.
+  const gText = readFileSync('data/reference/lep/gnuc2-23-20260429.lep', 'latin1');
+  const gSec = { 'gnuC2.txt': readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1') };
+  const cutAt = gText.split('\n').findIndex((l) => /^\*\s+10\. BRAKES/i.test(l));
+  const short = parseLep(gText.split('\n').slice(0, cutAt - 30).join('\n'));
+  const gShort = lepLineGeometry(short, { airfoils: gSec });
+  check('a file cut short inside its section 9 is not built, and says so by section, riser and path',
+    !gShort.ok && /^section 9: the file ends before riser \d's path \d+$/.test(gShort.problems[0]), gShort.problems[0]);
+  const farRib = parseLep(gText.replace('4\t1 1\t2 1\t3 1\t4 1 \t6 3.5', '4\t1 1\t2 1\t3 1\t4 1 \t6 99'));
+  const gFar = lepLineGeometry(farRib, { airfoils: gSec });
+  check('and a path to a rib the wing does not have is named, with the ribs it does',
+    !gFar.ok && /^section 10: brake path 1 ends on rib 99, and the wing has ribs 1 to 31$/.test(gFar.problems[0]), gFar.problems?.[0]);
+}
+
 section('What a design sews inside its cells, as its program cuts it');
 
 {
@@ -9913,26 +10022,28 @@ section('What a design sews inside its cells, as its program cuts it');
   near('the program\'s flattening keeps a flat strip\'s area', flatArea, Math.hypot(0.5, 0.2) * 2, 1e-12);
 
   const designs = [
-    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', false],
-    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', true],
-    ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt', false],
+    ['Swoop2', 'swoop2', 'swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt', '3.30'],
+    ['Tuluaq-19', 'tuluaq19', 'tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt', '3.25'],
+    ['gnuC2-23', 'gnuc2-23', 'gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt', '3.28'],
   ];
   const built = {};
-  for (const [name, key, file, sf, sn, before330] of designs) {
+  for (const [name, key, file, sf, sn, drawnAs] of designs) {
     const doc = parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1'));
     const t = lepRibTable(doc, { airfoils: { [sn]: readFileSync(`data/reference/lep/${sf}`, 'latin1') } });
+    // Drawn as its header's program drew it: 3.30 and 3.28 cut a diagonal's
+    // cut-outs through its allowance; 3.25 drew them inside a whole one, and
+    // offset a pocket's edges its older way.
     const st = lepStructure(doc, t);
-    built[name] = { st, t };
+    const before328 = drawnAs === '3.25';
+    built[name] = { st, t, doc };
     const rows = readFileSync(`data/reference/lep/${key}-cut-parts.tsv`, 'utf8').split('\n')
       .filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
     const one = (prefix) => rows.filter((r) => r[0].startsWith(prefix));
     const group = (part) => rows.find((r) => r[0] === part);
     const of = (kind) => st.pieces.filter((p) => p.kind === kind);
-    // What the file was drawn as: 3.30 cuts a diagonal's cut-outs through
-    // its allowance; 3.25 drew them inside a whole one, and offset a
-    // pocket's edges its older way.
-    const asDrawn = (p) => (before330 && p.drawnBefore330 ? p.drawnBefore330 : p);
     const cm2 = (m2) => m2 * 1e4;
+    check(`${name}: its internal structure is drawn as its header's program, ${drawnAs}, drew it`,
+      st.drawnAs === drawnAs && st.settings.ellipseSides === (drawnAs === '3.30' ? 55 : 39));
 
     const counted = (part) => Number(group(part)?.[2] ?? 0);
     check(`${name}: its internal structure is built, every kind its file has, piece for piece`,
@@ -9960,24 +10071,25 @@ section('What a design sews inside its cells, as its program cuts it');
       const side = r[0].endsWith('left') ? 'left' : 'right';
       const p = of('diagonal').find((x) => x.rib === Number(r[1]) && x.side === side);
       if (!p) { worstD = { d: 1, at: `${r[1]} ${side}` }; continue; }
-      const d = cm2(asDrawn(p).outlineAreaM2) / Number(r[3]) - 1;
+      const d = cm2(p.outlineAreaM2) / Number(r[3]) - 1;
       if (Math.abs(d) > Math.abs(worstD.d)) worstD = { d, at: `${r[1]} ${side}` };
       // The file's holes: 3.25's cut-outs, 3.30's ellipses at the anchors.
-      const holes = before330 ? p.drawnBefore330.cutOutsM2 : p.holesAreaM2;
-      const count = before330 ? p.cutOuts.length : p.holes.length;
+      // 3.25's cut-outs are holes in a whole piece; 3.30's ellipses at the anchors.
+      const holes = p.holesAreaM2;
+      const count = p.holes.length;
       if (count !== Number(r[4])) holesRight = false;
       const dh = cm2(holes) / Number(r[5]) - 1;
       if (Math.abs(dh) > Math.abs(worstH.d)) worstH = { d: dh, at: `${r[1]} ${side}` };
-      if (r[6]) perimD = Math.max(perimD, Math.abs(asDrawn(p).perimeterM * 100 - Number(r[6])));
+      if (r[6]) perimD = Math.max(perimD, Math.abs(p.perimeterM * 100 - Number(r[6])));
     }
     if (one('full diagonal,').length) {
       check(`${name}: every full diagonal is its file's, to two parts in a hundred thousand`,
         Math.abs(worstD.d) < 2e-5, `worst ${(worstD.d * 100).toFixed(5)}% at rib ${worstD.at}`);
-      check(`${name}: and so are its ${before330 ? 'cut-outs' : 'holes'}, piece by piece`,
+      check(`${name}: and so are its ${before328 ? 'cut-outs' : 'holes'}, piece by piece`,
         holesRight && Math.abs(worstH.d) < 1e-4,
         `worst ${(worstH.d * 100).toFixed(4)}% at rib ${worstH.at}${holesRight ? '' : '; a count differs'}`);
     }
-    if (before330) check(`${name}: and its diagonals' cut lines, to a millimetre`, perimD < 0.1, `worst ${(perimD * 10).toFixed(2)} mm`);
+    if (before328) check(`${name}: and its diagonals' cut lines, to a millimetre`, perimD < 0.1, `worst ${(perimD * 10).toFixed(2)} mm`);
 
     // Straps, pieces between two ribs and pockets: each to a part in ten
     // thousand, the file's own rounding to a hundredth of a cm2 on the
@@ -9994,10 +10106,10 @@ section('What a design sews inside its cells, as its program cuts it');
       for (const r of one(prefix)) {
         const p = find(r);
         if (!p) { worst = { d: 1, e: Infinity, at: r.slice(0, 2).join(' ') }; continue; }
-        tally(cm2(asDrawn(p).outlineAreaM2) / Number(r[3]) - 1, Number(r[3]), r.slice(0, 2).join(' '));
+        tally(cm2(p.outlineAreaM2) / Number(r[3]) - 1, Number(r[3]), r.slice(0, 2).join(' '));
         if (holes && Number(r[5]) > 0) tally(cm2(p.holesAreaM2) / Number(r[5]) - 1, Number(r[5]), `${r[0]} ${r[1]} holes`);
         if (holes && p.holes.length !== Number(r[4])) worst = { d: 1, e: Infinity, at: `${r[0]} ${r[1]}: ${p.holes.length} holes` };
-        if (r[6]) perim = Math.max(perim, Math.abs(asDrawn(p).perimeterM * 100 - Number(r[6])));
+        if (r[6]) perim = Math.max(perim, Math.abs(p.perimeterM * 100 - Number(r[6])));
       }
       check(`${name}: every ${label} is its file's, to a part in ten thousand or its rounding${holes ? ', its holes too' : ''}`,
         worst.e < 1 && perim < 0.1,
@@ -10029,8 +10141,8 @@ section('What a design sews inside its cells, as its program cuts it');
     ].filter(([part]) => group(part));
     const off = totals.map(([part, kind]) => {
       const g = group(part);
-      const area = cm2(sum(kind, (p) => asDrawn(p).outlineAreaM2));
-      const perim = sum(kind, (p) => asDrawn(p).perimeterM) * 100;
+      const area = cm2(sum(kind, (p) => p.outlineAreaM2));
+      const perim = sum(kind, (p) => p.perimeterM) * 100;
       return { part, dA: area / Number(g[3]) - 1, dP: g[6] ? perim - Number(g[6]) : 0 };
     });
     check(`${name}: and its totals: area to a part in ten thousand, cut line to a millimetre`,
@@ -10050,10 +10162,10 @@ section('What a design sews inside its cells, as its program cuts it');
     const mHoles = minis.reduce((a, p) => a + p.holes.length, 0);
     const mHolesCm2 = cm2(minis.reduce((a, p) => a + p.holesAreaM2, 0));
     check(`${name}: its ${minis.length} trailing-edge mini-ribs are its file's in total${mHoles ? `, and their ${mHoles} holes` : ''}, none unbuilt`,
-      minis.length === Number(gm[2]) && Math.abs(cm2(sum('minirib', (p) => asDrawn(p).outlineAreaM2)) - Number(gm[3])) < 0.02
+      minis.length === Number(gm[2]) && Math.abs(cm2(sum('minirib', (p) => p.outlineAreaM2)) - Number(gm[3])) < 0.02
       && mHoles === Number(gm[4]) && Math.abs(mHolesCm2 - Number(gm[5])) < 0.02
       && !st.notReproduced.some((x) => /mini-rib/.test(x)),
-      `${cm2(sum('minirib', (p) => asDrawn(p).outlineAreaM2)).toFixed(2)} cm2 against ${gm[3]}; holes ${mHoles}, `
+      `${cm2(sum('minirib', (p) => p.outlineAreaM2)).toFixed(2)} cm2 against ${gm[3]}; holes ${mHoles}, `
       + `${mHolesCm2.toFixed(2)} against ${gm[4]}, ${gm[5]}`);
   }
 
@@ -10067,7 +10179,7 @@ section('What a design sews inside its cells, as its program cuts it');
   check('the gnuC2-23: its mini-ribs rise at the front to 0.8 of the billow of the cell inboard of theirs',
     gm2.length === 29 && Math.abs(gm2[0].riseM[0] - 0.8 * 0.02807) < 2e-4 && Math.abs(gm2[0].riseM[1] - 0.8 * 0.02950) < 2e-4
     && gm2.every((p) => p.riseM[0] > 0.01 && p.riseM[1] > 0.01)
-    && gm2.every((p) => p.cutAreaM2 > (p.drawnBefore330?.cutAreaM2 ?? Infinity)),
+    && gm2.every((p) => p.cutAreaM2 > p.drawings['3.25'].cutAreaM2 && p.cutAreaM2 === p.drawings['3.28'].cutAreaM2),
     gm2.filter((p, k) => k === 0 || k === gm2.length - 1).map((p) => `M${p.rib} ${(p.riseM[0] * 100).toFixed(2)} and `
       + `${(p.riseM[1] * 100).toFixed(2)} cm`).join(', '));
 
@@ -10084,14 +10196,22 @@ section('What a design sews inside its cells, as its program cuts it');
   // across 30 openings.
   const tu = built['Tuluaq-19'].st;
   const tuD = tu.pieces.filter((p) => p.kind === 'diagonal');
-  const asCut = tuD.reduce((a, p) => a + p.cutAreaM2, 0);
-  const asDrawn325 = tuD.reduce((a, p) => a + p.drawnBefore330.cutAreaM2, 0);
+  const asCut = tuD.reduce((a, p) => a + p.drawings['3.28'].cutAreaM2, 0);
+  const asDrawn325 = tuD.reduce((a, p) => a + p.cutAreaM2, 0);
   const openings = tuD.reduce((a, p) => a + p.cutOuts.reduce((b, c) => b + Math.hypot(c[c.length - 1][0] - c[0][0], c[c.length - 1][1] - c[0][1]), 0), 0);
   check('the Tuluaq: its diagonals as 3.30 cuts them carry less cloth than its 3.25 file, by the allowance across each opening',
-    tuD.every((p) => p.cutAreaM2 < p.drawnBefore330.cutAreaM2)
+    tuD.every((p) => p.drawings['3.28'].cutAreaM2 < p.cutAreaM2 && p.cutAreaM2 === p.drawings['3.25'].cutAreaM2)
     && Math.abs((asDrawn325 - asCut) / (openings * tu.settings.ribAllowanceCm / 100) - 1) < 0.1,
     `${asCut.toFixed(4)} m2 against ${asDrawn325.toFixed(4)} a side; the allowance across ${openings.toFixed(2)} m of openings is `
     + `${(openings * tu.settings.ribAllowanceCm / 100).toFixed(4)} m2`);
+  // And asked to, it draws them as 3.30 would: every piece its newer drawing,
+  // the bill's cloth with them.
+  const tu330 = lepStructure(built['Tuluaq-19'].doc, built['Tuluaq-19'].t, { version: 3.3 });
+  check('the Tuluaq drawn as 3.30 would: every piece the newer drawing, and 0.30 m2 less cloth for the wing',
+    tu330.drawnAs === '3.30' && tu330.settings.ellipseSides === 60
+    && tu330.pieces.every((p, k) => p.cutAreaM2 === (tu.pieces[k].drawings?.['3.28'].cutAreaM2 ?? tu.pieces[k].cutAreaM2))
+    && Math.abs(tu.totals.wing.cutM2 - tu330.totals.wing.cutM2 - 0.296) < 0.01,
+    `${tu.totals.wing.cutM2.toFixed(3)} m2 as 3.25 drew it, ${tu330.totals.wing.cutM2.toFixed(3)} as 3.30 cuts it`);
 
   // The bill takes them, for the whole wing: the centre rib's pockets once,
   // and the centre cell's mini-rib; the mini-ribs in the rib cloth.
@@ -13280,6 +13400,30 @@ section('Against the certification flight tests');
   check('correcting the speed alone recovers most of the sink gap',
     corrected > asIs * 1.15,
     `${asIs.toFixed(3)} to ${corrected.toFixed(3)} m/s against a real 1.0`);
+
+  // Too high a lift coefficient, because the wing was flat. In its arc — the
+  // handbook's ellipse through its published projected span, as the picker
+  // builds it — the Geo 7 has seven tenths of the flat wing's lift slope, and
+  // the same assumed angle trims it at CL 0.59, where real wings trim: three
+  // of the four cases above 30 km/h, the lightest XS at 29.1.
+  const trimInArc = (size, allUpKg) => {
+    const z = geo.find((x) => x.name === size);
+    const pf = planformFromDesignInputs({
+      span: z.flatSpan, rootChord: z.maxChord, tipChord: 0.55, tipSweep: 1.25,
+    });
+    const wing = buildWing({
+      planform: pf, lobe: buildLobe(ellipseForProjectedRatio(z.projectedSpan / z.flatSpan), pf.halfSpan),
+      airfoil: naca4('4415'), cells: 24,
+    });
+    return solveEquilibriumFromWing({
+      planform: pf, airfoil: naca4('4415'), atm: atmosphere(0),
+      pilotMass: allUpKg - z.mass, wingMass: z.mass, lineLengthM: 6.6, arc: arcFactors(wing),
+    });
+  };
+  const inArc = cases.map(([sz, m]) => trimInArc(sz, m));
+  check('in its arc the same angle trims at a real wing\'s lift coefficient, three of the four cases above 30 km/h',
+    inArc.filter((r) => r.speedKMH < 30).length === 1 && inArc.every((r) => r.cz3D > 0.55 && r.cz3D < 0.65),
+    inArc.map((r) => `${r.speedKMH.toFixed(1)} km/h at CL ${r.cz3D.toFixed(3)}`).join(', '));
 }
 
 // ---------------------------------------------------------------------------
@@ -14425,8 +14569,10 @@ section('A vortex lattice over the wing as it sits');
 
   // The drag is the integral of the NORMAL wash: the same wake turned bodily
   // in its own plane, which cannot change its drag, keeps it.
-  const qcOf = (le, te) => le.map((c, k) => c + (te[k] - c) * 0.25);
-  const traceOf = (st) => st.map((s) => [qcOf(s.leftLE, s.leftTE), qcOf(s.rightLE, s.rightTE)].map((p) => [p[1], p[2]]));
+  // The trace is where the legs leave the trailing edge, seen down the flow
+  // at the 6 degrees the arc was solved at.
+  const a6 = (6 * Math.PI) / 180;
+  const traceOf = (st) => st.map((s) => [s.leftTE, s.rightTE].map((p) => [p[1], p[2] * Math.cos(a6) - p[0] * Math.sin(a6)]));
   const turn = (tr, deg) => {
     const a = (deg * Math.PI) / 180;
     return tr.map((seg) => seg.map(([y, z]) => [y * Math.cos(a) - z * Math.sin(a), y * Math.sin(a) + z * Math.cos(a)]));
@@ -14460,6 +14606,156 @@ section('A vortex lattice over the wing as it sits');
     solved.note);
   check('with a loading for every strip',
     solved.loading.length === solved.panels);
+}
+
+// ---------------------------------------------------------------------------
+section('The wing in its arc, in flight');
+
+{
+  // The polar and the balance stand on a flat wing: the lifting line's
+  // straight span and the handbook's finite-span factor. A paraglider flies
+  // in an arc, its tips at 50 to 90 degrees. `arcFactors` puts the lattice
+  // on the wing as built and on the same wing laid flat, and takes what the
+  // arc changes: the lift slope, the zero-lift angle, and the induced drag
+  // at the same lift.
+
+  // The lattice's own legs first. They ran from the quarter chord straight
+  // downstream, which off a banked strip passes its neighbours' control
+  // points at a slant: the default wing's circulation ran away above 9
+  // degrees. Along the strip to its trailing edge, it is a line in the angle.
+  const wD = demoWing();
+  const stD = wingStrips(wD);
+  const at = [6, 9, 12].map((a) => vortexLattice({ strips: stD, alphaDeg: a }));
+  const kD = at.map((r) => r.inducedDragN / (r.liftN * r.liftN));
+  check('the lattice on an arc stays a line in the angle to 12 degrees: lift by equal steps, induced drag as its square',
+    Math.abs((at[2].liftN - at[1].liftN) / (at[1].liftN - at[0].liftN) - 1) < 0.05
+    && Math.max(...kD) / Math.min(...kD) < 1.1,
+    `${at.map((r) => r.liftN.toFixed(2)).join(', ')} N; Di/L2 ${kD.map((k) => k.toFixed(4)).join(', ')}`);
+
+  // A wing with no arc is its own flat counterpart, exactly.
+  const pfF = planformFromDesignInputs({ span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1 });
+  const lobeF = buildLobe({ type: 'discrete', points: [[0, 0], [pfF.halfSpan * 1.2, 0]] }, pfF.halfSpan);
+  const wF = buildWing({ planform: pfF, lobe: lobeF, airfoil: naca4('4415'), cells: 12, pointsPerSurface: 40 });
+  const fF = arcFactors(wF);
+  check('a wing laid flat is its own flat counterpart: no arc, nothing changed',
+    Math.abs(fF.liftRatio - 1) < 1e-12 && Math.abs(fF.alphaShiftDeg) < 1e-12 && Math.abs(fF.inducedRatioAt(6) - 1) < 1e-12,
+    `${fF.liftRatio}, ${fF.alphaShiftDeg}, ${fF.inducedRatioAt(6)}`);
+
+  // On the three complete designs, by their own ribs.
+  const arcOf = (file, sf, sn) => {
+    const af = parseAirfoilText(readFileSync(`data/reference/lep/${sf}`, 'latin1'), sn.replace('.txt', ''));
+    const d = lepToDesign(parseLep(readFileSync(`data/reference/lep/${file}`, 'latin1')), { sections: { [sn]: af } });
+    const w = buildWing({ planform: discretePlanform(d.planformRows), lobe: null, airfoil: af, explicitRibs: d.explicitRibs, pointsPerSurface: 40 });
+    return { f: arcFactors(w), tip: w.ribs[w.ribs.length - 1].betaDeg, w };
+  };
+  const designsA = {
+    'gnuC2-23': arcOf('gnuc2-23-20260429.lep', 'gnuc2-23-gnuC2.txt', 'gnuC2.txt'),
+    Swoop2: arcOf('swoop2-20260829.lep', 'swoop2-gnuReflex.txt', 'gnuReflex.txt'),
+    'Tuluaq-19': arcOf('tuluaq19-20250107.lep', 'tuluaq19-gnua.txt', 'gnua.txt'),
+  };
+  check('on the three complete designs the arc leaves three quarters of the flat wing\'s lift and a quarter more induced drag at the same lift',
+    Object.values(designsA).every(({ f }) => f.liftRatio > 0.72 && f.liftRatio < 0.8
+      && [4, 6, 8].every((a) => f.inducedRatioAt(a) > 1.18 && f.inducedRatioAt(a) < 1.3)),
+    Object.entries(designsA).map(([n, { f, tip }]) => `${n}, tips at ${tip.toFixed(0)}°: lift ×${f.liftRatio.toFixed(3)}, `
+      + `induced ×${f.inducedRatioAt(6).toFixed(3)}`).join('; '));
+  {
+    // At an angle the lattice solved, the ratio is the two solutions' own.
+    const { f, w } = designsA['gnuC2-23'];
+    const A10 = vortexLattice({ strips: wingStrips(w), alphaDeg: 10 });
+    const F10 = vortexLattice({ strips: wingStrips(w, { flat: true }), alphaDeg: 10 });
+    const direct = (A10.inducedDragN / A10.liftN ** 2) / (F10.inducedDragN / F10.liftN ** 2);
+    near('the induced-drag ratio at an angle the lattice solved is the two solutions\' own',
+      f.inducedRatioAt(10), direct, 1e-9);
+  }
+
+  // The polar in the arc: the flat lifting line's lift scaled by the
+  // lattice's ratio at the angle shifted, its induced drag at the same lift
+  // by the lattice's.
+  const wP = demoWing();
+  const fP = arcFactors(wP);
+  const polarArgs = { planform: wP.planform, airfoil: naca4('4415'), atm: atmosphere(0), mass: 90, alphaRange: [2, 12], step: 2 };
+  const flatP = wingPolar(polarArgs);
+  const arcP = wingPolar({ ...polarArgs, arc: fP });
+  const a0P = estimateSectionPolar(naca4('4415'), { reynolds: 1.5e6 }).alphaL0Deg;
+  const ratiosP = arcP.points.map((q) => {
+    const flatAt = wingPolar({ ...polarArgs, alphaRange: [q.alphaDeg - fP.alphaShiftDeg, q.alphaDeg - fP.alphaShiftDeg], step: 1 }).points[0];
+    return { lift: q.CL / flatAt.CL / fP.liftRatio, induced: (q.CDi / q.CL ** 2) / (flatAt.CDi / flatAt.CL ** 2) / q.arc.inducedRatio };
+  });
+  check('the polar in its arc is the flat lifting line\'s, its lift and its induced drag at the same lift scaled by the lattice\'s ratios',
+    arcP.arc && ratiosP.every((r) => Math.abs(r.lift - 1) < 0.01 && Math.abs(r.induced - 1) < 0.01)
+    && arcP.points.every((q) => Math.abs(q.arc.inducedRatio - fP.inducedRatioAt(q.alphaDeg - a0P)) < 0.02),
+    ratiosP.map((r) => `${r.lift.toFixed(4)}/${r.induced.toFixed(4)}`).join(' '));
+  check('and it flies faster, glides less and sinks more than flat, at every angle',
+    arcP.points.every((q, k) => q.speed > flatP.points[k].speed && q.glideRatio < flatP.points[k].glideRatio)
+    && arcP.minSink.sinkRate > flatP.minSink.sinkRate,
+    `best glide ${flatP.bestGlide.glideRatio.toFixed(2)} flat, ${arcP.bestGlide.glideRatio.toFixed(2)} in its arc; `
+    + `min sink ${flatP.minSink.sinkRate.toFixed(3)}, ${arcP.minSink.sinkRate.toFixed(3)} m/s`);
+
+  // The balance: the handbook's finite-span factor and induced drag, a flat
+  // wing's, with the arc's ratios on them; the 2012 example sheet as it was.
+  const eqFlat = solveEquilibrium({});
+  const eqArc = solveEquilibrium({ arc: { liftRatio: 0.8, inducedRatio: 1.2 } });
+  near('the balance in an arc takes its lift from the finite-span factor times the arc\'s ratio',
+    eqArc.cz3D, eqFlat.cz3D * 0.8, 1e-12);
+  near('and its induced drag at that lift times the arc\'s',
+    eqArc.cxi, ((eqArc.cz3D ** 2) / (Math.PI * eqArc.aspectRatio * 0.9)) * 1.2, 1e-12);
+  check('and the 2012 example sheet is not flown in an arc it did not have',
+    solveEquilibrium({ legacySpreadsheet: true, arc: { liftRatio: 0.8, inducedRatio: 1.2 } }).calageMetres
+      === solveEquilibrium({ legacySpreadsheet: true }).calageMetres);
+
+  // Against published figures: the Lynx 2 M, flown on the lift curve derived
+  // from its wing, in the arc the picker gives it — the handbook's ellipse
+  // solved to its published 19.5 m2 projected area. Flat it trims a quarter
+  // slow, glides a tenth high and sinks a third low; in its arc each of the
+  // four comes nearer the published 39 km/h, 58, 11 and 1.0 m/s.
+  const pfL = planformFromDesignInputs({ span: 11.8, rootChord: 2.4, tipChord: 0.55, tipSweep: 1.4 });
+  const projectedFor = (ratio) => {
+    const lobe = buildLobe(ellipseForProjectedRatio(ratio), pfL.halfSpan);
+    const n = 240;
+    let area = 0;
+    let prev = lobe.at(0).y;
+    for (let i = 1; i <= n; i++) {
+      const y = (pfL.halfSpan * i) / n;
+      const ly = lobe.at(y).y;
+      area += pfL.chord(y - pfL.halfSpan / (2 * n)) * (ly - prev);
+      prev = ly;
+    }
+    return 2 * area;
+  };
+  let loR = 0.65;
+  let hiR = 0.98;
+  for (let i = 0; i < 30; i++) {
+    const mid = (loR + hiR) / 2;
+    if (projectedFor(mid) < 19.5) loR = mid; else hiR = mid;
+  }
+  const wL = buildWing({ planform: pfL, lobe: buildLobe(ellipseForProjectedRatio((loR + hiR) / 2), pfL.halfSpan),
+    airfoil: naca4('4415'), cells: 32, centreRib: false });
+  const fL = arcFactors(wL);
+  const rsL = riserSet({ rows: ['A', 'B', 'C'], lengthMM: 500, travelMM: 180, anchors: { A: 0.09, B: 0.32, C: 0.58 } });
+  const baseL = { area: 23.0, span: 11.8, chord: 2.4, pilotMass: 81.3, wingMass: 3.7, lineMass: 0.35, lineLength: 7.3,
+    cxPilot: 0.014, cxLines: 0.010, cx0a: 0.008, oswald: 0.92, rho: 1.225, alphaDeg: 6.0, cm: -0.042 };
+  const flyL = (arc) => acceleratedPolarFromWing({
+    riser: rsL, base: baseL, chordM: 2.4,
+    liftModel: liftModelFromWing({ planform: pfL, airfoil: naca4('4415'), atm: atmosphere(0), mass: 85, area: 23.0, arc }),
+  });
+  const flatL = flyL(null);
+  const arcL = flyL(fL);
+  const fig = (p) => [p.trimSpeedKMH, p.topValidSpeedKMH, p.bestGlide.glideRatio, p.minSink.sinkMS];
+  const pubL = [39, 58, 11, 1.0];
+  // The interface's speed system takes the polar it has already solved
+  // rather than solving it again: the same curve either way.
+  const ownPolar = wingPolar({ planform: pfL, airfoil: naca4('4415'), atm: atmosphere(0), mass: 85, area: 23.0,
+    cxLines: 0.010, cxPilot: 0.015, alphaRange: [-6, 16], step: 0.5, N: 24, arc: fL });
+  const lmOwn = liftModelFromWing({ planform: pfL, airfoil: naca4('4415'), atm: atmosphere(0), mass: 85, area: 23.0, arc: fL });
+  const lmGiven = liftModelFromWing({ planform: pfL, airfoil: naca4('4415'), atm: atmosphere(0), mass: 85, area: 23.0, polar: ownPolar });
+  check('a lift model given the polar already solved is the one it would have solved',
+    [-2, 0, 3, 6, 9, 12].every((a) => lmOwn.czAt(a) === lmGiven.czAt(a) && lmOwn.oswaldAt(a) === lmGiven.oswaldAt(a))
+    && lmGiven.czRange.join() === lmOwn.czRange.join());
+  check('the Lynx 2 M in its arc comes nearer every published figure than flat: trim, top speed, glide and sink',
+    fig(arcL).every((v, k) => Math.abs(v - pubL[k]) < Math.abs(fig(flatL)[k] - pubL[k]))
+    && Math.abs(arcL.bestGlide.glideRatio / 11 - 1) < 0.05,
+    `arc lift ×${fL.liftRatio.toFixed(3)}; flat ${fig(flatL).map((v) => v.toFixed(2)).join(', ')}; `
+    + `in its arc ${fig(arcL).map((v) => v.toFixed(2)).join(', ')}; published ${pubL.join(', ')}`);
 }
 
 // ---------------------------------------------------------------------------

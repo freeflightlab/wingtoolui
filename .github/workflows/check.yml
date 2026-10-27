@@ -1,0 +1,35 @@
+# Every check stage, on every push to main and every pull request.
+#
+# The page is one file built from the sources and committed with them, so
+# the first step builds it and fails if what is committed is not what the
+# sources build. Then `npm run check`: the suite, the interface, the
+# reference sweep and the self-audit, fifteen stages. Nothing is installed:
+# the project has no dependencies beyond Node and Python.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: The committed page is the one the sources build
+        run: |
+          python3 build.py
+          git diff --exit-code -- dist/
+      - name: Every check stage
+        run: npm run check

@@ -16,6 +16,8 @@ The collision check below turns that into a build failure instead.
 import re
 import sys
 import json
+import base64
+import hashlib
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -332,9 +334,31 @@ def build():
     app = (UI / "app.js").read_text()
     css = (UI / "style.css").read_text()
 
+    # The release, from package.json, shown in the page and carried in it,
+    # so a file someone sends can be matched to the release it came from.
+    version = json.loads((ROOT / "package.json").read_text())["version"]
+
     html = shell.replace("/*__CSS__*/", css)
+    html = html.replace("<!--__VERSION__-->", f"v{version}")
     html = html.replace("/*__CORE__*/", core_js + "\n\n" + reference_js)
     html = html.replace("/*__APP__*/", app)
+
+    # A content security policy, as a meta tag ahead of everything it
+    # governs. The page runs one inline script and nothing else, so the policy
+    # allows that script by its hash and no other: an inline handler that file
+    # text smuggled into the page would not run. And no network at all —
+    # the page says it uses none, and with `connect-src 'none'` it cannot.
+    # Images only from the page's own blobs (a viewport saved as PNG).
+    scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
+    if len(scripts) != 1 or "<!--__CSP__-->" not in html:
+        sys.exit("build: the page must carry one inline script and a <!--__CSP__--> slot for its policy")
+    digest = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
+    policy = ("default-src 'none'; "
+              f"script-src 'sha256-{digest}'; "
+              "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
+              "connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
+    html = html.replace("<!--__CSP__-->",
+                        f'<meta http-equiv="Content-Security-Policy" content="{policy}">')
 
     DIST.mkdir(exist_ok=True)
     out = DIST / "paraglider-design-tool.html"

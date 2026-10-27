@@ -79,17 +79,29 @@ really is**, with the strip's own normal, so the arc enters because the
 geometry says so.
 
 What that buys, on one wing of 10 m bent into an arc whose tip sits at 37°
-(a projected span of 9.32 m, ratio 0.93):
+(a projected span of 9.32 m, ratio 0.93), at 6°:
 
 | | flat | arced |
 | --- | --- | --- |
-| CL | 0.468 | **0.418** |
-| span efficiency | 1.020 | **1.052** |
+| CL, on its own projected area | 0.458 | **0.432** |
+| lift | | **11% less** |
+| span efficiency, on its own projected span | 1.015 | **1.043** |
 
 The lift loss a correction factor can approximate. **The efficiency gain it
 cannot** — an arced wing sheds a non-planar wake, which is more efficient for
 the same reason a winglet is. That is real information the old model could not
-produce.
+produce. (On the flat span the arc's induced drag at the same lift is still
+the larger: `arcFactors` takes both into the polar and the balance,
+`docs/environment-and-aero.md` section 6.)
+
+Its trailing legs ran from the quarter chord straight downstream. On a strip
+at an incidence that lifts them off its surface between the bound vortex and
+the control point, and out on an arc they passed the neighbouring strips'
+control points at a slant: the system grew ill-conditioned with the angle,
+the default wing's circulation ran away above 9°, and the lift the 37° arc
+costs came out 16% where it is 11%. The legs run along each strip's edge to
+its trailing edge now, and downstream from there, and the Trefftz plane sees
+the wake where it leaves.
 
 It said 1.130 until the third complete design was flown on it. The Trefftz
 integral took the vertical wash, which is the wash normal to the wake only
@@ -101,7 +113,8 @@ normal wash, the gnuC2-23's span efficiency is 1.21 on its projected span,
 not 1.52, and its induced drag a quarter more.
 
 Validated where the answer is known: the lift slope approaches 2 pi at high
-aspect ratio, and an elliptical wing gives a span efficiency of 1.006.
+aspect ratio (6.154 at AR 200), and an elliptical wing gives a span
+efficiency of 1.004.
 
 It came out at **0.503** first — exactly double the induced drag, because the
 Trefftz integral is `(rho/2) * integral(Gamma * w)` and the half was missing.

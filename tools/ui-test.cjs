@@ -99,6 +99,68 @@ if (!errors.length) {
   if (!okLow || !okHigh) errors.push(`glide withheld outside the models: 1 km ${JSON.stringify(low)}, 50 km ${JSON.stringify(high)}`);
   console.log(`  ${okLow && okHigh ? 'ok  ' : 'FAIL'} glide figures at 1 km ${low.glide}/${low.ld}; at 50 km withheld (${high.regime})`);
 }
+// The wing flies in its arc: the balance and the polar take the lattice's
+// ratios of the wing as built against itself laid flat. Unticked, it flies
+// flat, as the handbook's balance and the lifting line describe it, and
+// slower: three quarters of the lift and a quarter more induced drag.
+{
+  const S2 = globalThis.__S;
+  const texts = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) texts(c, out); return out; };
+  // The 2012 example sheet has no arc to fly, and a case above left it on.
+  const legacyWas = S2.legacy;
+  S2.legacy = false;
+  globalThis.__rebuild(); globalThis.__controls();
+  const m1 = globalThis.__getM();
+  const hint = texts(document.getElementById('g-balance')).find((t) => /fly the wing as it sits in its arc/.test(t)) || '';
+  const row = (() => { const t = texts(document.getElementById('balanceTable')); const i = t.indexOf('The arc'); return i >= 0 ? t[i + 1] : ''; })();
+  S2.arcInFlight = false; globalThis.__rebuild(); globalThis.__controls();
+  const m0 = globalThis.__getM();
+  const rowFlat = (() => { const t = texts(document.getElementById('balanceTable')); const i = t.indexOf('The arc'); return i >= 0 ? t[i + 1] : ''; })();
+  S2.arcInFlight = true; S2.legacy = legacyWas; globalThis.__rebuild(); globalThis.__controls();
+  const ok = m1.arc && m1.balance.arc && m1.polar.arc && !m0.arc && !m0.balance.arc && !m0.polar.arc
+    && m1.arc.liftRatio > 0.7 && m1.arc.liftRatio < 0.9
+    && Math.abs(m1.balance.cz3D / m0.balance.cz3D - m1.arc.liftRatio) < 1e-9
+    && m1.balance.speedKMH > m0.balance.speedKMH && m1.polar.bestGlide.glideRatio < m0.polar.bestGlide.glideRatio
+    && /of the lift at the same angle/.test(hint) && /^lift ×0\.\d{3}, induced drag ×1\.\d{3} at the same lift/.test(row)
+    && /not flown/.test(rowFlat);
+  if (!ok) {
+    errors.push(`the wing does not fly in its arc: arc ${m1.arc?.liftRatio}, balance ${m0.balance.speedKMH.toFixed(1)} -> `
+      + `${m1.balance.speedKMH.toFixed(1)} km/h; hint "${hint.slice(0, 80)}"; row "${row}" / "${rowFlat}"`);
+  }
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} the wing flies in its arc: lift ×${m1.arc?.liftRatio.toFixed(3)}, trim `
+    + `${m0.balance.speedKMH.toFixed(1)} km/h flat, ${m1.balance.speedKMH.toFixed(1)} in its arc; best glide `
+    + `${m0.polar.bestGlide.glideRatio.toFixed(2)} flat, ${m1.polar.bestGlide.glideRatio.toFixed(2)}`);
+}
+// The speed system in the interface: the wing across the bar on its own
+// lift curve, the trimmers with it, and nothing when the bar has no travel.
+{
+  const S2 = globalThis.__S;
+  const texts = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) texts(c, out); return out; };
+  const keep = { speedTravel: S2.speedTravel, trimTravel: S2.trimTravel, legacy: S2.legacy };
+  S2.legacy = false; S2.speedTravel = 150; S2.trimTravel = 0;
+  globalThis.__rebuild(); globalThis.__controls();
+  const m = globalThis.__getM();
+  const sb = m.speedBar;
+  const shown = texts(document.getElementById('speedTable'));
+  const rows = sb && !sb.error ? sb.rows : [];
+  const ok1 = rows.length === 6 && rows[0].alphaDeg === S2.alphaDeg && rows[5].barMM === 150
+    && rows.every((r, k) => k === 0 || (r.speedKMH > rows[k - 1].speedKMH && r.alphaDeg < rows[k - 1].alphaDeg))
+    && shown.includes(`${rows[0].speedKMH.toFixed(1)} km/h`) && shown.some((t) => /at the fastest point the lift curve supports/.test(t));
+  S2.trimTravel = 60; globalThis.__rebuild(); globalThis.__controls();
+  const tr = globalThis.__getM().trimmers;
+  const trSaid = texts(document.getElementById('speedTable')).find((t) => /^Trimmers out:/.test(t)) || '';
+  const ok2 = tr && tr.trimAlone.flyable && trSaid.includes(`Trimmers out: ${tr.trimAlone.alphaDeg.toFixed(1)}°`);
+  S2.trimTravel = 0; S2.speedTravel = 0; globalThis.__rebuild(); globalThis.__controls();
+  const none = texts(document.getElementById('speedTable'));
+  const ok3 = !globalThis.__getM().speedBar && none.some((t) => /No speed bar: its travel is nil/.test(t));
+  Object.assign(S2, keep); globalThis.__rebuild(); globalThis.__controls();
+  if (!(ok1 && ok2 && ok3)) {
+    errors.push(`the speed system is not in the interface as it should be: bar ${ok1}, trimmers ${ok2}, none ${ok3}; `
+      + `${shown.slice(0, 14).join(' | ')}`);
+  }
+  console.log(`  ${ok1 && ok2 && ok3 ? 'ok  ' : 'FAIL'} the speed system: ${rows[0]?.speedKMH.toFixed(1)} km/h at trim to `
+    + `${sb?.topValidSpeedKMH?.toFixed(1)} on 150 mm of bar; trimmers out ${tr?.trimAlone.alphaDeg.toFixed(1)}°; none with no travel`);
+}
 // "Solve anchors to the line length": the derived plan attaches every second
 // rib whatever the wing, which put a Zeno 2 S at 466 m of line against its
 // published 186. The solve writes the anchor counts out as a cascade.
@@ -865,6 +927,82 @@ try {
       }
       console.log('  ok   the gnuC2-23\'s section 35 balance is under Balance: 44.56 km/h as its program prints it, left at '
         + 'k 0.578, and 33.97 km/h solved to k = 1; the 70 kg pilot and 4 kg wing it was balanced for are the balance\'s');
+      // The status bar's warning of ribs nothing holds agrees with the
+      // panel: of the three it lists, the design's own pieces join two.
+      const stB = document.getElementById('status');
+      const stText = (stB.children || []).map((c) => c._text ?? '').join('');
+      if (!/ 1 rib with no load path/.test(stText)) {
+        console.log(`  FAIL the gnuC2-23's status bar: "${stText}" — the panel says its own pieces join two of the three ribs`);
+        process.exit(1);
+      }
+      console.log('  ok   and its status bar warns of the one rib nothing joins, as its panel says, not three');
+      // Its own table of risers and calage, as its 3.28 prints it, and its
+      // output's section 1 figures, as printed and as their labels say.
+      globalThis.__controls();
+      const textsG = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) textsG(c, out); return out; };
+      const spd = textsG(document.getElementById('speedTable'));
+      const cvG = globalThis.__getLEP()?.calage;
+      const firstRow = cvG?.speedPivotLast?.[1];
+      const okTable = cvG && spd.some((t) => /As its program \(3\.28\) tables them: risers at 10, 37, 72% of the central chord/.test(t))
+        && ['speed system, about the last riser', 'speed system, about the first', 'trimmers, about the first riser', 'trimmers, about the last']
+          .every((t) => spd.includes(t))
+        && firstRow && spd.includes(`${firstRow.alphaDeg.toFixed(2)}°`) && spd.includes(`${firstRow.calagePct.toFixed(2)}%`);
+      const bal = textsG(document.getElementById('balanceTable'));
+      const after = (k) => { const i = bal.indexOf(k); return i >= 0 ? bal[i + 1] : ''; };
+      const okMain = after('Vault arrow') === '2.81 m printed, 2.94 m as the label says'
+        && after('Karabiners to wingtip') === '6.25 m printed, 6.47 m as the label says'
+        && after('Planform centroid') === '54.63% c' && /^103\.8 cm back, 88\.7 cm down/.test(after('Wing mass centre'));
+      if (!okTable || !okMain) {
+        console.log(`  FAIL the gnuC2-23's own tables are not shown: table ${okTable}, section 1 ${okMain}: `
+          + `${after('Vault arrow')} / ${after('Karabiners to wingtip')} / ${after('Planform centroid')} / ${after('Wing mass centre')}`);
+        process.exit(1);
+      }
+      console.log(`  ok   and its own table of risers and calage as its 3.28 prints it (${cvG.speedPivotLast.length} rows to `
+        + `${cvG.speedPivotLast[cvG.speedPivotLast.length - 1].alphaDeg.toFixed(2)}°), and its section 1 as printed: `
+        + 'a 2.81 m arrow for its 2.94, 6.25 m karabiners to tip for 6.47');
+    }
+
+    // A damaged design file loads what it can and says what it could not:
+    // the gnuC2-23 cut short inside its lines.
+    {
+      const fsd = require('fs');
+      const full = fsd.readFileSync('data/reference/lep/gnuc2-23-20260429.lep', 'latin1').split('\n');
+      const cut = full.findIndex((l) => /^\*\s+10\. BRAKES/i.test(l)) - 30;
+      globalThis.__importLep(full.slice(0, cut).join('\n'),
+        { 'gnuC2.txt': fsd.readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1') });
+      const md = globalThis.__getM();
+      const note = S3._referenceNote || '';
+      if (md.error || !md.imported || !/Not read: its lines: section 9: the file ends before riser \d's path \d+/.test(note)) {
+        console.log(`  FAIL a damaged gnuC2-23 does not load what it can: ${md.error || ''} ${note.slice(0, 300)}`);
+        process.exit(1);
+      }
+      console.log(`  ok   a gnuC2-23 cut short in its lines still loads its wing, ${md.wing.ribs.length} half-ribs, and says `
+        + 'which section and line its lines stop at');
+    }
+
+    // A name is file text — an imported design's, a project's — and the
+    // status bar wrote it as markup: a name carrying an image tag with an
+    // error handler ran it the first time anything was saved. Text now.
+    {
+      // What `save` writes after every export (the harness's own save only
+      // records the file), and an error quoting the name.
+      const payload = '<img src=x onerror="window.__pwned=1">';
+      globalThis.__setStatus(null, `Saved ${payload}-ribs.dxf`);
+      const st = document.getElementById('status');
+      const texts = [];
+      const walk = (n) => { if (!n) return; if (n._text) texts.push(n._text); for (const c of n.children || []) walk(c); };
+      walk(st);
+      const anyImg = (n) => /^img$/i.test(n.tagName || '') || (n.children || []).some(anyImg);
+      globalThis.__setStatus(`${payload}: section 9: the file ends before riser 2's path 3`);
+      const errTexts = [];
+      const walkE = (n) => { if (!n) return; if (n._text) errTexts.push(n._text); for (const c of n.children || []) walkE(c); };
+      walkE(st);
+      if (anyImg(st) || /<img/.test(st._text || '') || !texts.join('').includes('Saved <img src=x')
+        || !errTexts.join('').startsWith('<img src=x')) {
+        console.log(`  FAIL a name with markup reaches the status bar as markup: ${texts.join('').slice(0, 120)}`);
+        process.exit(1);
+      }
+      console.log('  ok   a wing name carrying markup reaches the status bar as text, and nothing in it is an element');
     }
 
     // Its panels and ribs are cut as its cutting file cuts them, and the bill
@@ -877,6 +1015,14 @@ try {
       S3.reference = id;
       globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
       const mc = globalThis.__getM();
+      // Cut as the program its header names cut it, and the note says which.
+      const [said, drawn] = { tuluaq19: ['3.25', '3.25'], swoop2: ['3.30p', '3.30'], 'gnuc2-23': ['3.28', '3.28'] }[key];
+      if (!(S3._referenceNote || '').includes(`cut as its LEparagliding ${said} cut it`)
+        || globalThis.__getLEP()?.structure?.drawnAs !== drawn || globalThis.__getLEP()?.info?.program?.text !== said) {
+        console.log(`  FAIL ${tag} is not cut as its LEparagliding ${said} cut it: drawn as `
+          + `${globalThis.__getLEP()?.structure?.drawnAs}; "${(S3._referenceNote || '').slice(0, 200)}"`);
+        process.exit(1);
+      }
       const rowsC = fsx3.readFileSync(`data/reference/lep/${key}-cut-parts.tsv`, 'utf8').split('\n')
         .filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t'));
       // A panel cut in two by 3D shaping is two rows, "upper panel, front" and "upper panel, rear".
@@ -958,7 +1104,7 @@ try {
         console.log(`  FAIL ${tag}'s internal-structure cutting file has ${loopsI} pieces, not ${st.pieces.length}`);
         process.exit(1);
       }
-      console.log(`  ok   ${tag}: its own panels, as its cutting file cuts them (upper ${(dU * 100).toFixed(2)}%, `
+      console.log(`  ok   ${tag}, cut as its LEparagliding ${said} cut it: its own panels, as its cutting file cuts them (upper ${(dU * 100).toFixed(2)}%, `
         + `lower ${(dL * 100).toFixed(2)}%), its ribs as its program cuts them (worst ${(Math.max(...bodyOff) * 100).toFixed(4)}%, `
         + `${mR[3]} m2 in the bill), and the bill weighs the sail as cut: ${mU[1]} and ${mL[1]} m2; its internal structure `
         + `${mI[2]} m2 in ${mI[1]} pieces and its mini-ribs ${mM[2]} m2 in ${mM[1]}, ${loopsI} a side on its cutting file`);
@@ -1935,7 +2081,7 @@ try {
   // was dropped. Nothing checked, because nothing looked at the control.
   {
     globalThis.__controls();
-    const byLabel = (label) => globalThis.__createdNodes
+    const byLabel = (label) => globalThis.__inPage()
       .filter((n) => n.attrs && n.attrs['aria-label'] === label).pop();
     const kara = byLabel('Karabiner separation (cm)');
     const cd = byLabel('Line drag coefficient');
@@ -2028,7 +2174,7 @@ try {
     // `tagName`, not `tag` — the stub's own field name. Reading the wrong one
     // found no options at all, and the guard below is the only reason that
     // showed up rather than passing silently.
-    const optionValues = globalThis.__createdNodes
+    const optionValues = globalThis.__inPage()
       .filter((n) => n.tagName === 'option' && n.value !== undefined)
       .map((n) => n.value);
     if (!optionValues.length) {

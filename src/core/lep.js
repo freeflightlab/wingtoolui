@@ -101,6 +101,35 @@ export function sectionData(doc, number) {
   return s.dataIndices.map((i) => doc.lines[i]);
 }
 
+/**
+ * The newest LEparagliding this tool has read the source of (3.30p), and
+ * what it takes a file to be drawn by when its header does not say.
+ */
+export const LEP_PROGRAM_NEWEST = 3.3;
+
+/**
+ * Which LEparagliding the file was written for, from its header: "Input
+ * data file 3.28 version", "3.30p version", "version 3.25". The program
+ * itself skips the line, as it skips every comment; it is the designer's
+ * program, and so the one that drew the design's own cutting files — the
+ * versions draw some pieces differently (`lepEllipseSides`, `lepStructure`).
+ * Returns `{ number, text }` — 3.3 and "3.30p" — or null when the header
+ * does not say.
+ */
+export function readProgramVersion(doc) {
+  const end = doc.sections?.[0]?.start ?? Math.min(doc.lines.length, 12);
+  for (let i = 0; i < end; i++) {
+    const m = doc.lines[i].match(/input\s+data\s+file\s+(?:version\s+)?v?(\d+)\.(\d+)([a-z+]*)/i);
+    if (m) return { number: Number(`${m[1]}.${m[2]}`), text: `${m[1]}.${m[2]}${m[3]}` };
+  }
+  return null;
+}
+
+/** The program a file is read as drawn by: its header's, or the newest. */
+export function lepProgramVersion(doc) {
+  return readProgramVersion(doc)?.number ?? LEP_PROGRAM_NEWEST;
+}
+
 /** Split a data line into fields, honouring the "trailing text is ignored" rule. */
 function fields(line) {
   return line.trim().split(/[\s\t]+/);
@@ -664,6 +693,8 @@ export function describeLep(doc) {
     wingScale: g.wingScale,
     usesZRotation: usesZ,
     sections: doc.sections.map((s) => s.number),
+    // The LEparagliding its header says it was written for, or null.
+    program: readProgramVersion(doc),
   };
 }
 

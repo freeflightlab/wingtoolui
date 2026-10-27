@@ -10,12 +10,12 @@ openings, diagonals and rods, panel development, nesting, and DXF or printed
 patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
-One offline HTML file, 1.2 MB, no build step and no network. That constraint
+One offline HTML file, 1.5 MB, no build step and no network. That constraint
 drove the architecture: 40 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 63,000 lines**: 24,200 core, 5,800 interface, 16,700 tests, 5,400
-tools, 10,800 documentation.
+**About 71,000 lines**: 28,400 core, 6,200 interface, 18,300 tests, 6,000
+tools, 12,100 documentation.
 
 ## 2. What is genuinely validated
 
@@ -72,15 +72,19 @@ the standard's word for many rounds.
 
 ## 4. What is wrong, or unexplained
 
-**The residual in minimum sink is explained, and fixed only in the core.**
-At an assumed 6° the model trims at CL 0.806 where a real wing trims near 0.55
-to 0.65, so it flies about 20% too slowly and sinks about 17% too little.
-EN 926-2 flight test reports fix the trim speed above 30 km/h at the weights
-the wings were flown at, and the assumed-angle solve gives 24.9 to 31.6 km/h
-over four certified cases — short on three. `trimFromCalage` solves it the
-other way round, from where the risers hang, and gives 29.4 to 35.6 km/h at
-CL 0.58 to 0.63 with sinks of 0.92 to 1.08 m/s. The interface's balance is
-still the handbook's, on typed coefficients.
+**The residual in minimum sink was the arc.** On a flat wing, at an assumed
+6°, the model trims at CL 0.806 where a real wing trims near 0.55 to 0.65,
+so it flew about 20% too slowly and sank about 17% too little: EN 926-2
+flight test reports fix the trim above 30 km/h at the weights the wings were
+flown at, and the flat solve gives 24.9 to 31.6 km/h over four certified
+cases, short on three. The wing is not flat. In its arc — the published one
+— the vortex lattice gives the Geo 7 seven tenths of the flat wing's lift
+slope, and the same 6° trims at CL 0.59 and 29.1 to 36.9 km/h, short on one.
+On the Lynx 2 M, the derived polar in its arc comes nearer all four of its
+published figures: glide within 2%, sink 12% low, trim 12% slow. The
+interface flies the wing in its arc. What remains is the assumed angle —
+`trimFromCalage` solves the trim from where the risers hang, in the core —
+and a section lift curve from thin-aerofoil theory.
 
 **Generated linesets are long on two-liners.** Built with their own counts,
 the three-liners land from 3% under to 12% over their published totals and
@@ -106,7 +110,7 @@ and its holes are the program's polygons. What they sew inside their cells —
 full diagonals, V-rib strips, straps, pieces between two ribs and rod
 pockets, read from the program's own source — is within a part in ten
 thousand of every piece in the three files, or the file's own rounding, and
-the bill carries it, and the ribs at their cut size: 11.9, 10.5 and 11.3 m²
+the bill carries it, and the ribs at their cut size: 11.9, 10.8 and 11.3 m²
 of internal structure for the wing. So are their trailing-edge mini-ribs,
 the last pieces that were not built, raised at the front to the billow of
 the cell as the program finds it from the panels: all 70, to the files'
@@ -124,14 +128,15 @@ act are each worth nearly 2% of chord, and on that wing they cancel
 
 ## 5. What is missing
 
-**48 open items in the roadmap.** The substantial ones:
+**44 open items in the roadmap.** The substantial ones:
 
+- The trim from the calage in the interface: its balance takes an angle of
+  attack and typed coefficients, as the handbook's does.
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
 - Collapse (Z) lines: three reference wings carry them; the model does not.
-- Parts of the core with no way in from the interface: the speed system and
-  trimmers, the coupled balance, the vortex lattice, the inflated shape and
-  3D shaping. Each says so where it is documented.
+- Parts of the core with no way in from the interface: the coupled balance,
+  the inflated shape and 3D shaping. Each says so where it is documented.
 - Asymmetric and left/right-independent line plans.
 - Nesting: 63.5% of the roll on the default wing, against panels that fill
   94% of their own boxes.
@@ -164,14 +169,21 @@ material figure came from, refuses geometry that is not a wing, and marks its
 own estimates.
 
 **The aerodynamics is the weakest part**, though less so than it was. A
-vortex lattice now solves the wing as it actually sits in the air — the arc
-included, rather than corrected for afterwards — and it is validated against
-the cases with known exact answers: the lift slope approaches 2 pi at high
-aspect ratio, an elliptical wing gives a span efficiency of 1.006, and a
-wake turned in its own plane keeps its drag — which, until this round, on an
-arc it did not: the arc's gain in efficiency was overstated threefold. It is
-good enough to compare designs and rank trades; it is not good enough to
-predict a polar a manufacturer would publish.
+vortex lattice solves the wing as it actually sits in the air, and the polar
+and the balance fly the wing in its arc by it: three quarters of a flat
+wing's lift, a quarter more induced drag at the same lift. It is validated
+against the cases with known exact answers: the lift slope approaches 2 pi at
+high aspect ratio, an elliptical wing gives a span efficiency of 1.004, and a
+wake turned in its own plane keeps its drag. Two defects in it were found
+by those cases and by the wings: the Trefftz integral took the vertical wash,
+which overstated the arc's gain in efficiency threefold, and the trailing
+legs left the strips at their quarter chord, which made an arched wing's
+solution run away above 9° and overstated the lift the arc costs by half.
+With the arc, a wing's derived glide, sink and trim come near its published
+ones. It is good enough to compare designs and rank trades; the trim still
+comes from an assumed angle and the section's lift curve from thin-aerofoil
+theory, and it is not good enough to predict a polar a manufacturer would
+publish.
 
 **The geometry and construction side is strong.** It reproduces a published
 design exactly, holds 21 wings to physical invariants, and its constants are

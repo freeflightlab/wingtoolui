@@ -75,12 +75,18 @@ reported 99 deletions and 245 additions.)
 `LICENSE` should not be in the list at all. The release carries the
 repository's own file, byte for byte, so replacing the tree leaves it as it
 was. If `git status` shows it modified or deleted, stop: the release is not
-the one the checks passed (see `LICENSING.md`).
+the one the checks passed (the self-audit holds `LICENSE` to the GPL's checksum).
 
 ```bash
-git commit -m "Replace flat tree with the complete release"
+git commit -m "Release $(node -p "require('./package.json').version")"
 git push
 ```
+
+The release's version is `package.json`'s and `CHANGELOG.md` says what it
+changed; the page shows it beside its name. On the push, GitHub runs
+`.github/workflows/check.yml`: it builds the page, fails if the committed
+one is not what the sources build, and runs every check stage — the
+repository's **Actions** tab shows the result.
 
 ## Check it worked
 
@@ -111,15 +117,16 @@ drop the **folder**. Dropping the files from inside it flattens them, which is
 what happened here.
 
 So drag `src`, `data`, `docs`, `tests`, `tools` and `dist` as folders, then
-delete the old flat files at the top level, and add `.gitignore` by hand —
-the uploader does not show hidden files.
+delete the old flat files at the top level, and add `.gitignore` and
+`.github/workflows/check.yml` by hand — the uploader does not show hidden
+files or folders.
 
 Using git is simpler and is the only way that is hard to get wrong.
 
 ## What a complete tree looks like
 
 ```
-build.py  package.json  MANIFEST.txt  README.md  LICENSE  …
+build.py  package.json  MANIFEST.txt  README.md  CHANGELOG.md  LICENSE  …
 src/core/        40 modules
 src/ui/          index.html, app.js, style.css
 data/reference/  143 tables, CATALOGUE.md, and lep/ with three designs' files
@@ -127,6 +134,7 @@ docs/            documents and figures
 tests/           the test suites
 tools/           checks, importers, the doctor
 dist/            paraglider-design-tool.html, the built tool
+.github/         workflows/check.yml, the checks GitHub runs on a push
 .gitignore
 ```
 

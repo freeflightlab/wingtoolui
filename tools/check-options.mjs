@@ -140,6 +140,10 @@ const USER_FACING = [
   // the comparison of two designs, the anchor solve the full-pipeline run
   // validates with, and the design inputs the picker and that run now share.
   'compareDesigns', 'anchorsForLineLength', 'referenceDesignInputs',
+  // The wing in its arc, the speed system and the trimmers, and an imported
+  // design's own tables of them, all core and suite until 1.2 and 1.3.
+  'arcFactors', 'liftModelFromWing', 'acceleratedPolarFromWing', 'trimEnvelope',
+  'lepCalageVariation', 'lepMainParameters',
 ];
 // A CALL in the interface's code, comments apart. The name anywhere in the
 // file used to do, and a function mentioned in a comment and called nowhere

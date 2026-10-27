@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2665-test validation suite and a benchmark with regression budgets
+- [x] 2687-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -63,9 +63,10 @@ material published after the handbook:
       nose radius and surface curvature together. `shapingForWing` asks for
       the figure rather than guessing it.
 - [x] **LEP file interoperability** — `leparagliding.txt` read and written,
-      with all 33 unmodelled sections preserved byte for byte. Validated
-      against the published gnuC2-27 (27.00 m² recovered from a file named
-      for 27 m²). See `docs/lep-format.md`.
+      the sections it does not write preserved byte for byte. Validated
+      against three complete designs and their program's own output, the
+      Swoop2, the Tuluaq-19 and the gnuC2-23. (This item cited a gnuC2-27,
+      whose file was never in the repository.) See `docs/lep-format.md`.
 - [x] **Riser-based line plans** — rows and risers modelled separately,
       industry naming grammar, production line-table import, cascade topology
       and riser length recovered from lengths alone, junction placement
@@ -76,15 +77,18 @@ material published after the handbook:
       exactly (13/6/3/1). See `docs/brakes.md`.
 - [x] **Risers, speed system and the accelerated polar** *(ch.9)* — riser
       travel rotates the wing, the brake pulley couples to it, and the polar
-      runs across the bar range. Validated against BGD's published Lynx 2
-      figures on four independent quantities. See `docs/speed-system.md`.
+      runs across the bar range. Against BGD's published Lynx 2 figures it is
+      within 2 to 8% on a lift curve typed by hand, and a quarter slow at
+      trim and at top speed on the curve it derives from the wing, flat, at
+      an assumed angle (`docs/validation.md` §2.7). See
+      `docs/speed-system.md`.
 - [x] **Lift curve derived from the wing** — section polar plus lifting line
       plus Reynolds iteration, replacing the last hand-fed input. Most of the
       validity range now falls out of the same calculation.
 - [ ] **Predict the frontal-collapse floor** rather than assuming it. It is
       structural, not aerodynamic, and it governs predicted top speed at
-      4.8 km/h per 0.05. Currently inverted from published speeds (implying
-      Cz 0.307 on the Lynx 2); predicting it needs internal pressure and rib
+      6.7 km/h per 0.05. Currently inverted from published speeds (implying
+      Cz 0.22 on the Lynx 2); predicting it needs internal pressure and rib
       support modelling.
 - [x] **Trimmers** *(ch.9.3)* — rear-riser lengthening, composed with the
       speed system. The shortenings add but the angles do not quite, and the
@@ -113,8 +117,9 @@ material published after the handbook:
       on the bar, not forward. The A row sheds 27% of its share between trim
       and full bar while D gains a quarter, which is why rear-riser steering
       works accelerated and why C and D must be sized for it. Now asserted.
-- [ ] **Collapse and stabilo lines** — the `Z` row on the Lyght; parsed, not
-      generated.
+- [x] **Collapse and stabilo lines** — the stabilo's line is built
+      (`addStabilo`); the `Z` row is the collapse-line item below, which this
+      one repeated.
 - [x] **Load distribution through the cascade** — lifting-line lift to load
       per rib to tension per line, closing exactly on half the wing load.
 - [x] **Line materials and diameter selection** — 78 measured line types with
@@ -295,8 +300,11 @@ material published after the handbook:
       table, not a law.
 - [ ] **Left/right and asymmetric plans** — quantities of 2 and 4 already
       encode mirror pairs; asymmetric line or colour plans do not yet exist.
-- [ ] **Riser hardware** — maillons, pulleys, speed-system travel and trimmer
-      geometry, feeding the calage variation study (LEP section 28).
+- [ ] **Riser hardware** — maillons and pulleys: their mass, their length in
+      the riser and the line they take up. The calage variation study they
+      were to feed is done — an imported design's section 28 table is the
+      program's (`lepCalageVariation`) — but the tool's own risers still take
+      the travel and the trimmers' geometry as typed.
 - [x] **Total line lengths imported** — `tools/import-niviuk-totals.mjs`,
       all six Hook 6 sizes, cross-checked against the printed page. These are
       the PMA measurement, sail to harness, and what `comparePlans` needs.
@@ -338,7 +346,7 @@ validation notes flagged.
       combined with the V form through `internalStructure`.
 - [x] **Corrected the panel distortion measure** — it had compared a length
       the unrolling preserves by construction, so it reported machine
-      precision on every wing since Phase 1. See `docs/validation.md` §2.3.1.
+      precision on every wing since Phase 1. See `docs/departures.md` §3.1.
 - [x] **Responsiveness audit** — 26 reported metrics swept against the inputs
       they claim to depend on, checking each moves by a meaningful amount in
       the right direction. Added because the panel distortion measure passed
@@ -353,8 +361,11 @@ validation notes flagged.
 - [ ] **Risers and speed system** *(ch.9)*. Four-riser geometry, travel of each
       riser under acceleration, and the resulting change in calage — which
       makes the balance solve a curve over the speed range rather than a point.
-- [ ] **Trimmers and the accelerated polar.** Re-solve equilibrium across the
-      speed system's travel and plot speed against sink.
+- [x] **Trimmers and the accelerated polar.** The polar across the speed
+      system's travel and the trimmers' (`acceleratedPolar`,
+      `alphaChangeWithTrim`) are core and suite; the interface reaching them
+      is the speed-system item of the round of 10-07 to 10-12, which this
+      repeated.
 - [ ] **NACA 5-digit and modified 4-digit sections**, matching the generator
       this project was cross-checked against.
 - [x] **The polar fed back into the balance** — `solveEquilibriumFromWing`
@@ -702,9 +713,12 @@ validation notes flagged.
       7 MS +7%, Ultralite 5 19 -8%) and the two-liners a third over (Alpina 5
       ML +32%, Zeno 2 ML +34%). Each Ozone two-liner carries sixteen short
       bridles a side, A1a to A8b, gathering pairs of A attachments just below
-      the sail: a level the generator does not build. (This item said the
-      reverse once — "not a missing fourth level, all five wings run three" —
-      counting levels by their names, which call a bridle an A line.)
+      the sail: a level the generator does not build. An Ozone two-liner's A
+      row counts the lines under its bridle pairs as anchors, and whether the
+      bridles of neighbouring lines share ribs, no sheet or drawing on file
+      says. (This item said the reverse once — "not a missing fourth level,
+      all five wings run three" — counting levels by their names, which call
+      a bridle an A line.)
 - [x] **Minimum sink was outside the flyable envelope** — the polar is flat
       past CL 1.0, so the search put the minimum at CL 1.37 and 24 km/h.
       `maxUsableCL` caps it; glide is unaffected. Not a profile-drag error:
@@ -793,17 +807,22 @@ validation notes flagged.
       from its sheets where they are on file.
 - [ ] **The brake lines dominate the inspection forecast**, on an estimated
       settle rate; no aged lineset has been measured.
-- [ ] **A real arc is no circle** — the Geo 7's lines fit its published
+- [x] **A real arc is no circle** — the Geo 7's lines fit its published
       projected span worse on a circle (244 mm) than on a tighter one (110).
+      The reference wings' arc is an ellipse through their projected span
+      now: the round of 10-19, below.
 - [ ] **Single-skins are built as four rows** where the Skin 4 P and Bi Skin
       2 P have nine.
 - [ ] **The interface's balance is the handbook's**, on typed coefficients;
       the coupled solve and the trim from the calage are core and suite only.
-- [ ] **The speed system, trimmers and riser webbing** (`risers.js`) are core
-      and suite only.
-- [ ] **The Swoop2's 70 straps and 15 pieces between ribs** are read and
-      listed, not built: the file does not say how high in the cell a strap
-      sits.
+- [x] **The speed system, trimmers and riser webbing** (`risers.js`) were core
+      and suite only. The speed system and the trimmers are in the
+      interface: the round "the speed system in the interface", below. The
+      webbing's speed-system straps are not in the bill
+      (`docs/speed-system.md`, section 8).
+- [x] **The Swoop2's 70 straps and 15 pieces between ribs** were read and
+      listed, not built. Every one is cut as its program cuts it now, read
+      from the program's source: the round of 10-22, below.
 
 ### Round of 2026-10-19 to 10-21: the makers' own drawings of their line plans
 
@@ -847,9 +866,8 @@ validation notes flagged.
       Over the 28 sizes with per-anchor totals the rows' shape deviation goes
       from 119 to 88 mm; a Hook 6 from the picker is 87 to 112 mm from its
       sheet on its 33 load-bearing anchors, its brake compared by itself.
-- [ ] **The two-liners' bridles.** An Ozone two-liner's A row counts the
-      lines under its bridle pairs as anchors; whether the bridles of
-      neighbouring lines share ribs, no sheet or drawing on file says.
+- [x] **The two-liners' bridles** — folded into the bridle-level item under
+      Audit, which it repeated.
 - [ ] **Middle lines the generator cannot shape are paired** — the Zeno 2's C
       top lines on its B middles, UP's level between middles and mains,
       Niviuk's shared C and D middles.
@@ -1016,6 +1034,105 @@ validation notes flagged.
       lattice gives it) and the line plan's own drag and mass centres, the
       tool's designs could be balanced the way the program balances them
       rather than on a cancellation measured once.
+
+### Round of 2026-10-26: what the audit found
+
+- [x] **The licence is the repository's** — `LICENSE`, the GNU GPL v3 as
+      GitHub carries it, held to its checksum; `LICENSING.md`, deleted on
+      GitHub and put back by every release, is gone, and the audit fails if
+      it returns. The README says GPL v3 and that it covers the code, not
+      the manufacturers' data in `data/reference/`.
+- [x] **A name ran as markup** — a wing or design name carrying an image
+      tag ran its script in the status bar and in the import box, confirmed
+      in Chromium. Both write text now, and the page carries a content
+      security policy: one script, by its hash, and no network.
+- [x] **A damaged design file says where** — 19 of 200 cut or corrupted
+      files threw a raw TypeError from the line reader. Every section the
+      lines take is checked as it is read, and an import loads what it can
+      and names the section and line it could not: 1,440 damaged files, no
+      raw error.
+- [x] **The status bar's warning agrees with the panel** — it counted three
+      ribs with no load path on the gnuC2-23 where the panel says the
+      design's own pieces join two of them.
+- [x] **Each import is cut as its own program cut it** — the file's header
+      names it ("Input data file 3.28 version"): its holes' polygons, 39
+      sides before 3.30; a 3.25 diagonal's cut-outs inside a whole
+      allowance, its pockets and mini-ribs; what of sections 37 and 38 it
+      reads. The Tuluaq's bill is 10.77 m² of internal structure, as its
+      3.25 drew it, where it had 10.48 as 3.30 would cut it.
+- [x] **The documents the audit found untrue** — the Lynx 2's flight
+      figures came from a lift curve typed by hand; the assessment's size and
+      line counts, now held by the audit; the load cases moved to their own
+      note; five roadmap items closed or merged.
+- [x] **The derived lift flown twice through the finite-span factor** —
+      `acceleratedPolarFromWing` and `collapseFloorForTopSpeed` handed the
+      lifting line's coefficient, the wing's own, to the balance as a
+      section's, which took a quarter off it again: the Lynx 2's 0.845 at 6°
+      flew as 0.62. Flown as it is, with the line's own span efficiency, the
+      curve derived from the wing gives 30.1 km/h, 43.0, 12.2 and 0.69
+      against 39, 58, 11 and 1.0 — farther, and for the right reason: it is
+      a flat wing's curve at an assumed angle. The floor 58 km/h implies is
+      Cz 0.22, not 0.307.
+- [x] **The arc in the flight model** — the interface's polar and balance
+      took the wing flat. They fly it in its arc now: the round "the wing in
+      its arc", below. (This item put the 37° arc's cost at 16% of the lift, on
+      a lattice whose legs were wrong: it is 11%.)
+- [ ] **A new design's lines in its LEP file** — a file written from
+      nothing carries a placeholder line plan (two lines a row) and the
+      manual's section 18 and 34; holes, diagonals and rods are written off.
+      The tool's own plan, holes, diagonals and rods, written so that the
+      program reads them back to the same wing.
+- [ ] **The program's 3.27 and 3.29** — no design here was drawn by either:
+      their drawings are taken as 3.28's and 3.30's. A design of each, with
+      its cutting files, would settle where each change came in.
+
+### Round of 2026-10-26: the wing in its arc
+
+- [x] **The lattice's trailing legs** — they left each strip at its quarter
+      chord, straight downstream, which on a strip at an incidence lifts them
+      off its surface before its control point; out on an arc they passed
+      the neighbouring control points at a slant. The default wing's
+      circulation ran away above 9° (its induced drag 260 times its lift at
+      12°), and the lift the 37° test arc costs came out 16% where
+      it is 11%. The legs run along each strip's edge to its trailing edge
+      and downstream from there, and the Trefftz plane sees the wake where
+      it leaves: an elliptical wing 1.004, a rectangular AR 8 one 0.985, the
+      gnuC2-23 still 1.21 on its projected span.
+- [x] **What the arc does, from the lattice** (`arcFactors`) — the wing as
+      built against itself laid flat, the same chords, sweep and twist: its
+      lift slope, its zero-lift angle and its induced drag at the same lift.
+      Three quarters of the lift and a quarter more induced drag on the three
+      complete designs, 0.72 to 0.79 of the lift on the 55 published sizes.
+      `wingStrips` gives a centre cell its strip, which the lattice left out.
+- [x] **The polar, the balance and the speed system's lift curve in the
+      arc** — `wingPolar`, `solveEquilibrium`, `solveEquilibriumFromWing`
+      and `liftModelFromWing` take the factors; the interface flies the wing
+      in its arc unless **Fly the wing in its arc** is unticked, the factors
+      cached for the ribs they were found on; the full pipeline flies its 55
+      sizes so, none outside a real wing's speed, glide or sink.
+- [x] **Against published figures** — at the assumed 6° the Geo 7 trims at
+      CL 0.59 in its arc, not 0.81, and three of its four certified cases are
+      above 30 km/h, not one; the Lynx 2 M's derived glide comes to 10.8
+      against the published 11, its sink 0.88 against 1.0 and its trim 34.3
+      against 39, from 12.2, 0.69 and 30.1 flat.
+
+### Round of 2026-10-26: the speed system in the interface
+
+- [x] **The speed system and the trimmers** — a **Speed system** group: the
+      bar's travel and the trimmers', and the wing across the bar on its own
+      lift curve, in its arc, from the angle the balance assumes; positions
+      past the collapse floor marked; where the trimmers take it, alone and
+      with the bar. `liftModelFromWing` takes the polar already solved.
+- [x] **An imported design's own tables** — its section 28 table of risers
+      and calage as the program its file names prints it, and its output's
+      section 1 figures in the balance table, each as printed and, where the
+      label says otherwise, as it says: the gnuC2-23's 2.81 m arrow for 2.94.
+- [x] **The stub DOM kept every node it ever made** — its selectors searched
+      a registry of them, which a browser does not keep: 6.5 MB a rebuild,
+      and the interface test ran out of memory when the panel grew a table.
+      (The page itself holds steady in Chromium: 5,505 nodes and 6.5 MB of
+      heap after 60 rebuilds.) The selectors search the page from its roots
+      now, and the control probe keeps the registry it reads for itself.
 
 ## Phase 3 — construction detail
 

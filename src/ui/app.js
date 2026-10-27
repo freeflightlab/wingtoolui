@@ -92,6 +92,13 @@ const S = {
   // Fly the balance and the polar on the drag of the lines in the plan,
   // rather than on the number typed in.
   cxLinesFromPlan: false,
+  // Fly them on the wing in its arc, as the vortex lattice finds it against
+  // the same wing laid flat, rather than on the flat wing the handbook's
+  // balance and the lifting line describe.
+  arcInFlight: true,
+  // How far the speed bar shortens the front riser, and how far trimmers
+  // let the rear one out (0, none), in millimetres.
+  speedTravel: 150, trimTravel: 0,
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
@@ -143,6 +150,19 @@ let XPOLAR = null; // imported XFOIL section polar, when there is one
 // A design remembered for comparison: its summary, taken when the designer
 // asked, so a change can be read against the design before it.
 let REMEMBERED = null;
+// The arc's factors (`arcFactors`), with the ribs they were found on: a
+// change that moves no rib does not solve the lattice again.
+let ARC_FACTORS = { key: null, value: null };
+function arcFactorsFor(wing) {
+  const key = wing.ribs.map((r) => [r.station, r.chord, r.xLE, r.alphaDeg, r.betaDeg, r.zetaDeg,
+    r.lobePoint[0], r.lobePoint[1], r.pivots?.wash ?? 0].map((v) => v.toFixed(5)).join(',')).join(';');
+  if (ARC_FACTORS.key !== key) {
+    let value = null;
+    try { value = arcFactors(wing); } catch (e) { value = null; }
+    ARC_FACTORS = { key, value };
+  }
+  return ARC_FACTORS.value;
+}
 
 /**
  * The complete designs in the library, as opposed to specifications: each
@@ -458,26 +478,43 @@ function loadLepDesign(doc, sectionTexts = {}) {
   let panels = null;
   let structure = null;
   let balance = null;
+  let main = null;
+  let calage = null;
+  // Each part of the design built on its own, so a part the file cannot
+  // give is said and the rest still loads. One damaged section used to stop
+  // the whole import with whatever the first missing line threw.
+  const failed = [];
+  const attempt = (what, fn) => {
+    try { return fn(); } catch (e) { failed.push(`${what}: ${e.message}`); return null; }
+  };
   if (haveAll) {
-    table = lepRibTable(doc, { airfoils: texts });
-    geom = lepLineGeometry(doc, { airfoils: texts });
-    joncs = lepJoncs(doc, table);
-    holes = lepHoles(doc, table);
+    table = attempt('its ribs', () => lepRibTable(doc, { airfoils: texts }));
+    geom = table && attempt('its lines', () => lepLineGeometry(doc, { airfoils: texts }));
+    if (geom && !geom.ok) failed.push(`its lines: ${geom.problems[0]}`);
+    joncs = table && attempt('its rods', () => lepJoncs(doc, table));
+    holes = table && attempt('its holes', () => lepHoles(doc, table));
     // Its own panels, as its program cuts them: they do not move with any
     // slider, so they are made once. And what it sews inside its cells —
     // diagonals, pieces between ribs, straps, rod pockets — the same way.
-    try { panels = lepPanels(doc, table); } catch (e) { panels = null; }
+    panels = table && attempt('its own panels (this tool develops them instead)', () => lepPanels(doc, table));
     // The mini-ribs' transitions take the cell's billow from these panels.
-    try { structure = lepStructure(doc, table, { panels }); } catch (e) { structure = null; }
+    structure = table && attempt('its internal structure', () => lepStructure(doc, table, { panels }));
     // Its longitudinal balance, when its section 35 asks the program for
     // one: solved as the program solves it, and at the speed its typed
     // coefficients balance at.
-    try { balance = lepBalance(doc, table, geom); } catch (e) { balance = null; }
+    balance = table && geom?.ok ? attempt('its section 35 balance', () => lepBalance(doc, table, geom)) : null;
+    // Its whole-wing figures and its table of risers and calage, as the
+    // program it was written for prints them.
+    main = table && attempt('its whole-wing figures', () => lepMainParameters(doc, table, geom?.ok ? geom : null));
+    calage = table && attempt('its speed-system table',
+      () => lepCalageVariation(doc, table, { version: lepProgramVersion(doc) }));
   }
   // Section 12: what the design sews inside its cells.
   let hv = null;
   try { hv = parseHVRibs(doc); } catch (e) { hv = null; }
-  LEP = { doc, design, info: describeLep(doc), texts, parsed, geom, table, joncs, holes, hv, panels, structure, balance };
+  LEP = {
+    doc, design, info: describeLep(doc), texts, parsed, geom, table, joncs, holes, hv, panels, structure, balance, main, calage,
+  };
   S.name = design.name || S.name;
   const nameField = document.getElementById('wingName');
   if (nameField) nameField.value = S.name;
@@ -524,6 +561,7 @@ function loadLepDesign(doc, sectionTexts = {}) {
     S.wingMass = e35.wingKg;
   }
   const said = [];
+  if (failed.length) said.push(`not read: ${failed.join('; ')}`);
   if (!haveAll) {
     said.push(`the file names ${design.missingSections.join(', ')} — load it `
       + '(Section, "load a coordinate file") to reproduce its ribs, lines and rods exactly');
@@ -553,10 +591,14 @@ function loadLepDesign(doc, sectionTexts = {}) {
         + (masses35 ? `, and its pilot (${e35.pilotKg} kg) and wing (${e35.wingKg} kg) are the ones this tool's balance flies` : '')
       : `its section 35 balance is not solved: ${balance.problems[0]}`);
   }
+  // Which program drew it decides how some of its pieces are cut.
+  const program = readProgramVersion(doc);
   S._referenceNote = `${design.name || 'LEP design'}: a complete design from `
     + `${design.brand || 'LEparagliding'} — ${design.cells} cells, `
     + `${design.geometry.ribCount} ribs`
     + (geom?.ok ? `, ${geom.totals.linesPerSide} lines a side as its program computes them` : '')
+    + (program ? `, cut as its LEparagliding ${program.text} cut it`
+      : `, cut as LEparagliding ${LEP_PROGRAM_NEWEST.toFixed(2)} cuts it — its file does not say which version it was written for`)
     + '. The planform, arc and section sliders do not apply to it.'
     // Each is a sentence of its own, so each starts with a capital.
     + (said.length ? ` ${said.map((x) => x[0].toUpperCase() + x.slice(1)).join('. ')}.` : '');
@@ -790,6 +832,12 @@ function rebuild() {
     // Wing polar at the current atmospheric state. Uses an imported XFOIL
     // section polar when one is loaded, and says which in `polar.source`.
     const sectionSource = XPOLAR || null;
+    const thin = thinAirfoil(airfoil);
+    // The wing in its arc: its lift and induced drag as the lattice finds
+    // them of this wing against itself laid flat. The balance's typed Cz is
+    // a section's, and its induced drag is read at the angle the lattice's
+    // flat plates would see, this one less the section's zero-lift angle.
+    const arc = S.arcInFlight ? arcFactorsFor(wing) : null;
 
     // The balance and the polar, at a given line drag.
     //
@@ -814,6 +862,7 @@ function rebuild() {
         rho: atm.density, oswald: S.oswald, cxPilot: S.cxPilot, cxLines,
         alphaDeg: S.alphaDeg, cz: S.cz, cx0a: S.cx0a, cm: S.cm,
         legacySpreadsheet: S.legacy,
+        ...(arc ? { arc: { liftRatio: arc.liftRatio, inducedRatio: arc.inducedRatioAt(S.alphaDeg - thin.alphaL0Deg) } } : {}),
       }),
       polar: wingPolar({
         planform, airfoil, atm, mass: flightMass,
@@ -821,6 +870,7 @@ function rebuild() {
         twistAt,
         cxLines, cxPilot: S.cxPilot,
         alphaRange: [-2, 14], step: 1, sectionPolar: sectionSource,
+        arc,
       }),
     });
     let { balance, polar } = flightAt(S.cxLines);
@@ -997,7 +1047,6 @@ function rebuild() {
     const nd = nonDimensional({
       speed: trim ? trim.speed : 10, chord: metrics.mac, atm, span: S.span,
     });
-    const thin = thinAirfoil(airfoil);
     const polarIssues = XPOLAR ? checkPolarMatch(XPOLAR, nd) : [];
 
     // A split A riser: the outboard A anchors on their own riser, which is
@@ -1147,6 +1196,43 @@ function rebuild() {
       freeBody = { ok: false, problems: [e.message], note: e.message };
     }
 
+    // The speed system, on the wing's own lift curve — the polar above, in
+    // its arc when the wing flies in it — from the angle the balance assumes,
+    // the risers the plan's rows give and the travel set.
+    let speedBar = null;
+    let trimmers = null;
+    try {
+      const rowsS = ['A', 'B', 'C', 'D'].filter((r) => Number.isFinite(airfoil.anchors?.[r]));
+      if (rowsS.length >= 2 && S.speedTravel > 0) {
+        const riserS = riserSet({
+          rows: rowsS, lengthMM: riserM * 1000, travelMM: S.speedTravel,
+          anchors: Object.fromEntries(rowsS.map((r) => [r, airfoil.anchors[r]])),
+        });
+        const chordS = imported ? imported.rootChord : S.rootChord;
+        const lift = liftModelFromWing({
+          planform, airfoil, atm, mass: flightMass, area: metrics.area, polar,
+        });
+        speedBar = acceleratedPolarFromWing({
+          riser: riserS, chordM: chordS, liftModel: lift, steps: 6,
+          base: {
+            area: metrics.area, span: imported ? imported.flatSpan : S.span, chord: chordS,
+            lineLength: hangDepthM, lineMass: S.lineMass, pilotMass: S.pilotMass, wingMass: S.wingMass,
+            rho: atm.density, cxPilot: S.cxPilot, cxLines: cxLinesUsed, cx0a: S.cx0a, cm: S.cm,
+            alphaDeg: S.alphaDeg,
+          },
+        });
+        speedBar.floorCz = lift.czRange[0];
+        if (S.trimTravel > 0) {
+          trimmers = trimEnvelope({
+            riser: riserS, chordM: chordS, liftModel: lift, trimAlphaDeg: S.alphaDeg,
+            trimmer: { travelMM: S.trimTravel }, steps: 3,
+          });
+        }
+      }
+    } catch (e) {
+      speedBar = { error: e.message };
+    }
+
     M = {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, worstDev, worstPhi, imported, vribs,
@@ -1154,7 +1240,7 @@ function rebuild() {
       linePlan, loads, lineSelection, lengths, riserSplit, rods,
       rodSpecResult,
       writtenCascade,
-      atm, polar, trim, nd, thin, polarIssues,
+      atm, polar, trim, nd, thin, polarIssues, arc, speedBar, trimmers,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
       error: null,
@@ -1602,6 +1688,17 @@ function buildControls() {
     + 'plan has. Ticked, it is computed from every line\u2019s diameter, length '
     + 'and angle to the flow, and the balance and polar are solved again on it. '
     + 'Air density comes from Environment.');
+  checkField(B, 'arcInFlight', 'Fly the wing in its arc');
+  {
+    const a = M.arc;
+    hint(B, a
+      ? `The balance and the polar fly the wing as it sits in its arc: by the vortex lattice, against the same wing `
+        + `laid flat, ${(a.liftRatio * 100).toFixed(0)}% of the lift at the same angle and `
+        + `${(a.inducedRatioAt(S.alphaDeg - (M.thin?.alphaL0Deg ?? 0)) * 100 - 100).toFixed(0)}% more induced drag at the same lift. `
+        + 'Unticked, the wing flies flat, as the handbook\u2019s balance and the lifting line describe it.'
+      : 'The balance and the polar fly the wing flat, as the handbook\u2019s balance and the lifting line describe it: '
+        + 'ticked, they fly it in its arc, by the vortex lattice.');
+  }
   checkField(B, 'legacy', 'Match the 2012 example sheet');
   hint(B, 'The default applies the moment equation as published in 4.2. The checkbox drops the aerodynamic and wing-drag moments, which is what the handbook\u2019s own worked example does.');
   const balanceHost = el('div');
@@ -1628,6 +1725,19 @@ function buildControls() {
   B.append(compareHost);
 
   // Lines and risers: what the cascade is made of.
+  const SP = clear('g-speed');
+  if (SP) {
+    slider(SP, 'speedTravel', 'Speed bar travel', 0, 250, 5, (v) => v.toFixed(0), ' mm');
+    slider(SP, 'trimTravel', 'Trimmer travel', 0, 150, 5, (v) => (v ? `${v.toFixed(0)} mm` : 'none'));
+    hint(SP, 'The bar shortens the front riser by its travel, the rear by nothing and the risers between in '
+      + 'proportion; a trimmer lets the rear riser out. Each turns the wing nose down. The speeds are the '
+      + 'balance\u2019s equations on the wing\u2019s own lift curve — the polar\u2019s, in its arc when it flies '
+      + 'in it — from the angle the balance assumes, not on its typed Cz, so its trim can differ from the '
+      + 'balance\u2019s; and they stop meaning anything where the lift falls to the collapse floor.');
+    const spHost = el('div');
+    spHost.id = 'speedTable';
+    SP.append(spHost);
+  }
   const LN = clear('g-lines');
   if (locked && LEP.geom?.ok) {
     const g = LEP.geom;
@@ -2663,11 +2773,16 @@ function buildControls() {
   hint(F, 'DXF is written as R12 with one layer per panel, the same convention the handbook\u2019s own subroutine uses.');
   if (LEP) {
     const i = LEP.info;
+    // As text: the name is the file's, and a design file is something people
+    // download. Written as markup, a name carrying a tag ran it.
     const box = el('div', 'hint');
-    box.innerHTML = `<b style="color:var(--aci-cyan)">Imported: ${i.name}</b><br>`
-      + `${i.cells} cells · ${i.ribs} ribs · flat span ${i.flatSpan.toFixed(2)} m`
-      + ` · projected ${i.projectedSpan.toFixed(2)} m<br>`
-      + `sections carried through: ${i.sections.length}`;
+    const head = el('b', null, `Imported: ${i.name}`);
+    head.style.color = 'var(--aci-cyan)';
+    box.append(head,
+      el('div', null, `${i.cells} cells · ${i.ribs} ribs · flat span ${i.flatSpan.toFixed(2)} m`
+        + ` · projected ${i.projectedSpan.toFixed(2)} m`),
+      el('div', null, `${i.program ? `written for LEparagliding ${i.program.text} · ` : ''}`
+        + `sections carried through: ${i.sections.length}`));
     F.append(box);
     button(F, 'Return to parametric wing', () => {
       leaveImport();
@@ -2744,6 +2859,7 @@ function draw() {
 function drawSideTables() {
   if (!M || !M.balance || M.error) return;
   drawBalanceTable();
+  drawSpeedTable();
   drawEnvironment();
   drawCascadeTable();
   drawComparison();
@@ -2924,6 +3040,7 @@ function drawPolar() {
 
   note.textContent = (withheld ? `${withheld}  ·  ` : '')
     + `${M.polar.source === 'xfoil' ? 'XFOIL section data' : 'estimated section'}`
+    + `  ·  ${M.polar.arc ? `in its arc, lift ×${M.polar.arc.liftRatio.toFixed(2)}` : 'flat'}`
     + `  ·  Cx total ${bg ? bg.CD.toFixed(4) : '—'}  ·  induced ${bg ? ((bg.CDi / bg.CD) * 100).toFixed(0) : '—'}%`
     + `  ·  e ${bg ? bg.oswald.toFixed(3) : '—'}  ·  magenta = induced only`;
 }
@@ -3020,7 +3137,7 @@ function drawReadout() {
     // The whole wing, like the line count beside it. This showed one
     // half's — 50 diagonals next to 180 lines on the same wing.
     ['diagonals', M.vribs ? String(M.vribs.count * 2) : '0',
-      M.vribs && M.vribs.unsupportedRibs.length ? 'warn' : undefined],
+      unsupportedRibCount() ? 'warn' : undefined],
     ['altitude', (S.altitudeM / 1000).toFixed(1) + ' km'],
     ['ρ', M.atm.density.toExponential(2) + ' kg/m³'],
     ['Re', M.nd.reynolds.toExponential(2), M.nd.reynolds < 2e5 ? 'warn' : undefined],
@@ -3708,6 +3825,72 @@ function drawCut() {
     + (M.nestStale ? '  ·  updating…' : '');
 }
 
+/**
+ * The speed system: the wing across the bar, and the trimmers with it, and
+ * an imported design's own table of risers and calage as its program prints
+ * it.
+ */
+function drawSpeedTable() {
+  const host = document.getElementById('speedTable');
+  if (!host) return;
+  host.innerHTML = '';
+  const sb = M.speedBar;
+  const withheld = regimeWithheld();
+  if (!sb) {
+    host.append(el('div', 'hint', S.speedTravel > 0 ? 'No speed bar: the section has fewer than two rows of anchors.'
+      : 'No speed bar: its travel is nil.'));
+  } else if (sb.error) {
+    host.append(el('div', 'hint', `The speed bar is not solved: ${sb.error}`));
+  } else {
+    const t = el('table', 'tbl');
+    const head = el('tr');
+    for (const h of ['bar', 'α', 'Cz', 'speed', 'sink', 'glide']) head.append(el('td', null, h));
+    t.append(head);
+    for (const r of sb.rows) {
+      const tr = el('tr', r.inRange ? null : 'bad');
+      tr.append(el('td', null, `${r.barMM.toFixed(0)} mm`), el('td', null, `${r.alphaDeg.toFixed(1)}°`),
+        el('td', null, r.cz.toFixed(3)), el('td', null, `${r.speedKMH.toFixed(1)} km/h`),
+        el('td', null, withheld ? '—' : `${r.sinkMS.toFixed(2)} m/s`), el('td', null, withheld ? '—' : r.glideRatio.toFixed(2)));
+      t.append(tr);
+    }
+    host.append(t);
+    const out = sb.rows.filter((r) => !r.inRange).length;
+    host.append(el('div', 'hint', `${sb.trimSpeedKMH.toFixed(1)} km/h at trim, ${sb.topValidSpeedKMH.toFixed(1)} at the `
+      + `fastest point the lift curve supports` + (out ? `; the last ${out} position${out > 1 ? 's' : ''} of the bar `
+      + `take the lift below the collapse floor, Cz ${sb.floorCz.toFixed(2)}, where a paraglider folds rather than flies `
+      + '(marked)' : '; the whole bar is above the collapse floor') + '.'));
+  }
+  const tr = M.trimmers;
+  if (tr) {
+    const say = (r) => `${r.alphaDeg.toFixed(1)}°, Cz ${r.cz.toFixed(3)}${r.flyable ? '' : ', below the collapse floor'}`;
+    host.append(el('div', 'hint', `Trimmers out: ${say(tr.trimAlone)}. The bar alone: ${say(tr.barAlone)}. `
+      + `Both: ${say(tr.both)}` + (tr.combinationIsWorse ? ' — each alone flies, the two together do not.' : '.')));
+  }
+  // An imported design's own table, as its program prints it (its output's
+  // section 7): what each riser does and where the calage goes as the speed
+  // system and the trimmers turn the wing.
+  const cv = M.imported && LEP?.calage ? LEP.calage : null;
+  if (cv) {
+    const names = { speedPivotLast: 'speed system, about the last riser', speedPivotFirst: 'speed system, about the first',
+      trimPivotFirst: 'trimmers, about the first riser', trimPivotLast: 'trimmers, about the last' };
+    host.append(el('div', 'hint', `As its program (${LEP.info?.program?.text ?? 'LEparagliding'}) tables them: risers at `
+      + `${cv.positionsPct.join(', ')}% of the central chord, their changes in cm, and the calage in % of chord.`));
+    for (const [k, title] of Object.entries(names)) {
+      const t = el('table', 'tbl');
+      const head = el('tr');
+      head.append(el('td', null, title), ...cv.positionsPct.map((_, i) => el('td', null, `riser ${i + 1}`)), el('td', null, 'calage'));
+      t.append(head);
+      for (const r of cv[k]) {
+        const row = el('tr');
+        row.append(el('td', null, `${r.alphaDeg.toFixed(2)}°`), ...r.risersCm.map((x) => el('td', null, x.toFixed(2))),
+          el('td', null, `${r.calagePct.toFixed(2)}%`));
+        t.append(row);
+      }
+      host.append(t);
+    }
+  }
+}
+
 function drawBalanceTable() {
   const host = document.getElementById('balanceTable');
   if (!host) return;
@@ -3722,13 +3905,17 @@ function drawBalanceTable() {
     // θ = γ − α (handbook [10]): positive is nose DOWN.
     ['Attitude θ, nose down', b.thetaDeg.toFixed(2) + '°'],
     ['Cz 3D', b.cz3D.toFixed(3)],
+    ['The arc', b.arc
+      ? `lift ×${b.arc.liftRatio.toFixed(3)}, induced drag ×${b.arc.inducedRatio.toFixed(3)} at the same lift (vortex lattice)`
+      : 'not flown: the wing is taken flat'],
     // The balance is the handbook's, from the typed section coefficients and
     // the typed Oswald factor. The planform's own factor comes out of the
     // lifting line behind the polar; it is shown beside the one used, not
     // substituted for it, so the two can be compared.
     ['Oswald e', `${S.oswald.toFixed(2)} typed`
       + (M.polar?.bestGlide && Number.isFinite(M.polar.bestGlide.oswald)
-        ? `; the planform's lifting line gives ${M.polar.bestGlide.oswald.toFixed(3)}` : '')],
+        ? `; ${M.polar.arc ? 'the polar\'s, in the arc on the flat span,' : 'the planform\'s lifting line gives'} `
+          + `${M.polar.bestGlide.oswald.toFixed(3)}` : '')],
     ['CxT', b.cxTotal.toFixed(4)],
     ['— induced', (b.dragBreakdown.induced * 100).toFixed(1) + '%'],
     ['— lines', (b.dragBreakdown.lines * 100).toFixed(1) + '%'],
@@ -3773,6 +3960,22 @@ function drawBalanceTable() {
       ['Attitude (assiette)', `${g.assietteDeg.toFixed(2)}°`],
       ['Angle of attack', `${g.aoaDeg.toFixed(2)}°`],
     );
+    // Its output's section 1, as printed, and what each label describes
+    // where the figure is not that.
+    const mp = LEP.main;
+    if (mp) {
+      const two = (printed, actual, unit = ' m') => (Math.abs(printed - actual) > 0.005
+        ? `${printed.toFixed(2)}${unit} printed, ${actual.toFixed(2)}${unit} as the label says`
+        : `${actual.toFixed(2)}${unit}`);
+      rows.push(['Vault arrow', two(mp.arrowPrintedM, mp.arrowM)]);
+      if (Number.isFinite(mp.lineHeightM)) {
+        rows.push(['Line height', `${mp.lineHeightM.toFixed(2)} m with the risers`],
+          ['Karabiners to wingtip', two(mp.karabinerToTipPrintedM, mp.karabinerToTipM)]);
+      }
+      rows.push(['Planform centroid', `${mp.planformCentroidPct.toFixed(2)}% c`],
+        ['Wing mass centre', `${mp.wingMassCentreCm.y.toFixed(1)} cm back, ${mp.wingMassCentreCm.z.toFixed(1)} cm `
+          + `down, its sections\' at ${mp.sectionCgPct}% c`]);
+    }
   }
   // And its section 35 balance: the program's own solve, which it prints
   // "for informational purposes" and asks to be iterated, and the same
@@ -4587,6 +4790,31 @@ function cellWidthNote() {
   return text;
 }
 
+/**
+ * Ribs with no line and nothing carrying their lift to one that has one —
+ * on this tool's model of the diagonals — split by whether an imported
+ * design joins them to a neighbour with its own pieces between two ribs or
+ * straps.
+ *
+ * The status bar, the readout and the Internal structure summary all read
+ * this, so they cannot disagree. They did: the bar warned of three such ribs
+ * on the gnuC2-23 while the summary said the design itself joins two of them.
+ */
+function freeRibs() {
+  const v = M?.vribs;
+  if (!v) return { free: [], joined: [], unjoined: [] };
+  const free = v.unsupportedRibs || [];
+  const modelled = new Set((v.vribs ?? []).map((x) => x.source).filter(Boolean));
+  const others = v.own && M.imported && LEP?.hv
+    ? (LEP.hv.general ?? []).filter((e) => !modelled.has(`section 12 row ${e.index}`)) : [];
+  const pieces = [...others, ...(M.imported ? (LEP?.hv?.straps ?? []) : [])];
+  const joined = free.filter((r) => pieces.some((e) => e.fromRib === r + 1 || e.toRib === r + 1));
+  return { free, joined, others, unjoined: free.filter((r) => !joined.includes(r)) };
+}
+
+/** How many ribs nothing joins to a lined one: what the status bar warns of. */
+function unsupportedRibCount() { return freeRibs().unjoined.length; }
+
 /** What the diagonals come to, in words, for the Internal structure panel. */
 function structureSummary() {
   const v = M.vribs;
@@ -4622,11 +4850,7 @@ function structureSummary() {
   // not diagonals in this tool's model, and the balance below is on the
   // model: the gnuC2-23 joins its ribs with 66 such pieces, and the summary
   // said ribs were held from one side, or not at all, that the design holds.
-  const modelled = new Set(v.vribs.map((x) => x.source).filter(Boolean));
-  const others = v.own && M.imported && LEP?.hv
-    ? (LEP.hv.general ?? []).filter((e) => !modelled.has(`section 12 row ${e.index}`)) : [];
-  const joinedByOthers = (r) => [...others, ...(LEP?.hv?.straps ?? [])]
-    .some((e) => e.fromRib === r + 1 || e.toRib === r + 1);
+  const { others, joined: joinedFree } = freeRibs();
   const parts = [
     `${v.own ? 'The design\'s own' : 'Placed from the line plan'}: `
       + `${rows.map((row) => `${row} ${v.vribs.filter((x) => x.row === row).length}`).join(', ')} `
@@ -4651,7 +4875,7 @@ function structureSummary() {
       + `${othersLeft} pieces between two ribs join ribs too, and are not in it.`);
   }
   if (free.length) {
-    const joined = free.filter(joinedByOthers);
+    const joined = joinedFree;
     parts.push(`Rib${free.length > 1 ? 's' : ''} ${free.join(', ')} `
       + `${free.length > 1 ? 'have' : 'has'} no line and no diagonal reaching `
       + `${free.length > 1 ? 'them' : 'it'}`
@@ -5378,19 +5602,29 @@ function clear(id) {
   return n;
 }
 
+/**
+ * The status bar, built from text nodes.
+ *
+ * It was written as markup, and its messages carry what files supply: the
+ * wing's name in every "Saved <name>-ribs.dxf", a parse error quoting a
+ * line. A design file whose name held an image tag with an error handler ran
+ * that handler the first time anything was saved — checked in a browser,
+ * where it did. Nothing here is markup now; the page's content policy would
+ * stop an inline handler as well.
+ */
 function setStatus(error, msg) {
   const s = document.getElementById('status');
-  if (error) { s.innerHTML = `<span class="bad">${error}</span>`; return; }
+  s.innerHTML = '';
+  if (error) { s.append(el('span', 'bad', String(error))); return; }
   const dev = M.worstDev != null ? (M.worstDev * 100).toFixed(3) + '%' : '—';
   const ok = (M.worstDev ?? 0) < 0.01;
-  const unsupported = M.vribs ? M.vribs.unsupportedRibs.length : 0;
-  const warn = unsupported
-    ? `<span class="bad"> · ${unsupported} rib${unsupported > 1 ? 's' : ''} with no load path</span>`
-    : '';
-  s.innerHTML =
-    `<span class="${ok ? 'ok' : 'bad'}">●</span> ${msg || 'Model current'}${warn}` +
-    `<span class="sep"> · </span>worst panel distortion ${dev}` +
-    `<span class="sep"> · </span>rebuilt in ${(M.ms || 0).toFixed(0)} ms`;
+  const unsupported = unsupportedRibCount();
+  s.append(el('span', ok ? 'ok' : 'bad', '●'), el('span', null, ` ${msg || 'Model current'}`));
+  if (unsupported) {
+    s.append(el('span', 'bad', ` · ${unsupported} rib${unsupported > 1 ? 's' : ''} with no load path`));
+  }
+  s.append(el('span', 'sep', ' · '), el('span', null, `worst panel distortion ${dev}`),
+    el('span', 'sep', ' · '), el('span', null, `rebuilt in ${(M.ms || 0).toFixed(0)} ms`));
 }
 
 /* ------------------------------------------------------------- tab bar -- */

@@ -116,11 +116,14 @@ with a 2.0 m tip and 0.978 with a 0.30 m one.
 
 The interface's **balance** does not take it. That is the handbook's
 equilibrium, and it still takes the typed "Oswald e" (0.90): typing 0.70 moves
-the balance from glide 8.48 to 7.53 and leaves the polar where it was. The
-balance table shows the lifting line's factor beside the typed one so the two
-can be compared; the solve that couples them, `solveEquilibriumFromWing`, is in
-the core and the suite, not the interface (`docs/full-pipeline.md`, section
-6).
+the balance from glide 7.50 to 6.70 — 8.48 to 7.53 with the wing flown flat
+(section 6) — and leaves the polar where it was. The balance table shows the
+polar's factor beside the typed one so the two can be compared; the solve
+that couples them, `solveEquilibriumFromWing`, is in the core and the suite,
+not the interface (`docs/full-pipeline.md`, section 6).
+
+The lifting line solves a **flat** wing: its span is straight and its
+loading lies in one plane. Section 6 is what the arc does to it.
 
 Validated against the exact elliptical case, where theory gives e = 1 and
 `CL_alpha = a0/(1 + a0/(pi AR))`:
@@ -270,3 +273,45 @@ profile drag demonstrably is not. It is left as a stated gap rather than
 closed by fitting a factor to a number I have asserted from memory: the
 project has no published sink polar to calibrate against, and inventing one
 would make the model agree with me rather than with a wing.
+
+The lift coefficient *was* too high at every angle, and not by a factor
+anyone fitted: the polar's wing was flat. Section 6.
+
+---
+
+## 6. The wing in its arc
+
+The lifting line and the handbook's balance describe a flat wing. A
+paraglider flies bent through 50 to 90 degrees from its centre to its tips,
+and three things follow that a flat wing has none of: a strip out on the arc
+meets the flow at a slant, and lifts less for its angle; its lift is tilted
+and the sideways parts cancel; and the wake it sheds is not a flat sheet.
+The vortex lattice (`vlm.js`) solves the wing where it is. `arcFactors`
+solves it twice — as built, and laid flat with the same chords, sweep and
+twist — at two angles, and takes the ratios: of lift slope, of zero-lift
+angle, and of induced drag at the same lift. The polar (`wingPolar`) and
+the balance (`solveEquilibrium`) apply them to their flat wing when asked,
+and the interface asks unless **Fly the wing in its arc** is unticked.
+
+| wing | its tips | lift slope | induced drag at the same lift |
+| --- | --- | --- | --- |
+| the default | 50° | ×0.80 | ×1.19 |
+| the gnuC2-23 | 74° | ×0.75 | ×1.23 |
+| the Swoop2 | 74° | ×0.75 | ×1.23 |
+| the Tuluaq-19 | 89° | ×0.77 | ×1.24 |
+| the 55 published sizes, in the arcs the picker gives them | | ×0.72 to ×0.79 | |
+
+A quarter of the lift gone is 15% more speed at the same angle. On this
+section's wing (12.25 m, 95 kg), in an elliptical arc of projected-to-flat
+span 0.82, the minimum sink at the cap rises from 0.83 to 0.95 m/s: most of
+section 5's residual. Its best glide falls from 9.41 to 8.43 on the
+handbook's line drag of 0.020, and is 9.69 on a modern lineset's 0.010. On
+the Lynx 2 M, the one wing here with a published polar, in the arc solved to
+its published projected area, every figure the derived lift curve gives
+comes nearer the published one (`docs/validation.md` §2.7): trim 30.1 →
+34.3 km/h against 39, best glide 12.2 → 10.8 against 11, minimum sink 0.69
+→ 0.88 m/s against 1.0.
+
+What the arc does not change is the section and the angle. The trim still
+comes from an assumed angle of attack (or a typed Cz) unless it is solved
+from the calage, and the section's lift curve is thin-aerofoil theory's.

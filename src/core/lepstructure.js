@@ -56,13 +56,17 @@
  * - A station ahead of where a rib's lower surface starts is not found, and
  *   the point keeps the value its array started with: height zero. The
  *   Tuluaq's tip diagonal has one.
- * - The program before 3.30 (the Tuluaq's, 3.25) drew a diagonal's cut-outs
- *   against the sewing line, inside a full seam allowance, and offset a
- *   pocket's edges along the mean of the segments either side of each
- *   point; 3.30 (the Swoop2's) cuts the cut-outs through the allowance and
- *   offsets along the segment that leaves each point. Both are given:
- *   `cutAreaM2` is the piece as 3.30 cuts it, `drawnBefore330` as 3.25 drew
- *   it.
+ * - Each piece is drawn as the file's own program drew it — the version its
+ *   header states (`lepProgramVersion`). 3.25 (the Tuluaq's) drew a
+ *   diagonal's cut-outs against the sewing line, inside a full seam
+ *   allowance, offset a pocket's edges along the mean of the segments either
+ *   side of each point, and drew a mini-rib from its rib's cutting line;
+ *   3.28 (the gnuC2-23's) and 3.30 (the Swoop2's) cut the cut-outs through
+ *   the allowance, offset along the segment that leaves each point and raise
+ *   a mini-rib to its cell's billow. 3.28 and 3.25 drew an ellipse with 39
+ *   sides and read no section 38. Both drawings of a piece the versions
+ *   differ on are given, in `drawings`. 3.27's are not known and taken as
+ *   3.28's; 3.29's as 3.30's.
  * - A hole that would run off its piece is left out. The program's source
  *   computes it; the Swoop2's file has every other hole and not that one —
  *   a hole across a piece's edge cannot be cut as a hole.
@@ -71,7 +75,7 @@
  * one side of the wing.
  */
 
-import { sectionData, parseHVRibs, readAirfoils } from './lep.js';
+import { sectionData, parseHVRibs, readAirfoils, lepProgramVersion } from './lep.js';
 import { lepRibPoint, lepJoncs, lepEllipseSides, lepRibCutLine, lepPanels } from './leplines.js';
 import { dxfDocument, nestPanels, fabricEstimate } from './export.js';
 
@@ -320,8 +324,11 @@ function lepEdgeAngle(p1, p2, viaAtan2) {
   return a;
 }
 
-/** Sections 6, 37 and 38: what the pieces are cut with. */
-function lepStructureSettings(doc, table) {
+/**
+ * Sections 6, 37 and 38: what the pieces are cut with, by the program
+ * `version` — what it reads of them and how it draws.
+ */
+function lepStructureSettings(doc, table, version = lepProgramVersion(doc)) {
   const s6 = sectionData(doc, 6).map((l) => l.trim()).filter(Boolean);
   const first = (k) => Number(String(s6[k] ?? '').split(/\s+/)[0]);
   const ribMm = Number.isFinite(first(2)) ? first(2) : 0;
@@ -336,11 +343,16 @@ function lepStructureSettings(doc, table) {
       break;
     }
   }
-  const ellipseSides = lepEllipseSides(doc);
+  const ellipseSides = lepEllipseSides(doc, { version });
+  const drawnAs = version < 3.27 ? '3.25' : version < 3.29 ? '3.28' : '3.30';
+  const notes = [];
   const s37 = sectionData(doc, 37).map((l) => l.trim()).filter(Boolean);
   const holes = { diagonal: null, between: null, minirib: null };
   const s38 = sectionData(doc, 38).map((l) => l.trim()).filter(Boolean);
-  if (s38.length && parseInt(s38[0], 10) > 0) {
+  // Section 38 is 3.30's: the programs before it stop at 37.
+  if (s38.length && parseInt(s38[0], 10) > 0 && drawnAs !== '3.30') {
+    notes.push(`section 38's holes, which ${drawnAs} does not read: not cut`);
+  } else if (s38.length && parseInt(s38[0], 10) > 0) {
     const k = parseInt(s38[1], 10);
     for (const l of s38.slice(2, 2 + k)) {
       const f = l.split(/\s+/).map(Number);
@@ -356,16 +368,19 @@ function lepStructureSettings(doc, table) {
   // Section 37's code 3001: how a mini-rib's edges rise to meet the cell's
   // billow at its front — 0 not at all, 1 straight, 3 a half cosine — over a
   // length in per cent of chord, by a fraction of the billow there.
+  // 3.25 reads no code 3001: its mini-ribs have no transition.
   let miniTransition = { mode: 0, lengthPct: 0, factor: 0 };
   if (s37.length && parseInt(s37[0], 10) === 1) {
     for (const l of s37.slice(2)) {
       const f = l.split(/\s+/);
-      if (f[0] === '3001') miniTransition = { mode: Number(f[1]) || 0, lengthPct: Number(f[2]) || 0, factor: Number(f[3]) || 0 };
+      if (f[0] !== '3001') continue;
+      if (drawnAs === '3.25') notes.push('section 37\'s code 3001, which 3.25 does not read: mini-ribs drawn without it');
+      else miniTransition = { mode: Number(f[1]) || 0, lengthPct: Number(f[2]) || 0, factor: Number(f[3]) || 0 };
     }
   }
   return {
     ribAllowanceCm: ribMm / 10, vribAllowanceCm: vribMm / 10, strapShortening: Number.isFinite(tension) ? tension : 0,
-    ribAllowanceMm: ribMm, ellipseSides, holes, miniTransition, scale: table.scale ?? 1,
+    ribAllowanceMm: ribMm, ellipseSides, holes, miniTransition, scale: table.scale ?? 1, version, drawnAs, notes,
   };
 }
 
@@ -892,15 +907,16 @@ function lepBillow(table, panels, i, j) {
  *
  * - The billow is the cell inboard's, `hautok(i-1)`: the cell between ribs
  *   i-2 and i-1, not the mini-rib's own. The first two cells take the
- *   third's (its "provisional fix"; 3.28 fixed the second only).
+ *   third's (its "provisional fix"); 3.28 fixed the second only, and its
+ *   centre cell's mini-rib has no billow to rise to.
  * - Each point's normal is taken from a segment whose far end still carries
  *   this point's rise, not its own.
  * - Section 38's type 9 holes (3.30): a row of ellipses aft from the front,
  *   each smaller, sized by the section's thickness there.
  *
  * 3.25 drew them differently, from the rib's own cutting line (its 6.11)
- * and with no transition: `drawnBefore330` is that. Centimetres in, pieces
- * in the program's centimetres, as the others are.
+ * and with no transition: `before330` is that. Centimetres in, pieces in
+ * the program's centimetres, as the others are.
  */
 function lepMiniRibs(doc, table, st, panels) {
   const air = readAirfoils(doc);
@@ -946,7 +962,8 @@ function lepMiniRibs(doc, table, st, panels) {
     if (je === null || ji === null) { problems.push(`mini-rib ${i}: ${pct}% of chord does not cross its section`); continue; }
     let up = 0;
     let down = 0;
-    if (mode) {
+    // 3.28's hautok(0) is left at nothing.
+    if (mode && !(i === 1 && st.drawnAs !== '3.30')) {
       const cellOf = Math.max(2, i - 1);
       const he = lepBillow(table, panels, cellOf, je);
       const hi = lepBillow(table, panels, cellOf, ji);
@@ -1031,20 +1048,25 @@ function lepMiniRibs(doc, table, st, panels) {
 }
 
 /**
- * The design's internal structure (section 12), as its program cuts it.
+ * The design's internal structure (section 12), as its program cuts it —
+ * the program its header names, or `version`.
  *
- * @returns {{ok, problems, pieces, totals, notReproduced, droppedHoles, settings}}
+ * @returns {{ok, problems, pieces, totals, notReproduced, droppedHoles, settings, drawnAs}}
  *   pieces in metres, one side of the wing: `outline` the cut line, `holes`
  *   the holes cut in it, `sewing` its two sewn sides; `cutAreaM2` the cloth
  *   in the piece as cut (the outline less its holes), `perimeterM` the cut
- *   line's length. A full diagonal also gives `drawnBefore330`: its cloth as
- *   the program drew it up to 3.25, the cut-outs inside a whole allowance.
+ *   line's length. `drawnAs` is the program whose drawing that is: '3.25',
+ *   '3.28' or '3.30'. A full diagonal, a pocket and a mini-rib, which 3.25
+ *   drew differently, also give `drawings['3.25']` and `drawings['3.28']`
+ *   (3.28 and 3.30 alike): each drawing's `outlineAreaM2`, `holesAreaM2`,
+ *   `cutAreaM2` and `perimeterM` — a 3.25 diagonal's cut-outs are holes
+ *   inside a whole allowance, a 3.28 one's notches through it.
  */
-export function lepStructure(doc, table, { panels = null } = {}) {
+export function lepStructure(doc, table, { panels = null, version = lepProgramVersion(doc) } = {}) {
   const hv = parseHVRibs(doc);
-  const st = lepStructureSettings(doc, table);
+  const st = lepStructureSettings(doc, table, version);
   const problems = [];
-  const notReproduced = new Set();
+  const notReproduced = new Set(st.notes);
   let droppedHoles = 0;
   const raw = [];
 
@@ -1131,9 +1153,19 @@ export function lepStructure(doc, table, { panels = null } = {}) {
 
   // Centimetres to metres.
   const m = (pts) => pts.map((p) => [p[0] / 100, p[1] / 100]);
+  const drawing = (outline, holes) => {
+    const outlineCm2 = lepRingArea(outline);
+    const holesCm2 = holes.reduce((t, h) => t + lepRingArea(h), 0);
+    return { outlineAreaM2: outlineCm2 / 1e4, holesAreaM2: holesCm2 / 1e4, cutAreaM2: (outlineCm2 - holesCm2) / 1e4,
+      perimeterM: lepRingLength(outline) / 100 };
+  };
   const pieces = raw.map((p) => {
-    const holesCm2 = p.holes.reduce((t, h) => t + lepRingArea(h), 0);
-    const outlineCm2 = lepRingArea(p.outline);
+    // As 3.25 drew it: a diagonal whole, its cut-outs holes inside it; a
+    // pocket or a mini-rib its older line.
+    const old = p.kind === 'diagonal' ? { outline: p.wholeOutline, holes: [...p.pockets, ...p.holes] }
+      : (p.kind === 'pocket' || p.kind === 'minirib') && p.before330 ? { outline: p.before330, holes: p.holes } : null;
+    const drawn = old && st.drawnAs === '3.25' ? old : { outline: p.outline, holes: p.holes };
+    const own = drawing(drawn.outline, drawn.holes);
     const out = {
       kind: p.kind,
       ribs: p.ribs,
@@ -1146,31 +1178,13 @@ export function lepStructure(doc, table, { panels = null } = {}) {
       ...(p.row ? { row: p.row } : {}),
       ...(p.chordPct ? { chordPct: p.chordPct } : {}),
       ...(p.sewing ? { sewing: { left: m(p.sewing.left), right: m(p.sewing.right) } } : {}),
-      outline: m(p.outline),
-      holes: p.holes.map(m),
+      outline: m(drawn.outline),
+      holes: drawn.holes.map(m),
       ...(p.cutOuts ? { cutOuts: p.cutOuts.map(m), anchors: m(p.anchors) } : {}),
       ...(p.sewing ? { sewnAreaM2: lepRingArea(p.sewing.left.concat(p.sewing.right.slice().reverse())) / 1e4 } : {}),
-      outlineAreaM2: outlineCm2 / 1e4,
-      holesAreaM2: holesCm2 / 1e4,
-      cutAreaM2: (outlineCm2 - holesCm2) / 1e4,
-      perimeterM: lepRingLength(p.outline) / 100,
+      ...own,
+      ...(old ? { drawings: { '3.25': drawing(old.outline, old.holes), '3.28': drawing(p.outline, p.holes) } } : {}),
     };
-    if (p.kind === 'minirib' && p.before330) {
-      out.drawnBefore330 = { outlineAreaM2: lepRingArea(p.before330) / 1e4, cutAreaM2: lepRingArea(p.before330) / 1e4,
-        perimeterM: lepRingLength(p.before330) / 100 };
-    }
-    if (p.kind === 'pocket' && p.before330) {
-      out.drawnBefore330 = { outlineAreaM2: lepRingArea(p.before330) / 1e4, cutAreaM2: lepRingArea(p.before330) / 1e4,
-        perimeterM: lepRingLength(p.before330) / 100 };
-    }
-    if (p.kind === 'diagonal') {
-      const whole = lepRingArea(p.wholeOutline);
-      const pockets = p.pockets.reduce((t, q) => t + lepRingArea(q), 0);
-      out.drawnBefore330 = {
-        outlineAreaM2: whole / 1e4, cutOutsM2: pockets / 1e4, cutAreaM2: (whole - pockets - holesCm2) / 1e4,
-        perimeterM: lepRingLength(p.wholeOutline) / 100,
-      };
-    }
     return out;
   });
 
@@ -1198,6 +1212,7 @@ export function lepStructure(doc, table, { panels = null } = {}) {
     miniRibs,
     droppedHoles,
     settings: st,
+    drawnAs: st.drawnAs,
   };
 }
 

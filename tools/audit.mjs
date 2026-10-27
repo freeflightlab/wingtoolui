@@ -9,7 +9,7 @@
  *   3. A number written in the documentation that the code no longer
  *      produces. Prose does not fail a test run.
  */
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { execSync } from 'child_process';
 import { createHash } from 'crypto';
 
@@ -83,7 +83,7 @@ if (!existsSync('MANIFEST.txt')) {
   for (const d of ['src/core', 'src/ui', 'tests', 'tools']) {
     if (!existsSync(d)) continue;
     for (const f of readdirSync(d)) {
-      if (/\.(js|mjs|py|html|css)$/.test(f)) onDisk.push(`${d}/${f}`);
+      if (/\.(js|mjs|cjs|py|html|css)$/.test(f)) onDisk.push(`${d}/${f}`);
     }
   }
   // The complete designs, which the build embeds and the suite reads.
@@ -263,10 +263,31 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
   try { declared = JSON.parse(readFileSync('package.json', 'utf8')).license; } catch (e) { declared = null; }
   say(declared === 'GPL-3.0-only', "package.json declares it", `"${declared}"`);
   const readme = readFileSync('README.md', 'utf8');
-  const licensing = existsSync('LICENSING.md') ? readFileSync('LICENSING.md', 'utf8') : '';
-  say(/GNU General Public License, version 3/.test(readme) && /GNU General Public License, version\s+3/.test(licensing)
-    && !/no licen[cs]e is set|no `LICENSE` file/i.test(readme + licensing),
-  'and the README and LICENSING.md say so', '');
+  say(/GNU General Public License, version 3/.test(readme) && !/no licen[cs]e is set|no `LICENSE` file/i.test(readme),
+    'and the README says so', '');
+  // The repository keeps the LICENSE alone: LICENSING.md was deleted on
+  // GitHub, and releases kept putting it back.
+  say(!existsSync('LICENSING.md'), 'and no LICENSING.md beside it, as the repository keeps it', '');
+}
+
+/* ---- 1x2. the release says which it is ---------------------------------- */
+//
+// The version is package.json's; the build shows it in the page, and the
+// changelog's newest entry is it — a release with no entry of its own is
+// one nobody wrote down.
+{
+  let version = null;
+  try { version = JSON.parse(readFileSync('package.json', 'utf8')).version; } catch (e) { version = null; }
+  const log = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf8') : '';
+  const newest = /^## (\d+\.\d+\.\d+)/m.exec(log)?.[1];
+  say(version && newest === version, "the changelog's newest entry is the release's version",
+    `package.json ${version}, CHANGELOG.md ${newest ?? 'none'}`);
+  const page = existsSync('dist/paraglider-design-tool.html') ? readFileSync('dist/paraglider-design-tool.html', 'utf8') : '';
+  say(version && page.includes(`<span class="version" id="appVersion">v${version}</span>`),
+    'and the built page shows it', version ? `v${version}` : 'no version');
+  say(existsSync('.github/workflows/check.yml')
+    && /npm run check/.test(readFileSync('.github/workflows/check.yml', 'utf8')),
+  'and GitHub runs the checks on every push', '.github/workflows/check.yml');
 }
 
 /* ---- 1y. the assessment's numbers are current --------------------------- */
@@ -302,6 +323,57 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
   say(makers && cat && WORDS[makers[1]] === Number(cat[2]),
     'and its count of their makers',
     makers ? `says ${makers[1]}, the catalogue ${cat ? cat[2] : '?'}` : 'claim not found');
+
+  // Its size and its lines: they said 1.2 MB and 63,000 lines when the file
+  // was 1.5 MB and the project 71,000. A rounded figure, held to its
+  // rounding: the size to a tenth of a MB (of 2^20 bytes, as the build
+  // prints it), each count to 5%.
+  const built = 'dist/paraglider-design-tool.html';
+  const mb = existsSync(built) ? statSync(built).size / 2 ** 20 : null;
+  const sizeClaim = /One offline HTML file, ([\d.]+) MB/.exec(assess);
+  say(sizeClaim && mb !== null && Number(sizeClaim[1]) === Number(mb.toFixed(1)),
+    "the assessment's size of the file is current",
+    sizeClaim ? `says ${sizeClaim[1]} MB, the build is ${mb?.toFixed(2)} MB` : 'claim not found');
+  const linesOf = (files) => files.reduce((t, f) => t + readFileSync(f, 'utf8').split('\n').length - 1, 0);
+  const inDir = (d, re = /./) => readdirSync(d).filter((f) => re.test(f) && statSync(`${d}/${f}`).isFile()).map((f) => `${d}/${f}`);
+  const counted = {
+    core: linesOf(inDir('src/core', /\.js$/)),
+    interface: linesOf(inDir('src/ui')),
+    tests: linesOf(inDir('tests', /\.(js|mjs|cjs)$/)),
+    tools: linesOf(inDir('tools')),
+    documentation: linesOf([...inDir('docs', /\.md$/), ...inDir('.', /\.md$/)]),
+  };
+  const total = Object.values(counted).reduce((a, b) => a + b, 0);
+  const n = (x) => Number(String(x).replace(/,/g, ''));
+  const lineClaim = /\*\*About ([\d,]+) lines\*\*:\s+([\d,]+)\s+core,\s+([\d,]+)\s+interface,\s+([\d,]+)\s+tests,\s+([\d,]+)\s+tools,\s+([\d,]+)\s+documentation/.exec(assess);
+  const within = (claimed, actual) => Math.abs(n(claimed) / actual - 1) <= 0.05;
+  say(lineClaim && within(lineClaim[1], total) && Object.values(counted).every((v, k) => within(lineClaim[k + 2], v)),
+    "and its count of the project's lines, to 5%",
+    lineClaim ? `says ${lineClaim.slice(1).join(' / ')}; counted ${total} / ${Object.values(counted).join(' / ')}` : 'claim not found');
+
+  // The notes: the README's and REPO's count of them, and the README's
+  // table, which a new note was left out of.
+  const notesMd = readdirSync('docs').filter((f) => f.endsWith('.md'));
+  const readmeAll = readFileSync('README.md', 'utf8');
+  const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  const inWords = (k) => (k < 20 ? NUMBER_WORDS[k] : TENS[Math.floor(k / 10)] + (k % 10 ? `-${NUMBER_WORDS[k % 10]}` : ''));
+  const readmeCount = /docs\/\s+([a-z-]+) notes/.exec(readmeAll)?.[1];
+  const repoCount = /docs\/\s+(\d+) notes/.exec(readFileSync('REPO.md', 'utf8'))?.[1];
+  say(readmeCount === inWords(notesMd.length) && Number(repoCount) === notesMd.length,
+    'the README and REPO count the notes there are',
+    `README "${readmeCount}", REPO ${repoCount}, docs/ has ${notesMd.length}`);
+  // And REPO's size of the reference data, to a tenth: it said 680 KB.
+  const sizeOf = (d) => readdirSync(d, { withFileTypes: true })
+    .reduce((t, e) => t + (e.isDirectory() ? sizeOf(`${d}/${e.name}`) : statSync(`${d}/${e.name}`).size), 0);
+  const refKB = sizeOf('data/reference') / 1024;
+  const refClaim = /It is about (\d+) KB/.exec(readFileSync('REPO.md', 'utf8'))?.[1];
+  say(refClaim && Math.abs(Number(refClaim) / refKB - 1) <= 0.1, "REPO's size of the reference data is current",
+    `says ${refClaim} KB, it is ${refKB.toFixed(0)} KB`);
+  const unlisted = notesMd.filter((f) => !readmeAll.includes(`| \`docs/${f}\` |`));
+  say(unlisted.length === 0, "and every note is in the README's table of them",
+    unlisted.join(', ') || `${notesMd.length} listed`);
 }
 
 /* ---- 2b. terminology matches the standard ------------------------------ */

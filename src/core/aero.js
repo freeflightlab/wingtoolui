@@ -319,10 +319,21 @@ function solve(Ain, bin) {
  *
  * Parasitic drag from the lines and the pilot is added as an area-referenced
  * coefficient, the same convention chapter 4 uses.
+ *
+ * `arc` (`arcFactors` in vlm.js) flies the wing in its arc rather than flat.
+ * The lifting line solves the flat wing, with the section's own lift slope
+ * and zero-lift angle; the arc scales its lift by the lattice's ratio of
+ * slopes, moves its zero-lift angle by the lattice's shift, and multiplies
+ * its induced drag at the same lift by the lattice's ratio — at the angle
+ * the lattice's flat plates would see, this one less the section's zero-lift
+ * angle. Each section's lift coefficient, which its profile drag is read
+ * at, is scaled with the wing's. Without it a paraglider's arc was not in
+ * its polar at all: a fifth to a quarter more lift than it has at every
+ * angle, and a fifth less induced drag at the same lift.
  */
 export function wingPolar({
   planform, airfoil, atm, mass, area = null, chordRef = null,
-  twistAt = null, cxLines = 0.020, cxPilot = 0.015,
+  twistAt = null, cxLines = 0.020, cxPilot = 0.015, arc = null,
   alphaRange = [-4, 16], step = 0.5, sectionPolar = null, N = 24,
   // The highest lift coefficient the wing can actually be flown at.
   maxUsableCL = 0.9,
@@ -346,59 +357,71 @@ export function wingPolar({
     let ll = null;
     let nd = null;
 
+    let CL = 0;
+    let CDi = 0;
+    let arcInduced = 1;
     for (let iter = 0; iter < 6; iter++) {
       nd = nonDimensional({ speed: V, chord: cRef, atm, span: planform.span });
       if (!sectionPolar) {
         sp = estimateSectionPolar(airfoil, { reynolds: nd.reynolds, mach: nd.mach, surfaceFactor });
       }
+      // In an arc, the flat wing's angle that has the same zero-lift angle.
+      const aFlat = arc ? a - arc.alphaShiftDeg : a;
       ll = liftingLine({
-        planform, alphaDeg: a, twistAt,
+        planform, alphaDeg: aFlat, twistAt,
         alphaL0Rad: rad(sp.alphaL0Deg),
         liftSlope: sp.liftSlopePerRad ?? 2 * Math.PI,
         N,
       });
-      if (ll.CL <= 0.01) break;
-      const Vnew = Math.sqrt((2 * mass * atm.gravity) / (atm.density * S * ll.CL));
+      CL = arc ? arc.liftRatio * ll.CL : ll.CL;
+      arcInduced = arc ? arc.inducedRatioAt(a - sp.alphaL0Deg) : 1;
+      CDi = arc ? arcInduced * arc.liftRatio * arc.liftRatio * ll.CDi : ll.CDi;
+      if (CL <= 0.01) break;
+      const Vnew = Math.sqrt((2 * mass * atm.gravity) / (atm.density * S * CL));
       if (!Number.isFinite(Vnew)) break;
       if (Math.abs(Vnew - V) / Vnew < 1e-4) { V = Vnew; break; }
       V = Vnew;
     }
+    // The sections' own lift, as the arc leaves it.
+    const loading = arc ? ll.loading.map((st) => ({ ...st, cl: st.cl * arc.liftRatio })) : ll.loading;
 
     // Profile drag integrated across the span at each station's own local
     // lift coefficient, rather than assuming the whole wing works at the
     // wing-average Cl. The tips of a tapered wing run at a different Cl.
     let cdProfile = 0;
     let wsum = 0;
-    for (const st of ll.loading) {
+    for (const st of loading) {
       const cd = sectionCd(sp, st.cl);
       cdProfile += cd * st.chord;
       wsum += st.chord;
     }
     cdProfile = wsum > 0 ? cdProfile / wsum : sp.cd0;
 
-    const CD = cdProfile + ll.CDi + cxLines + cxPilot;
-    const glide = ll.CL > 0 ? ll.CL / CD : 0;
-    const sink = ll.CL > 0 ? V / Math.sqrt(1 + glide * glide) * 1 : NaN;
-    const sinkRate = ll.CL > 0 ? V * (CD / Math.sqrt(ll.CL * ll.CL + CD * CD)) : NaN;
+    const CD = cdProfile + CDi + cxLines + cxPilot;
+    const glide = CL > 0 ? CL / CD : 0;
+    const sinkRate = CL > 0 ? V * (CD / Math.sqrt(CL * CL + CD * CD)) : NaN;
 
     const pt = {
       alphaDeg: a,
-      CL: ll.CL,
-      CDi: ll.CDi,
+      CL,
+      CDi,
       CDprofile: cdProfile,
       CD,
       glideRatio: glide,
       speed: V,
       speedKMH: V * 3.6,
       sinkRate,
-      oswald: ll.e,
+      // The span efficiency on the flat aspect ratio: the line's own, and
+      // in an arc what its induced drag comes to on that span.
+      oswald: arc ? (CDi > 0 ? (CL * CL) / (Math.PI * AR * CDi) : ll.e) : ll.e,
       reynolds: nd.reynolds,
       mach: nd.mach,
-      loading: ll.loading,
-      stalled: ll.loading.some((s) => Math.abs(s.cl) > sp.clMax * 0.995),
+      loading,
+      ...(arc ? { arc: { liftRatio: arc.liftRatio, inducedRatio: arcInduced } } : {}),
+      stalled: loading.some((s) => Math.abs(s.cl) > sp.clMax * 0.995),
     };
     points.push(pt);
-    if (!pt.stalled && ll.CL > 0) {
+    if (!pt.stalled && CL > 0) {
       if (!best || glide > best.glideRatio) best = pt;
       // Only inside the flyable envelope.
       //
@@ -421,6 +444,7 @@ export function wingPolar({
 
   return {
     source: sectionPolar ? sectionPolar.source : 'estimated',
+    arc: arc ? { liftRatio: arc.liftRatio, alphaShiftDeg: arc.alphaShiftDeg } : null,
     area: S,
     aspectRatio: AR,
     chordRef,

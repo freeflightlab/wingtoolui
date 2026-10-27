@@ -162,6 +162,9 @@ export function buildWing(cfg) {
         lower: sec.lower.map(([u, v]) => [u * chord, v * chord]),
       },
       frame: frameOf(map),
+      // Where its washin and its yaw turn it, in fractions of chord: the
+      // same rib laid flat (`wingStrips`) turns about them too.
+      pivots: { wash: given?.rp ?? RP, yaw: given?.posZ ?? RL },
       airfoilName: own?.name,
       // What an imported rib says about itself: its own anchor rows (the
       // Swoop2's tip rib differs from the rest), brake point and intake.

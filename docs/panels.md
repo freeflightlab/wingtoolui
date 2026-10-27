@@ -139,8 +139,9 @@ through the trailing edge itself. Every rib of the three files comes out to
 0.05 mm of its cut line's length. An offset of the outline, mitred at the
 trailing edge, had carried 2 to 3 cm² more on every rib: 0.03% at the root,
 0.35% on the gnuC2-23's rib 30 and 2.5% on the Swoop2's tip. Their holes are
-the program's polygons — 39 sides until 3.30, then 60 or what its section 37
-says (the Swoop2's 55) — and each rib's take out its file's area to the
+the program's polygons, as the program its file's header names drew them —
+39 sides until 3.30, then 60 or what its section 37 says (the Swoop2's
+55) — and each rib's take out its file's area to the
 hundredth of a cm² it is written to. The bill weighs these ribs as cut. The
 ovalization and seam allowance controls, this tool's stand-ins for what the
 design states, are not offered on it.
@@ -148,7 +149,7 @@ design states, are not offered on it.
 What they sew inside their cells — full diagonals, V-rib strips, straps,
 pieces between two ribs and rod pockets — is cut the same way, every piece to
 its cutting file's (`docs/internal-structure.md`), and the bill carries it:
-11.87 m² for the Swoop2, 10.48 for the Tuluaq and 11.33 for the gnuC2-23.
+11.87 m² for the Swoop2, 10.77 for the Tuluaq and 11.33 for the gnuC2-23.
 So are their trailing-edge mini-ribs, raised at the front to meet the
 billow of the cell, which the program finds from these panels: 0.82, 0.89
 and 1.50 m² of rib cloth for the wing.

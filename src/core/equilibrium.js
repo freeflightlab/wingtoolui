@@ -108,12 +108,17 @@ export function solveEquilibrium(input = {}) {
   // for anyone matching a wing against measured data.
   const f3D = p.lift3DOverride ?? (p.legacySpreadsheet ? 0.624
     : p.apply3D ? lift3DFactor(AR, e) : 1);
-  const Cz = Cz2D * f3D;
+  // The arc (`arcFactors`, vlm.js): the handbook's wing is flat, and its
+  // finite-span factor and induced drag are a flat wing's. A wing in its arc
+  // has less lift at the same angle and more induced drag at the same lift,
+  // by what the lattice finds of this wing against itself laid flat.
+  const arc = p.arc && !p.legacySpreadsheet ? p.arc : null;
+  const Cz = Cz2D * f3D * (arc ? arc.liftRatio : 1);
 
   // Induced drag. The handbook's formula [6] uses Cz(alpha), and its worked
   // example feeds the 2D value in here; keeping that reproduces the example.
   const CzForInduced = p.legacySpreadsheet ? Cz2D : Cz;
-  const Cxi = (CzForInduced * CzForInduced) / (Math.PI * AR * e);
+  const Cxi = ((CzForInduced * CzForInduced) / (Math.PI * AR * e)) * (arc ? arc.inducedRatio : 1);
 
   const Cxa = Cxoa + Cxi;
   const CxT = Cxa + Cxs + Cxp;
@@ -197,6 +202,7 @@ export function solveEquilibrium(input = {}) {
   return {
     aspectRatio: AR,
     lift3DFactor: f3D,
+    ...(arc ? { arc: { liftRatio: arc.liftRatio, inducedRatio: arc.inducedRatio } } : {}),
     cz3D: Cz,
     cxi: Cxi,
     cxa: Cxa,
@@ -306,7 +312,7 @@ export function polarSweep(input, alphas, czFn, cmFn) {
  * The coupling is therefore a single pass, which is all it ever needed to be.
  */
 export function solveEquilibriumFromWing({
-  planform, airfoil, atm = null, alphaDeg = 6, ...rest
+  planform, airfoil, atm = null, alphaDeg = 6, arc = null, ...rest
 } = {}) {
   const m = planform.area && planform.span ? planform : planformMetrics(planform);
   // No angle here: the section's zero-lift angle and Cm0 do not depend on it.
@@ -316,9 +322,11 @@ export function solveEquilibriumFromWing({
   const ll = liftingLine({ planform, alphaDeg, N: 24 });
 
   // Thin-aerofoil theory gives a slope and a zero-lift angle, not a lift
-  // coefficient. Cz is what follows from them at this angle.
+  // coefficient. Cz is what follows from them at this angle — in an arc
+  // (`arcFactors`), at this angle less the arc's shift of the zero-lift
+  // angle, the arc's lift and induced-drag ratios applied by the balance.
   const cz = section.liftSlopePerRad
-    * ((alphaDeg - section.alphaL0Deg) * Math.PI) / 180;
+    * ((alphaDeg - (arc ? arc.alphaShiftDeg : 0) - section.alphaL0Deg) * Math.PI) / 180;
 
   // Omit rho entirely when there is no atmosphere, rather than passing
   // `undefined`.
@@ -338,6 +346,7 @@ export function solveEquilibriumFromWing({
     cz,
     cm: section.cm0,
     oswald: ll.e,
+    ...(arc ? { arc: { liftRatio: arc.liftRatio, inducedRatio: arc.inducedRatioAt(alphaDeg - section.alphaL0Deg) } } : {}),
     ...rest,
   });
 

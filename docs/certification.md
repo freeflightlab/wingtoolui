@@ -64,6 +64,26 @@ is flying too slowly because it is flying at too high a lift coefficient.
 Bringing the speed up to the certified minimum, at the same glide, moves sink
 from 0.73 to 0.88 m/s — most of the way to the 1.0 a wing of that size does.
 
+**Why the lift coefficient was too high: the wing was flat.** The solve took
+the lifting line's flat wing and the handbook's flat finite-span factor. In
+its arc — the handbook's ellipse through the Geo 7's published projected
+span, 0.77 of its flat one, as the picker builds it — the vortex lattice
+gives it seven tenths of the flat wing's lift slope (`arcFactors`,
+`docs/environment-and-aero.md` section 6), and the same assumed 6° trims it
+at CL 0.59:
+
+| wing | all-up | flat, 6° | in its arc, 6° | certificate |
+| --- | --- | --- | --- | --- |
+| Geo 7 XS | 55 kg | 24.9 km/h | 29.1 km/h | more than 30 |
+| Geo 7 XS | 70 kg | 28.1 km/h | 32.8 km/h | more than 30 |
+| Geo 7 L | 95 kg | 28.7 km/h | 33.6 km/h | more than 30 |
+| Geo 7 L | 115 kg | 31.6 km/h | 36.9 km/h | more than 30 |
+
+Three of four above the certified 30 km/h, the lightest XS just under, at a
+lift coefficient real wings trim at. Nothing was fitted to get there: the
+arc is the published one, and the lattice is validated where its answers
+are known. Its glide, on the handbook's line drag of 0.020, is 8.0.
+
 ## 4. What this does not do
 
 It does not fix it in the solve this section ran. That solve assumes the angle
@@ -84,11 +104,16 @@ same four cases trim at CL 0.58 to 0.63, the range real wings use:
 Three of four are then above the certified 30 km/h, and the sinks are the 1.0
 a wing of that size does. The XS at its lightest is still under, at 29.4.
 
+Flown in its arc, the same 42% calage trims faster still — 32.9 to 40.0
+km/h at CL 0.46 to 0.50 — which says the 42% was a guess for a flat wing;
+no Geo 7's calage is published.
+
 Neither solve is what the interface runs: its balance takes the typed angle
-and coefficients, as the handbook's does. And the test that pins the
-shortfall — three of four cases below 30 km/h on the assumed angle — still
-runs the assumed angle, so that work on it shows as movement rather than
-being absorbed silently.
+and coefficients, as the handbook's does, in the wing's arc unless that is
+unticked. The test that pins the flat shortfall — three of four cases below
+30 km/h on the assumed angle — still runs the flat wing, so that work on it
+shows as movement rather than being absorbed silently, and a second holds
+the wing in its arc to one of four.
 
 ## 5. On modelling collapse
 

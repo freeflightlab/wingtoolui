@@ -66,10 +66,10 @@ page describing it is not read as describing the tool.
 | `freebody.js` | the hanging wing as one body under gravity | Balance panel |
 | `inflated.js` | the flying shape against the built one | core and suite |
 | `intake.js` | the cell opening and its stagnation point | the intake note on the rib view; the rest core and suite |
-| `lep.js` | the LEparagliding file, read and written | yes |
-| `leplines.js` | an imported design's own geometry and lines, rods, holes, panels and rib cutting lines | yes |
+| `lep.js` | the LEparagliding file, read and written, and the program its header names | yes |
+| `leplines.js` | an imported design's own geometry and lines, rods, holes, panels and rib cutting lines; its speed system's and trimmers' table | yes, the table under Speed system |
 | `lepstructure.js` | an imported design's diagonals, V-rib strips, straps, pieces between ribs, rod pockets and trailing-edge mini-ribs, as its program cuts them | the bill and the Diagonals DXF |
-| `lepbalance.js` | an imported design's longitudinal balance (its section 35) and the whole-wing figures its program prints, as it computes them | the Balance panel; the section 1 figures core and suite |
+| `lepbalance.js` | an imported design's longitudinal balance (its section 35) and the whole-wing figures its program prints, as it computes them | the Balance panel, both |
 | `lineplan.js` | risers and cascade; readers for six makers' sheets | the plan; the sheet readers in the suite and tools |
 | `lines.js` | chapter 8's weighted-centroid cascade | core and suite; the interface's cascade is `lineplan.js` |
 | `loads.js` | loads, line choice, stretch, length chain, drag, load cases | yes; collapse, gust and envelope cases are core and suite |
@@ -89,7 +89,7 @@ page describing it is not read as describing the tool.
 | `shaping3d.js` | 3D shaping darts at the leading edge | core and suite |
 | `trimdrift.js` | why a wing goes out of trim, and when to check it | Line set & trim, Inspection check |
 | `viewfit.js` | fitting a drawing to its frame | yes |
-| `vlm.js` | a vortex lattice over the arced wing | core and suite |
+| `vlm.js` | a vortex lattice over the arced wing, and what the arc does to its lift and induced drag | the balance and the polar fly the wing in its arc by `arcFactors`; the lattice itself core and suite |
 | `vribs.js` | diagonals, and H ribs | the diagonals; `buildHRibs` is core and suite |
 | `wing3d.js` | chapter 3.4 profile insertion | yes |
 | `xfoil.js` | an XFOIL package out, a polar back | XFOIL package, polar import |

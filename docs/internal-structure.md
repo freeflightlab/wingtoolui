@@ -178,25 +178,37 @@ On the gnuC2-23 the first mini-rib rises 2.25 cm above and 2.36 below, and
 without the rise its mini-ribs are 8 to 11% small. The Swoop2's first is in
 its centre cell, between its centre rib and that rib's mirror, and is cut
 once for the wing. 3.25 drew them from the rib's own cutting line and with
-no rise (`drawnBefore330`); the Tuluaq's file, which has no transition, comes
+no rise (`drawings['3.25']`); the Tuluaq's file, which has no transition, comes
 out the same either way.
 
 ## 6. Versions of the program, and their drawings
 
-The Tuluaq's file was drawn by 3.25, which differs from 3.30 in two ways,
-and each piece is held to the file's own (the gnuC2-23's 3.28 draws them as
-3.30 does):
+A design file's header says which program it was written for — "Input data
+file 3.28 version", "3.30p version", "version 3.25" — and each piece is cut
+as that program cut it (`readProgramVersion`; `lepStructure`'s `version`
+asks for another). The program skips the line, as it skips every comment,
+but it is the designer's program, and so the one that drew the design's
+cutting files. Each of the three is held to its own. The versions differ in
+four ways:
 
 - **A diagonal's cut-outs.** 3.25 drew them against the sewing line inside a
   whole seam allowance, leaving a strip of allowance across each opening;
-  3.30 cuts them through it. On the Tuluaq that strip is 0.148 m² a side —
-  the 15 mm allowance across 9.85 m of openings.
+  3.28 and 3.30 cut them through it. On the Tuluaq that strip is 0.148 m² a
+  side — the 15 mm allowance across 9.85 m of openings.
 - **A pocket's edges.** 3.25 offset the rod's line along the mean of the
-  segments either side of each point; 3.30 along the one that leaves it.
+  segments either side of each point; 3.28 and 3.30 along the one that
+  leaves it.
+- **A mini-rib.** 3.25 drew it from its rib's cutting line and read no
+  transition (section 37's code 3001); 3.28 raises its front to the cell's
+  billow, but in a centre cell, which only 3.30 gives the third cell's.
+- **A hole.** An ellipse has 39 sides until 3.28 and 60 in 3.30, or what its
+  code 3002 says; only 3.30 reads section 38, the holes in diagonals, pieces
+  between ribs and mini-ribs.
 
-`cutAreaM2` is a piece as 3.30 cuts it, and what the bill counts;
-`drawnBefore330` is the same piece as 3.25 drew it, against which the
-Tuluaq's file is checked.
+3.27's drawings are not known — no design here was drawn by it — and are
+taken as 3.28's; 3.29's as 3.30's. A file whose header does not say is cut
+as 3.30 cuts it. A piece the versions draw differently carries both
+drawings, `drawings['3.25']` and `drawings['3.28']`.
 
 ## 7. In the interface
 
@@ -207,13 +219,13 @@ piece on the centre rib alone, its rods' pockets, once:
 | | full diagonals | V-rib strips | pieces between ribs | straps | rod pockets | the wing |
 | --- | --- | --- | --- | --- | --- | --- |
 | Swoop2 | 26, 5.76 m² | — | 30, 2.09 m² | 140, 2.27 m² | 98, 1.76 m² | 11.87 m² |
-| Tuluaq-19 | 20, 8.56 m² | — | — | 48, 1.50 m² | 27, 0.42 m² | 10.48 m² |
+| Tuluaq-19 | 20, 8.85 m² | — | — | 48, 1.50 m² | 27, 0.42 m² | 10.77 m² |
 | gnuC2-23 | — | 48, 1.93 m² | 186, 8.02 m² | 12, 0.31 m² | 118, 1.06 m² | 11.33 m² |
 
 Its trailing-edge mini-ribs are rib cloth, and their own item, **Mini-rib
 cloth**: 49 on the Swoop2, 0.82 m²; 32 on the Tuluaq, 0.89; 58 on the
-gnuC2-23, 1.50. The Tuluaq's diagonals are 8.85 m² as its 3.25 file draws
-them. The pockets follow the Rods switch. The **Diagonals DXF** writes one
+gnuC2-23, 1.50. Each is as its own program cut it: the Tuluaq's diagonals
+would be 8.56 m² as 3.30 cuts them. The pockets follow the Rods switch. The **Diagonals DXF** writes one
 side of every piece
 nested on a roll, each kind on its own layers — cut line, holes, sewing
 lines — with a label: `D2L` the diagonal from rib 2 to the left, `V20R/1`

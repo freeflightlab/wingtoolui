@@ -11,6 +11,15 @@ input; the Tuluaq-19's, a 3.25 input with the CRLF line ends it was published
 with; and the gnuC2-23's, a 3.28 input with LF line ends and one character in
 a comment that is not ASCII.
 
+A file's header names the program it was written for — "Input data file
+3.28 version" — and the program skips it, as it skips every comment. It is
+read here (`readProgramVersion`): the versions draw some pieces differently,
+and an import is cut as its own program cut it — its ellipses, its
+diagonals' cut-outs, its pockets and mini-ribs, what of sections 37 and 38
+it reads (`docs/internal-structure.md`, section 6). A header that does not
+say is read as 3.30's. This tool's own file says 3.28: it writes the
+sections 3.28 reads.
+
 ---
 
 ## The governing constraint
@@ -37,7 +46,7 @@ four of them and reads twenty-three.
 | 26 | Glue vents | read: which panel closes how much of each cell's intake, or across it on a diagonal |
 | 34 | Lines characteristics table | read: the design's own line types, round lines and webbing |
 | 37 | Special parameters | read in part: how many sides the program gives an ellipse (code 3002), how a mini-rib rises to the cell's billow (code 3001), and what the balance is solved on (1146, 1351, 1352) |
-| 38 | HVR holes | read: the holes cut in diagonals, in pieces between two ribs and in mini-ribs |
+| 38 | HVR holes | read: the holes cut in diagonals, in pieces between two ribs and in mini-ribs, when 3.30 drew the file — the programs before it do not read it |
 | 28 | Parameters for calage variation | read: the program's table of risers and calage as the speed system or trimmers turn the wing (`docs/speed-system.md`) |
 | 35 | Solve equilibrium equations | read and solved: the program's longitudinal balance, every figure its output's section 17 prints, and the same equations at the speed its coefficients balance at (`docs/gnuc2-23.md`, validation §2.9) |
 | 7, 15–17, 19, 20, 22–25, 32, 33, 36, 39 | Marks, colours, extra rib points, DXF options, mylars, tabs, parts separation, detailed risers, XFLR5 export… | **carried through untouched** |
@@ -107,6 +116,12 @@ is used as the template, so everything else is preserved. Otherwise
 recommended invariant blocks for sections 19 and 20 and the documented "off"
 form for everything that needs a real design decision — rib holes, V-ribs,
 colours, rods. Turning those on should be a deliberate act, not a default.
+
+That leaves a new design's lines out. A file written from nothing carries a
+placeholder line plan in sections 9 to 11, in the manual's form — two lines
+a row, to rib 2 and the mid-span rib — and the manual's section 18; not
+this tool's plan, holes, diagonals or rods. Writing them is
+an open item in `ROADMAP.md`. An imported design keeps its own.
 
 The wing scale is written as 1.0 with the matrix carrying true dimensions.
 Preserving an imported scale and dividing the matrix by it would also round

@@ -32,6 +32,9 @@
 const fs = require('fs');
 const crypto = require('crypto');
 const { errors, REPLACES_DESIGN } = require('./dom-shim.cjs');
+// What a panel rebuild made is read back from the shim's registry of new
+// nodes, which this probe keeps and empties as it goes.
+globalThis.__recordNodes = true;
 
 if (errors.length) {
   console.log(errors.join('\n'));

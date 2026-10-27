@@ -151,6 +151,8 @@ export function acceleratedPolar({
   chordM,
   czAt,
   cmAt = null,
+  // The span efficiency by angle, where the lift curve brings its own.
+  oswaldAt = null,
   steps = 11,
   czRange = [0.25, 1.30],
 }) {
@@ -166,6 +168,7 @@ export function acceleratedPolar({
       alphaDeg: alpha,
       cz,
       cm: cmAt ? cmAt(alpha) : base.cm,
+      ...(oswaldAt ? { oswald: oswaldAt(alpha) } : {}),
     });
     rows.push({
       bar,
@@ -296,10 +299,15 @@ export function liftModelFromWing({
   alphaRange = [-6, 16], step = 0.5,
   cxLines = 0.010, cxPilot = 0.015, twistAt = null, N = 24,
   minFlyingCz = 0.35,
+  // The wing in its arc (`arcFactors`), not flat.
+  arc = null,
+  // A polar already solved for this wing (`wingPolar`): taken as it is
+  // rather than solved again, and the options it was solved with with it.
+  polar: solved = null,
 }) {
-  const polar = wingPolar({
+  const polar = solved ?? wingPolar({
     planform, airfoil, atm, mass, area, twistAt,
-    cxLines, cxPilot, alphaRange, step, N,
+    cxLines, cxPilot, alphaRange, step, N, arc,
   });
 
   const usable = polar.points.filter((p) => !p.stalled && p.CL > 0.05);
@@ -344,9 +352,25 @@ export function liftModelFromWing({
   const polarMin = Math.min(...cls);
   const czFloor = Math.max(polarMin, minFlyingCz);
 
+  // Its span efficiency at each angle, the lifting line's: its induced drag
+  // is CL^2 / (pi AR e) with this e, so the balance flown on this curve
+  // takes the drag the curve's own loading makes.
+  const es = usable.map((p) => p.oswald);
+  const oswaldAt = (aDeg) => {
+    if (aDeg <= alphas[0]) return es[0];
+    for (let i = 1; i < alphas.length; i++) {
+      if (alphas[i] >= aDeg) {
+        const f = (aDeg - alphas[i - 1]) / (alphas[i] - alphas[i - 1]);
+        return es[i - 1] + f * (es[i] - es[i - 1]);
+      }
+    }
+    return es[es.length - 1];
+  };
+
   return {
     source: polar.source,
     czAt,
+    oswaldAt,
     cmAt: () => ta.cm0,
     czRange: [czFloor, Math.max(...cls)],
     czFloorFrom: czFloor > polarMin ? 'collapse limit' : 'polar',
@@ -366,17 +390,35 @@ export function liftModelFromWing({
  * The accelerated polar, driven by a lift model derived from the wing.
  * A thin wrapper, but it is the one that removes the last free hand from the
  * chain: geometry in, speed range out.
+ *
+ * The model's lift coefficient is the wing's — the lifting line has the
+ * finite span in it already — so the balance takes it as it is, with the
+ * line's own span efficiency for its induced drag (`wingBase`). It was
+ * handed over as a section's, and the handbook's finite-span factor took a
+ * quarter off it a second time: the Lynx 2's 0.845 at 6° flew as 0.62, at
+ * 35.1 km/h for 30.1.
  */
 export function acceleratedPolarFromWing({ riser, base, chordM, liftModel, steps = 11 }) {
   return acceleratedPolar({
     riser,
-    base: { ...base, cz: liftModel.czAt(base.alphaDeg) },
+    base: wingBase(base, liftModel),
     chordM,
     czAt: liftModel.czAt,
     cmAt: liftModel.cmAt,
+    oswaldAt: liftModel.oswaldAt,
     czRange: liftModel.czRange,
     steps,
   });
+}
+
+/** A balance's inputs for a lift model's coefficient: the wing's, not a section's. */
+function wingBase(base, liftModel) {
+  return {
+    ...base,
+    cz: liftModel.czAt(base.alphaDeg),
+    apply3D: false,
+    ...(liftModel.oswaldAt ? { oswald: liftModel.oswaldAt(base.alphaDeg) } : {}),
+  };
 }
 
 /**
@@ -399,8 +441,8 @@ export function collapseFloorForTopSpeed({
   riser, base, chordM, liftModel, targetTopKMH, steps = 41,
 }) {
   const full = acceleratedPolar({
-    riser, base: { ...base, cz: liftModel.czAt(base.alphaDeg) }, chordM,
-    czAt: liftModel.czAt, cmAt: liftModel.cmAt,
+    riser, base: wingBase(base, liftModel), chordM,
+    czAt: liftModel.czAt, cmAt: liftModel.cmAt, oswaldAt: liftModel.oswaldAt,
     czRange: [-Infinity, Infinity], steps,
   });
 

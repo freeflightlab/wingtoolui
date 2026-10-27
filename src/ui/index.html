@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!--__CSP__-->
 <title>Paraglider Design Tool</title>
 <style>/*__CSS__*/</style>
 </head>
@@ -10,7 +11,7 @@
 <div class="shell">
 
   <header class="masthead">
-    <div class="wordmark"><b>LE</b> Paraglider Design Tool</div>
+    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion"><!--__VERSION__--></span></div>
     <input class="wingname" id="wingName" value="gnu-01" aria-label="Wing name">
     <div class="readout" id="readout"></div>
     <button class="themebtn" id="themeBtn" aria-label="Switch between dark and light">Light</button>
@@ -43,6 +44,11 @@
       <details class="group">
         <summary>Balance</summary>
         <div class="group-body" id="g-balance"></div>
+      </details>
+
+      <details class="group">
+        <summary>Speed system</summary>
+        <div class="group-body" id="g-speed"></div>
       </details>
 
       <details class="group">

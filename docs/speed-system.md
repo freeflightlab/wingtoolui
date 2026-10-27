@@ -134,7 +134,11 @@ answer is most sensitive to. Everything needed to replace it already existed:
 `liftingLine` corrects for finite span and non-uniform loading, and
 `wingPolar` runs both while iterating speed and Reynolds to consistency.
 `liftModelFromWing` wires them to the speed system, so the chain runs geometry
-in, speed range out.
+in, speed range out — on the flat wing the lifting line solves, or, given the
+lattice's `arcFactors`, on the wing in its arc. On the Lynx 2 M the arc brings
+the derived trim from 30.1 to 34.3 km/h, the glide from 12.2 to 10.8 and the
+sink from 0.69 to 0.88 m/s, against a published 39, 11 and 1.0
+(`docs/validation.md` §2.7).
 
 The second benefit matters as much as the first. The hand-fed version needed a
 hand-set `czRange` — two magic numbers chosen from experience — to stop it
@@ -145,7 +149,7 @@ calculation.
 ### But the floor does not
 
 Derived from the polar alone, the usable Cz range came out as
-**[0.064, 1.627]**, and the accelerated polar duly ran to **87 km/h** on a
+**[0.064, 1.627]**, and the accelerated polar duly ran to **76 km/h** on a
 wing that does 58.
 
 The arithmetic is right. A rigid wing *can* fly at Cz 0.06. A paraglider
@@ -162,22 +166,29 @@ stated separately as `minFlyingCz`, because it comes from somewhere else.
 
 It cannot be derived here: it depends on intake design, internal pressure and
 rib support, none of which this project models. And it *governs* the predicted
-top speed — 4.8 km/h per 0.05 of assumed floor on this wing.
+top speed — 6.7 km/h per 0.05 of assumed floor on this wing.
 
 So the inference runs the other way. `collapseFloorForTopSpeed` takes a
 published top speed and reports the Cz the wing must still be flying at:
 
 | | |
 | --- | --- |
-| implied Cz at 58 km/h | **0.307** |
-| reached at | 75% bar, α −0.5° |
+| implied Cz at 58 km/h | **0.22** |
+| reached at | 88% bar, α −1.6° |
 | assumed floor | 0.35 |
-| sensitivity | 4.8 km/h per 0.05 |
+| sensitivity | 6.7 km/h per 0.05 |
 | verdict | published speed implies a **lower** floor than assumed |
 
-0.307 is a physically sensible collapse threshold, and it is a number a
-designer can compare against other wings and against a prototype. The verdict
+0.22 is what 58 km/h needs of the wing's 23 m² at 85 kg, whatever the lift
+curve; the curve says where on the bar it comes. It is a number a designer
+can compare against other wings and against a prototype, and the verdict
 names the disagreement rather than absorbing it into a fitted constant.
+
+These were 87 km/h, 0.307 at 75% bar and 4.8 km/h: the curve derived from
+the wing is the wing's own coefficient, and the balance took it for a
+section's and applied the finite-span factor to it again, flying 0.307 as
+0.226. `acceleratedPolarFromWing` and `collapseFloorForTopSpeed` fly it as
+it is, with the lifting line's own span efficiency.
 
 ---
 
@@ -251,7 +262,7 @@ main one, and where its pulleys sit, is not modelled.
 forward — this page said forward. As the angle of attack falls the A row's
 share of the lift goes from 43.8% to 37.9% to 27.6%, slow to trim to fast, and
 the D row's from 14.2% to 21.3%. `loadEnvelope` sizes each line over the
-flyable range of the bar: `docs/validation.md` §5.1.
+flyable range of the bar: `docs/load-cases.md` §1.
 
 **The collapse floor.** Inverted from published data, never predicted.
 Predicting it needs internal pressure and rib support modelling.
@@ -273,3 +284,29 @@ as vertical, gives the angles the program's rotation gives to 1.3% on the
 Tuluaq and 0.8% and 0.6% on the others, a little short of them: the risers
 converge on the pilot, and a riser's travel is a little less than its
 anchor's rise.
+
+## 9. In the interface
+
+The **Speed system** group sets the bar's travel (150 mm by default) and the
+trimmers' (none by default). Its table is the wing across the bar: from the
+angle the balance assumes, the risers the plan's rows give, each turn of the
+wing `alphaChange` gives, and at each the balance's equations flown on the
+wing's own lift curve — the polar's (`liftModelFromWing`, given the polar the
+interface has already solved), in its arc when it flies in it, its finite
+span taken once. A position that takes the lift below the collapse floor is
+marked: past it a paraglider folds rather than flies. On the default wing,
+150 mm of bar takes it from 35.0 km/h at trim to 45.4.
+
+Its trim is not the balance's. The balance flies the typed Cz at the angle;
+the speed system flies the polar's at the same angle, which on the default
+wing is the higher, 0.71 against 0.49. Neither is solved from where the
+risers hang (`trimFromCalage`, in the core).
+
+With trimmers set, it says where they take the wing alone, where the bar
+alone does, and where both do — and when each alone flies and the two
+together do not (`trimEnvelope`).
+
+An imported design whose section 28 asks for it shows the program's own
+table beneath, as the program its file was written for prints it: what each
+riser does and where the calage goes as the speed system and the trimmers
+turn the wing, all four tables.

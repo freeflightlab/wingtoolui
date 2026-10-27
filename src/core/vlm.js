@@ -26,10 +26,21 @@
  * The method
  * ---------------------------------------------------------------------------
  * One horseshoe vortex per spanwise strip. The bound segment runs along the
- * quarter-chord line of the strip; two trailing legs run downstream to far
- * enough away to count as infinity. A control point sits at three-quarter
- * chord, mid-strip, which is where the flat-plate boundary condition is
- * satisfied exactly for a lifting surface.
+ * quarter-chord line of the strip; two trailing legs run along its edges to
+ * the trailing edge, and from there downstream, with the flow, to far enough
+ * away to count as infinity. A control point sits at three-quarter chord,
+ * mid-strip, which is where the flat-plate boundary condition is satisfied
+ * exactly for a lifting surface.
+ *
+ * The legs lie on the strip as far as its trailing edge. They left from the
+ * quarter chord, straight downstream, which on a strip at an incidence to
+ * the flow lifts them off its surface between the bound vortex and the
+ * control point — harmless on a flat wing, and not on an arc: out on a
+ * banked strip the leg passed the control points at a slant, the system
+ * grew ill-conditioned with the angle, and the default wing's circulation
+ * ran away above 9 degrees (an induced drag 260 times its lift at 12). On
+ * the 37° test arc it overstated the lift lost to the arc by half, 16% for
+ * 11.
  *
  * Requiring zero flow through the surface at every control point gives a
  * dense linear system in the circulations. It is solved by Gaussian
@@ -41,6 +52,8 @@
  * near-field alternative differs from it by the error in the downwash at the
  * lifting line itself, and that is exactly where the model is weakest.
  */
+
+import { ribTransform } from './wing3d.js';
 
 const vCross = (a, b) => [
   a[1] * b[2] - a[2] * b[1],
@@ -201,28 +214,46 @@ export function vortexLattice({
     // Point it upward, so a positive circulation means lift.
     if (n[2] < 0) n = [-n[0], -n[1], -n[2]];
 
-    return { a, b, control, normal: n, span: vSub(b, a), strip: s };
+    return { a, b, control, normal: n, span: vSub(b, a), strip: s, ta: s.leftTE, tb: s.rightTE };
   });
 
   const n = panels.length;
   const wake = [farWake * Math.cos(alpha), 0, farWake * Math.sin(alpha)];
 
-  // A horseshoe's velocity: bound segment plus two trailing legs.
+  // A horseshoe's velocity: the bound segment, and each trailing leg along
+  // the strip's edge to its trailing edge and from there downstream.
   const horseshoe = (p, panel) => {
-    const aFar = [panel.a[0] + wake[0], panel.a[1] + wake[1], panel.a[2] + wake[2]];
-    const bFar = [panel.b[0] + wake[0], panel.b[1] + wake[1], panel.b[2] + wake[2]];
-    const v1 = filamentVelocity(p, aFar, panel.a);
+    const aFar = [panel.ta[0] + wake[0], panel.ta[1] + wake[1], panel.ta[2] + wake[2]];
+    const bFar = [panel.tb[0] + wake[0], panel.tb[1] + wake[1], panel.tb[2] + wake[2]];
+    const v0 = filamentVelocity(p, aFar, panel.ta);
+    const v1 = filamentVelocity(p, panel.ta, panel.a);
     const v2 = filamentVelocity(p, panel.a, panel.b);
-    const v3 = filamentVelocity(p, panel.b, bFar);
-    return [v1[0] + v2[0] + v3[0], v1[1] + v2[1] + v3[1], v1[2] + v2[2] + v3[2]];
+    const v3 = filamentVelocity(p, panel.b, panel.tb);
+    const v4 = filamentVelocity(p, panel.tb, bFar);
+    return [
+      v0[0] + v1[0] + v2[0] + v3[0] + v4[0],
+      v0[1] + v1[1] + v2[1] + v3[1] + v4[1],
+      v0[2] + v1[2] + v2[2] + v3[2] + v4[2],
+    ];
   };
 
+  // Each horseshoe's velocity at each control point, for a unit
+  // circulation: the influence matrix is its normal part, and the induced
+  // velocity that the forces take is the same vectors again, so they are
+  // kept rather than computed twice.
+  const VX = new Float64Array(n * n);
+  const VY = new Float64Array(n * n);
+  const VZ = new Float64Array(n * n);
   const A = [];
   const rhs = [];
   for (let i = 0; i < n; i++) {
     const row = new Array(n);
     for (let j = 0; j < n; j++) {
-      row[j] = vDot(horseshoe(panels[i].control, panels[j]), panels[i].normal);
+      const v = horseshoe(panels[i].control, panels[j]);
+      VX[i * n + j] = v[0];
+      VY[i * n + j] = v[1];
+      VZ[i * n + j] = v[2];
+      row[j] = vDot(v, panels[i].normal);
     }
     A.push(row);
     rhs.push(-vDot(U, panels[i].normal));
@@ -238,10 +269,9 @@ export function vortexLattice({
   for (let i = 0; i < n; i++) {
     const vInduced = [0, 0, 0];
     for (let j = 0; j < n; j++) {
-      const v = horseshoe(panels[i].control, panels[j]);
-      vInduced[0] += v[0] * gamma[j];
-      vInduced[1] += v[1] * gamma[j];
-      vInduced[2] += v[2] * gamma[j];
+      vInduced[0] += VX[i * n + j] * gamma[j];
+      vInduced[1] += VY[i * n + j] * gamma[j];
+      vInduced[2] += VZ[i * n + j] * gamma[j];
     }
     const vLocal = [U[0] + vInduced[0], U[1] + vInduced[1], U[2] + vInduced[2]];
     const f = vCross(vLocal, panels[i].span);
@@ -256,8 +286,11 @@ export function vortexLattice({
     });
   }
 
-  // Induced drag in the Trefftz plane, from the wake's trace.
-  const di = trefftzDrag(panels.map((p) => [[p.a[1], p.a[2]], [p.b[1], p.b[2]]]), gamma, rho);
+  // Induced drag in the Trefftz plane, from the wake's trace: where each
+  // leg leaves the trailing edge, seen down the flow — across it y, and up
+  // it z cos(alpha) - x sin(alpha).
+  const seen = (q) => [q[1], q[2] * Math.cos(alpha) - q[0] * Math.sin(alpha)];
+  const di = trefftzDrag(panels.map((p) => [seen(p.ta), seen(p.tb)]), gamma, rho);
 
   const area = strips.reduce((s, st) => {
     const c = (vNorm(vSub(st.leftTE, st.leftLE)) + vNorm(vSub(st.rightTE, st.rightLE))) / 2;
@@ -291,25 +324,113 @@ export function vortexLattice({
   };
 }
 
-/** Strips from a built wing, mirrored to the whole span. */
-export function stripsFromWing(wing) {
-  if (!wing?.ribs?.length) throw new Error('stripsFromWing needs a wing');
-  const edge = (rib) => ({
-    le: rib.upper[0],
-    te: rib.upper[rib.upper.length - 1],
-  });
+/**
+ * A built wing's chord lines as lattice strips: each rib's, from its leading
+ * edge to its trailing edge in its own plane, joined rib to rib and mirrored
+ * to the whole span, a centre cell — between the first rib and its mirror,
+ * when the first is off the centreline — included. `flat` lays the same ribs
+ * on their flat stations, with their chords, sweep and twist and no arc: the
+ * wing a lifting line sees.
+ *
+ * The centre cell was left out, and a design with one (an odd number of
+ * cells) was solved with a slot down its middle. A first rib within a
+ * millimetre of the centreline is on it: a cell that narrow is a strip the
+ * lattice cannot solve, and no cell at all.
+ */
+export function wingStrips(wing, { flat = false } = {}) {
+  if (!wing?.ribs?.length) throw new Error('wingStrips needs a wing');
+  const edge = (r) => {
+    if (flat) {
+      const map = ribTransform({
+        chord: r.chord, xLE: r.xLE, ly: r.station, lz: 0, beta: 0, zeta: 0,
+        washinDeg: r.alphaDeg, washPivot: r.pivots?.wash ?? 0.25,
+      });
+      return { le: map(0, 0), te: map(r.chord, 0) };
+    }
+    if (!r.frame) return { le: r.upper[0], te: r.upper[r.upper.length - 1] };
+    const f = r.frame;
+    const at = (u) => [f.origin[0] + u * f.u[0], f.origin[1] + u * f.u[1], f.origin[2] + u * f.u[2]];
+    return { le: at(0), te: at(r.chord) };
+  };
+  const E = wing.ribs.map(edge);
+  const m = (p) => [p[0], -p[1], p[2]];
   const out = [];
+  if (E[0].le[1] > 1e-3) {
+    out.push({ leftLE: m(E[0].le), leftTE: m(E[0].te), rightLE: E[0].le, rightTE: E[0].te });
+  }
   // The modelled half, then its mirror, so the lattice sees the whole wing:
   // a half-wing lattice would have a free edge at the centreline and shed a
   // vortex there that does not exist.
-  for (let i = 0; i < wing.ribs.length - 1; i++) {
-    const a = edge(wing.ribs[i]);
-    const b = edge(wing.ribs[i + 1]);
+  for (let i = 0; i < E.length - 1; i++) {
+    const a = E[i];
+    const b = E[i + 1];
     out.push({ leftLE: a.le, leftTE: a.te, rightLE: b.le, rightTE: b.te });
-    const m = (p) => [p[0], -p[1], p[2]];
-    out.push({
-      leftLE: m(b.le), leftTE: m(b.te), rightLE: m(a.le), rightTE: m(a.te),
-    });
+    out.push({ leftLE: m(b.le), leftTE: m(b.te), rightLE: m(a.le), rightTE: m(a.te) });
   }
   return out;
+}
+
+/** Strips from a built wing, mirrored to the whole span: `wingStrips`. */
+export function stripsFromWing(wing) {
+  return wingStrips(wing);
+}
+
+/**
+ * What the arc does to the wing in flight: the wing as built against the
+ * same wing laid flat (`wingStrips`), both on the lattice, at two angles of
+ * attack. The lifting line the polar and the balance stand on solves the
+ * flat one, with the section's own lift slope, zero-lift angle and drag;
+ * these are what the arc changes of it.
+ *
+ *   liftRatio      the arched wing's lift slope over the flat one's
+ *   alphaShiftDeg  its zero-lift angle less the flat one's: the twist,
+ *                  weighted by where the arc leaves the lift
+ *   inducedRatioAt(alphaDeg)  its induced drag over the flat one's at the
+ *                  same lift, at that angle of the lattice's flat plates —
+ *                  a cambered wing's angle less its section's zero-lift
+ *                  angle. The circulation is taken as linear in the angle
+ *                  between the two solved, and the angle held to 2 to 12
+ *                  degrees: near no lift the ratio of two vanishing drags
+ *                  means nothing.
+ *
+ * Forces, not coefficients: the lattice refers its own to the projected
+ * area, the lifting line to the flat one, and a ratio of forces needs
+ * neither. On the default wing the arc costs a fifth of the lift; on the
+ * gnuC2-23, whose tips stand at 74°, more than a quarter.
+ */
+export function arcFactors(wing, { alphas = [4, 10] } = {}) {
+  const arched = wingStrips(wing);
+  const flat = wingStrips(wing, { flat: true });
+  const [a1, a2] = alphas;
+  const solve = (st) => [vortexLattice({ strips: st, alphaDeg: a1 }), vortexLattice({ strips: st, alphaDeg: a2 })];
+  const A = solve(arched);
+  const F = solve(flat);
+  const slope = (S) => (S[1].liftN - S[0].liftN) / (a2 - a1);
+  const zero = (S) => a1 - S[0].liftN / slope(S);
+  // The wake's trace, where the legs leave the trailing edge, seen down the
+  // flow at the angle asked.
+  const traceAt = (st, aDeg) => {
+    const al = (aDeg * Math.PI) / 180;
+    const seen = (q) => [q[1], q[2] * Math.cos(al) - q[0] * Math.sin(al)];
+    return st.map((s) => [seen(s.leftTE), seen(s.rightTE)]);
+  };
+  const kAt = (st, S, aDeg) => {
+    const f = (aDeg - a1) / (a2 - a1);
+    const gamma = S[0].gamma.map((g, i) => g + f * (S[1].gamma[i] - g));
+    const lift = S[0].liftN + f * (S[1].liftN - S[0].liftN);
+    return trefftzDrag(traceAt(st, aDeg), gamma) / (lift * lift);
+  };
+  const inducedRatioAt = (alphaDeg) => {
+    const a = Math.min(12, Math.max(2, alphaDeg));
+    return kAt(arched, A, a) / kAt(flat, F, a);
+  };
+  return {
+    liftRatio: slope(A) / slope(F),
+    alphaShiftDeg: zero(A) - zero(F),
+    inducedRatioAt,
+    projectedSpanM: A[0].spanM,
+    projectedAreaM2: A[0].areaM2,
+    strips: arched.length,
+    alphas: [a1, a2],
+  };
 }

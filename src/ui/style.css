@@ -69,6 +69,7 @@ html, body {
   white-space: nowrap;
 }
 .wordmark b { color: var(--aci-cyan); font-weight: 600; }
+.wordmark .version { color: var(--text-faint); letter-spacing: 0.05em; text-transform: none; margin-left: 4px; }
 
 .wingname {
   font-family: var(--mono);

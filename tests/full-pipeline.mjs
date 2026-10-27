@@ -21,7 +21,8 @@ import {
 } from '../src/core/lineplan.js';
 import { analyseLoads, selectLines, parseMaterialsTable, DEFAULT_LINE_TABLE, lengthChain } from '../src/core/loads.js';
 import { solveEquilibrium } from '../src/core/equilibrium.js';
-import { wingPolar } from '../src/core/aero.js';
+import { wingPolar, thinAirfoil } from '../src/core/aero.js';
+import { arcFactors } from '../src/core/vlm.js';
 import { atmosphere } from '../src/core/atmosphere.js';
 import { ribOpenings } from '../src/core/ribholes.js';
 import { buildVRibs } from '../src/core/vribs.js';
@@ -239,13 +240,17 @@ for (const [family, sizes] of Object.entries(fams)) {
       }
 
       // --- flight -------------------------------------------------------
+      // In its arc, as the interface flies it: the lattice's ratios of this
+      // wing against itself laid flat.
+      const arc = arcFactors(wing);
       const eq = solveEquilibrium({
         pilotMass: mass, area: m.area, span: pf.span,
         cxLines: loads.drag.cxLines, alphaDeg: 6,
+        arc: { liftRatio: arc.liftRatio, inducedRatio: arc.inducedRatioAt(6 - thinAirfoil(naca4('4415')).alphaL0Deg) },
       });
       const polar = wingPolar({
         planform: pf, airfoil: naca4('4415'), atm: atmosphere(0),
-        mass, alphaRange: [2, 12], step: 1,
+        mass, alphaRange: [2, 12], step: 1, arc,
       });
 
       // Physics: a paraglider flies between 30 and 60 km/h, glides between
@@ -264,7 +269,7 @@ for (const [family, sizes] of Object.entries(fams)) {
       }
       // Higher aspect ratio must glide better, all else equal.
       rows.push({
-        id, family, ar: size.flatAR, area: m.area,
+        id, family, ar: size.flatAR, area: m.area, arcLift: arc.liftRatio,
         glide: eq.glideRatio, speed: eq.speedKMH, sink: polar.minSink.sinkRate,
         cxLines: loads.drag.cxLines, util: fab.utilisation,
         lineM: plan.totalLengthM, publishedLineM: size.totalLineLength ?? null,
@@ -374,6 +379,7 @@ if (byAR.length > 4) {
   console.log('\nthe ranges, over every wing:');
   console.log(`  trim speed ${range('speed', 1)} km/h; glide ${range('glide', 2)}; `
     + `minimum sink ${range('sink', 3)} m/s`);
+  console.log(`  the arc leaves ${range('arcLift', 3)} of the flat wing's lift slope`);
   console.log(`  lowest sinks: ${bySink.slice(0, 3).map((r) => `${r.id} ${r.sink.toFixed(3)}`).join('; ')}`);
   console.log(`  nesting ${range('util', 3)} of the roll used`);
 }

@@ -98,7 +98,9 @@ same to 0.001%.
 before 3.30 and of 60, or what section 37's code 3002 says, after. The
 tool's had 48, and every hole of the two designs drawn before 3.30 was 0.15%
 off; each rib's now takes out its file's area to the hundredth of a cm² the
-file is written to.
+file is written to. Which program drew it is its header's — "Input data
+file 3.28 version" — and the import is drawn as that program drew it
+(`docs/internal-structure.md`, section 6).
 
 **The speed system's table.** Section 28 has the program print how the
 risers and the calage change as the wing is turned. All three designs'
