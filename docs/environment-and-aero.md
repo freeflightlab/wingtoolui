@@ -114,13 +114,18 @@ drag and the Oswald factor come out as **results** of the planform, so changing
 the taper changes the induced drag — e is 0.960 on the default wing, 0.933
 with a 2.0 m tip and 0.978 with a 0.30 m one.
 
-The interface's **balance** does not take it. That is the handbook's
-equilibrium, and it still takes the typed "Oswald e" (0.90): typing 0.70 moves
-the balance from glide 7.50 to 6.70 — 8.48 to 7.53 with the wing flown flat
-(section 6) — and leaves the polar where it was. The balance table shows the
-polar's factor beside the typed one so the two can be compared; the solve
-that couples them, `solveEquilibriumFromWing`, is in the core and the suite,
-not the interface (`docs/full-pipeline.md`, section 6).
+The interface's **balance** takes it. It is the handbook's equilibrium, and
+by default (**Balance on**: the wing's own polar, at the angle) it flies on
+the polar: the lift, the induced drag through the span efficiency the polar
+has on its aspect ratio, and the profile drag, all at the angle, and the
+section's Cm0 (`balanceOnPolar`); trimmed from the calage, at the angle where
+that balance hangs the pilot there (`trimOnPolar`). The polar's induced drag
+comes back to the digit: a span efficiency of 0.814 on the flat span, the
+default wing at 5° in its arc. Set to the handbook's typed coefficients, it
+takes the typed "Oswald e" (0.90) as the handbook's example does: typing 0.70
+moves that balance from glide 7.50 to 6.70 — 8.48 to 7.53 with the wing
+flown flat (section 6) — and leaves the polar where it was, and the table
+shows the polar's factor beside the typed one so the two can be compared.
 
 The lifting line solves a **flat** wing: its span is straight and its
 loading lies in one plane. Section 6 is what the arc does to it.
@@ -178,8 +183,12 @@ xfoil < xfoil_input.cmd > xfoil_output.out
 
 The exported package is a normalised `.dat`, a command script, and a note
 recording the conditions. Once a polar is imported the wing analysis uses
-measured section data, `source` becomes `'xfoil'`, and only the camber theory
-and the lifting line remain modelled.
+its section data, `source` becomes `'xfoil'`, and only the camber theory
+and the lifting line remain modelled; the balance and the lattice take its
+Cm0 and zero-lift angle. A polar swept from 0°, as many are, never reaches
+zero lift, and its first angle had been taken for its zero-lift angle, some
+4° out on a cambered section: it is found along the polar's lift slope now,
+and the panel says so; a polar with no rising lift to find it by is refused.
 
 An imported polar is checked against the current condition. A polar run at sea
 level loads perfectly happily and silently gives the wrong answer at 20 km, so
@@ -312,6 +321,20 @@ comes nearer the published one (`docs/validation.md` §2.7): trim 30.1 →
 34.3 km/h against 39, best glide 12.2 → 10.8 against 11, minimum sink 0.69
 → 0.88 m/s against 1.0.
 
-What the arc does not change is the section and the angle. The trim still
-comes from an assumed angle of attack (or a typed Cz) unless it is solved
-from the calage, and the section's lift curve is thin-aerofoil theory's.
+What the arc does not change is the section and the angle. The trim comes
+from the angle asked, or from the calage, on the wing's own polar (the
+Balance panel's **Balance on**; section 2), and the section's lift curve is
+thin-aerofoil theory's, or a loaded XFOIL polar's.
+
+### Where it lifts
+
+The lattice says where the lift acts too: each strip's on its quarter-chord
+line, and the lift's line through the centroid of their parts in the plane
+of symmetry (`latticeCentres`); the section's own moment moves it along the
+flow by Cm0 times the strips' chords squared (`liftLine`). On the gnuC2-23 at
+4.51° the centroid is 31.2% of the central chord back and 0.60 m below the
+chord, and the line crosses the chord at 30.6% with the section's moment;
+the rule, 0.25 − Cm0/CL, puts it at 26.9%. Laid flat the wing carries it
+33.6% back, its quarter-chord line running back toward the tips. The
+balance, by default, takes the lift there, and every other force where it
+acts (`docs/balance.md`).

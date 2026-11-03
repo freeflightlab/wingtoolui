@@ -22,8 +22,8 @@ Source: <https://laboratoridenvol.com/paragliderdesign/index.html> (revised
 | `voute.html` §3.2 | Influence of arc shape | `lobe.js` `lobeMetrics` | Metrics reported |
 | `voute.html` §3.3 | Washin / washout | `lobe.js` `washinAt` | Three distributions |
 | `voute.html` §3.4 | Profile insertion, both rotations | `wing3d.js` `buildWing` | Complete |
-| `le.html` §4.1–4.2 | Equilibrium equations | `equilibrium.js` | Complete |
-| `le.html` §4.3 | Solving the system | `equilibrium.js` `solveEquilibrium` | Closed form, not iterative |
+| `le.html` §4.1–4.2 | Equilibrium equations | `equilibrium.js` | Complete; the seventh term, which counts the pitching moment again, only on request (`docs/departures.md` §5); each force where it acts rather than by the rules, by default on the polar (`docs/balance.md`) |
+| `le.html` §4.3 | Solving the system | `equilibrium.js` `solveEquilibrium`, `balanceOnPolar`, `balanceWhereForcesAct`, `calageFromForces`, `trimOnPolar` | Closed form, not iterative; in the interface on typed coefficients or on the wing's own polar, at an angle or trimmed from the calage |
 | `le.html` §4.4 | Worked spreadsheet | `equilibrium.js` legacy mode | Reproduced — see validation §1 |
 | `le.html` §4.5 | Simplified graphical method | `equilibrium.js` `simplifiedCalage`, `glideAngleTable` | In the core and the suite; not in the interface |
 | `le.html` §4.6 | Empirical methods | — | Judgement, not computation |
@@ -36,8 +36,8 @@ Source: <https://laboratoridenvol.com/paragliderdesign/index.html> (revised
 | `lines.html` §8.1 | Cascade by weighted centroid | `lines.js` `buildCascade` | Both load cases, in the core and the suite. The interface's cascade is `lineplan.js` `buildLinePlan` |
 | `lines.html` §8.2 | Brakes and distribution | `lines.js` `brakeAnchors`, `applyBrakeDistribution` | As §8.1; the interface's brakes are `lineplan.js` `buildBrakePlan` |
 | `lines.html` §8.3–8.4 | Elasticity, loads | `loads.js`, `trimdrift.js` | Implemented beyond the source, which has headings only |
-| `risers.html` §9.1–9.2 | Risers, 4-riser speed system | `risers.js`, `lineplan.js` (riser layouts) | Riser layouts in the interface; the speed system and accelerated polar in the core and the suite |
-| `risers.html` §9.3–9.4 | Trimmers, vario seat | `risers.js` (trimmers) | Trimmers in the core and the suite; no vario seat |
+| `risers.html` §9.1–9.2 | Risers, 4-riser speed system | `risers.js`, `lineplan.js` (riser layouts) | Riser layouts, the speed bar and the accelerated polar in the interface |
+| `risers.html` §9.3–9.4 | Trimmers, vario seat | `risers.js` (trimmers) | Trimmers in the interface; no vario seat |
 | ch.10 | Materials | `loads.js`, `fabric.js`, `reinforcement.js`, `bom.js` | Lines, cloth, rods, tabs and the bill, from suppliers' figures where they publish them |
 | `leparagliding.en.html` | The author's own software | `lep.js`, `leplines.js`, `lepstructure.js`, `lepbalance.js` | The format read and written (`docs/lep-format.md`); a design's own ribs, lines, rods and holes computed as its program computes them (validation §2.6), its panels and ribs cut as it cuts them (`docs/panels.md`), its internal structure too (`docs/internal-structure.md`), and the balance it solves (validation §2.9) |
 | `gnuLAB2` | Complete example wing | `data/reference/lep` | The Swoop2 stands in: a complete design from the same author, loadable in the interface |
@@ -58,7 +58,7 @@ page describing it is not read as describing the tool.
 | `atmosphere.js` | US Standard Atmosphere 1976 to 86 km; Re, Mach, Kn and their flags | Environment panel |
 | `bom.js` | bill of materials; mass reconciliation and thread | the bill; the reconciliation is core and suite |
 | `compare.js` | two designs side by side | Balance panel, against a remembered design |
-| `equilibrium.js` | chapter 4 balance; the coupled solve; trim from the calage | the handbook balance; `solveEquilibriumFromWing` and `trimFromCalage` are core and suite |
+| `equilibrium.js` | chapter 4 balance; the balance with every force where it acts; the coupled solve; trim from the calage | both balances; `solveEquilibriumFromWing` and `trimFromCalage` are core and suite |
 | `export.js` | DXF, SVG and printable writers; nesting; a DXF reader | writers and nesting; the reader in the suite and the interface test |
 | `fabric.js` | cloth by location | yes |
 | `family.js` | a size family from one design | Size family |
@@ -72,7 +72,7 @@ page describing it is not read as describing the tool.
 | `lepbalance.js` | an imported design's longitudinal balance (its section 35) and the whole-wing figures its program prints, as it computes them | the Balance panel, both |
 | `lineplan.js` | risers and cascade; readers for six makers' sheets | the plan; the sheet readers in the suite and tools |
 | `lines.js` | chapter 8's weighted-centroid cascade | core and suite; the interface's cascade is `lineplan.js` |
-| `loads.js` | loads, line choice, stretch, length chain, drag, load cases | yes; collapse, gust and envelope cases are core and suite |
+| `loads.js` | loads, line choice, stretch, length chain, drag and where the lines' weight and drag act, load cases | yes; collapse, gust and envelope cases are core and suite |
 | `lobe.js` | chapter 3 arc and washin | yes |
 | `marking.js` | registration marks on a cutting file | through the marked Panels DXF |
 | `num.js` | numeric helpers | — |
@@ -89,9 +89,9 @@ page describing it is not read as describing the tool.
 | `shaping3d.js` | 3D shaping darts at the leading edge | core and suite |
 | `trimdrift.js` | why a wing goes out of trim, and when to check it | Line set & trim, Inspection check |
 | `viewfit.js` | fitting a drawing to its frame | yes |
-| `vlm.js` | a vortex lattice over the arced wing, and what the arc does to its lift and induced drag | the balance and the polar fly the wing in its arc by `arcFactors`; the lattice itself core and suite |
+| `vlm.js` | a vortex lattice over the arced wing: what the arc does to its lift and induced drag, and where they act | the balance and the polar fly the wing in its arc by `arcFactors`, the balance takes its lift's line; the lattice itself core and suite |
 | `vribs.js` | diagonals, and H ribs | the diagonals; `buildHRibs` is core and suite |
-| `wing3d.js` | chapter 3.4 profile insertion | yes |
+| `wing3d.js` | chapter 3.4 profile insertion; the central section's plane; the wing's mass centre from its cloth | yes |
 | `xfoil.js` | an XFOIL package out, a polar back | XFOIL package, polar import |
 
 ---

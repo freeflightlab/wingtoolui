@@ -109,24 +109,41 @@ section 3's change.) It is reported as
 assumed. It also means swapping which rib you pass as "left" changes which seam
 is exact, by an amount too small to matter.
 
-### 5 The 4.4 spreadsheet omits two moment terms
+### 5 The 4.4 spreadsheet omits two moment terms, and 4.2 counts one twice
 
 Reproducing the worked example term by term shows that its moment sum leaves
 out two of the terms section 4.2 derives: the moment of **wing drag** about the
 leading edge, and the **aerodynamic moment** itself. With those two dropped,
 the five printed moments reproduce and sum to the printed residual of 0.17.
-With them restored, the balance point moves aft.
 
-The handbook flags the sheet as still in development, so both behaviours are
-available:
+The second omission is the sheet's, and the sheet is right. 4.2 puts the lift
+and the wing's drag at the centre of pressure, and the sheet places that from
+the pitching moment, Xcp = 0.25 − Cm/Cz (0.296 of the chord). A force there
+already carries the moment about the quarter chord; 4.2's seventh term,
+−q0·Cm, adds it again — and without the chord, so what it adds is a force
+taken for a moment. LEparagliding, the same author's program, takes moments
+about the centre of pressure and has no such term (`lepbalance.js`, which
+reproduces its section 17 to the digit), and the handbook's 2020 revisit of
+the problem counts the aerodynamic moment about the point the forces are put
+at, which at the centre of pressure is none.
 
 | Mode | Moment terms | Calage |
 | --- | --- | --- |
 | `legacySpreadsheet: true` | as printed in 4.4 | 0.429 m (sheet: 0.433 m) |
-| default | as derived in 4.2 | further aft |
+| default | 4.2's first six | 0.889 m |
+| `printedAeroMoment: true` | all seven, as 4.2 prints them | 0.966 m |
+
+Counted once, a pilot with nothing below the wing but weight hangs plumb under
+the centre of pressure, to the micrometre; counted twice, 6 cm off it. The
+second count grows with the section's camber: 2.6% of chord on the example's
+Cm of −0.042, 6.1 points on a NACA 4415 flown on its own polar at 5°. It was
+the default until 1.4.0, and it is why the derived calages sat at the "40 to
+45%" this project took for where real wings hang: counted once, the lift a
+real wing trims at needs 32 to 36%, where the three complete designs on file
+hang theirs.
 
 The force-balance half of the solve — speed, glide ratio, glide angle, dynamic
-pressure, drag split — is unaffected and reproduces the sheet in both modes.
+pressure, drag split — is unaffected and reproduces the sheet in every mode.
 
 ### 6 The sheet's 3D lift factor does not follow from its own inputs
 
@@ -416,6 +433,19 @@ No pressure gives flat, not an infinite radius. A tension too low to span the
 ribs against the pressure is reported as `overLimit` rather than returning a
 bulge past a half-circle. An excess no arc can reach is refused with the
 maximum that is reachable.
+
+### 26 The balance puts each force where it acts
+
+Chapter 4 places each force by rule: the lift and the wing's drag on the
+central chord at 0.25 − Cm0/Cz of it, the wing's weight a third back on the
+chord, the lines' weight half way down and their drag a third, the pilot at
+the karabiners. The balance on the wing's polar now puts each where the wing
+itself says it acts — the lift on its own line in the arc, from the vortex
+lattice — and takes moments about the karabiners; the rules remain a choice.
+On the gnuC2-23 at its own 4.51° the rules hang the pilot at 25.5% of the
+central chord where its file hangs him at 33%, and every force where it acts
+at 32.4%. `docs/balance.md` has the method, what it reproduces and the other
+designs.
 
 ---
 

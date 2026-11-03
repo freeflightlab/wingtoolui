@@ -358,6 +358,44 @@ const key3 = (p) => (Array.isArray(p) ? p.map((v) => v.toFixed(6)).join(',') : S
 /* --------------------------------------------------- materials and sizing -- */
 
 /**
+ * Line weight from its cross-section, in g/m per mm² of nominal area, for a
+ * line whose supplier's figure is not to hand.
+ *
+ * Sheathed: Edelrid's data sheets for the 7343, 6843, 7850 and 7950 give
+ * diameter and weight for 26 sizes, and they come to 0.98 on average (0.81
+ * to 1.10) — aramid core or Dyneema alike, since the cover is the same
+ * polyester and the nominal diameter is the cover's. The Swoop2's own file
+ * gives its three sheathed Dyneema lines at 0.80, 0.87 and 0.96.
+ *
+ * This was 1.2, "sheathed lines run heavier per area": a fifth to a half
+ * more than any of those 29 lines weighs. Liros's sheathed lines in
+ * OpenGlider's table — TSL, NTSL, DSL and DFL, 24 sizes — come to 0.955
+ * (0.77 to 1.05), and its TSL alone to 0.98.
+ *
+ * Unsheathed aramid: 1.11, Liros's LTC, bare Technora, nine sizes in
+ * OpenGlider's table (0.88 to 1.48; `data/reference/line-stretch.tsv`). It
+ * was 0.9, an estimate, for every bare line, and Edelrid's 8000-U and 8001
+ * came out a fifth light.
+ *
+ * Unsheathed otherwise — Dyneema, Vectran: 0.9, an estimate with no data
+ * sheet behind it here.
+ */
+export const LINE_WEIGHT_PER_AREA = {
+  sheathed: 0.98,
+  unsheathedAramid: 1.11,
+  unsheathed: 0.9,
+  source: 'sheathed: Edelrid data sheets, 26 sizes (data/reference/line-materials-suppliers.tsv), '
+    + 'and Liros\'s 24 in OpenGlider\'s table at 0.955; bare aramid: Liros LTC, 9 sizes '
+    + '(data/reference/line-stretch.tsv); other bare line: estimated',
+};
+
+/** A line's weight per metre from its cross-section, g/m (`LINE_WEIGHT_PER_AREA`). */
+function weightFromArea(areaMM2, { sheathed, fibre }) {
+  return areaMM2 * (sheathed ? LINE_WEIGHT_PER_AREA.sheathed
+    : fibre === 'aramid' ? LINE_WEIGHT_PER_AREA.unsheathedAramid : LINE_WEIGHT_PER_AREA.unsheathed);
+}
+
+/**
  * Line materials.
  *
  * Two strengths are carried per line, and the distinction is the single most
@@ -390,19 +428,19 @@ const key3 = (p) => (Array.isArray(p) ? p.map((v) => v.toFixed(6)).join(',') : S
  * subset spans the range so the bundled tool works with no data files.
  */
 export const DEFAULT_LINE_TABLE = [
-  // code, mm, new daN, kinked daN, mm^2, g/m (estimated from area), elongation
-  m('U-025', 0.43, 25.0, 12.0, 0.15, 0.135, 0.035),
-  m('U-050', 0.61, 56.5, 23.5, 0.29, 0.26, 0.035),
-  m('U-070', 0.72, 66.3, 29.5, 0.41, 0.37, 0.035),
-  m('U-090', 0.82, 97.6, 54.3, 0.53, 0.48, 0.035),
-  m('U-120', 0.90, 115.3, 62.9, 0.64, 0.58, 0.035),
-  m('U-130', 1.00, 122.6, 64.9, 0.79, 0.71, 0.035),
-  m('U-135', 1.10, 160.0, 85.6, 0.95, 0.86, 0.035),
-  m('U-190', 1.20, 193.0, 103.0, 1.13, 1.02, 0.035),
-  m('U-230', 1.40, 230.0, 115.1, 1.54, 1.39, 0.035),
-  m('U-280', 1.50, 263.8, 141.7, 1.77, 1.59, 0.035),
-  m('U-360', 1.80, 360.0, 231.0, 2.54, 2.29, 0.035),
-  m('U-430', 2.00, 430.0, 232.6, 3.14, 2.83, 0.035),
+  // code, mm, new daN, kinked daN, mm^2, g/m (null: from its area), elongation
+  m('U-025', 0.43, 25.0, 12.0, 0.15, null, 0.035),
+  m('U-050', 0.61, 56.5, 23.5, 0.29, null, 0.035),
+  m('U-070', 0.72, 66.3, 29.5, 0.41, null, 0.035),
+  m('U-090', 0.82, 97.6, 54.3, 0.53, null, 0.035),
+  m('U-120', 0.90, 115.3, 62.9, 0.64, null, 0.035),
+  m('U-130', 1.00, 122.6, 64.9, 0.79, null, 0.035),
+  m('U-135', 1.10, 160.0, 85.6, 0.95, null, 0.035),
+  m('U-190', 1.20, 193.0, 103.0, 1.13, null, 0.035),
+  m('U-230', 1.40, 230.0, 115.1, 1.54, null, 0.035),
+  m('U-280', 1.50, 263.8, 141.7, 1.77, null, 0.035),
+  m('U-360', 1.80, 360.0, 231.0, 2.54, null, 0.035),
+  m('U-430', 2.00, 430.0, 232.6, 3.14, null, 0.035),
   m('DC35', 0.49, 32.6, 33.6, 0.19, 0.17, 0.04),
   m('DC40', 0.50, 47.4, 41.0, 0.20, 0.18, 0.04),
   m('DC60', 0.60, 60.0, 43.2, 0.28, 0.25, 0.04),
@@ -418,6 +456,7 @@ export const DEFAULT_LINE_TABLE = [
  *  supplier's figure is not to hand (`LINE_WEIGHT_PER_AREA`). */
 function m(code, diameterMM, newDaN, kinkedDaN, areaMM2, gramsPerM, elong, sheathed = false) {
   const family = lineFamilyOf(code);
+  const isSheathed = family ? family.cover != null : sheathed;
   return {
     name: code,
     code,
@@ -425,9 +464,9 @@ function m(code, diameterMM, newDaN, kinkedDaN, areaMM2, gramsPerM, elong, sheat
     strengthNewDaN: newDaN,
     strengthKinkedDaN: kinkedDaN,
     areaMM2,
-    gramsPerM,
+    gramsPerM: gramsPerM ?? weightFromArea(areaMM2, { sheathed: isSheathed, fibre: fibreOf(code) }),
     elongationAtRated: elong,
-    sheathed: family ? family.cover != null : sheathed,
+    sheathed: isSheathed,
     // What carries the load: 'aramid' for the U- lines (Edelrid 8000-U),
     // 'dyneema' for the DC and PPSL lines.
     fibre: fibreOf(code),
@@ -490,28 +529,6 @@ export function materialBrands(materials) {
     .map(([name, count]) => ({ name, count }));
 }
 
-/**
- * Line weight from its cross-section, in g/m per mm² of nominal area, for a
- * line whose supplier's figure is not to hand.
- *
- * Sheathed: Edelrid's data sheets for the 7343, 6843, 7850 and 7950 give
- * diameter and weight for 26 sizes, and they come to 0.98 on average (0.81
- * to 1.10) — aramid core or Dyneema alike, since the cover is the same
- * polyester and the nominal diameter is the cover's. The Swoop2's own file
- * gives its three sheathed Dyneema lines at 0.80, 0.87 and 0.96.
- *
- * This was 1.2, "sheathed lines run heavier per area": a fifth to a half
- * more than any of those 29 lines weighs.
- *
- * Unsheathed: 0.9, an estimate with no data sheet behind it here.
- */
-export const LINE_WEIGHT_PER_AREA = {
-  sheathed: 0.98,
-  unsheathed: 0.9,
-  source: 'sheathed: Edelrid data sheets, 26 sizes '
-    + '(data/reference/line-materials-suppliers.tsv); unsheathed: estimated',
-};
-
 export function parseMaterialsTable(tsv) {
   const out = [];
   for (const line of tsv.split(/\r?\n/).slice(1)) {
@@ -534,8 +551,7 @@ export function parseMaterialsTable(tsv) {
       strengthNewDaN: Number(sn),
       strengthKinkedDaN: kinked,
       areaMM2: Number(a),
-      gramsPerM: Number(a) * (sheathed
-        ? LINE_WEIGHT_PER_AREA.sheathed : LINE_WEIGHT_PER_AREA.unsheathed),
+      gramsPerM: weightFromArea(Number(a), { sheathed, fibre: fibreOf({ name, code }) }),
       elongationAtRated: sheathed ? 0.05 : 0.035,
       sheathed,
       fibre: fibreOf({ name, code }),
@@ -599,6 +615,11 @@ export function selectLines(tensions, {
   minimumDiameterMM = PRACTICAL_FLOOR.diameterMM,
   strengthBasis = 'kinked',
   preferLowDrag = true,
+  // The line set's strength level by level, as the DHV calculates it for
+  // EN 926-1 (`strengthByLevel`): `{ maxWeightKg }` sizes up the weakest
+  // lines of any level short of it. The lines carry their plan's ends
+  // (`from`, `to`), which say how they join.
+  levelRule = null,
 } = {}) {
   const rated = (mat) => (strengthBasis === 'new' ? mat.strengthNewDaN : mat.strengthKinkedDaN);
   // Order by diameter, not strength: diameter is what costs drag, and among
@@ -642,6 +663,46 @@ export function selectLines(tensions, {
     };
   });
 
+  // Sized line by line, a set can still fall short level by level: the
+  // default wing's main lines came to 1382 daN, under the 1400 the DHV's
+  // calculation asks of every level, and its brake's first level to 82, a
+  // DC 40 a side, where it asks 150. A real wing's are well over: the Lynx
+  // 2 M's nine mains a side come to 2015 daN after bending, both sides, and
+  // its brake line from the handle is a PPSL 200 a side, 424. The weakest
+  // line of a short level is taken up a size, and again, until each holds.
+  let levelSized = 0;
+  if (levelRule && levelRule.maxWeightKg > 0 && chosen.every((c) => Array.isArray(c.from) && Array.isArray(c.to))) {
+    const R = levelRule.rule ?? DHV_LINE_CALCULATION;
+    const up = (c) => sorted.find((mat) => rated(mat) > (c.ratedDaN ?? 0)
+      && mat.diameterMM >= (c.line?.diameterMM ?? 0) && mat.diameterMM >= minimumDiameterMM);
+    const take = (c, mat) => {
+      c.line = mat;
+      c.ratedDaN = rated(mat);
+      c.utilisation = c.requiredDaN / rated(mat);
+      c.massG = (mat.gramsPerM * c.lengthMM) / 1000;
+      c.sizedBy = 'level';
+      levelSized += 1;
+    };
+    for (const c of chosen) {
+      if (c.line && c.ratedDaN < R.lineMinDaN) {
+        const mat = sorted.find((m) => rated(m) >= R.lineMinDaN && m.diameterMM >= (c.line?.diameterMM ?? 0));
+        if (mat) take(c, mat);
+      }
+    }
+    for (let guard = 0; guard < 2000; guard++) {
+      const v = strengthByLevel(chosen, { maxWeightKg: levelRule.maxWeightKg, strength: (c) => c.ratedDaN });
+      const short = [
+        ...(v.suspension?.levels ?? []).filter((x) => x.sumDaN < R.levelMinDaN || x.g < R.levelMinG),
+        ...(v.brake?.levels ?? []).filter((x) => x.sumDaN < R.brakeLevelMinDaN),
+      ][0];
+      if (!short) break;
+      const weakest = short.members.filter((c) => c.line && up(c))
+        .sort((a, b) => (a.ratedDaN ?? 0) - (b.ratedDaN ?? 0))[0];
+      if (!weakest) break;
+      take(weakest, up(weakest));
+    }
+  }
+
   const unmet = chosen.filter((c) => !c.line);
   const totalMassG = chosen.reduce((s, c) => s + (c.massG || 0) * 2, 0);
 
@@ -650,6 +711,8 @@ export function selectLines(tensions, {
     unmet,
     ok: unmet.length === 0,
     totalMassG,
+    levelSized,
+    levelRule: levelRule ? { maxWeightKg: levelRule.maxWeightKg, rule: levelRule.rule ?? DHV_LINE_CALCULATION } : null,
     byMaterial: groupLinesBy(chosen.filter((c) => c.line), (c) => c.line.code),
     loadCase,
     strengthBasis,
@@ -666,6 +729,93 @@ function groupLinesBy(arr, fn) {
 }
 
 /* --------------------------------------------------------------- stretch -- */
+
+/**
+ * Measured load and elongation of named lines, from OpenGlider's line types
+ * (`data/reference/line-stretch.tsv`): 56 sizes of Cousin's Vectraline, CTL
+ * 900 and Technoline and Liros's LTC, NTSL, TSL, DFL and DSL. Each curve is
+ * load in daN and elongation as a fraction, in pairs from nothing at no load;
+ * `byCode` holds the usable ones by the code the same line has in the
+ * catalogue (`line-materials.tsv`), and `rows` every one, with why a curve is
+ * not used where it is not.
+ */
+export function parseLineStretch(tsv) {
+  const rows = [];
+  let head = null;
+  for (const raw of String(tsv ?? '').split(/\r?\n/)) {
+    if (!raw.trim() || raw.startsWith('#')) continue;
+    const f = raw.split('\t');
+    if (!head) { head = f.map((x) => x.trim()); continue; }
+    const at = (k) => (f[head.indexOf(k)] ?? '').trim();
+    const num = (k) => (at(k) === '' ? null : Number(at(k)));
+    const pairs = at('stretch').split(/\s+/).filter(Boolean)
+      .map((p) => p.split(':').map(Number));
+    if (pairs.some((p) => p.length !== 2 || !p.every(Number.isFinite))) {
+      throw new Error(`parseLineStretch: ${at('og_name')} has a stretch that is not load:elongation pairs (${at('stretch')})`);
+    }
+    const use = at('use');
+    rows.push({
+      maker: at('maker'),
+      family: at('family'),
+      item: at('item'),
+      name: at('og_name'),
+      catalogue: at('catalogue') || null,
+      diameterMM: num('diameter_mm'),
+      minBreakDaN: num('min_break_daN'),
+      gramsPerM: num('weight_g_per_m'),
+      curve: [[0, 0], ...pairs.map(([daN, pct]) => [daN, pct / 100])],
+      used: use === 'yes',
+      why: use === 'yes' ? null : use.replace(/^no:\s*/, ''),
+    });
+  }
+  const byCode = new Map(rows.filter((r) => r.catalogue).map((r) => [r.catalogue, r]));
+  return { rows, byCode };
+}
+
+/**
+ * A catalogue with the measured figures attached where a line has them: its
+ * load and elongation curve (`stretchCurve`, daN and fraction), and its
+ * weight per metre, which the catalogue only estimates from the line's area.
+ * A line whose curve is not used keeps the generic stretch, and says why.
+ */
+export function withMeasuredLineData(table, stretch) {
+  if (!stretch?.byCode) return table;
+  return table.map((line) => {
+    const r = stretch.byCode.get(line.code);
+    if (!r) return line;
+    return {
+      ...line,
+      ...(r.used ? { stretchCurve: r.curve, stretchSource: `OpenGlider ${r.name}` } : { stretchNotUsed: r.why }),
+      ...(Number.isFinite(r.gramsPerM)
+        ? { gramsPerM: r.gramsPerM, gramsPerMEstimated: line.gramsPerM, weightSource: `OpenGlider ${r.name}` } : {}),
+    };
+  });
+}
+
+/**
+ * Elongation of a line under a load, as a fraction of its unloaded length.
+ *
+ * Its measured curve where it has one, straight between points and on along
+ * the last of them beyond, as OpenGlider reads its own; otherwise the
+ * generic model, `elongationAtRated` at the rated (kinked) strength and in
+ * proportion below it. On the thirteen lines with a measured curve the two
+ * differ by up to three times at the 5 daN a line is measured at
+ * (`docs/openglider.md`).
+ */
+export function elongationOf(line, forceN, ratedN) {
+  const F = Math.max(0, forceN) / 10;   // daN, the curve's unit
+  const c = line?.stretchCurve;
+  if (c && c.length >= 2) {
+    let i = 1;
+    while (i < c.length - 1 && c[i][0] < F) i++;
+    const [f0, e0] = c[i - 1];
+    const [f1, e1] = c[i];
+    return e0 + ((F - f0) * (e1 - e0)) / ((f1 - f0) || 1);
+  }
+  const eps = line?.elongationAtRated ?? 0;
+  return ratedN > 0 ? eps * (forceN / ratedN) : 0;
+}
+
 
 /**
  * Elastic stretch under load (LEP section 18).
@@ -740,15 +890,15 @@ export function lengthChain(selection, {
       };
     }
     const ratedN = (l.ratedDaN ?? l.line.strengthKinkedDaN) * 10;
-    const eps = l.line.elongationAtRated;
-    // Extension of a line of unloaded length L0 under force F.
-    const extend = (L0, forceN) => L0 * eps * (forceN / ratedN);
+    // Its measured curve where it has one (`elongationOf`), and the generic
+    // elongation in proportion to its rated strength where not.
+    const stretchAt = (forceN) => elongationOf(l.line, forceN, ratedN);
 
     const flying = l.lengthMM;                       // the design output
     const flightN = l.tensionN * atG;
     // Unloaded length that reaches the flying length under the flight load.
-    const sewn = flying / (1 + eps * (flightN / ratedN));
-    const reference = sewn + extend(sewn, measurementDaN * 10);
+    const sewn = flying / (1 + stretchAt(flightN));
+    const reference = sewn * (1 + stretchAt(measurementDaN * 10));
 
     return {
       ...l,
@@ -757,6 +907,9 @@ export function lengthChain(selection, {
       referenceLengthMM: Math.round(reference),
       sewnLengthMM: Math.round(sewn),
       cutLengthMM: Math.round(sewn + loopAllowanceMM),
+      // Where its stretch came from: the line's own measured curve, or the
+      // generic elongation at its rated strength.
+      stretchFrom: l.line.stretchCurve ? 'measured' : 'generic',
       // The two differences a designer needs to see.
       flightStretchMM: flying - sewn,
       measurementStretchMM: reference - sewn,
@@ -786,6 +939,87 @@ export function lengthChain(selection, {
   };
 }
 
+/* ---------------------------------------------------- strength by level -- */
+
+/**
+ * The line set's strength level by level, as the DHV calculates it for EN
+ * 926-1:2015 and NfL 2-565-20 (its "suspension line calculation", 2023):
+ * level 1 is the lines attached to the risers, and each further junction
+ * starts the next; each level's breaking strengths after bending, both sides
+ * of the wing, must sum to at least 1400 daN and to 14 times the maximum
+ * weight; every line must hold 20 daN; and each level of the brake lines 150
+ * daN. OpenGlider's `get_floor_strength` sums the same way, and counts a
+ * branch that has ended again at every level above it, its top lines still
+ * carrying its share — as a cut across the cascade at that height must.
+ *
+ * `lines` are the sized lines of one side (`selectLines`), joined end to end
+ * by where they meet; `strength(l)` is a line's strength after bending, daN.
+ */
+export const DHV_LINE_CALCULATION = Object.freeze({
+  levelMinDaN: 1400,
+  levelMinG: 14,
+  lineMinDaN: 20,
+  brakeLevelMinDaN: 150,
+  source: 'DHV, "suspension line calculation" (service.dhv.de, 2023), for EN 926-1:2015 | NfL 2-565-20',
+});
+
+export function strengthByLevel(lines, {
+  maxWeightKg, strength = (l) => l.ratedDaN ?? l.line?.strengthKinkedDaN, sides = 2,
+  brakeRows = ['K', 'BR'], tolerance = 1e-4,
+} = {}) {
+  const key = (p) => p.map((v) => Math.round(v / tolerance)).join(',');
+  const groups = { suspension: lines.filter((l) => !brakeRows.includes(l.row)), brake: lines.filter((l) => brakeRows.includes(l.row)) };
+  const out = {};
+  for (const [what, ls] of Object.entries(groups)) {
+    if (!ls.length) { out[what] = null; continue; }
+    const tops = new Set(ls.map((l) => key(l.to)));
+    // A line whose lower end no other line reaches hangs from a riser (or the
+    // handle): level 1. Each line above starts at the top of the one below.
+    const below = new Map();
+    for (const l of ls) below.set(key(l.to), l);
+    const levelOf = new Map();
+    const depth = (l) => {
+      if (levelOf.has(l)) return levelOf.get(l);
+      const parent = tops.has(key(l.from)) ? below.get(key(l.from)) : null;
+      const d = parent && parent !== l ? depth(parent) + 1 : 1;
+      levelOf.set(l, d);
+      return d;
+    };
+    ls.forEach(depth);
+    const topLevel = Math.max(...levelOf.values());
+    const startsAbove = new Set(ls.map((l) => key(l.from)));
+    // A line nothing starts from at its upper end is a branch's last.
+    const last = ls.filter((l) => !startsAbove.has(key(l.to)));
+    const levels = [];
+    for (let k = 1; k <= topLevel; k++) {
+      const at = ls.filter((l) => levelOf.get(l) === k);
+      const carried = last.filter((l) => levelOf.get(l) < k);
+      const all = [...at, ...carried];
+      const sum = sides * all.reduce((a, l) => a + (strength(l) || 0), 0);
+      const g = maxWeightKg > 0 ? sum / (maxWeightKg * 0.981) : NaN;
+      levels.push({ level: k, lines: at.length, carried: carried.length, sumDaN: sum, g, members: at });
+    }
+    const weakest = ls.reduce((a, l) => ((strength(l) || 0) < (strength(a) || 0) ? l : a), ls[0]);
+    out[what] = { levels, weakest: { name: weakest.name, strengthDaN: strength(weakest) } };
+  }
+  const D = DHV_LINE_CALCULATION;
+  const susp = out.suspension;
+  const problems = [];
+  if (susp) {
+    for (const v of susp.levels) {
+      if (v.sumDaN < D.levelMinDaN) problems.push(`level ${v.level} holds ${v.sumDaN.toFixed(0)} daN, under ${D.levelMinDaN}`);
+      if (Number.isFinite(v.g) && v.g < D.levelMinG) problems.push(`level ${v.level} holds ${v.g.toFixed(1)} g, under ${D.levelMinG}`);
+    }
+    if (susp.weakest.strengthDaN < D.lineMinDaN) problems.push(`${susp.weakest.name} holds ${susp.weakest.strengthDaN} daN, under ${D.lineMinDaN}`);
+  }
+  if (out.brake) {
+    for (const v of out.brake.levels) {
+      if (v.sumDaN < D.brakeLevelMinDaN) problems.push(`brake level ${v.level} holds ${v.sumDaN.toFixed(0)} daN, under ${D.brakeLevelMinDaN}`);
+    }
+  }
+  return { ...out, maxWeightKg, ok: problems.length === 0, problems, rule: D };
+}
+
 export function stretchCorrection(selection, { atG = 1, loopAllowanceMM = 0 } = {}) {
   const corrected = selection.lines.map((l) => {
     if (!l.line) {
@@ -797,7 +1031,7 @@ export function stretchCorrection(selection, { atG = 1, loopAllowanceMM = 0 } = 
     }
     const forceN = l.tensionN * atG;
     const ratedN = (l.ratedDaN ?? l.line.strengthKinkedDaN) * 10;
-    const stretchMM = l.lengthMM * l.line.elongationAtRated * (forceN / ratedN);
+    const stretchMM = l.lengthMM * elongationOf(l.line, forceN, ratedN);
     // Finished length: shortened by the stretch, so the flying length is the
     // design length.
     const finished = l.lengthMM - stretchMM;
@@ -843,15 +1077,31 @@ export function stretchCorrection(selection, { atG = 1, loopAllowanceMM = 0 } = 
  * area, that gives the line drag coefficient — the `Cxs` that the equilibrium
  * solver has been taking as a typed-in constant since Phase 1.
  *
- * Two refinements matter and are both exposed:
+ * Three refinements matter and are all exposed:
  *
- *   - Lines are not normal to the flow. A line inclined at angle psi to the
- *     stream sees roughly `sin^2(psi)` of the normal-incidence drag, by the
- *     independence principle for yawed cylinders. Where line geometry is
- *     available the true inclination is used; otherwise a single factor
+ *   - Lines are not square to the flow. By the independence principle for
+ *     yawed cylinders, a line at an angle psi to the stream feels the force
+ *     of the flow's component square to it, (V sin psi)^2, square to its own
+ *     axis; its drag is that force's part along the flow, sin^3 psi of the
+ *     drag square on (Hoerner; Relf and Powell; the principle holds above a
+ *     Reynolds number of a few hundred). This took sin^2, the force, for the
+ *     drag: 3% too much on a line 15 degrees off square. Where the line's
+ *     geometry is known its own angle is used; otherwise a single factor
  *     stands in for the set.
- *   - Reynolds numbers here are a few thousand, where a smooth cylinder sits
- *     near Cd = 1.0-1.2. Sheathed lines are rougher and sit a little higher.
+ *   - A line's Reynolds number is a few hundred to a few thousand, on the
+ *     flow square to it and its own diameter, and its drag coefficient falls
+ *     with it: 1 + 10 Re^(-2/3), White's correlation for a cylinder, as
+ *     LEparagliding takes it from De Villiers' HEGALA report — 1.19 for a
+ *     0.5 mm line at 12 m/s, 1.06 for a 2.5 mm riser line. Given `air`, each
+ *     line has its own; given `cdCylinder`, every line that; with neither,
+ *     1.1. Sheathed lines had 5% added, which nothing sourced: a braided
+ *     cover's roughness moves a cylinder's drag near its drag crisis, at a
+ *     Reynolds number near 2 x 10^5, not at a line's.
+ *   - Its loops are in the flow too, the line doubled over them: a sewn
+ *     allowance at its length, and an imported line's as its program counts
+ *     them (`loopFrontalMM`), a spliced loop at sqrt 2 - 1 of its length.
+ *     Square to the flow, the gnuC2-23's lineset is then its program's drag
+ *     to the last digit.
  */
 /**
  * Wake shielding between lines.
@@ -915,7 +1165,19 @@ export function wakeShielding(lines, { flowDirection = [1, 0, 0], maxDeficit = 0
 
 export function lineDrag(selection, {
   wingAreaM2,
-  cdCylinder = 1.1,
+  // Every line's coefficient, when given; each line's own from its Reynolds
+  // number, given the air and the speed (`air`: speedMS, rho, muPaS); 1.1
+  // with neither.
+  cdCylinder = null,
+  air = null,
+  // The loops at a line's ends, sewn: the line doubled over them. A line
+  // that brings its own (`loopFrontalMM`, an imported design's) keeps it.
+  loopAllowanceMM = 0,
+  // The risers (a plan's `riserWebbing`), each with its material: a round
+  // one is a line; a strap is a flat plate broadside, Cd 1.98, without its
+  // loops, as LEparagliding counts both. One without a material is not
+  // counted, and said.
+  risers = [],
   inclinationFactor = null,
   flowDirection = [1, 0, 0],
   sides = 2,
@@ -925,48 +1187,175 @@ export function lineDrag(selection, {
 } = {}) {
   const wake = wakeInterference
     ? wakeShielding(selection.lines, { flowDirection }) : null;
+  const fn = Math.hypot(flowDirection[0], flowDirection[1], flowDirection[2]) || 1;
+  const flow = flowDirection.map((v) => v / fn);
+  const useReynolds = !Number.isFinite(cdCylinder) && !!air
+    && air.speedMS > 0 && air.rho > 0 && air.muPaS > 0;
+  const sinOf = (from, to) => {
+    if (!from || !to) return null;
+    const v = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    const n = Math.hypot(v[0], v[1], v[2]) || 1;
+    const cosPsi = Math.abs((v[0] * flow[0] + v[1] * flow[1] + v[2] * flow[2]) / n);
+    return Math.sqrt(Math.max(0, 1 - cosPsi * cosPsi));
+  };
+  // A cylinder's coefficient: given, or by its Reynolds number on the flow
+  // square to it.
+  const cylinderCd = (dM, sinPsi) => {
+    if (Number.isFinite(cdCylinder)) return { cd: cdCylinder, reynolds: null };
+    const reynolds = useReynolds ? (air.rho * air.speedMS * (sinPsi ?? 1) * dM) / air.muPaS : null;
+    return { cd: reynolds > 0 ? 1 + 10 * reynolds ** (-2 / 3) : 1.1, reynolds };
+  };
   let dragAreaM2 = 0;
   let lengthM = 0;
+  let cdArea = 0;
+  let plainArea = 0;
   const perLine = [];
 
   for (const l of selection.lines) {
     if (!l.line) continue;
-    const lenM = l.lengthMM / 1000;
+    // Its length in the flow: node to node, and its loops.
+    const loopMM = Number.isFinite(l.loopFrontalMM) ? l.loopFrontalMM : loopAllowanceMM;
+    const lenM = (l.lengthMM + loopMM) / 1000;
     const dM = l.line.diameterMM / 1000;
-
+    // Its angle to the flow, psi: the drag along the flow goes as sin^3.
+    const sinPsi = sinOf(l.from, l.to);
     let factor = inclinationFactor;
-    if (factor == null) {
-      if (l.from && l.to) {
-        const v = [l.to[0] - l.from[0], l.to[1] - l.from[1], l.to[2] - l.from[2]];
-        const n = Math.hypot(v[0], v[1], v[2]) || 1;
-        const cosPsi = Math.abs((v[0] * flowDirection[0] + v[1] * flowDirection[1]
-          + v[2] * flowDirection[2]) / n);
-        factor = 1 - cosPsi * cosPsi;   // sin^2 of the angle to the flow
-      } else {
-        factor = 0.85;
-      }
-    }
-
-    const cd = l.line.sheathed ? cdCylinder * 1.05 : cdCylinder;
+    if (factor == null) factor = sinPsi == null ? 0.85 : sinPsi ** 3;
+    const { cd, reynolds } = cylinderCd(dM, sinPsi);
     // Drag goes as velocity squared, so a velocity deficit of q on a shielded
     // line reduces its contribution by (1-q)^2.
     const shield = wake && wake.byLine.has(l.name)
       ? (1 - wake.byLine.get(l.name).deficit) ** 2 : 1;
     const area = dM * lenM * cd * factor * sides * shield;
     dragAreaM2 += area;
-    lengthM += lenM * sides;
-    perLine.push({ name: l.name, dragAreaM2: area, inclinationFactor: factor });
+    lengthM += (l.lengthMM / 1000) * sides;
+    cdArea += cd * dM * lenM;
+    plainArea += dM * lenM;
+    perLine.push({ name: l.name, dragAreaM2: area, inclinationFactor: factor, cd, reynolds });
   }
+
+  // The risers, each at its own angle to the flow.
+  let risersDragAreaM2 = 0;
+  const risersUncounted = [];
+  for (const r of risers ?? []) {
+    const mat = r.material;
+    if (!mat || !(mat.diameterMM > 0)) { risersUncounted.push(r.name ?? r.riser); continue; }
+    const strap = mat.section === 'rectangular';
+    const sinPsi = sinOf(r.from, r.to);
+    const factor = inclinationFactor ?? (sinPsi == null ? 1 : sinPsi ** 3);
+    const dM = mat.diameterMM / 1000;
+    const lenM = (r.lengthMM + (strap ? 0 : (r.loopFrontalMM ?? 0))) / 1000;
+    const { cd, reynolds } = strap ? { cd: 1.98, reynolds: null } : cylinderCd(dM, sinPsi);
+    const area = dM * lenM * cd * factor * sides;
+    risersDragAreaM2 += area;
+    perLine.push({ name: r.name, riser: true, strap, dragAreaM2: area, inclinationFactor: factor, cd, reynolds });
+  }
+  dragAreaM2 += risersDragAreaM2;
 
   return {
     dragAreaM2,
+    risersDragAreaM2,
+    risersUncounted,
     totalLengthM: lengthM,
     wake,
     cxLines: wingAreaM2 ? dragAreaM2 / wingAreaM2 : null,
+    // The lines' coefficient over the set, weighted by their frontal area,
+    // and what it came from.
+    cdMean: plainArea > 0 ? cdArea / plainArea : null,
+    cdBasis: Number.isFinite(cdCylinder) ? 'given' : useReynolds ? 'reynolds' : 'default',
     meanDiameterMM: selection.lines.filter((l) => l.line)
       .reduce((s2, l) => s2 + l.line.diameterMM * l.lengthMM, 0)
       / selection.lines.filter((l) => l.line).reduce((s2, l) => s2 + l.lengthMM, 0),
     perLine,
+  };
+}
+
+/**
+ * Where a lineset's weight and its drag act, in the central section's
+ * plane (`centralFrame`, wing3d.js): back from the nose along the central
+ * chord, and down from it. Each line at its middle — by its own mass, and
+ * by its own drag area as `lineDrag` gives it line by line, the risers'
+ * among them when it counts theirs. The two halves are mirror images, so
+ * one is all it takes.
+ *
+ * `massKg`, when given, is the lineset's weight as the balance carries it —
+ * typed, or a design's own — and what it has beyond the lines' own mass is
+ * the risers' webbing and hardware: it is put at the middle of the webbing
+ * (`webbing`, a plan's `riserWebbing`), or at the karabiners when the plan
+ * has none. A typed figure below the lines' own is taken as theirs, spread
+ * as they are.
+ *
+ * @param {object} selection  `selectLines` (its lines need `from` and `to`)
+ * @param {object} o
+ * @param {object} o.frame    `centralFrame(wing)`
+ * @param {object} [o.drag]   `lineDrag(selection, ...)`; without it the drag
+ *                            is weighted by each line's diameter by length
+ * @param {object[]} [o.webbing]
+ * @param {number[]} [o.karabiner]
+ * @param {number} [o.massKg]
+ * @param {number} [o.sides]
+ */
+export function lineCentres(selection, {
+  frame, drag = null, webbing = [], karabiner = null, massKg = null, sides = 2,
+} = {}) {
+  if (!frame?.u) throw new Error('lineCentres needs the central frame (centralFrame)');
+  const { origin: o, u, v } = frame;
+  const inPlane = (p) => {
+    const d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+    return [d[0] * u[0] + d[1] * u[1] + d[2] * u[2], -(d[0] * v[0] + d[1] * v[1] + d[2] * v[2])];
+  };
+  let gSum = 0;
+  let gb = 0;
+  let gd = 0;
+  let aSum = 0;
+  let ab = 0;
+  let ad = 0;
+  let k = -1;
+  for (const l of selection?.lines ?? []) {
+    if (!l.line) continue;
+    k += 1;
+    if (!l.from || !l.to) continue;
+    const [b, dn] = inPlane([0, 1, 2].map((i) => (l.from[i] + l.to[i]) / 2));
+    const g = Number.isFinite(l.massG) ? l.massG : (l.line.gramsPerM ?? 0) * (l.lengthMM / 1000);
+    gSum += g; gb += g * b; gd += g * dn;
+    const area = drag?.perLine?.[k]?.dragAreaM2 ?? (l.line.diameterMM / 1000) * (l.lengthMM / 1000);
+    aSum += area; ab += area * b; ad += area * dn;
+  }
+  // The risers' drag, when the drag counts it, at the webbing's middle.
+  const riserDrag = new Map((drag?.perLine ?? []).filter((p) => p.riser).map((p) => [p.name, p.dragAreaM2]));
+  for (const w of webbing ?? []) {
+    const area = riserDrag.get(w.name);
+    if (!(area > 0) || !w.from || !w.to) continue;
+    const [b, dn] = inPlane([0, 1, 2].map((i) => (w.from[i] + w.to[i]) / 2));
+    aSum += area; ab += area * b; ad += area * dn;
+  }
+  if (!(gSum > 0) || !(aSum > 0)) return null;
+  const linesKg = (gSum * sides) / 1000;
+  const own = { backM: gb / gSum, downM: gd / gSum };
+  // The rest of the weight: the webbing's middle, or the karabiners.
+  const mids = (webbing ?? []).filter((w) => w.from && w.to)
+    .map((w) => inPlane([0, 1, 2].map((i) => (w.from[i] + w.to[i]) / 2)));
+  const rest = mids.length
+    ? { backM: mids.reduce((a, m) => a + m[0], 0) / mids.length, downM: mids.reduce((a, m) => a + m[1], 0) / mids.length }
+    : karabiner ? (([b, dn]) => ({ backM: b, downM: dn }))(inPlane(karabiner)) : null;
+  const total = Number.isFinite(massKg) && massKg > 0 ? massKg : linesKg;
+  const restKg = rest ? Math.max(0, total - linesKg) : 0;
+  const all = linesKg + restKg;
+  const mass = restKg > 0
+    ? {
+      backM: ((own.backM * linesKg) + (rest.backM * restKg)) / all,
+      downM: ((own.downM * linesKg) + (rest.downM * restKg)) / all,
+    }
+    : own;
+  return {
+    mass,
+    massKg: total,
+    linesKg,
+    restKg,
+    lines: own,
+    rest,
+    drag: { backM: ab / aSum, downM: ad / aSum },
+    dragAreaM2: aSum,
   };
 }
 

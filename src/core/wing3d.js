@@ -425,6 +425,140 @@ export function projectedArea(wing) {
   return 2 * area;
 }
 
+/**
+ * The central section's own plane, which the balance works in: its nose,
+ * the unit vector back along its chord and the one square to it, up, both
+ * in the plane of symmetry, and the chord's incidence against the lattice's
+ * x axis, nose up positive. A first rib off the centreline (a centre cell)
+ * stands for the centre: its chord and nose are the centre cell's.
+ */
+export function centralFrame(wing) {
+  const root = wing?.ribs?.[0];
+  if (!root) throw new Error('centralFrame needs a wing');
+  const f = root.frame;
+  const origin = f ? f.origin : root.upper[0];
+  const ux = f ? f.u[0] : 1;
+  const uz = f ? f.u[2] : 0;
+  const n = Math.hypot(ux, uz) || 1;
+  const u = [ux / n, 0, uz / n];
+  return {
+    origin,
+    u,
+    v: [-u[2], 0, u[0]],
+    chordM: root.chord,
+    incidenceDeg: (Math.atan2(-u[2], u[0]) * 180) / Math.PI,
+  };
+}
+
+/**
+ * Where the wing's cloth puts its mass, in the central section's plane
+ * (`centralFrame`): back from the nose along the chord, and down from it.
+ * The two skins cell by cell, as the ruled surfaces between neighbouring
+ * ribs' sections, each by its own cloth's weight — the upper skin's nose, to
+ * `noseTo` of the chord, by the leading edge's — and every rib as its whole
+ * section, by the rib cloth's. Both halves and the centre cell, when there
+ * is one. A wing in its arc has it well below the chord: the tips hang
+ * down. The ribs' openings, the tapes, rods and seams are not counted; the
+ * rest of a wing's mass is taken as spread like its cloth.
+ *
+ * LEparagliding estimates the same point as the chord-weighted mean of
+ * every rib's point at 36% of its chord, at the rib's height in the arc
+ * (`lepMainParameters`).
+ *
+ * @param {object} wing   `buildWing`
+ * @param {object} o      the cloths' weights, g/m²
+ * @returns {{backM:number, downM:number, clothKg:number, parts:object}}
+ */
+export function wingMassCentre(wing, {
+  upperGsm, lowerGsm, ribGsm, noseGsm = upperGsm, noseTo = 0,
+} = {}) {
+  if (!wing?.ribs?.length) throw new Error('wingMassCentre needs a wing');
+  if (![upperGsm, lowerGsm, ribGsm, noseGsm].every((g) => g >= 0)) {
+    throw new Error('wingMassCentre needs each cloth\'s weight in g/m²');
+  }
+  const frame = centralFrame(wing);
+  const { origin: o, u, v } = frame;
+  const parts = {
+    upper: { areaM2: 0, kg: 0 }, nose: { areaM2: 0, kg: 0 }, lower: { areaM2: 0, kg: 0 }, ribs: { areaM2: 0, kg: 0 },
+  };
+  let kg = 0;
+  let mx = 0;
+  let mz = 0;
+  // A mass at a point, `copies` times: its mirror has the same x and z.
+  const add = (part, areaM2, point, gsm, copies) => {
+    const m = (areaM2 * gsm * copies) / 1000;
+    parts[part].areaM2 += areaM2 * copies;
+    parts[part].kg += m;
+    kg += m;
+    mx += m * point[0];
+    mz += m * point[2];
+  };
+  const tri = (a, b, c) => {
+    const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const n = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+    return { area: 0.5 * Math.hypot(n[0], n[1], n[2]), at: [0, 1, 2].map((k) => (a[k] + b[k] + c[k]) / 3) };
+  };
+  const mirror = (p) => [p[0], -p[1], p[2]];
+  // The skin between two ribs' polylines, quad by quad.
+  const skin = (A, B, surface, chordOf, copies) => {
+    const n = Math.min(A.length, B.length);
+    for (let k = 0; k < n - 1; k++) {
+      const t1 = tri(A[k], A[k + 1], B[k + 1]);
+      const t2 = tri(A[k], B[k + 1], B[k]);
+      const area = t1.area + t2.area;
+      if (!(area > 0)) continue;
+      const at = [0, 1, 2].map((j) => (t1.at[j] * t1.area + t2.at[j] * t2.area) / area);
+      const nose = surface === 'upper' && chordOf(k) < noseTo;
+      add(nose ? 'nose' : surface, area, at, nose ? noseGsm : surface === 'upper' ? upperGsm : lowerGsm, copies);
+    }
+  };
+  const r = wing.ribs;
+  const chordAt = (rib) => (k) => {
+    const s = rib.section?.upper;
+    return s && rib.chord > 0 ? ((s[k][0] + s[k + 1][0]) / 2) / rib.chord : 0.5;
+  };
+  for (let i = 0; i < r.length - 1; i++) {
+    skin(r[i].upper, r[i + 1].upper, 'upper', chordAt(r[i]), 2);
+    skin(r[i].lower, r[i + 1].lower, 'lower', chordAt(r[i]), 2);
+  }
+  if (!hasCentreRib(wing)) {
+    skin(r[0].upper.map(mirror), r[0].upper, 'upper', chordAt(r[0]), 1);
+    skin(r[0].lower.map(mirror), r[0].lower, 'lower', chordAt(r[0]), 1);
+  }
+  // Each rib as its section: the outline's area and centroid, in its plane.
+  r.forEach((rib, i) => {
+    const sec = rib.section;
+    if (!sec || !rib.frame) return;
+    const loop = sec.upper.concat(sec.lower.slice().reverse());
+    let a = 0;
+    let cx = 0;
+    let cy = 0;
+    for (let k = 0; k < loop.length; k++) {
+      const [x0, y0] = loop[k];
+      const [x1, y1] = loop[(k + 1) % loop.length];
+      const cr = x0 * y1 - x1 * y0;
+      a += cr;
+      cx += (x0 + x1) * cr;
+      cy += (y0 + y1) * cr;
+    }
+    if (Math.abs(a) < 1e-12) return;
+    cx /= 3 * a;
+    cy /= 3 * a;
+    const f = rib.frame;
+    const at = [0, 1, 2].map((k) => f.origin[k] + cx * f.u[k] + cy * f.v[k]);
+    add('ribs', Math.abs(a) / 2, at, ribGsm, ribCopies(wing, i));
+  });
+  if (!(kg > 0)) throw new Error('wingMassCentre: the wing has no cloth');
+  const c = [mx / kg - o[0], 0, mz / kg - o[2]];
+  return {
+    backM: c[0] * u[0] + c[2] * u[2],
+    downM: -(c[0] * v[0] + c[2] * v[2]),
+    clothKg: kg,
+    parts,
+  };
+}
+
 /** All rib outlines as closed 3D loops, for drawing and export. */
 export function ribLoops(wing) {
   return wing.ribs.map((r) => r.upper.slice().reverse().concat(r.lower.slice(1)));

@@ -13,10 +13,12 @@ decision makes it on the user's behalf without saying so.
 | --- | --- | --- |
 | karabiner separation | 0.42 m | sets where the cascade converges; changes the whole line plan |
 | loop allowance | 130 mm | material, not rounding: 130 mm over the default wing's 228 lines is 29.6 m of cord |
-| line drag coefficient | 1.1 | a cylinder in cross-flow, but Reynolds number moves it |
+| line drag coefficient | 1.1 | each line's own, from its Reynolds number as LEparagliding takes it, or one typed for every line (`docs/loads-and-materials.md` §3) |
 | measuring tension | 5 daN | the PMA's, and it sets the reference length an inspector checks |
 | row load shares | convention | the handbook table, or the section's own pressure distribution |
 | print margin and overlap | 10 / 15 mm | depends on the printer, not on the wing |
+| where the balance's forces act | chapter 4's rules | each where the wing says it acts, or the rules: 6.9% of chord apart on the gnuC2-23 (`docs/balance.md`) |
+| how the pilot hangs | at the karabiners | free to swing or held plumb, and how far below them: a harness's geometry |
 
 Each is asserted to change the model, and separately asserted to change an
 exported file. **A control that changes nothing is worse than no control:** it

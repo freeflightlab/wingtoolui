@@ -7,7 +7,9 @@
  * property the algorithm must obey, or a number printed in the handbook.
  */
 
-import { vortexLattice, stripsFromWing, trefftzDrag, wingStrips, arcFactors } from '../src/core/vlm.js';
+import {
+  vortexLattice, stripsFromWing, trefftzDrag, trefftzSegments, wingStrips, arcFactors, latticeCentres, liftLine,
+} from '../src/core/vlm.js';
 import { freeBodyCheck } from '../src/core/freebody.js';
 import {
   lepLineGeometry, lepPlanForTool, lepRibTable, lepAnchorPoint, readLepAirfoil, lepJoncs, lepHoles,
@@ -15,7 +17,9 @@ import {
   lepPanels, lepSeamAllowances, lepSkinTension, lepVents, lepShaping, lepSeamMatching,
   lepRibCutLine, lepEllipseSides, lepCalageVariation,
 } from '../src/core/leplines.js';
-import { toRibPlane, hasCentreRib, ribCopies, wholeWingCounts, ribSurfacePoint } from '../src/core/wing3d.js';
+import {
+  toRibPlane, hasCentreRib, ribCopies, wholeWingCounts, ribSurfacePoint, centralFrame, wingMassCentre,
+} from '../src/core/wing3d.js';
 import {
   lepStructure, lepResample, lepFlatten, lepStructureToDXF, lepStructureNesting, lepStructureWords,
 } from '../src/core/lepstructure.js';
@@ -38,7 +42,10 @@ import { buildWing, projectedArea , ribLoops, mirrorRib } from '../src/core/wing
 import { analyticPlanform as _ap } from '../src/core/planform.js';
 import { developPanel, developmentError, developWing } from '../src/core/flatdev.js';
 import { solveArc, applyOvalization, wideningProfile , DEFAULT_TRANSITIONS , arcFromWidening, seamEasing, billowFromPressure, tensionForBillow, panelBillowProfile } from '../src/core/ovalization.js';
-import { solveEquilibrium, lift3DFactor, simplifiedCalage , polarSweep, glideAngleTable, solveEquilibriumFromWing, trimFromCalage } from '../src/core/equilibrium.js';
+import {
+  solveEquilibrium, lift3DFactor, simplifiedCalage, polarSweep, glideAngleTable, solveEquilibriumFromWing, trimFromCalage,
+  balanceOnPolar, trimOnPolar, calageFromForces, balanceWhereForcesAct,
+} from '../src/core/equilibrium.js';
 import { canopyAnchors, centroid, buildCascade , brakeAnchors, applyBrakeDistribution } from '../src/core/lines.js';
 import {
   panelsToDXF, wingToOBJ, ribsToDXF, panelsToSVG, nestPanels, fabricEstimate, layoutBands,
@@ -114,6 +121,7 @@ import {
   thinAirfoil, liftingLine, wingPolar, estimateSectionPolar, profileDrag,
   altitudeSweep,
   camberLine,
+  polarAt as wingPolarAt,
 } from '../src/core/aero.js';
 import { applyReflex } from '../src/core/airfoil.js';
 import { parsePolar, commandScript, airfoilToDat, checkPolarMatch } from '../src/core/xfoil.js';
@@ -142,6 +150,7 @@ import {
   asymmetricCollapse, frontalCollapse, designEnvelope, PRACTICAL_FLOOR,
   publishedCascadeLoads, strengthFactors,
   DEFAULT_LOAD_CASE, wakeShielding, lengthChain, LINE_WEIGHT_PER_AREA,
+  parseLineStretch, withMeasuredLineData, elongationOf, strengthByLevel, DHV_LINE_CALCULATION, lineCentres,
 } from '../src/core/loads.js';
 import {
   riserSet, handleGeometry, handleAgainstBrake, riserLengths, alphaChange, brakeSlackUnderBar,
@@ -163,6 +172,7 @@ import {
 
 const pick = (p) => (p ? { row: p.row, level: p.level, index: p.index } : null);
 
+// A polar in XFOIL's own format, its numbers made up near a NACA 4415's.
 const SAMPLE_POLAR = [
   '',
   '       XFOIL         Version 6.99',
@@ -1009,6 +1019,20 @@ section('LEparagliding file interoperability');
     sd.ribs === scratchWing.ribs.length * 2 - 1 && sd.cells === (scratchWing.ribs.length - 1) * 2,
     `ribs ${sd.ribs}, cells ${sd.cells}`);
   near('span survives the write', sd.flatSpan, 10.25, 2e-3, ' m');
+  // Section 8 is written so that the program's construction — the attitude
+  // asin((Cp - calage) / line height), the pilot plumb under its Cp — gives
+  // back the balance's attitude. It wrote the centre of pressure, to a whole
+  // per cent.
+  const bal8 = solveEquilibrium({});
+  const a8 = readAoA(parseLep(designToLep({
+    wing: scratchWing, airfoil: naca4('4415'), name: 'eight', balance: bal8, lineLengthM: 6.0, riserLengthCm: 50,
+  })));
+  const chord8 = scratchWing.ribs[0].chord * 100;
+  const theta8 = (Math.asin((((a8.cpPct - a8.calagePct) / 100) * chord8) / (a8.lineLengthCm + a8.riserLengthCm)) * 180) / Math.PI;
+  check('section 8 is written so its program flies the balance\'s attitude, not the centre of pressure\'s',
+    Math.abs(theta8 - bal8.thetaDeg) < 0.01 && Math.abs(a8.calagePct - bal8.calageFraction * 100) < 0.006
+    && a8.riserLengthCm === 50 && a8.lineLengthCm === 600 && Math.abs(a8.cpPct - bal8.xcpFraction * 100) > 1,
+    `${theta8.toFixed(3)} degrees against ${bal8.thetaDeg.toFixed(3)}; Cp ${a8.cpPct}% where the centre of pressure is ${(bal8.xcpFraction * 100).toFixed(2)}%`);
 
   // Malformed input must fail loudly rather than produce a plausible wing.
   check('a non-LEP file is rejected', (() => {
@@ -1241,7 +1265,22 @@ section('XFOIL interoperability');
   check('zero-lift angle is interpolated, not picked',
     polar.alphaL0Deg > -4 && polar.alphaL0Deg < -3.8, `got ${polar.alphaL0Deg.toFixed(3)}`);
   near('lift slope is near 2 pi', polar.liftSlopePerRad, 2 * Math.PI, 0.3, ' /rad');
-  check('polar is marked as measured', polar.source === 'xfoil');
+  check('polar is marked as XFOIL\'s', polar.source === 'xfoil');
+  check('a polar that reaches zero lift is not extrapolated', polar.zeroLiftExtrapolated === false);
+  // Swept from 0°, as many polars are, it does not reach zero lift, and its
+  // first angle was taken for its zero-lift angle: 3.9° short, the wing on it
+  // flying with 3.9° less of its own lift at every angle.
+  const from0 = parsePolar(SAMPLE_POLAR.split('\n').filter((l) => !/^\s+-[42]\.000\s/.test(l)).join('\n'));
+  check('a polar that never reaches zero lift and does not rise with its angle is refused', (() => {
+    const stalled = [...SAMPLE_POLAR.split('\n').slice(0, 12),
+      '  14.000   1.2000   0.03000   0.02500  -0.0700  0.0100  1.0000',
+      '  16.000   1.1000   0.05000   0.04500  -0.0650  0.0100  1.0000'].join('\n');
+    try { parsePolar(stalled); return false; } catch (e) { return /zero-lift angle cannot be found/.test(e.message); }
+  })());
+  check('a polar swept from 0° finds its zero lift along its lift slope, and says so',
+    from0.points.length === 6 && from0.zeroLiftExtrapolated
+      && Math.abs(from0.alphaL0Deg - polar.alphaL0Deg) < 0.1 && Math.abs(from0.cm0 - polar.cm0) < 0.002,
+    `${from0.alphaL0Deg.toFixed(3)} deg, Cm0 ${from0.cm0.toFixed(4)} against ${polar.alphaL0Deg.toFixed(3)} deg, ${polar.cm0.toFixed(4)}`);
 
   // A polar computed at the wrong condition loads fine and is wrong, so the
   // mismatch has to be surfaced rather than assumed away.
@@ -1263,6 +1302,9 @@ section('XFOIL interoperability');
   });
   check('wing polar reports its section source', wp.source === 'xfoil');
   check('wing polar on measured data still solves', wp.bestGlide.glideRatio > 3);
+  const at5 = (sp) => wingPolar({ planform: pf, airfoil: naca4('4415'), atm: atmosphere(1000), mass: 85,
+    sectionPolar: sp, alphaRange: [5, 5], step: 1 }).points[0].CL;
+  near('and on the polar swept from 0° it lifts as on the whole one', at5(from0) / at5(polar), 1, 0.03);
 }
 
 // ---------------------------------------------------------------------------
@@ -8836,6 +8878,13 @@ section('Swoop2: LEparagliding\'s own geometry, reproduced');
     airfoil: { ...secAf, anchors: design.anchorFractions }, anchors: design.anchorFractions,
   });
   const selL = lepLineSelection(loadsL.tensions, plan);
+  // Its own set against the DHV's calculation for EN 926-1, at the
+  // strengths its types are given: every level holds, its mains six times
+  // over.
+  const dhvL = strengthByLevel(selL.lines, { maxWeightKg: 85.5 });
+  check('and its own set holds every level of the DHV\'s line calculation, at the strengths its types are given',
+    dhvL.ok && dhvL.suspension.levels[0].g > 60,
+    dhvL.suspension.levels.map((x) => `level ${x.level} ${x.sumDaN.toFixed(0)} daN, ${x.g.toFixed(0)} g`).join('; '));
   check('every line takes the type its own table gives it',
     selL.ok && selL.lines.every((l) => l.line && l.sizedBy === 'design'),
     `${selL.unmet.length} without one`);
@@ -9871,12 +9920,12 @@ section('The wing as a whole, and its balance, as the program prints them');
     alphaDeg: e.alphaDeg, cz: e.cl * e.cle, cx0a: e.cd * e.cde - cxi, cm: (0.25 - e.cpYM / b.chordM) * e.cl * e.cle,
     apply3D: false,
   });
-  check('the handbook\'s balance on the same coefficients flies the same speed and glide, and hangs the pilot within 0.15% of chord of it',
-    Math.abs(hb.speedKMH / c.speedKMH - 1) < 1e-9 && Math.abs(hb.gammaDeg - c.gammaDeg) < 1e-9
-    && Math.abs(hb.calageFraction * 100 - c.calagePct) < 0.15,
-  `${(hb.calageFraction * 100).toFixed(2)}% against ${c.calagePct.toFixed(2)}%`);
-  // Why so close: the handbook's rules, one at a time, in the program's
-  // moments. Two are worth about 1.8% of chord each, in opposite senses.
+  check('the handbook\'s balance on the same coefficients flies the same speed and glide',
+    Math.abs(hb.speedKMH / c.speedKMH - 1) < 1e-9 && Math.abs(hb.gammaDeg - c.gammaDeg) < 1e-9,
+  `${hb.speedKMH.toFixed(3)} km/h, ${hb.gammaDeg.toFixed(4)} degrees`);
+  // Where it hangs the pilot: the handbook's rules, one at a time, in the
+  // program's moments. Two are worth about 1.8% of chord each, in opposite
+  // senses.
   const st = { ...c, wing: c.massCentres.wing, linesMc: b.lines.massCentreM, dragCentre: c.lineDrag.centreM };
   const calageWith = (o) => {
     const s = { ...st, ...o };
@@ -9899,6 +9948,16 @@ section('The wing as a whole, and its balance, as the program prints them');
     && Math.abs(sens.wingOnChord - 0.52) < 0.01 && Math.abs(sens.pilotAtKarabiners + 0.18) < 0.01
     && Math.abs(calageWith({}) ) < 1e-9,
   Object.entries(sens).map(([k, v]) => `${k} ${v.toFixed(3)}`).join(', '));
+  // And together they are the whole difference. The handbook's balance put
+  // the pilot within 0.15% of chord of the program's while it counted the
+  // pitching moment twice (`solveEquilibrium`, "The pitching moment, once"):
+  // the second count, -0.27%, cancelled most of what the rules come to.
+  const rulesSum = Object.values(sens).reduce((a, v) => a + v, 0);
+  check('and the handbook\'s balance hangs the pilot 0.39% of chord aft of the program\'s: what its rules come to, +0.42%',
+    Math.abs(hb.calageFraction * 100 - c.calagePct - rulesSum) < 0.05
+    && Math.abs(hb.calageFraction * 100 - c.calagePct - 0.39) < 0.01,
+  `${(hb.calageFraction * 100).toFixed(2)}% against ${c.calagePct.toFixed(2)}%: ${(hb.calageFraction * 100 - c.calagePct).toFixed(3)} `
+    + `against the rules' ${rulesSum.toFixed(3)}`);
   check('the line drag sits 47% of the way down to the karabiners, its weight 53%',
     Math.abs(b.lines.dragCentreM.z / b.hcpM - 0.472) < 0.0005 && Math.abs(b.lines.massCentreM.z / b.hcpM - 0.525) < 0.0005,
   `${(b.lines.dragCentreM.z / b.hcpM).toFixed(4)}, ${(b.lines.massCentreM.z / b.hcpM).toFixed(4)}`);
@@ -13267,51 +13326,60 @@ section('Trim from the calage, not from an assumed angle');
   const pfT = planformFromDesignInputs({
     span: zT.flatSpan, rootChord: zT.maxChord, tipChord: 0.55, tipSweep: 1.25,
   });
+  // The line height is `lineLength`: given as `lineLengthM`, which the
+  // balance does not read, it flew on the default 6 m.
   const args = {
     planform: pfT, airfoil: naca4('4415'), atm: atmosphere(0),
-    pilotMass: 52, wingMass: 3, lineLengthM: 6.6,
+    pilotMass: 52, wingMass: 3, lineLength: 6.6,
   };
 
   // The calage is NOT monotonic in angle of attack: it falls to a minimum
-  // near 1 to 2 degrees and rises on both sides. A bisection assuming it
-  // rises throughout finds the wrong branch or nothing at all.
+  // where the wing has hardly any lift — the centre of pressure runs aft as
+  // the lift goes, Xcp = 0.25 - Cm/Cz — and rises from there. A bisection
+  // assuming it rises throughout finds the wrong branch or nothing at all.
   const calageAt = (a) => solveEquilibriumFromWing({ ...args, alphaDeg: a })
     .calageFraction;
   check('the calage falls before it rises',
-    calageAt(-2) > calageAt(2) && calageAt(12) > calageAt(2),
-    `${(calageAt(-2) * 100).toFixed(1)}% at -2, `
-    + `${(calageAt(2) * 100).toFixed(1)}% at 2, `
+    calageAt(-3) > calageAt(-2) && calageAt(12) > calageAt(-2),
+    `${(calageAt(-3) * 100).toFixed(1)}% at -3, `
+    + `${(calageAt(-2) * 100).toFixed(1)}% at -2, `
     + `${(calageAt(12) * 100).toFixed(1)}% at 12`);
 
   // So there are two angles for any reachable calage, and only the upper one
   // is a flight state — at the lower the wing has no lift to speak of and
   // would not stay open.
-  const trimmed = trimFromCalage({ ...args, calageFraction: 0.42 });
+  //
+  // 34%: between the gnuC2-23's 33 and the Tuluaq-19's 36, two built wings
+  // whose files say where their lines hang them (the Swoop2's says 32.5).
+  // No Geo 7's calage is published. This said 42%, "where real wings hang",
+  // and trimmed there only while the balance counted the pitching moment
+  // twice; counted once, 42% trims this wing at CL 0.79 and 25 km/h.
+  const trimmed = trimFromCalage({ ...args, calageFraction: 0.34 });
   check('the solve returns the flight branch, not the low-angle one',
     trimmed.alphaDeg > 2, `${trimmed.alphaDeg.toFixed(2)} degrees`);
   near('and it hits the calage it was asked for',
-    trimmed.calageFraction, 0.42, 1e-4);
+    trimmed.calageFraction, 0.34, 1e-4);
 
   // The point of the change: a realistic calage gives a realistic wing.
-  check('a 42% calage trims at a lift coefficient a real wing uses',
+  check('a calage where built wings hang theirs trims at a lift coefficient a real wing uses',
     trimmed.cz3D > 0.5 && trimmed.cz3D < 0.7,
-    `CL ${trimmed.cz3D.toFixed(3)} against a real 0.55 to 0.65`);
+    `CL ${trimmed.cz3D.toFixed(3)} at 34% against a real 0.55 to 0.65`);
 
   const assumed = solveEquilibriumFromWing({ ...args, alphaDeg: 6 });
   check('where the old assumed angle of 6 degrees does not',
     assumed.cz3D > 0.75, `CL ${assumed.cz3D.toFixed(3)}`);
   check('and the speed rises towards what certification requires',
-    trimmed.speedKMH > assumed.speedKMH * 1.15,
+    trimmed.speedKMH > assumed.speedKMH * 1.12,
     `${assumed.speedKMH.toFixed(1)} to ${trimmed.speedKMH.toFixed(1)} km/h, `
     + 'certificate wants more than 30');
   check('carrying the sink rate with it',
-    (trimmed.speedMS / trimmed.glideRatio) > (assumed.speedMS / assumed.glideRatio) * 1.15,
+    (trimmed.speedMS / trimmed.glideRatio) > (assumed.speedMS / assumed.glideRatio) * 1.12,
     `${(assumed.speedMS / assumed.glideRatio).toFixed(3)} to `
     + `${(trimmed.speedMS / trimmed.glideRatio).toFixed(3)} m/s against a real 1.0`);
 
   // A calage the wing cannot trim at is refused rather than approximated.
   check('an unreachable calage is refused, and says what is reachable', (() => {
-    try { trimFromCalage({ ...args, calageFraction: 0.20 }); return false; }
+    try { trimFromCalage({ ...args, calageFraction: 0.15 }); return false; }
     catch (e) { return /outside what this wing can trim at/.test(e.message); }
   })());
   check('and a calage outside 0 to 1 is refused as not a fraction', (() => {
@@ -13366,7 +13434,7 @@ section('Against the certification flight tests');
     });
     return solveEquilibriumFromWing({
       planform: pf, airfoil: naca4('4415'), atm: atmosphere(0),
-      pilotMass: allUpKg - z.mass, wingMass: z.mass, lineLengthM: 6.6,
+      pilotMass: allUpKg - z.mass, wingMass: z.mass, lineLength: 6.6,
     });
   };
 
@@ -13417,13 +13485,40 @@ section('Against the certification flight tests');
     });
     return solveEquilibriumFromWing({
       planform: pf, airfoil: naca4('4415'), atm: atmosphere(0),
-      pilotMass: allUpKg - z.mass, wingMass: z.mass, lineLengthM: 6.6, arc: arcFactors(wing),
+      pilotMass: allUpKg - z.mass, wingMass: z.mass, lineLength: 6.6, arc: arcFactors(wing),
     });
   };
   const inArc = cases.map(([sz, m]) => trimInArc(sz, m));
   check('in its arc the same angle trims at a real wing\'s lift coefficient, three of the four cases above 30 km/h',
     inArc.filter((r) => r.speedKMH < 30).length === 1 && inArc.every((r) => r.cz3D > 0.55 && r.cz3D < 0.65),
     inArc.map((r) => `${r.speedKMH.toFixed(1)} km/h at CL ${r.cz3D.toFixed(3)}`).join(', '));
+
+  // Trimmed from the calage instead (docs/certification.md section 4): no
+  // Geo 7's is published, and the three complete designs on file hang theirs
+  // at 32.5 to 36%. From 34%, in its arc, all four are above 30 km/h, and
+  // the lightest reaches it from a calage forward of 37.1%.
+  const fromCalage = (size, allUpKg, calageFraction) => {
+    const z = geo.find((x) => x.name === size);
+    const pf = planformFromDesignInputs({
+      span: z.flatSpan, rootChord: z.maxChord, tipChord: 0.55, tipSweep: 1.25,
+    });
+    const wing = buildWing({
+      planform: pf, lobe: buildLobe(ellipseForProjectedRatio(z.projectedSpan / z.flatSpan), pf.halfSpan),
+      airfoil: naca4('4415'), cells: 24,
+    });
+    return trimFromCalage({
+      planform: pf, airfoil: naca4('4415'), atm: atmosphere(0), calageFraction,
+      pilotMass: allUpKg - z.mass, wingMass: z.mass, lineLength: 6.6, arc: arcFactors(wing),
+    });
+  };
+  const at34 = cases.map(([sz, m]) => fromCalage(sz, m, 0.34));
+  check('trimmed in its arc from a 34% calage, where built wings hang, all four cases are above 30 km/h',
+    at34.every((r) => r.speedKMH > 30 && r.cz3D > 0.5 && r.cz3D < 0.52)
+    && Math.abs(at34[0].speedKMH - 31.3) < 0.05 && Math.abs(at34[3].speedKMH - 39.5) < 0.05,
+    at34.map((r) => `${r.speedKMH.toFixed(1)} km/h at CL ${r.cz3D.toFixed(3)}`).join(', '));
+  const xs371 = fromCalage('XS', 55, 0.371);
+  check('and the lightest trims at the certified 30 km/h from a calage of 37.1%',
+    Math.abs(xs371.speedKMH - 30) < 0.05, `${xs371.speedKMH.toFixed(2)} km/h`);
 }
 
 // ---------------------------------------------------------------------------
@@ -14759,6 +14854,562 @@ section('The wing in its arc, in flight');
 }
 
 // ---------------------------------------------------------------------------
+section('The balance on the wing\'s own polar');
+
+{
+  // The handbook's balance takes a typed Cz, Cx0, Cm and Oswald factor,
+  // whatever the wing. `balanceOnPolar` flies it on the wing's own polar
+  // instead — its lift, induced and profile drag at the angle, in its arc
+  // when the polar is — and `trimOnPolar` finds the angle a calage trims at.
+  const pfB = planformFromDesignInputs({ span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1 });
+  const mB = planformMetrics(pfB);
+  const afB = naca4('4415');
+  const atmB = atmosphere(1000);
+  const thinB = thinAirfoil(afB);
+  const polarB = wingPolar({
+    planform: pfB, airfoil: afB, atm: atmB, mass: 85, area: mB.area, chordRef: mB.mac,
+    alphaRange: [-2, 15], step: 1,
+  });
+  const common = {
+    area: mB.area, span: pfB.span, chord: 2.6, lineLength: 7.0, pilotMass: 75, wingMass: 5, lineMass: 0.5,
+    rho: atmB.density, cxPilot: 0.015, cxLines: 0.012,
+  };
+
+  // The polar at any angle: its own points exactly, straight lines between.
+  const p5 = polarB.points.find((x) => x.alphaDeg === 5);
+  const p6 = polarB.points.find((x) => x.alphaDeg === 6);
+  const at5 = wingPolarAt(polarB, 5);
+  const at55 = wingPolarAt(polarB, 5.5);
+  check('the polar at one of its own angles is that point, and halfway between two it is halfway',
+    at5.CL === p5.CL && at5.CDi === p5.CDi && at5.CDprofile === p5.CDprofile
+    && Math.abs(at55.CL - (p5.CL + p6.CL) / 2) < 1e-15 && Math.abs(at55.CDprofile - (p5.CDprofile + p6.CDprofile) / 2) < 1e-15,
+    `CL ${at5.CL.toFixed(4)} at 5, ${at55.CL.toFixed(4)} at 5.5`);
+  check('and outside its angles there is none', wingPolarAt(polarB, -3) === null && wingPolarAt(polarB, 15.5) === null);
+
+  // The balance takes the polar's own figures: its induced drag through the
+  // span efficiency it has on its aspect ratio comes back to the polar's.
+  const b5 = balanceOnPolar({ polar: polarB, alphaDeg: 5, cm0: thinB.cm0, ...common });
+  check('on the polar the balance\'s lift, induced and profile drag are the polar\'s at the angle',
+    Math.abs(b5.cz3D - at5.CL) < 1e-15 && Math.abs(b5.cxi - at5.CDi) < 1e-12 && Math.abs(b5.cxa - at5.CDi - at5.CDprofile) < 1e-12
+    && b5.lift3DFactor === 1 && !b5.arc,
+    `Cz ${b5.cz3D.toFixed(4)}, Cxi ${b5.cxi.toFixed(5)} against ${at5.CDi.toFixed(5)}`);
+  const W = (common.pilotMass + common.wingMass + common.lineMass) * 9.81;
+  check('and the forces balance the weight', Math.abs(b5.q0 * (b5.cz3D * Math.cos(b5.gammaRad) + b5.cxTotal * Math.sin(b5.gammaRad)) - W) < 1e-9,
+    `${W.toFixed(1)} N`);
+  // Its centre of pressure is the wing's lift's: Xcp = 0.25 - Cm0/CL, on
+  // the wing's lift coefficient, not on a section's at the angle.
+  check('its centre of pressure is placed from the section\'s Cm0 on the wing\'s own lift',
+    Math.abs(b5.xcpFraction - (0.25 - thinB.cm0 / at5.CL)) < 1e-15,
+    `${(b5.xcpFraction * 100).toFixed(2)}% of chord, Cm0 ${thinB.cm0.toFixed(4)}`);
+  let threw = null;
+  try { balanceOnPolar({ polar: polarB, alphaDeg: 20, cm0: thinB.cm0, ...common }); } catch (e) { threw = e.message; }
+  check('an angle the polar does not reach is refused, and says the polar\'s range',
+    /outside the polar \(-2 to 15\)/.test(threw || ''), threw);
+
+  // Trimmed from a calage: the angle the pilot hangs the wing at. (This
+  // wing, flat and on a NACA 4415, can trim from 39.6% aft.)
+  const t42 = trimOnPolar({ polar: polarB, calageFraction: 0.42, cm0: thinB.cm0, ...common });
+  const back = balanceOnPolar({ polar: polarB, alphaDeg: t42.onPolar.alphaDeg, cm0: thinB.cm0, ...common });
+  check('a calage trims the wing at the angle whose balance hangs the pilot there',
+    Math.abs(t42.calageFraction - 0.42) < 1e-4 && t42.calageAsked === 0.42 && t42.derivedFrom === 'calage'
+    && Math.abs(back.calageFraction - t42.calageFraction) < 1e-12 && Math.abs(back.speedKMH - t42.speedKMH) < 1e-9,
+    `${t42.onPolar.alphaDeg.toFixed(3)} degrees, ${t42.speedKMH.toFixed(2)} km/h, CL ${t42.cz3D.toFixed(3)}`);
+  // On the branch a wing flies on: the calage rises with the angle, so
+  // further aft trims slower.
+  const t46 = trimOnPolar({ polar: polarB, calageFraction: 0.46, cm0: thinB.cm0, ...common });
+  check('further aft trims at a higher angle and slower',
+    t46.onPolar.alphaDeg > t42.onPolar.alphaDeg && t46.speedKMH < t42.speedKMH,
+    `${t42.onPolar.alphaDeg.toFixed(2)} to ${t46.onPolar.alphaDeg.toFixed(2)} degrees`);
+  let refused = null;
+  try { trimOnPolar({ polar: polarB, calageFraction: 0.05, cm0: thinB.cm0, ...common }); } catch (e) { refused = e.message; }
+  check('a calage the wing cannot trim at is refused, and says what it can',
+    /outside what this wing can trim at/.test(refused || ''), refused);
+
+  // The speed system on the same polar starts where the balance is.
+  const liftB = liftModelFromWing({ planform: pfB, airfoil: afB, atm: atmB, mass: 85, area: mB.area, polar: polarB });
+  check('the lift model on a polar takes its profile drag too, the polar\'s at its own angles',
+    typeof liftB.profileAt === 'function' && Math.abs(liftB.profileAt(5) - p5.CDprofile) < 1e-12
+    && Math.abs(liftB.czAt(5) - p5.CL) < 1e-12,
+    `${liftB.profileAt(5).toFixed(5)} at 5 degrees`);
+  const riserB = riserSet({ rows: ['A', 'B', 'C', 'D'], lengthMM: 500, travelMM: 150, anchors: afB.anchors ?? { A: 0.085, B: 0.275, C: 0.53, D: 0.785 } });
+  const barB = acceleratedPolarFromWing({
+    riser: riserB, chordM: 2.6, liftModel: liftB, steps: 4, ownProfileDrag: true,
+    base: { ...common, cx0a: 0.009, cm: thinB.cm0, alphaDeg: t42.onPolar.alphaDeg },
+  });
+  check('so the bar, flown on the polar\'s own drag from the trimmed angle, starts at the balance\'s trim',
+    Math.abs(barB.rows[0].speedKMH - t42.speedKMH) < 1e-6 && barB.rows[3].speedKMH > barB.rows[0].speedKMH,
+    `${barB.rows[0].speedKMH.toFixed(3)} km/h against ${t42.speedKMH.toFixed(3)}`);
+}
+
+section('Measured line stretch and weights, from OpenGlider');
+
+{
+  // OpenGlider (booya-at/OpenGlider, GPL-3) carries 56 line types with their
+  // load and elongation measured: Cousin's Vectraline, CTL 900 and
+  // Technoline, Liros's LTC, NTSL, TSL, DFL and DSL. This project's stretch
+  // was one elongation at the rated strength, in proportion below it.
+  const st = parseLineStretch(readFileSync('data/reference/line-stretch.tsv', 'utf8'));
+  const unused = st.rows.filter((r) => !r.used);
+  check('56 line types, 50 with a curve to use; the six without say why',
+    st.rows.length === 56 && st.rows.length - unused.length === 50
+    && unused.filter((r) => /placeholder|no stretch given/.test(r.why)).length === 4
+    && unused.some((r) => r.name === 'liros.dsl140' && /falls as the load rises/.test(r.why))
+    && unused.some((r) => r.name === 'cousin.technoline1830' && /daN/.test(r.why)),
+  unused.map((r) => `${r.name}: ${r.why}`).join('; '));
+  check('every curve used starts from nothing and rises with the load',
+    st.rows.filter((r) => r.used).every((r) => r.curve[0][0] === 0 && r.curve[0][1] === 0
+      && r.curve.every((p, i) => i === 0 || (p[0] > r.curve[i - 1][0] && p[1] >= r.curve[i - 1][1]))));
+
+  // Fourteen of them are lines the catalogue has, and agree with it.
+  const cat = parseMaterialsTable(readFileSync('data/reference/line-materials.tsv', 'utf8'));
+  const matched = [...st.byCode.entries()].map(([code, r]) => ({ r, c: cat.find((x) => x.code === code) }));
+  check('fourteen are in the catalogue, at its diameters to 0.1 mm and, Liros\'s, its strengths',
+    matched.length === 14 && matched.every(({ r, c }) => c && Math.abs(r.diameterMM - c.diameterMM) <= 0.1001
+      && (r.maker !== 'Liros' || Math.abs(r.minBreakDaN - c.strengthNewDaN) <= 3)),
+  matched.map(({ r, c }) => `${c?.code} ${r.diameterMM}/${c?.diameterMM}`).join(', '));
+
+  // Their weights check the weight per area the catalogue's are estimated at.
+  const perArea = (fams) => {
+    const v = st.rows.filter((r) => r.maker === 'Liros' && fams.includes(r.family) && r.gramsPerM)
+      .map((r) => r.gramsPerM / ((Math.PI / 4) * r.diameterMM * r.diameterMM));
+    return { n: v.length, mean: v.reduce((a, b) => a + b, 0) / v.length };
+  };
+  const sh = perArea(['TSL', 'NTSL', 'DSL', 'DFL']);
+  const bare = perArea(['LTC']);
+  check('Liros\'s sheathed lines weigh 0.955 g/m per mm2 over 24 sizes, where Edelrid\'s give the 0.98 the catalogue uses',
+    sh.n === 24 && Math.abs(sh.mean - 0.955) < 0.002 && Math.abs(sh.mean / LINE_WEIGHT_PER_AREA.sheathed - 1) < 0.03,
+    `${sh.mean.toFixed(3)} over ${sh.n}`);
+  check('and its bare Technora 1.11 over nine, which the catalogue now takes for bare aramid where it took 0.9',
+    bare.n === 9 && Math.abs(bare.mean - 1.112) < 0.002 && LINE_WEIGHT_PER_AREA.unsheathedAramid === 1.11
+    && Math.abs(cat.find((x) => x.code === 'U-190').gramsPerM - 1.13 * 1.11) < 1e-9,
+  `${bare.mean.toFixed(3)} over ${bare.n}`);
+
+  const measured = withMeasuredLineData(cat, st);
+  const tsl = measured.find((x) => x.code === 'TSL190');
+  const dfl = measured.find((x) => x.code === 'DFL-115');
+  check('a matched line takes its curve and its weight, and keeps the estimate beside it',
+    tsl.stretchCurve?.length === 3 && tsl.gramsPerM === 1.76 && Math.abs(tsl.gramsPerMEstimated - 1.96 * 0.98) < 1e-9
+    && !dfl.stretchCurve && /no stretch given/.test(dfl.stretchNotUsed) && dfl.gramsPerM === 1.18,
+  `${tsl.gramsPerM} g/m against ${tsl.gramsPerMEstimated.toFixed(2)} estimated`);
+  check('its elongation is the curve at its points, straight between and on beyond them',
+    elongationOf(tsl, 100, 984) === 0.0025 && Math.abs(elongationOf(tsl, 200, 984) - 0.0048) < 1e-12
+    && Math.abs(elongationOf(tsl, 50, 984) - 0.00125) < 1e-12 && Math.abs(elongationOf(tsl, 400, 984) - 0.0094) < 1e-12,
+    `${(elongationOf(tsl, 50, 984) * 100).toFixed(3)}% at 5 daN`);
+  const u190 = measured.find((x) => x.code === 'U-190');
+  check('and a line with no curve keeps the generic: 3.5% at its rated strength, in proportion',
+    Math.abs(elongationOf(u190, 500, 1030) - 0.035 * (500 / 1030)) < 1e-15);
+
+  // What the generic got wrong, at the 5 daN a line is measured at.
+  const at5 = matched.filter(({ r }) => r.used).map(({ r, c }) => {
+    const m = measured.find((x) => x.code === c.code);
+    const gen = (m.sheathed ? 0.05 : 0.035) * (50 / (m.strengthKinkedDaN * 10));
+    return { code: c.code, family: r.family, ratio: gen / elongationOf(m, 50, m.strengthKinkedDaN * 10) };
+  });
+  const tslR = at5.filter((x) => x.family === 'TSL').map((x) => x.ratio);
+  const ltcR = at5.filter((x) => x.family === 'LTC').map((x) => x.ratio);
+  check('at 5 daN the generic stretch was one and a half to three times a sheathed Technora line\'s, and within half of a bare one\'s',
+    Math.min(...tslR) > 1.45 && Math.max(...tslR) < 3.0 && Math.min(...ltcR) > 0.55 && Math.max(...ltcR) < 1.35
+    && Math.abs(at5.find((x) => x.code === 'DSL70').ratio - 3.6) < 0.05,
+    at5.map((x) => `${x.code} ${x.ratio.toFixed(2)}`).join(', '));
+
+  // The length chain takes the curve: a 3 m TSL 190 measured at 5 daN.
+  const chain = (line) => lengthChain({ lines: [{ name: 'X', lengthMM: 3000, tensionN: 60, line, ratedDaN: line.strengthKinkedDaN }] },
+    { measurementDaN: 5 }).lines[0];
+  const cMeasured = chain(tsl);
+  const cGeneric = chain({ ...tsl, stretchCurve: undefined });
+  check('so a 3 m TSL 190 measured at 5 daN is 3.7 mm over its sewn length, where the generic said 7.6',
+    cMeasured.stretchFrom === 'measured' && Math.abs(cMeasured.measurementStretchMM - 3.74) < 0.01
+    && cGeneric.stretchFrom === 'generic' && Math.abs(cGeneric.measurementStretchMM - 7.59) < 0.02,
+  `${cMeasured.measurementStretchMM.toFixed(2)} against ${cGeneric.measurementStretchMM.toFixed(2)} mm`);
+}
+
+section('The line set level by level, as the DHV calculates it');
+
+{
+  // The DHV's "suspension line calculation" for EN 926-1:2015 | NfL
+  // 2-565-20: level 1 is the lines on the risers, each further junction
+  // starts the next; each level's strengths after bending, both sides, at
+  // least 1400 daN and 14 times the maximum weight; every line 20 daN; each
+  // brake level 150. OpenGlider sums its levels so, a branch that has ended
+  // counted again above it.
+  const L = (name, from, to, daN, row = 'A') => ({ name, row, from, to, ratedDaN: daN });
+  // Two mains; each splits in two; one of the four splits again.
+  const set = [
+    L('M1', [0, 0, 0], [0, 1, 5], 300), L('M2', [0, 0, 0], [0, 3, 5], 300),
+    L('m1', [0, 1, 5], [0, 0.5, 6], 120), L('m2', [0, 1, 5], [0, 1.5, 6], 120),
+    L('m3', [0, 3, 5], [0, 2.5, 6], 120), L('m4', [0, 3, 5], [0, 3.5, 6], 120),
+    L('u1', [0, 0.5, 6], [0, 0.4, 7], 60), L('u2', [0, 0.5, 6], [0, 0.6, 7], 60),
+  ];
+  const v = strengthByLevel(set, { maxWeightKg: 100 });
+  const lv = v.suspension.levels;
+  check('levels by junction: mains, then four, then the two above the one that splits, the other three carried up',
+    lv.length === 3 && lv[0].lines === 2 && lv[1].lines === 4 && lv[2].lines === 2 && lv[2].carried === 3
+    && lv[0].sumDaN === 1200 && lv[1].sumDaN === 960 && lv[2].sumDaN === 2 * (60 + 60 + 3 * 120),
+  lv.map((x) => `${x.level}: ${x.lines}+${x.carried} ${x.sumDaN}`).join(' | '));
+  check('and against the calculation: 12.2 g at the mains and 960 daN above them are short, and say so',
+    !v.ok && Math.abs(lv[0].g - 1200 / 98.1) < 1e-9
+    && v.problems.some((p) => /level 2 holds 960 daN, under 1400/.test(p))
+    && v.problems.some((p) => /level 1 holds 12\.2 g, under 14/.test(p)),
+  v.problems.join('; '));
+
+  // The tool's own set, sized line by line, and then to the calculation.
+  const wingD = demoWing();
+  const planD = buildLinePlan({ wing: wingD, airfoil: naca4('4415'), everyNthRib: 2, lineLengthM: 6.5, brakes: { anchors: 13, levelCounts: [6, 3, 1] } });
+  const loadsD = analyseLoads({ plan: planD, planform: wingD.planform, stations: wingD.stations, totalMassKg: 85, alphaDeg: 5 });
+  const cat = parseMaterialsTable(readFileSync('data/reference/line-materials.tsv', 'utf8'));
+  const byLine = selectLines(loadsD.tensions, { table: cat });
+  const byLevel = selectLines(loadsD.tensions, { table: cat, levelRule: { maxWeightKg: 85 } });
+  const before = strengthByLevel(byLine.lines, { maxWeightKg: 85 });
+  const after = strengthByLevel(byLevel.lines, { maxWeightKg: 85 });
+  check('sized line by line, the default wing\'s set falls short of it',
+    !before.ok, before.problems.join('; '));
+  check('sized to it, every level holds, by taking lines up and never down',
+    after.ok && byLevel.levelSized > 0
+    && byLevel.lines.every((l, i) => l.ratedDaN >= byLine.lines[i].ratedDaN)
+    && byLevel.lines.filter((l) => l.sizedBy === 'level').length === byLevel.lines.filter((l, i) => l.ratedDaN > byLine.lines[i].ratedDaN).length,
+  `${byLevel.levelSized} sizes up; brake level 1 ${after.brake.levels[0].sumDaN.toFixed(0)} daN, mains ${after.suspension.levels[0].sumDaN.toFixed(0)}`);
+  check('and the rule is the DHV\'s, said where it came from',
+    DHV_LINE_CALCULATION.levelMinDaN === 1400 && DHV_LINE_CALCULATION.levelMinG === 14
+    && DHV_LINE_CALCULATION.brakeLevelMinDaN === 150 && /EN 926-1:2015/.test(DHV_LINE_CALCULATION.source));
+}
+
+section('Every force where it acts');
+
+{
+  // Chapter 4 balances the wing with each force placed by rule: the lift
+  // and the wing's drag on the central chord at 0.25 - Cm0/Cz of it, the
+  // wing's weight a third back on the chord, the lines' weight half way down
+  // and their drag a third, the pilot at the karabiners. LEparagliding, by
+  // the same author, puts each where it acts. So does this, from the wing.
+
+  // The lattice's centres. A flat rectangle's strips all have their quarter
+  // chord at a quarter of the chord, on it: lift, induced and profile drag
+  // all act there.
+  const pfR = planformFromDesignInputs({ span: 10, rootChord: 1, tipChord: 1, tipSweep: 0, ellipticityLE: 0, ellipticityTE: 0 });
+  const lobeR = buildLobe({ type: 'discrete', points: [[0, 0], [pfR.halfSpan * 1.2, 0]] }, pfR.halfSpan);
+  const wR = buildWing({ planform: pfR, lobe: lobeR, airfoil: naca4('0012'), cells: 16, pointsPerSurface: 30, washin: { total: 0, mode: 'linear' } });
+  const cR = arcFactors(wR).forceCentreAt(6);
+  const on = (q, b, d) => Math.abs(q.backM - b) < 1e-9 && Math.abs(q.downM - d) < 1e-9;
+  check('a flat rectangle\'s lift, induced and profile drag act on its quarter-chord line, on the chord',
+    on(cR.lift, 0.25, 0) && on(cR.induced, 0.25, 0) && on(cR.profile, 0.25, 0)
+    && Math.abs(cR.crossingFraction - 0.25) < 1e-9 && cR.flowToChordDeg === 6 && centralFrame(wR).incidenceDeg === 0,
+    `${cR.lift.backM.toFixed(6)} back, ${cR.lift.downM.toExponential(1)} down`);
+  // The Trefftz plane's drag, segment by segment, sums to its drag.
+  const sR = wingStrips(wR);
+  const lR = vortexLattice({ strips: sR, alphaDeg: 6 });
+  const al = (6 * Math.PI) / 180;
+  const traceR = sR.map((st) => [st.leftTE, st.rightTE].map((q) => [q[1], q[2] * Math.cos(al) - q[0] * Math.sin(al)]));
+  const segs = trefftzSegments(traceR, lR.gamma);
+  check('the induced drag shared strip by strip sums to the Trefftz plane\'s',
+    Math.abs(segs.reduce((a, d) => a + d, 0) - trefftzDrag(traceR, lR.gamma)) < 1e-12 * trefftzDrag(traceR, lR.gamma)
+    && Math.abs(trefftzDrag(traceR, lR.gamma) - lR.inducedDragN) < 1e-9);
+
+  // The gnuC2-23 in its arc: the lift's centroid 0.6 m below the chord and
+  // aft of the central quarter chord, because the planform's quarter-chord
+  // line runs back toward the tips.
+  const afG = parseAirfoilText(readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1'), 'gnuC2');
+  const docG = parseLep(readFileSync('data/reference/lep/gnuc2-23-20260429.lep', 'latin1'));
+  const dG = lepToDesign(docG, { sections: { 'gnuC2.txt': afG } });
+  const wG = buildWing({ planform: discretePlanform(dG.planformRows), lobe: null, airfoil: afG, explicitRibs: dG.explicitRibs, pointsPerSurface: 40 });
+  const thinG = thinAirfoil(afG);
+  const arcG = arcFactors(wG);
+  const cG = arcG.forceCentreAt(4.51, { alphaL0Deg: thinG.alphaL0Deg });
+  const lat = 4.51 - thinG.alphaL0Deg;
+  const dirG = vortexLattice({ strips: wingStrips(wG), alphaDeg: lat });
+  const cD = latticeCentres(wingStrips(wG), dirG.gamma, centralFrame(wG), { alphaDeg: 4.51, latticeDeg: lat });
+  // The wake trails along the flow, so the lattice is not quite linear in
+  // the angle: taken as linear between solves at 4 and 10 degrees, the
+  // centre is within a millimetre.
+  check('between its two solves the lattice\'s centre is the lattice\'s at the angle, to a millimetre',
+    Math.abs(cG.lift.backM - cD.lift.backM) < 1e-3 && Math.abs(cG.lift.downM - cD.lift.downM) < 1e-3
+    && Math.abs(cG.crossingFraction - cD.crossingFraction) < 1e-4,
+    `${cG.lift.backM.toFixed(4)}/${cG.lift.downM.toFixed(4)} against ${cD.lift.backM.toFixed(4)}/${cD.lift.downM.toFixed(4)}`);
+  check('the gnuC2-23\'s lift: centred 0.60 m below its chord, its line crossing it at 29.1%',
+    Math.abs(cG.lift.downM - 0.604) < 0.01 && Math.abs(cG.crossingFraction - 0.2913) < 0.002
+    && cG.induced.downM > cG.lift.downM && cG.profile.downM > cG.lift.downM,
+    `${cG.lift.downM.toFixed(3)} m down, crossing ${(cG.crossingFraction * 100).toFixed(2)}%; induced ${cG.induced.downM.toFixed(3)}, profile ${cG.profile.downM.toFixed(3)} m down`);
+  const flatG = arcG.forceCentreAt(4.51, { alphaL0Deg: thinG.alphaL0Deg, flat: true });
+  check('laid flat its lift is on its chord, and further aft: the arc takes the outer wing\'s lift',
+    Math.abs(flatG.lift.downM) < 0.01 && flatG.lift.backM > cG.lift.backM,
+    `${flatG.lift.backM.toFixed(3)} m back flat, ${cG.lift.backM.toFixed(3)} in the arc`);
+  // The section's own moment moves the line along the flow: aft for a
+  // nose-down Cm0, forward for a reflex's nose-up one, by Cm0 times the
+  // strips' chords squared over the lift.
+  const llG = liftLine(cG, { cm0: thinG.cm0, liftOverQ: cG.liftOverQ });
+  const ll0 = liftLine(cG, { cm0: 0 });
+  const llR = liftLine(cG, { cm0: 0.0246, liftOverQ: cG.liftOverQ });
+  check('Cm0 moves the lift\'s line along the flow: -0.0078 3.7 cm aft, a reflex +0.0246 forward',
+    Math.abs(ll0.crossingBackM - cG.crossingBackM) < 1e-12 && Math.abs(llG.shiftM - 0.0365) < 0.001
+    && Math.abs(llG.shiftM - (-thinG.cm0 * cG.chordSquaredSpanM3) / cG.liftOverQ) < 1e-12
+    && llR.shiftM < 0 && Math.abs(llR.shiftM / llG.shiftM - 0.0246 / thinG.cm0) < 1e-9,
+    `${(llG.shiftM * 100).toFixed(2)} cm, ${(llR.shiftM * 100).toFixed(2)} cm`);
+
+  // The wing's mass, from its cloth. A symmetric section with the same
+  // cloth top and bottom has it on the chord; along the chord it is the
+  // skins' length and the ribs' area, each where they are.
+  const mR = wingMassCentre(wR, { upperGsm: 30, lowerGsm: 30, ribGsm: 40 });
+  const sec = wR.ribs[0].section;
+  let len = 0;
+  let lenX = 0;
+  for (const surf of [sec.upper, sec.lower]) {
+    for (let k = 0; k < surf.length - 1; k++) {
+      const d = Math.hypot(surf[k + 1][0] - surf[k][0], surf[k + 1][1] - surf[k][1]);
+      len += d; lenX += d * (surf[k][0] + surf[k + 1][0]) / 2;
+    }
+  }
+  const loop = sec.upper.concat(sec.lower.slice().reverse());
+  let A2 = 0;
+  let Cx = 0;
+  for (let k = 0; k < loop.length; k++) {
+    const [x0, y0] = loop[k];
+    const [x1, y1] = loop[(k + 1) % loop.length];
+    const cr = x0 * y1 - x1 * y0;
+    A2 += cr; Cx += (x0 + x1) * cr;
+  }
+  const ribArea = Math.abs(A2) / 2;
+  const ribX = Cx / (3 * A2);
+  const half = pfR.halfSpan;
+  const skinKg = (2 * half * len * 30) / 1000;
+  const ribKg = (wholeWingCounts(wR).ribs * ribArea * 40) / 1000;
+  const expect = (skinKg * (lenX / len) + ribKg * ribX) / (skinKg + ribKg);
+  check('a flat rectangle on a symmetric section: its mass on the chord, where its skins and ribs put it',
+    Math.abs(mR.downM) < 1e-9 && Math.abs(mR.backM - expect) < 1e-3 && Math.abs(mR.clothKg - (skinKg + ribKg)) < 0.01 * mR.clothKg,
+    `${mR.backM.toFixed(4)} m back against ${expect.toFixed(4)}; ${mR.clothKg.toFixed(3)} kg against ${(skinKg + ribKg).toFixed(3)}`);
+  const pfC = planformFromDesignInputs({ span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1 });
+  const lobeC = buildLobe({ type: 'circle', projectedRatio: 0.8 }, pfC.halfSpan);
+  const ribbed = buildWing({ planform: pfC, lobe: lobeC, airfoil: naca4('4415'), cells: 20, centreRib: true });
+  const celled = buildWing({ planform: pfC, lobe: lobeC, airfoil: naca4('4415'), cells: 20, centreRib: false });
+  const cl = { upperGsm: 32, lowerGsm: 32, ribGsm: 40 };
+  const mRib = wingMassCentre(ribbed, cl);
+  const mCell = wingMassCentre(celled, cl);
+  check('a centre cell instead of a centre rib puts it within a centimetre: the cell is counted, once',
+    Math.abs(mRib.backM - mCell.backM) < 0.01 && Math.abs(mRib.downM - mCell.downM) < 0.01
+    && Math.abs(mRib.parts.upper.areaM2 - mCell.parts.upper.areaM2) < 0.02 * mRib.parts.upper.areaM2,
+    `${mRib.backM.toFixed(3)}/${mRib.downM.toFixed(3)} against ${mCell.backM.toFixed(3)}/${mCell.downM.toFixed(3)}`);
+  const mG = wingMassCentre(wG, cl);
+  const tG = lepRibTable(docG, { airfoils: { 'gnuC2.txt': readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1') } });
+  const lepMc = lepMainParameters(docG, tG).wingMassCentreCm;
+  check('the gnuC2-23\'s cloth: 50.6% back and 0.73 m down, where its program\'s rule says 44% and 0.89 m',
+    Math.abs(mG.backM / wG.ribs[0].chord - 0.506) < 0.005 && Math.abs(mG.downM - 0.725) < 0.01
+    && Math.abs(lepMc.y / 100 - 1.038) < 0.002 && Math.abs(lepMc.z / 100 - 0.887) < 0.002,
+    `${mG.backM.toFixed(3)} m back, ${mG.downM.toFixed(3)} m down; the program's ${(lepMc.y / 100).toFixed(3)}, ${(lepMc.z / 100).toFixed(3)}`);
+  let noCloth = null;
+  try { wingMassCentre(wR, { upperGsm: 30 }); } catch (e) { noCloth = e.message; }
+  check('a cloth without its weight is refused', /each cloth's weight/.test(noCloth || ''), noCloth);
+
+  // The lines: each at its middle, by its mass and its drag area; what the
+  // balance's weight has beyond their own goes to the risers.
+  const frameC = centralFrame(ribbed);
+  const sel2 = { lines: [
+    { line: { gramsPerM: 1, diameterMM: 1 }, from: [1, 0.5, -6], to: [1, 0.5, -2], lengthMM: 4000, massG: 4 },
+    { line: { gramsPerM: 1, diameterMM: 2 }, from: [2, 1, -4], to: [2, 1, 0], lengthMM: 4000, massG: 12 },
+  ] };
+  const lc = lineCentres(sel2, { frame: frameC });
+  const lcK = lineCentres(sel2, { frame: frameC, massKg: 0.04, karabiner: [1, 0.2, -7] });
+  check('two lines: their weight at the mass-weighted middle, their drag at the area-weighted one',
+    on(lc.mass, 1.75, 2.5) && on(lc.drag, 5 / 3, 8 / 3) && lc.linesKg === 0.032 && lc.restKg === 0,
+    JSON.stringify(lc.mass));
+  check('and a heavier lineset\'s remainder at the karabiners, when there is no webbing',
+    on(lcK.mass, 1.6, 3.4) && Math.abs(lcK.restKg - 0.008) < 1e-12 && on(lcK.rest, 1, 7));
+
+  // The moments, each force at its point. With the pilot plumb and every
+  // point the program's, LEparagliding's own equations to the micrometre.
+  const tGL = lepRibTable(docG, { airfoils: { 'gnuC2.txt': readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1') } });
+  const gGL = lepLineGeometry(docG, { airfoils: { 'gnuC2.txt': readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1') } });
+  const balG = lepBalance(docG, tGL, gGL);
+  const e = balG.inputs;
+  for (const which of ['converged', 'printed']) {
+    const st = balG[which];
+    const th = (st.thetaDeg * Math.PI) / 180;
+    const alp = (e.alphaDeg * Math.PI) / 180;
+    const mc = st.massCentres;
+    const py = lepCalageFromMoments({
+      e, theta: th, alpha: alp, wing: mc.wing, linesKg: balG.masses.linesKg, linesMc: mc.lines,
+      linesDragN: st.forces.lines, dragCentre: st.lineDrag.centreM, pilotDragN: st.forces.pilot, hcpM: balG.hcpM,
+    });
+    const down = [-Math.sin(th), Math.cos(th)];
+    const flow = [Math.cos(alp), -Math.sin(alp)];
+    const Wt = (kg) => [down[0] * kg * e.g, down[1] * kg * e.g];
+    const Dr = (n) => [flow[0] * n, flow[1] * n];
+    const others = [
+      { name: 'wingWeight', F: Wt(e.wingKg), at: [mc.wing.y, mc.wing.z] },
+      { name: 'lineWeight', F: Wt(balG.masses.linesKg), at: [mc.lines.y, mc.lines.z] },
+      { name: 'lineDrag', F: Dr(st.forces.lines), at: [st.lineDrag.centreM.y, st.lineDrag.centreM.z] },
+    ];
+    const Fp = [Wt(e.pilotKg)[0] + Dr(st.forces.pilot)[0], Wt(e.pilotKg)[1] + Dr(st.forces.pilot)[1]];
+    const sum = others.reduce((acc, f) => [acc[0] + f.F[0], acc[1] + f.F[1]], Fp);
+    // The wing's own force at its centre of pressure, as the program has it.
+    const forces = [{ name: 'aero', F: [-sum[0], -sum[1]], at: [e.cpYM, e.cpZM] }, ...others];
+    const pilot = { weightN: e.pilotKg * e.g, dragN: st.forces.pilot, belowM: e.pilotBelowM };
+    const plumb = calageFromForces({ alphaDeg: e.alphaDeg, thetaDeg: st.thetaDeg, depthM: balG.hcpM, forces, pilot: { ...pilot, hangs: 'plumb' } });
+    const free = calageFromForces({ alphaDeg: e.alphaDeg, thetaDeg: st.thetaDeg, depthM: balG.hcpM, forces, pilot: { ...pilot, hangs: 'free' } });
+    check(`the gnuC2-23's section 17, ${which}: the program's calage from moments about the karabiners, the pilot plumb`,
+      Math.abs(plumb.calageM - py) < 1e-9 && Math.abs(plumb.calageM - st.karabinerM.y) < 1e-9 && Math.abs(plumb.residual) < 1e-9,
+      `${(plumb.calageM * 1000).toFixed(4)} mm against ${(py * 1000).toFixed(4)}`);
+    if (which === 'converged') {
+      check('free to swing, the pilot hangs 1.2 degrees behind plumb and puts no moment about the karabiners, 0.18% of chord forward',
+        free.moments.pilot === 0 && Math.abs(free.pilotLeanDeg - 1.19) < 0.02
+        && Math.abs((free.calageM - plumb.calageM) / balG.chordM + 0.00177) < 0.0002,
+        `${free.pilotLeanDeg.toFixed(3)} degrees, ${(((free.calageM - plumb.calageM) / balG.chordM) * 100).toFixed(3)}%`);
+    }
+  }
+
+  // The balance: the forces balanceOnPolar's, each at its point.
+  const mC = planformMetrics(pfC);
+  const afC = naca4('4415');
+  const thinC = thinAirfoil(afC);
+  const atmC = atmosphere(1000);
+  const arcC = arcFactors(ribbed);
+  const polarC = wingPolar({
+    planform: pfC, airfoil: afC, atm: atmC, mass: 85, area: mC.area, chordRef: mC.mac, alphaRange: [-2, 15], step: 1, arc: arcC,
+  });
+  const commonC = {
+    area: mC.area, span: pfC.span, chord: 2.6, lineLength: 7.0, pilotMass: 75, wingMass: 5, lineMass: 0.5,
+    rho: atmC.density, cxPilot: 0.015, cxLines: 0.012,
+  };
+  const rules5 = balanceOnPolar({ polar: polarC, alphaDeg: 5, cm0: thinC.cm0, ...commonC });
+  // Every point put where the rules put it, and the rules come back.
+  const xcp = rules5.xcpFraction * 2.6;
+  const byRule = (a) => ({
+    lift: { backM: xcp, downM: 0 }, induced: { backM: xcp, downM: 0 }, profile: { backM: xcp, downM: 0 },
+    liftOverQ: 1, chordSquaredSpanM3: 0, chordM: 2.6, flowToChordDeg: a, crossingBackM: xcp, crossingFraction: xcp / 2.6,
+  });
+  const asRules = balanceWhereForcesAct({
+    polar: polarC, alphaDeg: 5, cm0: thinC.cm0, ...commonC, centresAt: byRule,
+    wingCentre: { backM: 2.6 / 3, downM: 0 }, lines: null, pilotBelowM: 0, pilotHangs: 'plumb',
+  });
+  check('with every point where chapter 4\'s rules put it, the handbook\'s calage to the micrometre',
+    Math.abs(asRules.calageMetres - rules5.calageMetres) < 1e-9 && asRules.speedKMH === rules5.speedKMH
+    && asRules.glideRatio === rules5.glideRatio,
+    `${asRules.calageMetres.toFixed(6)} m against ${rules5.calageMetres.toFixed(6)}`);
+  const centresC = (a) => arcC.forceCentreAt(a, { alphaL0Deg: thinC.alphaL0Deg });
+  const wingC = wingMassCentre(ribbed, cl);
+  const act5 = balanceWhereForcesAct({ polar: polarC, alphaDeg: 5, cm0: thinC.cm0, ...commonC, centresAt: centresC, wingCentre: wingC });
+  check('each where it acts, the moments about the karabiners sum to none, and every force is in them',
+    Math.abs(act5.momentResidual) < 1e-9 && act5.mode === 'where-forces-act' && act5.acting.linesByRule
+    && ['lift', 'profileDrag', 'inducedDrag', 'wingWeight', 'lineWeight', 'lineDrag', 'pilot'].every((k) => Number.isFinite(act5.moments[k]))
+    && act5.moments.pilot === 0 && act5.speedKMH === rules5.speedKMH,
+    Object.entries(act5.moments).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', '));
+  // This wing's NACA 4415 has a large Cm0, and the rule puts its moment on
+  // the root chord: the strips' own chords, smaller outboard, carry less,
+  // so here the lift's line is forward of the rule's.
+  check('on a cambered NACA 4415 the lift\'s line is forward of the rule\'s, and the calage with it: 42.3% and 46.4% at 5 degrees, where the rules say 45.1% and 48.6%',
+    Math.abs(act5.acting.liftCrossingFraction - 0.4232) < 0.002 && Math.abs(act5.calageFraction - 0.4635) < 0.002
+    && Math.abs(rules5.xcpFraction - 0.4507) < 0.001 && Math.abs(rules5.calageFraction - 0.4858) < 0.001,
+    `lift ${(act5.acting.liftCrossingFraction * 100).toFixed(2)}%, calage ${(act5.calageFraction * 100).toFixed(2)}%`);
+  const plumb5 = balanceWhereForcesAct({ polar: polarC, alphaDeg: 5, cm0: thinC.cm0, ...commonC, centresAt: centresC, wingCentre: wingC, pilotHangs: 'plumb' });
+  check('held plumb, the pilot\'s drag below the karabiners pitches the wing down, and the calage is further aft',
+    plumb5.calageFraction > act5.calageFraction && plumb5.moments.pilot < 0,
+    `${(plumb5.calageFraction * 100).toFixed(3)}% against ${(act5.calageFraction * 100).toFixed(3)}%`);
+  // Trimmed from the calage on it.
+  const tAct = trimOnPolar({ polar: polarC, calageFraction: 0.48, cm0: thinC.cm0, ...commonC, solve: balanceWhereForcesAct, centresAt: centresC, wingCentre: wingC });
+  const tRule = trimOnPolar({ polar: polarC, calageFraction: 0.48, cm0: thinC.cm0, ...commonC });
+  check('trimmed from a calage, the wing flies where its balance hangs the pilot there: at 48%, 5.8 degrees where the rules say 4.7',
+    Math.abs(tAct.calageFraction - 0.48) < 1e-4 && tAct.mode === 'where-forces-act'
+    && Math.abs(tAct.onPolar.alphaDeg - 5.80) < 0.05 && Math.abs(tRule.onPolar.alphaDeg - 4.68) < 0.05,
+    `${tAct.onPolar.alphaDeg.toFixed(3)} degrees, ${tAct.speedKMH.toFixed(2)} km/h; the rules ${tRule.onPolar.alphaDeg.toFixed(3)}`);
+  let noCentres = null;
+  try { balanceWhereForcesAct({ polar: polarC, alphaDeg: 5, cm0: thinC.cm0, ...commonC, wingCentre: wingC }); } catch (err) { noCentres = err.message; }
+  check('without the lattice it is refused, not flown on the rules unsaid', /needs the lattice/.test(noCentres || ''), noCentres);
+}
+
+section('Each line\'s drag, by its Reynolds number and its angle to the flow');
+
+{
+  // A line is a cylinder in cross-flow. Its coefficient falls with its
+  // Reynolds number, 1 + 10 Re^(-2/3) as LEparagliding takes it; by the
+  // independence principle it feels the flow square to it, and its drag is
+  // that force's part along the flow, sin^3 of its angle to it.
+  const docL = parseLep(readFileSync('data/reference/lep/gnuc2-23-20260429.lep', 'latin1'));
+  const txtL = { 'gnuC2.txt': readFileSync('data/reference/lep/gnuc2-23-gnuC2.txt', 'latin1') };
+  const tL = lepRibTable(docL, { airfoils: txtL });
+  const gL = lepLineGeometry(docL, { airfoils: txtL });
+  const bL = lepBalance(docL, tL, gL);
+  const eL = bL.inputs;
+  const air = { speedMS: eL.speedMS, rho: eL.rho, muPaS: eL.muMicroPaS * 1e-6 };
+  // Every round line the program has, square to the flow, at its diameter.
+  const round = bL.lines.perLine.filter((pl) => pl.cd !== 1.98);
+  const worst = Math.max(...round.map((pl) => {
+    const dMM = ((pl.reynolds * air.muPaS) / (air.rho * air.speedMS)) * 1000;
+    const one = { lines: [{ name: 'x', line: { diameterMM: dMM }, lengthMM: 1000, from: [0, 0, 0], to: [0, 0, 1] }] };
+    return Math.abs(lineDrag(one, { wingAreaM2: 1, air }).perLine[0].cd - pl.cd);
+  }));
+  check('each line\'s coefficient from its Reynolds number is the program\'s, on all 95 of the gnuC2-23\'s',
+    round.length === 95 && worst < 1e-12, `worst ${worst.toExponential(1)}`);
+  const one = (from, to, dMM = 1) => ({ lines: [{ name: 'x', line: { diameterMM: dMM }, lengthMM: 1000, from, to }] });
+  const sq = lineDrag(one([0, 0, 0], [0, 0, 1]), { wingAreaM2: 1, air });
+  const at60 = lineDrag(one([0, 0, 0], [0.5, 0, Math.sqrt(3) / 2]), { wingAreaM2: 1, air });
+  const sin60 = Math.sqrt(3) / 2;
+  check('a line at 60 degrees to the flow: sin^3 of the drag, on the Reynolds number of the flow square to it',
+    Math.abs(at60.perLine[0].inclinationFactor - sin60 ** 3) < 1e-12
+    && Math.abs(at60.perLine[0].reynolds - sq.perLine[0].reynolds * sin60) < 1e-9
+    && at60.perLine[0].cd > sq.perLine[0].cd,
+    `factor ${at60.perLine[0].inclinationFactor.toFixed(4)}, Cd ${sq.perLine[0].cd.toFixed(4)} square, ${at60.perLine[0].cd.toFixed(4)} at 60`);
+  // Given a coefficient, every line has it; with neither, 1.1.
+  const given = lineDrag(one([0, 0, 0], [0, 0, 1]), { wingAreaM2: 1, cdCylinder: 0.95 });
+  const bare = lineDrag(one([0, 0, 0], [0, 0, 1]), { wingAreaM2: 1 });
+  check('a coefficient given is every line\'s, and with neither it is 1.1, each said',
+    given.perLine[0].cd === 0.95 && given.cdBasis === 'given' && bare.perLine[0].cd === 1.1 && bare.cdBasis === 'default'
+    && sq.cdBasis === 'reynolds');
+  // Its loops: the line doubled over them, a spliced loop at sqrt 2 - 1.
+  const looped = lineDrag(one([0, 0, 0], [0, 0, 1]), { wingAreaM2: 1, cdCylinder: 1, loopAllowanceMM: 130, sides: 1 });
+  const own = lineDrag({ lines: [{ ...one([0, 0, 0], [0, 0, 1]).lines[0], loopFrontalMM: 99 }] },
+    { wingAreaM2: 1, cdCylinder: 1, loopAllowanceMM: 130, sides: 1 });
+  check('its loops are in the flow too: 130 mm of a sewn allowance, or what an imported line says of its own',
+    Math.abs(looped.dragAreaM2 - 0.001 * 1.13) < 1e-15 && Math.abs(own.dragAreaM2 - 0.001 * 1.099) < 1e-15
+    && looped.totalLengthM === 1);
+  // The gnuC2-23's and the Tuluaq-19's own lines and risers as their
+  // program has them, against its frontal area: lengths and loops by its
+  // own rule, a strap riser without its loops.
+  const loopsOf = (mat) => 20 * (mat.loopCm ?? 0) * (mat.loopKind === 'p' ? Math.SQRT2 - 1 : 1);
+  const asTool = (g) => {
+    const isRiser = (l) => l.level === 1 && !l.brake;
+    return {
+      lines: g.lines.filter((l) => l.material && !isRiser(l)).map((l) => ({
+        name: l.label, line: { diameterMM: l.material.diameterMM }, lengthMM: l.cutLength * 10,
+        loopFrontalMM: loopsOf(l.material), from: l.from, to: l.to,
+      })),
+      risers: g.lines.filter((l) => l.material && isRiser(l)).map((l) => ({
+        name: l.label, material: l.material, lengthMM: l.cutLength * 10,
+        loopFrontalMM: l.material.section === 'rectangular' ? 0 : loopsOf(l.material), from: l.from, to: l.to,
+      })),
+    };
+  };
+  const gnu = asTool(gL);
+  const docT = parseLep(readFileSync('data/reference/lep/tuluaq19-20250107.lep', 'latin1'));
+  const txtT = { 'gnua.txt': readFileSync('data/reference/lep/tuluaq19-gnua.txt', 'latin1') };
+  const gT = lepLineGeometry(docT, { airfoils: txtT });
+  const tul = asTool(gT);
+  // The frontal area: each line's and riser's drag area over its own
+  // coefficient, square to the flow (a strap is always at its 1.98).
+  const frontal = (set) => lineDrag({ lines: set.lines }, { wingAreaM2: 1, cdCylinder: 1, inclinationFactor: 1, risers: set.risers })
+    .perLine.reduce((acc, pl) => acc + pl.dragAreaM2 / pl.cd, 0);
+  const fG = frontal(gnu);
+  const fT = frontal(tul);
+  check('their frontal area, loops in and a strap riser without them, is the program\'s to the square millimetre',
+    gnu.lines.length === 92 && gnu.risers.length === 3 && tul.risers.every((r) => r.material.section === 'rectangular')
+    && Math.abs(fG - gL.totals.lineAreaM2) < 1e-6 && Math.abs(fT - gT.totals.lineAreaM2) < 1e-6,
+    `${fG.toFixed(6)} and ${fT.toFixed(6)} m2 against ${gL.totals.lineAreaM2.toFixed(6)} and ${gT.totals.lineAreaM2.toFixed(6)}`);
+  // Square to the flow, as the program takes every line, its drag is the
+  // program's; at its section 17's 9.45 degrees, in the program's own
+  // coordinates — y aft, z down, the flow aft and up — each line at its own
+  // angle to the flow takes 8.5% off.
+  const lepAll = 2 * bL.lines.perLine.reduce((acc, pl) => acc + pl.areaMM2 * 1e-6 * pl.cd, 0);
+  const strip = (set) => set.map(({ from, to, ...rest }) => rest);
+  const squareOn = lineDrag({ lines: strip(gnu.lines) }, { wingAreaM2: 1, air, inclinationFactor: 1, risers: strip(gnu.risers) });
+  const al = (eL.alphaDeg * Math.PI) / 180;
+  const flowed = lineDrag({ lines: gnu.lines }, { wingAreaM2: 1, air, risers: gnu.risers, flowDirection: [0, Math.cos(al), -Math.sin(al)] });
+  check('square to the flow, its lines\' and risers\' drag is the program\'s to the last digit; each at its own angle, 8.5% less',
+    Math.abs(squareOn.dragAreaM2 / lepAll - 1) < 1e-9 && Math.abs(flowed.dragAreaM2 / lepAll - 0.915) < 0.005
+    && squareOn.risersDragAreaM2 > 0,
+    `${squareOn.dragAreaM2.toFixed(6)} and ${flowed.dragAreaM2.toFixed(4)} m2 against ${lepAll.toFixed(6)}`);
+  const strapT = lineDrag({ lines: [] }, { wingAreaM2: 1, air, risers: tul.risers });
+  const bareRiser = lineDrag({ lines: [] }, { wingAreaM2: 1, air, risers: [{ name: 'riser-A', from: [0, 0, 0], to: [0, 0, 1], lengthMM: 500 }] });
+  check('a strap riser is a flat plate broadside, Cd 1.98, and one with no material is said, not counted',
+    strapT.perLine.every((pl) => pl.cd === 1.98 && pl.strap) && bareRiser.risersDragAreaM2 === 0
+    && bareRiser.risersUncounted.join() === 'riser-A');
+}
+
 section('The wing hangs over its maillon');
 
 {
@@ -14869,34 +15520,50 @@ section('The wing hangs over its maillon');
   // The line plan used a load-weighted average of the anchor positions
   // instead — a plausible geometric proxy that knows nothing about balance.
   // These are flying machines; where the mass hangs decides how they fly.
-  // `cm` and `cz` matter: the balance point IS the moment balance, so a
-  // solve without the section's pitching moment is answering a different
-  // question. Omitting them gave calage 36.6% with the centre of pressure at
-  // 29.7% — forward of the hang point, which cannot balance — and that was
-  // the test being wrong, not the model.
+  // `cm` and `cz` matter: the balance point IS the moment balance, and the
+  // section's pitching moment places the centre of pressure the lift acts at.
   const balH = solveEquilibrium({
     area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
     pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
   });
 
-  // The physical relation, independent of any particular number.
+  // The physical relation, independent of any particular number: with
+  // nothing below the wing but the pilot's weight — no drag on the lines or
+  // the pilot, no weight in the wing or the lines — the wing's force at its
+  // centre of pressure carries the pilot, so the pilot hangs plumb under it.
+  // On a wing at an attitude theta, nose down, a line height L down from the
+  // chord, the foot of that plumb line is L tan theta forward of the centre
+  // of pressure (aft of it, nose up, as this wing is with no drag to steepen
+  // its glide).
   //
-  // Take moments about the hang point. Lift acts up at the centre of
-  // pressure; if that is FORWARD of the hang point the couple is nose-UP,
-  // which is what balances an aerofoil's nose-down pitching moment. So the
-  // wing hangs from a point AFT of its centre of pressure.
-  //
-  // I asserted the opposite first, from reasoning the couple out backwards,
-  // and the model failed a test that was itself wrong. The direction is worth
-  // stating carefully because getting it round the wrong way is easy and
-  // looks equally plausible.
-  check('the wing hangs from a point aft of its centre of pressure',
-    balH.calageFraction > balH.xcpFraction,
-    `calage ${(balH.calageFraction * 100).toFixed(1)}%, `
-    + `centre of pressure ${(balH.xcpFraction * 100).toFixed(1)}%`);
+  // This said the wing must hang AFT of its centre of pressure, for the
+  // lift-weight couple to oppose the section's nose-down moment — which the
+  // lift at the centre of pressure already carries: the moment counted twice,
+  // as the handbook's seventh term counted it (`solveEquilibrium`, "The
+  // pitching moment, once"). Counted twice, the pilot hung 6.4 cm off plumb.
+  const bare = { cxPilot: 0, cxLines: 0, wingMass: 0, lineMass: 0 };
+  const plumb = solveEquilibrium({ area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, alphaDeg: 5, cz: 0.9, cm: -0.042, ...bare });
+  const plumbAt = plumb.cpMetres - 6.5 * Math.tan((plumb.thetaDeg * Math.PI) / 180);
+  check('with nothing below the wing but the pilot\'s weight, the pilot hangs plumb under the centre of pressure',
+    Math.abs(plumb.calageMetres - plumbAt) < 1e-9,
+    `calage ${plumb.calageMetres.toFixed(4)} m against ${plumbAt.toFixed(4)} m plumb; centre of pressure `
+    + `${plumb.cpMetres.toFixed(4)} m, ${plumb.thetaDeg.toFixed(2)} degrees nose down`);
+  const twice = solveEquilibrium({ area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
+    pilotMass: 90, alphaDeg: 5, cz: 0.9, cm: -0.042, ...bare, printedAeroMoment: true });
+  check('which the handbook\'s seventh term, the pitching moment counted again, does not',
+    Math.abs(twice.calageMetres - plumbAt) > 0.05,
+  `${((twice.calageMetres - plumbAt) * 100).toFixed(1)} cm off plumb`);
+  // Drag below the wing swings the pilot back from the plumb line at the
+  // attitude it flies at: the calage follows it aft.
+  const plumbOwn = balH.cpMetres - 6.5 * Math.tan((balH.thetaDeg * Math.PI) / 180);
+  check('and drag on the lines and the pilot swings the pilot aft of plumb',
+    balH.calageMetres > plumbOwn + 0.05,
+    `calage ${(balH.calageFraction * 100).toFixed(1)}% against ${((plumbOwn / 2.45) * 100).toFixed(1)}% plumb at `
+    + `${balH.thetaDeg.toFixed(2)} degrees, centre of pressure ${(balH.xcpFraction * 100).toFixed(1)}%`);
 
-  // And the more nose-down the section, the further aft it must hang to
-  // generate the nose-up couple that balances it.
+  // And the more nose-down the section, the further aft its centre of
+  // pressure, and the further aft the wing hangs.
   const noseDown = solveEquilibrium({
     area: 22.5, span: 11.6, chord: 2.45, lineLength: 6.5,
     pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
@@ -14921,9 +15588,11 @@ section('The wing hangs over its maillon');
   near('the wing hangs from the calage, not from an anchor average',
     chordFractionOf(hungFromBalance.karabiner[0]), balH.calageFraction, 0.005,
     ' of chord');
+  // Two points of chord on this wing. (Nearly five while the balance counted the
+  // pitching moment twice, which put its calage further aft.)
   check('which is a different place from the anchor centroid',
     Math.abs(chordFractionOf(hungFromBalance.karabiner[0])
-      - chordFractionOf(planH.karabiner[0])) > 0.03,
+      - chordFractionOf(planH.karabiner[0])) > 0.01,
     `${(chordFractionOf(planH.karabiner[0]) * 100).toFixed(1)}% against `
     + `${(chordFractionOf(hungFromBalance.karabiner[0]) * 100).toFixed(1)}%`);
 
@@ -14943,17 +15612,14 @@ section('The wing hangs over its maillon');
     `${(fast.calageFraction * 100).toFixed(1)}% at 2 degrees, `
     + `${(slow.calageFraction * 100).toFixed(1)}% at 9`);
 
-  // A calage that cannot balance is refused.
+  // A calage that is not this wing's is refused.
   //
   // `solveEquilibrium` has a `legacySpreadsheet` mode reproducing a 2012
-  // worksheet, and it leaves the aerofoil's own pitching moment OUT of the
-  // balance. The number is right for matching that worksheet and wrong as
-  // geometry: it puts the hang point forward of the centre of pressure, where
-  // the lift-weight couple adds to the section's nose-down moment instead of
-  // opposing it. A wing hung there could not fly.
-  //
-  // The two modes disagreed about the sign of that relationship and the tool
-  // would have used whichever it was handed.
+  // worksheet. Its glide is not its own coefficients': it takes the induced
+  // drag of the 2D lift and flies 11.5 degrees down where its lift and drag
+  // give 7.2. The number is right for matching that worksheet and wrong as
+  // geometry. (It was refused for hanging the wing forward of the centre of
+  // pressure, which a wing gliding nose down does: see above.)
   const handbook = solveEquilibrium({
     area: 22.5, span: 11.6, chord: 2.33, lineLength: 6.5,
     pilotMass: 90, wingMass: 5, alphaDeg: 5, cz: 0.9, cm: -0.042,
@@ -14964,16 +15630,19 @@ section('The wing hangs over its maillon');
     legacySpreadsheet: true,
   });
 
-  check('the handbook balance hangs the wing aft of its centre of pressure',
+  check('the handbook balance\'s calage hangs the lines',
     usableCalage(handbook).ok,
     `calage ${(handbook.calageFraction * 100).toFixed(1)}%, `
     + `cp ${(handbook.xcpFraction * 100).toFixed(1)}%`);
-  check('the 2012 worksheet mode does not, because it omits the aerofoil moment',
+  check('the 2012 worksheet\'s does not',
     !usableCalage(legacy).ok,
     `calage ${(legacy.calageFraction * 100).toFixed(1)}%, `
     + `cp ${(legacy.xcpFraction * 100).toFixed(1)}%`);
   check('and the refusal says why',
-    /forward of the centre of pressure/.test(usableCalage(legacy).why));
+    /glide its own coefficients do not give/.test(usableCalage(legacy).why));
+  // Nor is a calage forward of the centre of pressure refused for being so.
+  check('a calage forward of the centre of pressure is used: a wing gliding nose down hangs there',
+    usableCalage({ calageFraction: 0.33, xcpFraction: 0.38, mode: 'handbook-4.2' }).ok);
 
   // Refused means the lines fall back to the anchor centroid, not to the
   // unusable number and not to the nose.

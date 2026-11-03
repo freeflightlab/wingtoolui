@@ -9,9 +9,9 @@ Covers handbook chapter 9, and LEP sections 28 (calage variation) and 33
 (detailed risers).
 
 **Where it is.** Everything on this page is in the core (`risers.js`) and held
-by the suite. The interface does not run it: its risers are the line plan's
-straps, and there is no speed bar, trimmer or accelerated polar to set or
-read there yet.
+by the suite. The interface runs the speed bar and the trimmers in its
+**Speed system** group (section 9); the riser webbing and its straps are core
+and suite only (section 8).
 
 ---
 
@@ -289,7 +289,7 @@ anchor's rise.
 
 The **Speed system** group sets the bar's travel (150 mm by default) and the
 trimmers' (none by default). Its table is the wing across the bar: from the
-angle the balance assumes, the risers the plan's rows give, each turn of the
+angle the balance flies at, the risers the plan's rows give, each turn of the
 wing `alphaChange` gives, and at each the balance's equations flown on the
 wing's own lift curve — the polar's (`liftModelFromWing`, given the polar the
 interface has already solved), in its arc when it flies in it, its finite
@@ -297,10 +297,14 @@ span taken once. A position that takes the lift below the collapse floor is
 marked: past it a paraglider folds rather than flies. On the default wing,
 150 mm of bar takes it from 35.0 km/h at trim to 45.4.
 
-Its trim is not the balance's. The balance flies the typed Cz at the angle;
-the speed system flies the polar's at the same angle, which on the default
-wing is the higher, 0.71 against 0.49. Neither is solved from where the
-risers hang (`trimFromCalage`, in the core).
+On the polar its trim is the balance's. The balance flies the same polar at
+the same angle, on the polar's own profile drag, and the first row is the
+balance's 35.0 km/h to the hundredth. Trimmed from the calage, the bar
+starts from the angle the calage gives. Balanced on the handbook's typed
+coefficients, the balance flies the typed Cz at the angle and the bar the
+polar's, which on the default wing is the higher, 0.71 against 0.49: 42.0
+km/h against 35.0. (This section said the two trims always differed, when
+the balance took only typed coefficients.)
 
 With trimmers set, it says where they take the wing alone, where the bar
 alone does, and where both do — and when each alone flies and the two

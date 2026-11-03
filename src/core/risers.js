@@ -153,6 +153,8 @@ export function acceleratedPolar({
   cmAt = null,
   // The span efficiency by angle, where the lift curve brings its own.
   oswaldAt = null,
+  // And its profile drag by angle.
+  profileAt = null,
   steps = 11,
   czRange = [0.25, 1.30],
 }) {
@@ -169,6 +171,7 @@ export function acceleratedPolar({
       cz,
       cm: cmAt ? cmAt(alpha) : base.cm,
       ...(oswaldAt ? { oswald: oswaldAt(alpha) } : {}),
+      ...(profileAt ? { cx0a: profileAt(alpha) } : {}),
     });
     rows.push({
       bar,
@@ -355,22 +358,40 @@ export function liftModelFromWing({
   // Its span efficiency at each angle, the lifting line's: its induced drag
   // is CL^2 / (pi AR e) with this e, so the balance flown on this curve
   // takes the drag the curve's own loading makes.
-  const es = usable.map((p) => p.oswald);
-  const oswaldAt = (aDeg) => {
-    if (aDeg <= alphas[0]) return es[0];
+  // Along its points, held at the ends.
+  const along = (vals) => (aDeg) => {
+    if (aDeg <= alphas[0]) return vals[0];
     for (let i = 1; i < alphas.length; i++) {
       if (alphas[i] >= aDeg) {
         const f = (aDeg - alphas[i - 1]) / (alphas[i] - alphas[i - 1]);
-        return es[i - 1] + f * (es[i] - es[i - 1]);
+        return vals[i - 1] + f * (vals[i] - vals[i - 1]);
       }
     }
-    return es[es.length - 1];
+    return vals[vals.length - 1];
   };
+  // Within its points, the span efficiency the polar's own induced drag has
+  // at the lift there — the lift and the induced drag each straight between
+  // points, as `polarAt` takes them — so the balance flown on this curve
+  // takes the polar's induced drag to the digit, and the speed bar's first
+  // row is the balance's own trim. (The efficiency itself drawn straight
+  // between points gave the same trim to 0.2 m/h.) Beyond them, held.
+  const oswaldHeld = along(usable.map((p) => p.oswald));
+  const cdiAt = along(usable.map((p) => p.CDi));
+  const AR = polar.aspectRatio;
+  const oswaldAt = (aDeg) => {
+    if (!(AR > 0) || aDeg <= alphas[0] || aDeg >= alphas[alphas.length - 1]) return oswaldHeld(aDeg);
+    const cl = czAt(aDeg);
+    const cdi = cdiAt(aDeg);
+    return cdi > 0 ? (cl * cl) / (Math.PI * AR * cdi) : oswaldHeld(aDeg);
+  };
+  // And its profile drag, the sections' at their own lift across the span.
+  const profileAt = along(usable.map((p) => p.CDprofile));
 
   return {
     source: polar.source,
     czAt,
     oswaldAt,
+    profileAt,
     cmAt: () => ta.cm0,
     czRange: [czFloor, Math.max(...cls)],
     czFloorFrom: czFloor > polarMin ? 'collapse limit' : 'polar',
@@ -398,7 +419,7 @@ export function liftModelFromWing({
  * quarter off it a second time: the Lynx 2's 0.845 at 6° flew as 0.62, at
  * 35.1 km/h for 30.1.
  */
-export function acceleratedPolarFromWing({ riser, base, chordM, liftModel, steps = 11 }) {
+export function acceleratedPolarFromWing({ riser, base, chordM, liftModel, steps = 11, ownProfileDrag = false }) {
   return acceleratedPolar({
     riser,
     base: wingBase(base, liftModel),
@@ -406,6 +427,9 @@ export function acceleratedPolarFromWing({ riser, base, chordM, liftModel, steps
     czAt: liftModel.czAt,
     cmAt: liftModel.cmAt,
     oswaldAt: liftModel.oswaldAt,
+    // The polar's own profile drag at each angle, rather than the one typed
+    // into `base` — as the balance on the polar takes it.
+    ...(ownProfileDrag && liftModel.profileAt ? { profileAt: liftModel.profileAt } : {}),
     czRange: liftModel.czRange,
     steps,
   });

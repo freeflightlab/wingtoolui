@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2687 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2753 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -70,7 +70,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2687 unit checks against known geometry and the sources |
+| `npm test` | 2753 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -107,15 +107,22 @@ number drift up silently would be worse. Exceeding the baseline fails.
 full 3D wing, with diagonal ribs carrying the span that has no line on it. Panels developed flat, ovalized for billow, given seam allowance,
 and nested onto a fabric roll.
 
-**Flight.** Longitudinal balance, section and wing polars from thin-aerofoil
-theory and lifting line, the wing flown in its arc by a vortex lattice,
-atmosphere to 20 km, and an accelerated polar across the speedbar range.
+**Flight.** Longitudinal balance on the wing's own polar, at an angle or
+trimmed from the calage, with every force where it acts — the lift on its own
+line in the wing's arc, the wing's and the lines' weight and drag at their own
+centres, the pilot below the karabiners — section and wing polars from
+thin-aerofoil theory and lifting line, the wing flown in its arc by a vortex
+lattice, atmosphere to 20 km, and an accelerated polar across the speedbar
+range.
 
 **Lines.** Riser-based cascades with industry naming and optional merged rows, brakes with their own
 four-level cascade, load from lift distribution through to line tension, line
-selection from measured materials sized across the speedbar range, elastic
-stretch, gust load factors, asymmetric and collapse load cases, and line drag
-fed back into the balance.
+selection from measured materials sized across the speedbar range and level
+by level to the DHV's line calculation for EN 926-1, elastic stretch on
+measured curves where a line has one, gust load factors, asymmetric and
+collapse load cases, and each line's drag — its Cd from its Reynolds number,
+sin³ of its angle to the flow, its loops — fed back into the balance where
+it acts.
 
 **Interoperability.** Reads and writes `leparagliding.txt`; reads production
 line sheets in four manufacturers' formats; imports aerofoils in three.
@@ -179,7 +186,7 @@ src/core/          the maths — 40 modules, pure functions, no DOM, each tested
   airfoil.js       ch.2  NACA 4-digit, coordinate import, surface splitting
   lobe.js          ch.3  arc types, arc-length parameterisation, washin
   wing3d.js        ch.3.4 + 2021 study: three rotations, flow-alignment angles
-  equilibrium.js   ch.4  balance, calage, speed, glide; the coupled solve
+  equilibrium.js   ch.4  balance, calage, speed, glide; every force where it acts
   flatdev.js       ch.5  triangle-pair unrolling of panels
   ovalization.js   ch.6  billow geometry and panel widening
   vribs.js         ch.7  diagonal and horizontal ribs, development, load path
@@ -222,12 +229,13 @@ tests/             the unit suite, the Phase 1 audit, the full pipeline, the
                    reference sweep, the benchmark
 tools/             the other check stages, the interface harness, figures,
                    importers, and readers for legacy sheets
-docs/              forty-five notes; see below
-data/reference/    143 tables: line sheets of 21 wings from five makers, six
+docs/              forty-six notes; see below
+data/reference/    144 tables: line sheets of 21 wings from five makers, six
                    of their line-plan drawings transcribed line by line, 55
                    published sizes and the makers' own specifications to check
                    them against, cell counts, the suppliers' line data, PHI's
-                   measured 78-line materials table, inspection records, a
+                   measured 78-line materials table, OpenGlider's 56 line
+                   types with their stretch measured, inspection records, a
                    published riser geometry, fabric schedules and
                    certification reports; and in lep/ the own files of three
                    complete designs, the Swoop2, the Tuluaq-19 and the
@@ -286,7 +294,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2687 checks |
+| unit suite | the maths, 2753 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -337,6 +345,7 @@ cascade: its riser layout, its counts, its tip lines and its stabilo's line.
 | `docs/rods-validated.md` | the Swoop2 rods against its own computed output |
 | `docs/free-body.md` | does the whole machine balance as a body in gravity |
 | `docs/hang-point.md` | where the wing hangs, and why the calage decides it |
+| `docs/balance.md` | the balance with every force where it acts, and what it reproduces |
 | `docs/line-plans.md` | risers, naming, topology inference |
 | `docs/drawn-line-plans.md` | the makers' own line-plan drawings, each wing's own cascade, where rows end, the stabilo |
 | `docs/reference-wings.md` | the reference wings against their published figures |

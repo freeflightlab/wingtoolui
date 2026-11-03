@@ -105,7 +105,7 @@ function lepAreas(table) {
  * rib's height in the arc. A rib on the centreline counts once, the rest
  * twice. cm.
  */
-function wingMassCentre(table, pct) {
+function lepWingMassCentre(table, pct) {
   const r = table.ribs;
   const centred = r[0].x < 0.2;
   let sum = 0;
@@ -169,7 +169,7 @@ export function lepMainParameters(doc, table, geom = null) {
   out.planformCentroidPct = (100 * (cy / a - r[0].yLE)) / r[0].chord;
   out.planformCentroidMM = Math.trunc((out.planformCentroidPct / 100) * r[0].chord * 10);
   out.sectionCgPct = sectionCgPct;
-  out.wingMassCentreCm = wingMassCentre(table, sectionCgPct);
+  out.wingMassCentreCm = lepWingMassCentre(table, sectionCgPct);
 
   if (geom?.ok) {
     const lines = geom.lineLengthCm;

@@ -229,6 +229,10 @@ def build():
     # unreachable, so a designer could not choose what to build from.
     mats = (ROOT / "data" / "reference" / "line-materials.tsv").read_text()
     reference_js += "\nconst LINE_MATERIALS_TSV = " + json.dumps(mats) + ";"
+    # And the load and elongation measured for some of those lines, with the
+    # weights of some, from OpenGlider's line types.
+    stretch = (ROOT / "data" / "reference" / "line-stretch.tsv").read_text()
+    reference_js += "\nconst LINE_STRETCH_TSV = " + json.dumps(stretch) + ";"
 
     # Every published wing, as a starting point.
     #

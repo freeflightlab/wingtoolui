@@ -53,7 +53,7 @@
  * lifting line itself, and that is exactly where the model is weakest.
  */
 
-import { ribTransform } from './wing3d.js';
+import { ribTransform, centralFrame } from './wing3d.js';
 
 const vCross = (a, b) => [
   a[1] * b[2] - a[2] * b[1],
@@ -144,7 +144,16 @@ function solveDense(A, rhs) {
  * projected span. It is 1.21.
  */
 export function trefftzDrag(trace, gamma, rho = 1.225) {
-  let di = 0;
+  return Math.abs(trefftzSegments(trace, gamma, rho).reduce((a, d) => a + d, 0));
+}
+
+/**
+ * `trefftzDrag` segment by segment: each leg pair's share of the induced
+ * drag, its circulation by the normal wash the whole wake puts on its trace.
+ * Signed; their sum is the drag.
+ */
+export function trefftzSegments(trace, gamma, rho = 1.225) {
+  const out = new Array(trace.length);
   for (let i = 0; i < trace.length; i++) {
     const [[ya, za], [yb, zb]] = trace[i];
     const yc = (ya + yb) / 2;
@@ -163,9 +172,9 @@ export function trefftzDrag(trace, gamma, rho = 1.225) {
       }
     }
     // The normal wash by the length: the tangent (dy, dz), turned a quarter.
-    di += 0.5 * rho * gamma[i] * (w * (yb - ya) - v * (zb - za));
+    out[i] = 0.5 * rho * gamma[i] * (w * (yb - ya) - v * (zb - za));
   }
-  return Math.abs(di);
+  return out;
 }
 
 /**
@@ -376,6 +385,107 @@ export function stripsFromWing(wing) {
 }
 
 /**
+ * Where a lattice's forces act, in the central section's plane (`frame`,
+ * from `centralFrame`): back from its nose along its chord, and down from
+ * the chord. Metres.
+ *
+ *   lift      the centroid of the strips' lift, on their quarter-chord
+ *             lines: each strip's circulation by its span seen from ahead,
+ *             which is the share of it square to the flow in the plane of
+ *             symmetry (the rest, across, cancels side to side). The lift
+ *             of forces all square to the flow is their sum through their
+ *             centroid. `crossingBackM` is where that line crosses the chord.
+ *   induced   the centroid of the induced drag, strip by strip as the
+ *             Trefftz plane shares it out (`trefftzSegments`), on the same
+ *             lines: for the least drag a non-planar wing can have, Munk's,
+ *             it is the lift's; a wing loaded otherwise puts it elsewhere.
+ *   profile   the centroid of the strips' own area, which is where their
+ *             profile drag acts when every section has the same coefficient.
+ *
+ * And what the balance needs to put the sections' own pitching moment on
+ * the lift: `liftOverQ`, the lattice's lift over the dynamic pressure (m²,
+ * its CL by its area), and `chordSquaredSpanM3`, each strip's chord squared
+ * by its span seen from ahead — their moment is Cm0 q by it. Carried by a
+ * lift L, the moment moves its line along the flow by
+ * -Cm0 q chordSquaredSpan / L (`liftLine`).
+ *
+ * @param {object[]} strips   as `wingStrips` makes them
+ * @param {number[]} gamma    their circulation, at a unit free stream
+ * @param {object}   frame    `centralFrame(wing)`
+ * @param {object}   o
+ * @param {number}   o.alphaDeg    the flow's angle to the lattice's x axis
+ * @param {number}  [o.latticeDeg] the angle the circulation was solved at,
+ *                                 for the wake's trace; alphaDeg if not given
+ */
+export function latticeCentres(strips, gamma, frame, { alphaDeg, latticeDeg = alphaDeg }) {
+  const { origin: o, u, v } = frame;
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const dist = (p, r) => Math.hypot(r[0] - p[0], r[1] - p[1], r[2] - p[2]);
+  const qc = (le, te) => [0, 1, 2].map((k) => le[k] + (te[k] - le[k]) * 0.25);
+  const lat = (latticeDeg * Math.PI) / 180;
+  const seen = (q) => [q[1], q[2] * Math.cos(lat) - q[0] * Math.sin(lat)];
+  const di = trefftzSegments(strips.map((s) => [seen(s.leftTE), seen(s.rightTE)]), gamma);
+  const sum = { lift: 0, liftB: 0, liftD: 0, ind: 0, indB: 0, indD: 0, area: 0, areaB: 0, areaD: 0, c2: 0 };
+  strips.forEach((s, i) => {
+    const a = qc(s.leftLE, s.leftTE);
+    const b = qc(s.rightLE, s.rightTE);
+    const d = [0, 1, 2].map((k) => (a[k] + b[k]) / 2 - o[k]);
+    const back = dot(d, u);
+    const down = -dot(d, v);
+    const seenY = Math.abs(b[1] - a[1]);
+    const chord = (dist(s.leftLE, s.leftTE) + dist(s.rightLE, s.rightTE)) / 2;
+    const area = chord * dist(a, b);
+    const l = gamma[i] * seenY;
+    sum.lift += l; sum.liftB += l * back; sum.liftD += l * down;
+    sum.ind += di[i]; sum.indB += di[i] * back; sum.indD += di[i] * down;
+    sum.area += area; sum.areaB += area * back; sum.areaD += area * down;
+    sum.c2 += chord * chord * seenY;
+  });
+  if (!(sum.lift > 0)) return null;
+  // The flow's angle to the central chord, and the lift's line through its
+  // centroid down to the chord: square to the flow, it leans forward by it.
+  const flowToChordDeg = alphaDeg + frame.incidenceDeg;
+  const ac = (flowToChordDeg * Math.PI) / 180;
+  const lift = { backM: sum.liftB / sum.lift, downM: sum.liftD / sum.lift };
+  const crossingBackM = lift.backM - lift.downM * Math.tan(ac);
+  return {
+    lift,
+    crossingBackM,
+    crossingFraction: crossingBackM / frame.chordM,
+    induced: Math.abs(sum.ind) > 0
+      ? { backM: sum.indB / sum.ind, downM: sum.indD / sum.ind } : { ...lift },
+    profile: { backM: sum.areaB / sum.area, downM: sum.areaD / sum.area },
+    areaM2: sum.area,
+    liftOverQ: 2 * sum.lift,
+    chordSquaredSpanM3: sum.c2,
+    chordM: frame.chordM,
+    alphaDeg,
+    flowToChordDeg,
+  };
+}
+
+/**
+ * The lift's line of action with the sections' own pitching moment on it:
+ * the lattice's centroid (`latticeCentres`) moved along the flow by
+ * -Cm0 chordSquaredSpan / (L / q), for a lift L at dynamic pressure q —
+ * aft for a nose-down moment. Returns a point on the line, in the central
+ * section's plane, and where the line crosses the central chord.
+ *
+ * @param {object} centres  `latticeCentres(...)`
+ * @param {object} o
+ * @param {number} o.cm0          the section's pitching moment at no lift
+ * @param {number} o.liftOverQ    L / q, m²: the polar's CL by its area
+ */
+export function liftLine(centres, { cm0 = 0, liftOverQ = centres.liftOverQ }) {
+  const ac = (centres.flowToChordDeg * Math.PI) / 180;
+  const shiftM = liftOverQ > 0 ? (-cm0 * centres.chordSquaredSpanM3) / liftOverQ : 0;
+  const backM = centres.lift.backM + shiftM * Math.cos(ac);
+  const downM = centres.lift.downM - shiftM * Math.sin(ac);
+  const crossingBackM = backM - downM * Math.tan(ac);
+  return { backM, downM, shiftM, crossingBackM, crossingFraction: crossingBackM / centres.chordM };
+}
+
+/**
  * What the arc does to the wing in flight: the wing as built against the
  * same wing laid flat (`wingStrips`), both on the lattice, at two angles of
  * attack. The lifting line the polar and the balance stand on solves the
@@ -424,10 +534,23 @@ export function arcFactors(wing, { alphas = [4, 10] } = {}) {
     const a = Math.min(12, Math.max(2, alphaDeg));
     return kAt(arched, A, a) / kAt(flat, F, a);
   };
+  // Where the forces act, at an angle: each solve's circulation taken as
+  // linear in the angle between the two, as the induced ratio takes it, at
+  // the angle the lattice's flat plates see — a cambered wing's less its
+  // section's zero-lift angle — and the flow at the wing's own (`latticeCentres`).
+  const frame = centralFrame(wing);
+  const forceCentreAt = (alphaDeg, { alphaL0Deg = 0, flat: onFlat = false } = {}) => {
+    const S = onFlat ? F : A;
+    const latticeDeg = alphaDeg - alphaL0Deg;
+    const f = (latticeDeg - a1) / (a2 - a1);
+    const gamma = S[0].gamma.map((g, i) => g + f * (S[1].gamma[i] - g));
+    return latticeCentres(onFlat ? flat : arched, gamma, frame, { alphaDeg, latticeDeg });
+  };
   return {
     liftRatio: slope(A) / slope(F),
     alphaShiftDeg: zero(A) - zero(F),
     inducedRatioAt,
+    forceCentreAt,
     projectedSpanM: A[0].spanM,
     projectedAreaM2: A[0].areaM2,
     strips: arched.length,

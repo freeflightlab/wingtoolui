@@ -32,50 +32,60 @@ A paraglider's angle of incidence is set by its line lengths: the wing hangs
 from the maillon and sits at whatever attitude those lengths dictate. Where it
 hangs from decides how it flies, and a load-weighted average of the anchor
 positions is a plausible-looking geometric proxy that knows nothing about
-balance. On a typical wing the two differ by several points of chord.
+balance. On the default wing the two differ by 9.8 points of chord: 31.0% at
+the anchors' centre, 40.8% where the balance on its own polar puts the pilot
+at 5° with every force where it acts (`docs/balance.md`), 39.3% on the
+handbook's rules for where they act.
 
-Take moments about the hang point. Lift acts up at the centre of pressure; if
-that is **forward** of the hang point the couple is nose-**up**, which is what
-balances an aerofoil's nose-down pitching moment. So the wing hangs from a
-point **aft of its centre of pressure**, and the more nose-down the section,
-the further aft.
+Where the calage falls against the centre of pressure is a matter of
+attitude, not a rule. With nothing below the wing but the pilot's weight, the
+wing's force at its centre of pressure carries the pilot, so the pilot hangs
+plumb under it, and on a wing gliding θ nose down the foot of that plumb line
+on the chord is L tan θ **forward** of the centre of pressure, L the line
+height. LEparagliding's section 8 builds every design so, and the three
+complete designs on file hang at calages of 33, 32.5 and 36% under plumb
+points of 38, 40 and 39%. Drag below the wing — the lines', the pilot's —
+swings the pilot back from the plumb line, and a more nose-down section puts
+the centre of pressure, and the wing with it, further aft. All three are
+asserted, the first to the micrometre.
 
-Both of those are asserted now. I stated the first one backwards to begin
-with, and a test that was itself wrong failed a model that was right — the
-direction is easy to reason round the wrong way and looks equally plausible
-either way.
+This note said the wing must hang **aft** of its centre of pressure, for the
+lift-weight couple to oppose the section's nose-down moment. The lift at the
+centre of pressure already carries that moment, so the couple was counted
+twice — as the handbook's own 4.2 counts it, in a seventh term the balance
+now leaves out (`docs/departures.md` §5). The rule refused calages that real
+designs hang at, and the free-body check caught it on the 13 m² Ultralite 5,
+whose balance hangs it forward of its centre of pressure: its lines were hung
+from the anchors' centre instead.
 
 Without a solved equilibrium the anchor centroid remains as a fallback, which
 is better than the leading edge, and the caller knows which was used.
 
-### The two balance modes disagreed about the sign
+### The worksheet's calage hangs no wing
 
 `solveEquilibrium` has a `legacySpreadsheet` mode that reproduces a 2012
-worksheet. It leaves the **aerofoil's own pitching moment out of the balance**,
-and that changes the answer qualitatively rather than slightly:
+worksheet. Its glide is not its own coefficients': it takes the induced drag
+of the 2D lift coefficient — the handbook's example 0.070, where its
+finite-span lift gives 0.027 — and so flies steeper than its lift and drag
+do, and solves its calage at that attitude. On the wing the tests use:
 
-| mode | calage | centre of pressure | can it balance? |
+| mode | glide angle | calage | centre of pressure |
 | --- | --- | --- | --- |
-| handbook 4.2 | 36.9% | 29.7% | **yes** — hang point aft of CP |
-| 2012 worksheet | 19.4% | 29.7% | **no** — hang point forward of CP |
+| handbook 4.2, the pitching moment once | 6.0° | 34.0% | 29.7% |
+| handbook 4.2 as printed, twice | 6.0° | 36.9% | 29.7% |
+| 2012 worksheet | 9.3° | 19.4% | 29.7% |
 
-The legacy number is right for matching that worksheet and wrong as geometry.
-A wing hung 10 points of chord forward of its centre of pressure has a
-lift-weight couple that *adds* to the section's nose-down moment instead of
-opposing it. It could not fly.
+The legacy number is right for matching that worksheet and belongs to no
+wing. `usableCalage` refuses it and says why:
 
-The tool would have used whichever number it was handed. `usableCalage` now
-refuses one that cannot balance, and says why:
+> the 2012 worksheet's calage is solved at a glide its own coefficients do
+> not give, so it hangs no wing
 
-> the calage (19.4%) is forward of the centre of pressure (29.7%), so the wing
-> could not balance there
-
-Refused, the lines fall back to the anchor centroid rather than to an
-unusable number. Legacy mode remains available for reproducing the
-worksheet's figures; it just does not get to place the lines.
-
-The interface defaults to the handbook path, so this was a latent fault rather
-than a live one — but it was one checkbox away.
+Refused, the lines fall back to the anchor centroid. It was refused before
+for hanging forward of the centre of pressure — the wrong reason, and one
+that would have refused the designs above. Legacy mode remains available for
+reproducing the worksheet's figures; it just does not get to place the
+lines.
 
 ### Three places, not one
 
@@ -100,25 +110,26 @@ and **stayed there after returning to a parametric wing**. A row the imported
 design does not have now keeps its current value.
 
 With all three fixed, nothing runs to the leading edge. On the default wing as
-the tool opens the karabiner hangs under the calage, 34.2% of the root chord,
+the tool opens the karabiner hangs under the calage, 40.8% of the root chord,
 and each row's main lines start from the top of its own riser — the risers
 lean towards the lines they carry, so those are three points, not one:
 
 | riser | its top | its rows attach at |
 | --- | --- | --- |
-| A | 32.8% of chord | 8.5% |
-| B | 34.0% | 27.5% |
-| C, with D and the brake pulley | 35.7% | 53.0%, 78.5%, and the trailing edge |
+| A | 38.9% of chord | 8.5% |
+| B | 40.3% | 27.5% |
+| C, with D and the brake pulley | 41.9% | 53.0%, 78.5%, and the trailing edge |
 
-No line of the 111 reaches forward of 5% of chord. The brake handle is placed
-0.35 m aft of the hang point and 0.55 m below it; the brake line runs from
-there up to the pulley at the top of the rear riser.
+No line of the 109 reaches forward of the A row's 8.5% of chord. The brake handle is placed
+0.35 m aft of the karabiner and 0.55 m below the risers' tops, 5 cm under the
+karabiner; the brake line runs from there up to the pulley at the top of the
+rear riser.
 
 This section's table used to say every row "starts at or aft of the hang
 point" and that "the brake handle hangs from the same point as the risers".
 Neither has been true since the risers were given their own tops and the
-handle its own place: the A riser's top is a point and a half of chord
-*forward* of the karabiner, which is where a front riser should be.
+handle its own place: the A riser's top is two points of chord *forward* of
+the karabiner, which is where a front riser should be.
 
 ### Why nothing caught it
 

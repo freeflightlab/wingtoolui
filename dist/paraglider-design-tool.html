@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-BfajdiXRMaik+x14QPn0pCLyKaBSSPD+ktlO1NKh4gA='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-FgAmoL0ybxWMW26KwzpiH2hnJP9yIDR+Op0Tr3lqZJc='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Paraglider Design Tool</title>
 <style>/* Palette note: the geometry colours are the AutoCAD Color Index values the
    handbook's own panel subroutine writes into its DXF (2 yellow, 3 green,
@@ -584,7 +584,7 @@ input[type=range]::-moz-range-thumb {
 <div class="shell">
 
   <header class="masthead">
-    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.3.0</span></div>
+    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.7.0</span></div>
     <input class="wingname" id="wingName" value="gnu-01" aria-label="Wing name">
     <div class="readout" id="readout"></div>
     <button class="themebtn" id="themeBtn" aria-label="Switch between dark and light">Light</button>
@@ -2151,6 +2151,28 @@ function wingPolar({
   };
 }
 
+/**
+ * A wing polar's coefficients at any angle within its points, along straight
+ * lines between them: lift, induced and profile drag, and the span
+ * efficiency the two make on its aspect ratio. Null outside its range.
+ */
+function polarAt(polar, alphaDeg) {
+  const pts = polar?.points ?? [];
+  if (pts.length < 2 || !(alphaDeg >= pts[0].alphaDeg - 1e-9) || !(alphaDeg <= pts[pts.length - 1].alphaDeg + 1e-9)) return null;
+  let i = 0;
+  while (i < pts.length - 2 && pts[i + 1].alphaDeg < alphaDeg) i++;
+  const a = pts[i];
+  const b = pts[i + 1];
+  const f = (alphaDeg - a.alphaDeg) / (b.alphaDeg - a.alphaDeg);
+  const at = (k) => a[k] + f * (b[k] - a[k]);
+  const CL = at('CL');
+  const CDi = at('CDi');
+  return {
+    alphaDeg, CL, CDi, CDprofile: at('CDprofile'),
+    oswald: CDi > 0 ? (CL * CL) / (Math.PI * polar.aspectRatio * CDi) : NaN,
+  };
+}
+
 /** Interpolate a section polar's drag at a given lift coefficient. */
 function sectionCd(sp, cl) {
   const pts = sp.points;
@@ -2876,6 +2898,140 @@ function projectedArea(wing) {
   return 2 * area;
 }
 
+/**
+ * The central section's own plane, which the balance works in: its nose,
+ * the unit vector back along its chord and the one square to it, up, both
+ * in the plane of symmetry, and the chord's incidence against the lattice's
+ * x axis, nose up positive. A first rib off the centreline (a centre cell)
+ * stands for the centre: its chord and nose are the centre cell's.
+ */
+function centralFrame(wing) {
+  const root = wing?.ribs?.[0];
+  if (!root) throw new Error('centralFrame needs a wing');
+  const f = root.frame;
+  const origin = f ? f.origin : root.upper[0];
+  const ux = f ? f.u[0] : 1;
+  const uz = f ? f.u[2] : 0;
+  const n = Math.hypot(ux, uz) || 1;
+  const u = [ux / n, 0, uz / n];
+  return {
+    origin,
+    u,
+    v: [-u[2], 0, u[0]],
+    chordM: root.chord,
+    incidenceDeg: (Math.atan2(-u[2], u[0]) * 180) / Math.PI,
+  };
+}
+
+/**
+ * Where the wing's cloth puts its mass, in the central section's plane
+ * (`centralFrame`): back from the nose along the chord, and down from it.
+ * The two skins cell by cell, as the ruled surfaces between neighbouring
+ * ribs' sections, each by its own cloth's weight — the upper skin's nose, to
+ * `noseTo` of the chord, by the leading edge's — and every rib as its whole
+ * section, by the rib cloth's. Both halves and the centre cell, when there
+ * is one. A wing in its arc has it well below the chord: the tips hang
+ * down. The ribs' openings, the tapes, rods and seams are not counted; the
+ * rest of a wing's mass is taken as spread like its cloth.
+ *
+ * LEparagliding estimates the same point as the chord-weighted mean of
+ * every rib's point at 36% of its chord, at the rib's height in the arc
+ * (`lepMainParameters`).
+ *
+ * @param {object} wing   `buildWing`
+ * @param {object} o      the cloths' weights, g/m²
+ * @returns {{backM:number, downM:number, clothKg:number, parts:object}}
+ */
+function wingMassCentre(wing, {
+  upperGsm, lowerGsm, ribGsm, noseGsm = upperGsm, noseTo = 0,
+} = {}) {
+  if (!wing?.ribs?.length) throw new Error('wingMassCentre needs a wing');
+  if (![upperGsm, lowerGsm, ribGsm, noseGsm].every((g) => g >= 0)) {
+    throw new Error('wingMassCentre needs each cloth\'s weight in g/m²');
+  }
+  const frame = centralFrame(wing);
+  const { origin: o, u, v } = frame;
+  const parts = {
+    upper: { areaM2: 0, kg: 0 }, nose: { areaM2: 0, kg: 0 }, lower: { areaM2: 0, kg: 0 }, ribs: { areaM2: 0, kg: 0 },
+  };
+  let kg = 0;
+  let mx = 0;
+  let mz = 0;
+  // A mass at a point, `copies` times: its mirror has the same x and z.
+  const add = (part, areaM2, point, gsm, copies) => {
+    const m = (areaM2 * gsm * copies) / 1000;
+    parts[part].areaM2 += areaM2 * copies;
+    parts[part].kg += m;
+    kg += m;
+    mx += m * point[0];
+    mz += m * point[2];
+  };
+  const tri = (a, b, c) => {
+    const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const n = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+    return { area: 0.5 * Math.hypot(n[0], n[1], n[2]), at: [0, 1, 2].map((k) => (a[k] + b[k] + c[k]) / 3) };
+  };
+  const mirror = (p) => [p[0], -p[1], p[2]];
+  // The skin between two ribs' polylines, quad by quad.
+  const skin = (A, B, surface, chordOf, copies) => {
+    const n = Math.min(A.length, B.length);
+    for (let k = 0; k < n - 1; k++) {
+      const t1 = tri(A[k], A[k + 1], B[k + 1]);
+      const t2 = tri(A[k], B[k + 1], B[k]);
+      const area = t1.area + t2.area;
+      if (!(area > 0)) continue;
+      const at = [0, 1, 2].map((j) => (t1.at[j] * t1.area + t2.at[j] * t2.area) / area);
+      const nose = surface === 'upper' && chordOf(k) < noseTo;
+      add(nose ? 'nose' : surface, area, at, nose ? noseGsm : surface === 'upper' ? upperGsm : lowerGsm, copies);
+    }
+  };
+  const r = wing.ribs;
+  const chordAt = (rib) => (k) => {
+    const s = rib.section?.upper;
+    return s && rib.chord > 0 ? ((s[k][0] + s[k + 1][0]) / 2) / rib.chord : 0.5;
+  };
+  for (let i = 0; i < r.length - 1; i++) {
+    skin(r[i].upper, r[i + 1].upper, 'upper', chordAt(r[i]), 2);
+    skin(r[i].lower, r[i + 1].lower, 'lower', chordAt(r[i]), 2);
+  }
+  if (!hasCentreRib(wing)) {
+    skin(r[0].upper.map(mirror), r[0].upper, 'upper', chordAt(r[0]), 1);
+    skin(r[0].lower.map(mirror), r[0].lower, 'lower', chordAt(r[0]), 1);
+  }
+  // Each rib as its section: the outline's area and centroid, in its plane.
+  r.forEach((rib, i) => {
+    const sec = rib.section;
+    if (!sec || !rib.frame) return;
+    const loop = sec.upper.concat(sec.lower.slice().reverse());
+    let a = 0;
+    let cx = 0;
+    let cy = 0;
+    for (let k = 0; k < loop.length; k++) {
+      const [x0, y0] = loop[k];
+      const [x1, y1] = loop[(k + 1) % loop.length];
+      const cr = x0 * y1 - x1 * y0;
+      a += cr;
+      cx += (x0 + x1) * cr;
+      cy += (y0 + y1) * cr;
+    }
+    if (Math.abs(a) < 1e-12) return;
+    cx /= 3 * a;
+    cy /= 3 * a;
+    const f = rib.frame;
+    const at = [0, 1, 2].map((k) => f.origin[k] + cx * f.u[k] + cy * f.v[k]);
+    add('ribs', Math.abs(a) / 2, at, ribGsm, ribCopies(wing, i));
+  });
+  if (!(kg > 0)) throw new Error('wingMassCentre: the wing has no cloth');
+  const c = [mx / kg - o[0], 0, mz / kg - o[2]];
+  return {
+    backM: c[0] * u[0] + c[2] * u[2],
+    downM: -(c[0] * v[0] + c[2] * v[2]),
+    clothKg: kg,
+    parts,
+  };
+}
+
 /** All rib outlines as closed 3D loops, for drawing and export. */
 function ribLoops(wing) {
   return wing.ribs.map((r) => r.upper.slice().reverse().concat(r.lower.slice(1)));
@@ -3592,10 +3748,30 @@ function tensionForBillow({
  * moments reproduce exactly and sum to the printed 0.17.
  *
  * Both behaviours are available. `legacySpreadsheet: true` reproduces the 2012
- * example (calage 0.433 m); the default applies the equations as published in
- * 4.2 and returns a slightly further-aft calage. The difference is real and
- * worth understanding before trusting either on a prototype — see
+ * example (calage 0.433 m); the default applies the equations of 4.2 and
+ * returns a further-aft calage. The difference is real and worth
+ * understanding before trusting either on a prototype — see
  * docs/validation.md.
+ *
+ * ---------------------------------------------------------------------------
+ * The pitching moment, once
+ * ---------------------------------------------------------------------------
+ * 4.2 puts the lift and the wing's drag at the centre of pressure, and the
+ * sheet places it from the pitching moment, Xcp = 0.25 - Cm/Cz (0.296 of the
+ * chord in 4.4). A force there already carries the moment about the quarter
+ * chord. 4.2's seventh term, -q0 Cm, adds it again — and without the chord,
+ * so the moment it adds is a newton figure taken for a newton-metre one. The
+ * sheet leaves it out, and so does the author's program, which takes moments
+ * about the centre of pressure itself (`lepbalance.js`); the handbook's 2020
+ * revisit counts the aerodynamic moment about the point the forces are put
+ * at, which at the centre of pressure is none.
+ *
+ * Counted twice, it put the calage of a wing with a cambered section, Cm0
+ * -0.105, 6% of chord further aft at 5 degrees — and the derived calages
+ * "well aft of the 40 to 45% real wings use" (`trimFromCalage`) were partly
+ * that. The default counts it once: the six terms of 4.2 before it.
+ * `printedAeroMoment: true` adds the seventh as printed, to read the text
+ * against.
  */
 const DEFAULT_INPUTS = {
   name: 'LAB_example',
@@ -3617,6 +3793,7 @@ const DEFAULT_INPUTS = {
   cm: -0.042,           // pitching moment coefficient
   apply3D: true,        // apply finite-span correction to lift
   legacySpreadsheet: false,
+  printedAeroMoment: false, // 4.2's seventh term, the pitching moment again
 };
 
 /**
@@ -3713,6 +3890,9 @@ function solveEquilibrium(input = {}) {
   const sigmaLineWeight = -ml * g * ct;
 
   const useAll = !p.legacySpreadsheet;
+  // The seventh term only as printed: the centre of pressure already places
+  // the pitching moment (see "The pitching moment, once").
+  const withAero = useAll && !!p.printedAeroMoment;
   const constTerm =
     mLift
     + (useAll ? mWingDrag : 0)
@@ -3721,7 +3901,7 @@ function solveEquilibrium(input = {}) {
     + mPilotWeight
     + mLineWeight
     + mWingWeight
-    + (useAll ? mAero : 0);
+    + (withAero ? mAero : 0);
 
   const sigmaCoeff = sigmaLines + sigmaPilotDrag + sigmaPilotWeight + sigmaLineWeight;
   const sigma = -constTerm / sigmaCoeff;
@@ -3736,7 +3916,7 @@ function solveEquilibrium(input = {}) {
     pilotWeight: -(mPilotWeight + sigmaPilotWeight * sigma),
     lineWeight: -(mLineWeight + sigmaLineWeight * sigma),
     wingWeight: -mWingWeight,
-    aerodynamic: -mAero,
+    aerodynamic: withAero ? -mAero : 0,
   };
   const residual = useAll
     ? Object.values(moments).reduce((a, v) => a + v, 0)
@@ -3771,7 +3951,8 @@ function solveEquilibrium(input = {}) {
     calageFraction: sigma / l,
     moments,
     momentResidual: residual,
-    mode: p.legacySpreadsheet ? 'legacy-2012-spreadsheet' : 'handbook-4.2-full',
+    mode: p.legacySpreadsheet ? 'legacy-2012-spreadsheet'
+      : withAero ? 'handbook-4.2-as-printed' : 'handbook-4.2',
   };
 }
 
@@ -3913,6 +4094,284 @@ function solveEquilibriumFromWing({
 }
 
 /**
+ * The handbook's balance flown on a wing's own polar (`wingPolar`) rather
+ * than on typed numbers: its lift, its induced drag through the span
+ * efficiency it has on its aspect ratio, and its profile drag, all at the
+ * angle, and the section's own Cm0. The lift is the wing's, so the
+ * finite-span factor is not applied again; a polar solved in the wing's arc
+ * has the arc in it, and none is passed. `inputs` are the rest of
+ * `solveEquilibrium`'s: masses, lines, pilot, density, area and span — the
+ * polar's own, so that its span efficiency means the same here.
+ */
+function balanceOnPolar({ polar, alphaDeg, cm0, ...inputs }) {
+  const p = polarAt(polar, alphaDeg);
+  if (!p) {
+    throw new Error(`balanceOnPolar: ${alphaDeg} degrees is outside the polar `
+      + `(${polar?.points?.[0]?.alphaDeg} to ${polar?.points?.[polar.points.length - 1]?.alphaDeg})`);
+  }
+  const solved = solveEquilibrium({
+    ...inputs, alphaDeg, cz: p.CL, apply3D: false, oswald: p.oswald, cx0a: p.CDprofile, cm: cm0,
+    legacySpreadsheet: false, arc: null,
+  });
+  return { ...solved, onPolar: p };
+}
+
+/**
+ * The calage from moments, every force at its own point: the karabiners'
+ * position along the central chord at which the moments of all the forces
+ * on the glider, about the karabiners, sum to none.
+ *
+ * In the central section's plane, back along its chord and down from it,
+ * metres, with the karabiners `depthM` below the chord. A force's point
+ * either belongs to the wing (`withKarabiners` 0), hangs with the
+ * karabiners (1: the handbook's rules put the lines' weight and drag below
+ * the calage), or between: a line's middle moves with them by its depth
+ * over theirs, so a lineset placed from a plan hung at `fromM` keeps its
+ * shape as the karabiners move along the chord. The point given is where
+ * it is with the karabiners at `fromM`.
+ *
+ * The pilot hangs from the karabiners `belowM` down, either `plumb`, as the
+ * handbook and LEparagliding put him, or `free`: a body free to swing
+ * about the karabiners comes to rest with his own weight and drag in line
+ * with them, a little behind plumb, and puts no moment about them.
+ *
+ * Moments are nose up positive.
+ *
+ * @param {object} o
+ * @param {number} o.alphaDeg   the flow's angle to the central chord
+ * @param {number} o.thetaDeg   the chord's angle below the horizon, nose down
+ *                              positive: the glide angle less alphaDeg
+ * @param {number} o.depthM     the karabiners' depth below the chord
+ * @param {{name:string, F:number[], at:number[], withKarabiners?:number, fromM?:number}[]} o.forces
+ * @param {{weightN:number, dragN:number, belowM:number, hangs?:string}} o.pilot
+ */
+function calageFromForces({ alphaDeg, thetaDeg, depthM, forces, pilot }) {
+  const a = rad(alphaDeg);
+  const t = rad(thetaDeg);
+  const flow = [Math.cos(a), -Math.sin(a)];
+  const down = [-Math.sin(t), Math.cos(t)];
+  const cross = (r, F) => r[0] * F[1] - r[1] * F[0];
+  // The pilot's forces, and where he hangs from the karabiners.
+  const Fp = [pilot.weightN * down[0] + pilot.dragN * flow[0], pilot.weightN * down[1] + pilot.dragN * flow[1]];
+  const along = pilot.hangs === 'plumb' ? down : (() => {
+    const n = Math.hypot(Fp[0], Fp[1]) || 1;
+    return [Fp[0] / n, Fp[1] / n];
+  })();
+  const arm = [pilot.belowM * along[0], pilot.belowM * along[1]];
+  const pilotMoment = cross(arm, Fp);
+  // Each force's moment about the karabiners at (sigma, depth) is linear
+  // in sigma: its point is at + k (sigma - from), so its arm along the
+  // chord is at - from k + (k - 1) sigma.
+  let constant = pilotMoment;
+  let slope = 0;
+  for (const f of forces) {
+    const k = f.withKarabiners ?? 0;
+    const from = f.fromM ?? 0;
+    constant += (f.at[0] - k * from) * f.F[1] - (f.at[1] - depthM) * f.F[0];
+    slope += (k - 1) * f.F[1];
+  }
+  if (!(Math.abs(slope) > 1e-9)) throw new Error('calageFromForces: no force but the pilot\'s fixes the karabiners along the chord');
+  const sigma = -constant / slope;
+  const K = [sigma, depthM];
+  const moments = {};
+  for (const f of forces) {
+    const k = f.withKarabiners ?? 0;
+    const p = [f.at[0] + k * (sigma - (f.fromM ?? 0)), f.at[1]];
+    moments[f.name] = (moments[f.name] ?? 0) + cross([p[0] - K[0], p[1] - K[1]], f.F);
+  }
+  moments.pilot = pilotMoment;
+  const pilotAt = [sigma + arm[0], depthM + arm[1]];
+  return {
+    calageM: sigma,
+    moments,
+    residual: Object.values(moments).reduce((x, y) => x + y, 0),
+    pilotAt,
+    // The pilot's lean behind plumb, degrees.
+    pilotLeanDeg: (Math.atan2(cross(along, down), down[0] * along[0] + down[1] * along[1]) * 180) / Math.PI,
+  };
+}
+
+/**
+ * The balance flown on a wing's own polar with every force where it acts,
+ * rather than where chapter 4's rules put it:
+ *
+ *   - the wing's lift on its own line of action in the arc, from the vortex
+ *     lattice (`latticeCentres`): the centroid of its strips' lift, moved
+ *     along the flow by the sections' own pitching moment (`liftLine`).
+ *     The rule puts it on the central chord at 0.25 - Cm0/CL of that chord;
+ *     a planform's quarter-chord line runs aft toward the tips, and in its
+ *     arc the wing's lift is well below its chord;
+ *   - its profile drag at the centroid of its area, and its induced drag at
+ *     the centroid of the induced drag the lattice finds strip by strip;
+ *   - the wing's weight at its mass centre in the arc (`wingMassCentre`);
+ *   - the lines' weight and drag at their own centres (`lineCentres`) —
+ *     without a plan yet, by the rules: half and a third of the way down;
+ *   - the pilot below the karabiners, `pilotBelowM`, hanging free
+ *     (`calageFromForces`).
+ *
+ * The forces themselves are `balanceOnPolar`'s: the same glide, speed and
+ * lift; only where they act differs.
+ *
+ * @param {object} o
+ * @param {object} o.polar, o.alphaDeg, o.cm0   as `balanceOnPolar`
+ * @param {function} o.centresAt  (alphaDeg) => `latticeCentres(...)`, the
+ *                    lattice at this angle (`arcFactors(...).forceCentreAt`)
+ * @param {{backM:number, downM:number}} o.wingCentre
+ * @param {object|null} o.lines   `lineCentres(...)`, with `fromM`: the
+ *                    calage its plan was hung at, metres
+ * @param {number} [o.pilotBelowM]
+ * @param {string} [o.pilotHangs]  'free' or 'plumb'
+ */
+function balanceWhereForcesAct({
+  polar, alphaDeg, cm0, centresAt, wingCentre, lines = null,
+  pilotBelowM = 0.2, pilotHangs = 'free', ...inputs
+}) {
+  if (typeof centresAt !== 'function') throw new Error('balanceWhereForcesAct needs the lattice\'s centres (centresAt)');
+  if (!Number.isFinite(wingCentre?.backM) || !Number.isFinite(wingCentre?.downM)) {
+    throw new Error('balanceWhereForcesAct needs the wing\'s mass centre');
+  }
+  const base = balanceOnPolar({ polar, alphaDeg, cm0, ...inputs });
+  const p = { ...DEFAULT_INPUTS, ...inputs };
+  const centres = centresAt(alphaDeg);
+  if (!centres) throw new Error(`balanceWhereForcesAct: the lattice has no lift at ${alphaDeg} degrees`);
+  const q0 = base.q0;
+  const S = p.area;
+  const ac = centres.flowToChordDeg;
+  const thetaC = base.gammaDeg - ac;
+  const a = rad(ac);
+  const t = rad(thetaC);
+  const flow = [Math.cos(a), -Math.sin(a)];
+  const up = [-Math.sin(a), -Math.cos(a)];
+  const down = [-Math.sin(t), Math.cos(t)];
+  const times = (v, k) => [v[0] * k, v[1] * k];
+  const liftN = q0 * base.cz3D;
+  const profileN = q0 * base.onPolar.CDprofile;
+  const inducedN = q0 * base.cxi;
+  const linesDragN = q0 * p.cxLines;
+  const pilotDragN = q0 * p.cxPilot;
+  const g = p.g;
+  const L = liftLine(centres, { cm0, liftOverQ: base.cz3D * S });
+  const h = p.lineLength;
+  const linesAt = lines
+    ? {
+      weight: { at: [lines.mass.backM, lines.mass.downM], withKarabiners: lines.mass.downM / h, fromM: lines.fromM },
+      drag: { at: [lines.drag.backM, lines.drag.downM], withKarabiners: lines.drag.downM / h, fromM: lines.fromM },
+    }
+    : {
+      // The handbook's rules: weight half way down, drag a third, both
+      // under the calage.
+      weight: { at: [0, h / 2], withKarabiners: 1, fromM: 0 },
+      drag: { at: [0, h / 3], withKarabiners: 1, fromM: 0 },
+    };
+  const forces = [
+    { name: 'lift', F: times(up, liftN), at: [L.backM, L.downM] },
+    { name: 'profileDrag', F: times(flow, profileN), at: [centres.profile.backM, centres.profile.downM] },
+    { name: 'inducedDrag', F: times(flow, inducedN), at: [centres.induced.backM, centres.induced.downM] },
+    { name: 'wingWeight', F: times(down, p.wingMass * g), at: [wingCentre.backM, wingCentre.downM] },
+    { name: 'lineWeight', F: times(down, p.lineMass * g), ...linesAt.weight },
+    { name: 'lineDrag', F: times(flow, linesDragN), ...linesAt.drag },
+  ];
+  const solved = calageFromForces({
+    alphaDeg: ac, thetaDeg: thetaC, depthM: h, forces,
+    pilot: { weightN: p.pilotMass * g, dragN: pilotDragN, belowM: pilotBelowM, hangs: pilotHangs },
+  });
+  const sigma = solved.calageM;
+  const chord = p.chord;
+  // Where the wing's own force — its lift and both drags — crosses the
+  // central chord: its moment about the nose over its component square to
+  // the chord.
+  const wingF = forces.slice(0, 3);
+  const R = wingF.reduce((r, f) => [r[0] + f.F[0], r[1] + f.F[1]], [0, 0]);
+  const Mw = wingF.reduce((m, f) => m + f.at[0] * f.F[1] - f.at[1] * f.F[0], 0);
+  const cpBackM = Mw / R[1];
+  // And the point the program types (LEparagliding's section 35): where
+  // the lift's line meets the line of the wing's drag.
+  const dragN = profileN + inducedN;
+  const PD = [
+    ((centres.profile.backM * profileN) + (centres.induced.backM * inducedN)) / dragN,
+    ((centres.profile.downM * profileN) + (centres.induced.downM * inducedN)) / dragN,
+  ];
+  const s = (PD[0] - L.backM) * up[0] + (PD[1] - L.downM) * up[1];
+  const cpPoint = { backM: L.backM + s * up[0], downM: L.downM + s * up[1] };
+  // The point on the chord plumb above the pilot.
+  const plumbM = solved.pilotAt[0] + solved.pilotAt[1] * Math.tan(t);
+  return {
+    ...base,
+    thetaDeg: thetaC,
+    xcpFraction: cpBackM / chord,
+    cpMetres: cpBackM,
+    calageMetres: sigma,
+    calageFraction: sigma / chord,
+    moments: solved.moments,
+    momentResidual: solved.residual,
+    forcesN: {
+      lift: liftN, profileDrag: profileN, inducedDrag: inducedN, lineDrag: linesDragN, pilotDrag: pilotDragN,
+      wingWeight: p.wingMass * g, lineWeight: p.lineMass * g, pilotWeight: p.pilotMass * g,
+    },
+    acting: {
+      // The centroid of the strips' lift, and its line with the sections'
+      // moment on it.
+      liftCentroid: centres.lift,
+      liftLine: L,
+      liftCrossingFraction: L.crossingFraction,
+      cpPoint,
+      profile: centres.profile,
+      induced: centres.induced,
+      wing: { backM: wingCentre.backM, downM: wingCentre.downM },
+      lines: lines ? { mass: lines.mass, drag: lines.drag, fromM: lines.fromM } : null,
+      linesByRule: !lines,
+      pilot: { backM: solved.pilotAt[0], downM: solved.pilotAt[1], belowM: pilotBelowM, hangs: pilotHangs, leanDeg: solved.pilotLeanDeg },
+      plumbFraction: plumbM / chord,
+      flowToChordDeg: ac,
+      chordM: chord,
+      // Where chapter 4's rule puts the lift, for comparison.
+      ruleCpFraction: base.xcpFraction,
+    },
+    mode: 'where-forces-act',
+  };
+}
+
+/**
+ * Trim from the calage on a wing's own polar: the angle at which
+ * `balanceOnPolar` puts the pilot where the risers hang — or `solve`, with
+ * the same arguments: `balanceWhereForcesAct`. As `trimFromCalage` finds it
+ * — the calage falls to a minimum at a low angle and rises either side, and
+ * the branch a wing flies on is the upper one — over the polar's angles.
+ */
+function trimOnPolar({ polar, calageFraction, tolerance = 1e-5, solve = balanceOnPolar, ...rest }) {
+  if (!(calageFraction > 0 && calageFraction < 1)) {
+    throw new Error(`trimOnPolar: calageFraction is a fraction of chord between 0 and 1 (got ${calageFraction})`);
+  }
+  const pts = polar.points.filter((p) => p.CL > 0.05);
+  if (pts.length < 2) throw new Error('trimOnPolar: the polar has no lifting points');
+  const lo0 = pts[0].alphaDeg;
+  const hi0 = pts[pts.length - 1].alphaDeg;
+  const at = (alphaDeg) => solve({ polar, alphaDeg, ...rest });
+  const samples = 4 * Math.max(1, Math.round(hi0 - lo0));
+  let minAlpha = lo0;
+  let minCalage = Infinity;
+  for (let i = 0; i <= samples; i++) {
+    const a = lo0 + ((hi0 - lo0) * i) / samples;
+    const c = at(a).calageFraction;
+    if (c < minCalage) { minCalage = c; minAlpha = a; }
+  }
+  const topCalage = at(hi0).calageFraction;
+  if (calageFraction < minCalage || calageFraction > topCalage) {
+    throw new Error(`a calage of ${(calageFraction * 100).toFixed(1)}% is outside what this wing can trim at `
+      + `(${(minCalage * 100).toFixed(1)}% at ${minAlpha.toFixed(1)} degrees, rising to `
+      + `${(topCalage * 100).toFixed(1)}% at ${hi0} degrees)`);
+  }
+  let lo = minAlpha;
+  let hi = hi0;
+  for (let i = 0; i < 60 && hi - lo > tolerance; i++) {
+    const mid = (lo + hi) / 2;
+    if (at(mid).calageFraction < calageFraction) lo = mid; else hi = mid;
+  }
+  const alphaDeg = (lo + hi) / 2;
+  return { ...at(alphaDeg), calageAsked: calageFraction, derivedFrom: 'calage' };
+}
+
+/**
  * Trim from the calage, rather than calage from an assumed trim.
  *
  * `solveEquilibriumFromWing` takes an angle of attack and reports the calage
@@ -3922,17 +4381,20 @@ function solveEquilibriumFromWing({
  * flies at whatever angle that produces.**
  *
  * The difference is not academic. The default angle was 6 degrees, which
- * demands a calage at 48% of chord — well aft of the 40 to 45% real wings
- * use — and produces CL 0.81 and a trim speed of 24.9 km/h on a Geo 7 XS.
- * EN 926-2 requires more than 30 km/h, and the certificate for that wing
- * records it passing at 55 kg.
+ * on a Geo 7 XS (a NACA 4415 standing in for its section, flat) demands a
+ * calage at 42.6% of chord and produces CL 0.81 and a trim speed of 24.9
+ * km/h. EN 926-2 requires more than 30 km/h, and the certificate for that
+ * wing records it passing at 55 kg.
  *
- * Run the other way round, a calage of 40 to 43.5% gives 2 to 4 degrees,
- * CL 0.49 to 0.65 and 27.8 to 31.9 km/h. The lift coefficient and the speed
- * both land where a real wing sits, from a geometry a builder can measure.
+ * Run the other way round from where built wings hang — the three complete
+ * designs on file say 32.5, 33 and 36% — a calage of 33 to 36% gives 3.2 to
+ * 4.1 degrees, CL 0.59 to 0.66 and 27.6 to 29.2 km/h: the lift coefficient
+ * a real wing trims at, from a geometry a builder can measure. (This said
+ * 40 to 43.5%, "where real wings hang", which trimmed there only while the
+ * balance counted the pitching moment twice.)
  *
- * The calage rises monotonically with angle of attack, so this is a plain
- * root find on that relation.
+ * On the branch a wing flies on the calage rises with the angle, so past the
+ * minimum this is a plain root find on that relation.
  */
 function trimFromCalage({
   planform, airfoil, atm = null, calageFraction,
@@ -3947,10 +4409,11 @@ function trimFromCalage({
     planform, airfoil, atm, alphaDeg, ...rest,
   });
 
-  // The calage is NOT monotonic in angle of attack. It falls to a minimum —
-  // around 1 to 2 degrees on the wings here — and rises on both sides. A
-  // bisection that assumes it rises throughout picks the wrong branch or
-  // finds nothing.
+  // The calage is NOT monotonic in angle of attack. It falls to a minimum
+  // where the wing has hardly any lift — the centre of pressure runs aft as
+  // the lift goes, Xcp = 0.25 - Cm/Cz: near -2 degrees on a NACA 4415 — and
+  // rises on both sides. A bisection that assumes it rises throughout picks
+  // the wrong branch or finds nothing.
   //
   // My first version assumed monotonic and its bracket check threw rather
   // than returning a wrong answer, which is the only reason this was caught.
@@ -6913,16 +7376,18 @@ function hangPointFromAnchors(wing, fractions, calageFraction = null) {
   //
   // A paraglider's angle of incidence is set by its line lengths: the wing
   // hangs from the maillon and sits at whatever attitude those lengths
-  // dictate. The point it hangs from is the calage — where the moment
-  // balances, with the lift acting forward of it and the section's own
-  // pitching moment making up the difference. That is chapter 4's whole
-  // subject and `solveEquilibrium` computes it.
+  // dictate. The point it hangs from is the calage — where the moments of
+  // the wing's lift and drag at its centre of pressure, the weights and the
+  // drag below it balance. That is chapter 4's whole subject and
+  // `solveEquilibrium` computes it.
   //
   // This used a load-weighted average of the anchor positions instead, which
-  // is a plausible-looking geometric proxy and not the same thing. On a
-  // typical wing it came out at 31.9% of chord where the equilibrium says
-  // **50.6%** — the wing was hung 18.7 points of chord too far forward, so
-  // the model pitched nose-down against the attitude it would really fly at.
+  // is a plausible-looking geometric proxy and not the same thing. On the
+  // default wing it comes out at 31.0% of chord where the balance on its
+  // polar says 40.8% at 5 degrees — 39.3% with each force where the
+  // handbook's rules put it — so the model pitched nose-down against the
+  // attitude it would really fly at. (This said 50.6% and 18.7 points, from
+  // a balance that counted the pitching moment twice.)
   //
   // These are flying machines. Where the mass hangs decides how they fly, and
   // a geometric average of some attachment points does not know that.
@@ -6932,18 +7397,13 @@ function hangPointFromAnchors(wing, fractions, calageFraction = null) {
       return (rootRib.xLE ?? 0) + calageFraction * (rootRib.chord ?? 0);
     }
   }
-  // A calage that cannot balance is not used.
+  // A calage that is not this wing's is not used.
   //
   // `solveEquilibrium` has a `legacySpreadsheet` mode that reproduces a 2012
-  // worksheet, and it omits the aerofoil's own pitching moment from the
-  // balance. The number it returns is right for matching that worksheet and
-  // wrong as geometry: it puts the hang point FORWARD of the centre of
-  // pressure, where the lift-weight couple adds to the section's nose-down
-  // moment instead of opposing it. A wing hung there could not fly.
-  //
-  // `usableCalage` below is the guard. Legacy remains available for
-  // reproducing the worksheet's numbers; it just does not get to place the
-  // lines.
+  // worksheet, whose glide is not its own coefficients' (`usableCalage`).
+  // The number it returns is right for matching that worksheet and wrong as
+  // geometry. Legacy remains available for reproducing the worksheet's
+  // numbers; it just does not get to place the lines.
 
   // Without a solved equilibrium, fall back to the anchor centroid — better
   // than the leading edge, and the caller is told which was used.
@@ -6953,11 +7413,21 @@ function hangPointFromAnchors(wing, fractions, calageFraction = null) {
 /**
  * Whether a solved calage can be used to hang a wing.
  *
- * Taking moments about the hang point, lift acting FORWARD of it gives a
- * nose-up couple, which is what balances an aerofoil's nose-down pitching
- * moment. So a usable calage sits AFT of the centre of pressure. One forward
- * of it describes a wing that cannot balance, and the 2012-spreadsheet mode
- * returns exactly that because it leaves the aerofoil moment out.
+ * Any calage on the chord can, but the 2012 worksheet's. Its glide is not its
+ * own coefficients': it takes the induced drag of the 2D lift coefficient,
+ * 0.070 where its finite-span lift gives 0.027, and flies 11.5 degrees down
+ * where its lift and drag give 7.2, so the attitude its calage is solved at
+ * belongs to no wing.
+ *
+ * This refused a calage forward of the centre of pressure, reasoning that the
+ * lift-weight couple must oppose the section's nose-down moment. The lift at
+ * the centre of pressure already carries that moment; the couple was counted
+ * twice. A pilot with nothing but weight below the wing hangs plumb under the
+ * centre of pressure, and a wing gliding nose down puts the foot of that
+ * plumb line on the chord FORWARD of it, by the line height times tan theta —
+ * which is where LEparagliding's own section 8 puts the three complete
+ * designs on file: calages of 33, 32.5 and 36% under plumb points of 38, 40
+ * and 39%. Drag below the wing swings the pilot back from there.
  */
 function usableCalage(balance) {
   if (!balance || !Number.isFinite(balance.calageFraction)) {
@@ -6966,14 +7436,11 @@ function usableCalage(balance) {
   if (!(balance.calageFraction > 0 && balance.calageFraction < 1)) {
     return { ok: false, why: 'calage is not a fraction of chord' };
   }
-  if (Number.isFinite(balance.xcpFraction)
-    && balance.calageFraction < balance.xcpFraction) {
+  if (balance.mode === 'legacy-2012-spreadsheet') {
     return {
       ok: false,
-      why: `the calage (${(balance.calageFraction * 100).toFixed(1)}%) is `
-        + `forward of the centre of pressure `
-        + `(${(balance.xcpFraction * 100).toFixed(1)}%), so the wing could not `
-        + 'balance there',
+      why: 'the 2012 worksheet\'s calage is solved at a glide its own coefficients do not give, '
+        + 'so it hangs no wing',
     };
   }
   return { ok: true, why: null };
@@ -8973,6 +9440,8 @@ function acceleratedPolar({
   cmAt = null,
   // The span efficiency by angle, where the lift curve brings its own.
   oswaldAt = null,
+  // And its profile drag by angle.
+  profileAt = null,
   steps = 11,
   czRange = [0.25, 1.30],
 }) {
@@ -8989,6 +9458,7 @@ function acceleratedPolar({
       cz,
       cm: cmAt ? cmAt(alpha) : base.cm,
       ...(oswaldAt ? { oswald: oswaldAt(alpha) } : {}),
+      ...(profileAt ? { cx0a: profileAt(alpha) } : {}),
     });
     rows.push({
       bar,
@@ -9175,22 +9645,40 @@ function liftModelFromWing({
   // Its span efficiency at each angle, the lifting line's: its induced drag
   // is CL^2 / (pi AR e) with this e, so the balance flown on this curve
   // takes the drag the curve's own loading makes.
-  const es = usable.map((p) => p.oswald);
-  const oswaldAt = (aDeg) => {
-    if (aDeg <= alphas[0]) return es[0];
+  // Along its points, held at the ends.
+  const along = (vals) => (aDeg) => {
+    if (aDeg <= alphas[0]) return vals[0];
     for (let i = 1; i < alphas.length; i++) {
       if (alphas[i] >= aDeg) {
         const f = (aDeg - alphas[i - 1]) / (alphas[i] - alphas[i - 1]);
-        return es[i - 1] + f * (es[i] - es[i - 1]);
+        return vals[i - 1] + f * (vals[i] - vals[i - 1]);
       }
     }
-    return es[es.length - 1];
+    return vals[vals.length - 1];
   };
+  // Within its points, the span efficiency the polar's own induced drag has
+  // at the lift there — the lift and the induced drag each straight between
+  // points, as `polarAt` takes them — so the balance flown on this curve
+  // takes the polar's induced drag to the digit, and the speed bar's first
+  // row is the balance's own trim. (The efficiency itself drawn straight
+  // between points gave the same trim to 0.2 m/h.) Beyond them, held.
+  const oswaldHeld = along(usable.map((p) => p.oswald));
+  const cdiAt = along(usable.map((p) => p.CDi));
+  const AR = polar.aspectRatio;
+  const oswaldAt = (aDeg) => {
+    if (!(AR > 0) || aDeg <= alphas[0] || aDeg >= alphas[alphas.length - 1]) return oswaldHeld(aDeg);
+    const cl = czAt(aDeg);
+    const cdi = cdiAt(aDeg);
+    return cdi > 0 ? (cl * cl) / (Math.PI * AR * cdi) : oswaldHeld(aDeg);
+  };
+  // And its profile drag, the sections' at their own lift across the span.
+  const profileAt = along(usable.map((p) => p.CDprofile));
 
   return {
     source: polar.source,
     czAt,
     oswaldAt,
+    profileAt,
     cmAt: () => ta.cm0,
     czRange: [czFloor, Math.max(...cls)],
     czFloorFrom: czFloor > polarMin ? 'collapse limit' : 'polar',
@@ -9218,7 +9706,7 @@ function liftModelFromWing({
  * quarter off it a second time: the Lynx 2's 0.845 at 6° flew as 0.62, at
  * 35.1 km/h for 30.1.
  */
-function acceleratedPolarFromWing({ riser, base, chordM, liftModel, steps = 11 }) {
+function acceleratedPolarFromWing({ riser, base, chordM, liftModel, steps = 11, ownProfileDrag = false }) {
   return acceleratedPolar({
     riser,
     base: wingBase(base, liftModel),
@@ -9226,6 +9714,9 @@ function acceleratedPolarFromWing({ riser, base, chordM, liftModel, steps = 11 }
     czAt: liftModel.czAt,
     cmAt: liftModel.cmAt,
     oswaldAt: liftModel.oswaldAt,
+    // The polar's own profile drag at each angle, rather than the one typed
+    // into `base` — as the balance on the polar takes it.
+    ...(ownProfileDrag && liftModel.profileAt ? { profileAt: liftModel.profileAt } : {}),
     czRange: liftModel.czRange,
     steps,
   });
@@ -17797,7 +18288,16 @@ function solveDense(A, rhs) {
  * projected span. It is 1.21.
  */
 function trefftzDrag(trace, gamma, rho = 1.225) {
-  let di = 0;
+  return Math.abs(trefftzSegments(trace, gamma, rho).reduce((a, d) => a + d, 0));
+}
+
+/**
+ * `trefftzDrag` segment by segment: each leg pair's share of the induced
+ * drag, its circulation by the normal wash the whole wake puts on its trace.
+ * Signed; their sum is the drag.
+ */
+function trefftzSegments(trace, gamma, rho = 1.225) {
+  const out = new Array(trace.length);
   for (let i = 0; i < trace.length; i++) {
     const [[ya, za], [yb, zb]] = trace[i];
     const yc = (ya + yb) / 2;
@@ -17816,9 +18316,9 @@ function trefftzDrag(trace, gamma, rho = 1.225) {
       }
     }
     // The normal wash by the length: the tangent (dy, dz), turned a quarter.
-    di += 0.5 * rho * gamma[i] * (w * (yb - ya) - v * (zb - za));
+    out[i] = 0.5 * rho * gamma[i] * (w * (yb - ya) - v * (zb - za));
   }
-  return Math.abs(di);
+  return out;
 }
 
 /**
@@ -18029,6 +18529,107 @@ function stripsFromWing(wing) {
 }
 
 /**
+ * Where a lattice's forces act, in the central section's plane (`frame`,
+ * from `centralFrame`): back from its nose along its chord, and down from
+ * the chord. Metres.
+ *
+ *   lift      the centroid of the strips' lift, on their quarter-chord
+ *             lines: each strip's circulation by its span seen from ahead,
+ *             which is the share of it square to the flow in the plane of
+ *             symmetry (the rest, across, cancels side to side). The lift
+ *             of forces all square to the flow is their sum through their
+ *             centroid. `crossingBackM` is where that line crosses the chord.
+ *   induced   the centroid of the induced drag, strip by strip as the
+ *             Trefftz plane shares it out (`trefftzSegments`), on the same
+ *             lines: for the least drag a non-planar wing can have, Munk's,
+ *             it is the lift's; a wing loaded otherwise puts it elsewhere.
+ *   profile   the centroid of the strips' own area, which is where their
+ *             profile drag acts when every section has the same coefficient.
+ *
+ * And what the balance needs to put the sections' own pitching moment on
+ * the lift: `liftOverQ`, the lattice's lift over the dynamic pressure (m²,
+ * its CL by its area), and `chordSquaredSpanM3`, each strip's chord squared
+ * by its span seen from ahead — their moment is Cm0 q by it. Carried by a
+ * lift L, the moment moves its line along the flow by
+ * -Cm0 q chordSquaredSpan / L (`liftLine`).
+ *
+ * @param {object[]} strips   as `wingStrips` makes them
+ * @param {number[]} gamma    their circulation, at a unit free stream
+ * @param {object}   frame    `centralFrame(wing)`
+ * @param {object}   o
+ * @param {number}   o.alphaDeg    the flow's angle to the lattice's x axis
+ * @param {number}  [o.latticeDeg] the angle the circulation was solved at,
+ *                                 for the wake's trace; alphaDeg if not given
+ */
+function latticeCentres(strips, gamma, frame, { alphaDeg, latticeDeg = alphaDeg }) {
+  const { origin: o, u, v } = frame;
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const dist = (p, r) => Math.hypot(r[0] - p[0], r[1] - p[1], r[2] - p[2]);
+  const qc = (le, te) => [0, 1, 2].map((k) => le[k] + (te[k] - le[k]) * 0.25);
+  const lat = (latticeDeg * Math.PI) / 180;
+  const seen = (q) => [q[1], q[2] * Math.cos(lat) - q[0] * Math.sin(lat)];
+  const di = trefftzSegments(strips.map((s) => [seen(s.leftTE), seen(s.rightTE)]), gamma);
+  const sum = { lift: 0, liftB: 0, liftD: 0, ind: 0, indB: 0, indD: 0, area: 0, areaB: 0, areaD: 0, c2: 0 };
+  strips.forEach((s, i) => {
+    const a = qc(s.leftLE, s.leftTE);
+    const b = qc(s.rightLE, s.rightTE);
+    const d = [0, 1, 2].map((k) => (a[k] + b[k]) / 2 - o[k]);
+    const back = dot(d, u);
+    const down = -dot(d, v);
+    const seenY = Math.abs(b[1] - a[1]);
+    const chord = (dist(s.leftLE, s.leftTE) + dist(s.rightLE, s.rightTE)) / 2;
+    const area = chord * dist(a, b);
+    const l = gamma[i] * seenY;
+    sum.lift += l; sum.liftB += l * back; sum.liftD += l * down;
+    sum.ind += di[i]; sum.indB += di[i] * back; sum.indD += di[i] * down;
+    sum.area += area; sum.areaB += area * back; sum.areaD += area * down;
+    sum.c2 += chord * chord * seenY;
+  });
+  if (!(sum.lift > 0)) return null;
+  // The flow's angle to the central chord, and the lift's line through its
+  // centroid down to the chord: square to the flow, it leans forward by it.
+  const flowToChordDeg = alphaDeg + frame.incidenceDeg;
+  const ac = (flowToChordDeg * Math.PI) / 180;
+  const lift = { backM: sum.liftB / sum.lift, downM: sum.liftD / sum.lift };
+  const crossingBackM = lift.backM - lift.downM * Math.tan(ac);
+  return {
+    lift,
+    crossingBackM,
+    crossingFraction: crossingBackM / frame.chordM,
+    induced: Math.abs(sum.ind) > 0
+      ? { backM: sum.indB / sum.ind, downM: sum.indD / sum.ind } : { ...lift },
+    profile: { backM: sum.areaB / sum.area, downM: sum.areaD / sum.area },
+    areaM2: sum.area,
+    liftOverQ: 2 * sum.lift,
+    chordSquaredSpanM3: sum.c2,
+    chordM: frame.chordM,
+    alphaDeg,
+    flowToChordDeg,
+  };
+}
+
+/**
+ * The lift's line of action with the sections' own pitching moment on it:
+ * the lattice's centroid (`latticeCentres`) moved along the flow by
+ * -Cm0 chordSquaredSpan / (L / q), for a lift L at dynamic pressure q —
+ * aft for a nose-down moment. Returns a point on the line, in the central
+ * section's plane, and where the line crosses the central chord.
+ *
+ * @param {object} centres  `latticeCentres(...)`
+ * @param {object} o
+ * @param {number} o.cm0          the section's pitching moment at no lift
+ * @param {number} o.liftOverQ    L / q, m²: the polar's CL by its area
+ */
+function liftLine(centres, { cm0 = 0, liftOverQ = centres.liftOverQ }) {
+  const ac = (centres.flowToChordDeg * Math.PI) / 180;
+  const shiftM = liftOverQ > 0 ? (-cm0 * centres.chordSquaredSpanM3) / liftOverQ : 0;
+  const backM = centres.lift.backM + shiftM * Math.cos(ac);
+  const downM = centres.lift.downM - shiftM * Math.sin(ac);
+  const crossingBackM = backM - downM * Math.tan(ac);
+  return { backM, downM, shiftM, crossingBackM, crossingFraction: crossingBackM / centres.chordM };
+}
+
+/**
  * What the arc does to the wing in flight: the wing as built against the
  * same wing laid flat (`wingStrips`), both on the lattice, at two angles of
  * attack. The lifting line the polar and the balance stand on solves the
@@ -18077,10 +18678,23 @@ function arcFactors(wing, { alphas = [4, 10] } = {}) {
     const a = Math.min(12, Math.max(2, alphaDeg));
     return kAt(arched, A, a) / kAt(flat, F, a);
   };
+  // Where the forces act, at an angle: each solve's circulation taken as
+  // linear in the angle between the two, as the induced ratio takes it, at
+  // the angle the lattice's flat plates see — a cambered wing's less its
+  // section's zero-lift angle — and the flow at the wing's own (`latticeCentres`).
+  const frame = centralFrame(wing);
+  const forceCentreAt = (alphaDeg, { alphaL0Deg = 0, flat: onFlat = false } = {}) => {
+    const S = onFlat ? F : A;
+    const latticeDeg = alphaDeg - alphaL0Deg;
+    const f = (latticeDeg - a1) / (a2 - a1);
+    const gamma = S[0].gamma.map((g, i) => g + f * (S[1].gamma[i] - g));
+    return latticeCentres(onFlat ? flat : arched, gamma, frame, { alphaDeg, latticeDeg });
+  };
   return {
     liftRatio: slope(A) / slope(F),
     alphaShiftDeg: zero(A) - zero(F),
     inducedRatioAt,
+    forceCentreAt,
     projectedSpanM: A[0].spanM,
     projectedAreaM2: A[0].areaM2,
     strips: arched.length,
@@ -19349,6 +19963,44 @@ const key3 = (p) => (Array.isArray(p) ? p.map((v) => v.toFixed(6)).join(',') : S
 /* --------------------------------------------------- materials and sizing -- */
 
 /**
+ * Line weight from its cross-section, in g/m per mm² of nominal area, for a
+ * line whose supplier's figure is not to hand.
+ *
+ * Sheathed: Edelrid's data sheets for the 7343, 6843, 7850 and 7950 give
+ * diameter and weight for 26 sizes, and they come to 0.98 on average (0.81
+ * to 1.10) — aramid core or Dyneema alike, since the cover is the same
+ * polyester and the nominal diameter is the cover's. The Swoop2's own file
+ * gives its three sheathed Dyneema lines at 0.80, 0.87 and 0.96.
+ *
+ * This was 1.2, "sheathed lines run heavier per area": a fifth to a half
+ * more than any of those 29 lines weighs. Liros's sheathed lines in
+ * OpenGlider's table — TSL, NTSL, DSL and DFL, 24 sizes — come to 0.955
+ * (0.77 to 1.05), and its TSL alone to 0.98.
+ *
+ * Unsheathed aramid: 1.11, Liros's LTC, bare Technora, nine sizes in
+ * OpenGlider's table (0.88 to 1.48; `data/reference/line-stretch.tsv`). It
+ * was 0.9, an estimate, for every bare line, and Edelrid's 8000-U and 8001
+ * came out a fifth light.
+ *
+ * Unsheathed otherwise — Dyneema, Vectran: 0.9, an estimate with no data
+ * sheet behind it here.
+ */
+const LINE_WEIGHT_PER_AREA = {
+  sheathed: 0.98,
+  unsheathedAramid: 1.11,
+  unsheathed: 0.9,
+  source: 'sheathed: Edelrid data sheets, 26 sizes (data/reference/line-materials-suppliers.tsv), '
+    + 'and Liros\'s 24 in OpenGlider\'s table at 0.955; bare aramid: Liros LTC, 9 sizes '
+    + '(data/reference/line-stretch.tsv); other bare line: estimated',
+};
+
+/** A line's weight per metre from its cross-section, g/m (`LINE_WEIGHT_PER_AREA`). */
+function weightFromArea(areaMM2, { sheathed, fibre }) {
+  return areaMM2 * (sheathed ? LINE_WEIGHT_PER_AREA.sheathed
+    : fibre === 'aramid' ? LINE_WEIGHT_PER_AREA.unsheathedAramid : LINE_WEIGHT_PER_AREA.unsheathed);
+}
+
+/**
  * Line materials.
  *
  * Two strengths are carried per line, and the distinction is the single most
@@ -19381,19 +20033,19 @@ const key3 = (p) => (Array.isArray(p) ? p.map((v) => v.toFixed(6)).join(',') : S
  * subset spans the range so the bundled tool works with no data files.
  */
 const DEFAULT_LINE_TABLE = [
-  // code, mm, new daN, kinked daN, mm^2, g/m (estimated from area), elongation
-  m('U-025', 0.43, 25.0, 12.0, 0.15, 0.135, 0.035),
-  m('U-050', 0.61, 56.5, 23.5, 0.29, 0.26, 0.035),
-  m('U-070', 0.72, 66.3, 29.5, 0.41, 0.37, 0.035),
-  m('U-090', 0.82, 97.6, 54.3, 0.53, 0.48, 0.035),
-  m('U-120', 0.90, 115.3, 62.9, 0.64, 0.58, 0.035),
-  m('U-130', 1.00, 122.6, 64.9, 0.79, 0.71, 0.035),
-  m('U-135', 1.10, 160.0, 85.6, 0.95, 0.86, 0.035),
-  m('U-190', 1.20, 193.0, 103.0, 1.13, 1.02, 0.035),
-  m('U-230', 1.40, 230.0, 115.1, 1.54, 1.39, 0.035),
-  m('U-280', 1.50, 263.8, 141.7, 1.77, 1.59, 0.035),
-  m('U-360', 1.80, 360.0, 231.0, 2.54, 2.29, 0.035),
-  m('U-430', 2.00, 430.0, 232.6, 3.14, 2.83, 0.035),
+  // code, mm, new daN, kinked daN, mm^2, g/m (null: from its area), elongation
+  m('U-025', 0.43, 25.0, 12.0, 0.15, null, 0.035),
+  m('U-050', 0.61, 56.5, 23.5, 0.29, null, 0.035),
+  m('U-070', 0.72, 66.3, 29.5, 0.41, null, 0.035),
+  m('U-090', 0.82, 97.6, 54.3, 0.53, null, 0.035),
+  m('U-120', 0.90, 115.3, 62.9, 0.64, null, 0.035),
+  m('U-130', 1.00, 122.6, 64.9, 0.79, null, 0.035),
+  m('U-135', 1.10, 160.0, 85.6, 0.95, null, 0.035),
+  m('U-190', 1.20, 193.0, 103.0, 1.13, null, 0.035),
+  m('U-230', 1.40, 230.0, 115.1, 1.54, null, 0.035),
+  m('U-280', 1.50, 263.8, 141.7, 1.77, null, 0.035),
+  m('U-360', 1.80, 360.0, 231.0, 2.54, null, 0.035),
+  m('U-430', 2.00, 430.0, 232.6, 3.14, null, 0.035),
   m('DC35', 0.49, 32.6, 33.6, 0.19, 0.17, 0.04),
   m('DC40', 0.50, 47.4, 41.0, 0.20, 0.18, 0.04),
   m('DC60', 0.60, 60.0, 43.2, 0.28, 0.25, 0.04),
@@ -19409,6 +20061,7 @@ const DEFAULT_LINE_TABLE = [
  *  supplier's figure is not to hand (`LINE_WEIGHT_PER_AREA`). */
 function m(code, diameterMM, newDaN, kinkedDaN, areaMM2, gramsPerM, elong, sheathed = false) {
   const family = lineFamilyOf(code);
+  const isSheathed = family ? family.cover != null : sheathed;
   return {
     name: code,
     code,
@@ -19416,9 +20069,9 @@ function m(code, diameterMM, newDaN, kinkedDaN, areaMM2, gramsPerM, elong, sheat
     strengthNewDaN: newDaN,
     strengthKinkedDaN: kinkedDaN,
     areaMM2,
-    gramsPerM,
+    gramsPerM: gramsPerM ?? weightFromArea(areaMM2, { sheathed: isSheathed, fibre: fibreOf(code) }),
     elongationAtRated: elong,
-    sheathed: family ? family.cover != null : sheathed,
+    sheathed: isSheathed,
     // What carries the load: 'aramid' for the U- lines (Edelrid 8000-U),
     // 'dyneema' for the DC and PPSL lines.
     fibre: fibreOf(code),
@@ -19480,28 +20133,6 @@ function materialBrands(materials) {
     .sort((a, b) => b[1] - a[1])
     .map(([name, count]) => ({ name, count }));
 }
-
-/**
- * Line weight from its cross-section, in g/m per mm² of nominal area, for a
- * line whose supplier's figure is not to hand.
- *
- * Sheathed: Edelrid's data sheets for the 7343, 6843, 7850 and 7950 give
- * diameter and weight for 26 sizes, and they come to 0.98 on average (0.81
- * to 1.10) — aramid core or Dyneema alike, since the cover is the same
- * polyester and the nominal diameter is the cover's. The Swoop2's own file
- * gives its three sheathed Dyneema lines at 0.80, 0.87 and 0.96.
- *
- * This was 1.2, "sheathed lines run heavier per area": a fifth to a half
- * more than any of those 29 lines weighs.
- *
- * Unsheathed: 0.9, an estimate with no data sheet behind it here.
- */
-const LINE_WEIGHT_PER_AREA = {
-  sheathed: 0.98,
-  unsheathed: 0.9,
-  source: 'sheathed: Edelrid data sheets, 26 sizes '
-    + '(data/reference/line-materials-suppliers.tsv); unsheathed: estimated',
-};
 function parseMaterialsTable(tsv) {
   const out = [];
   for (const line of tsv.split(/\r?\n/).slice(1)) {
@@ -19524,8 +20155,7 @@ function parseMaterialsTable(tsv) {
       strengthNewDaN: Number(sn),
       strengthKinkedDaN: kinked,
       areaMM2: Number(a),
-      gramsPerM: Number(a) * (sheathed
-        ? LINE_WEIGHT_PER_AREA.sheathed : LINE_WEIGHT_PER_AREA.unsheathed),
+      gramsPerM: weightFromArea(Number(a), { sheathed, fibre: fibreOf({ name, code }) }),
       elongationAtRated: sheathed ? 0.05 : 0.035,
       sheathed,
       fibre: fibreOf({ name, code }),
@@ -19588,6 +20218,11 @@ function selectLines(tensions, {
   minimumDiameterMM = PRACTICAL_FLOOR.diameterMM,
   strengthBasis = 'kinked',
   preferLowDrag = true,
+  // The line set's strength level by level, as the DHV calculates it for
+  // EN 926-1 (`strengthByLevel`): `{ maxWeightKg }` sizes up the weakest
+  // lines of any level short of it. The lines carry their plan's ends
+  // (`from`, `to`), which say how they join.
+  levelRule = null,
 } = {}) {
   const rated = (mat) => (strengthBasis === 'new' ? mat.strengthNewDaN : mat.strengthKinkedDaN);
   // Order by diameter, not strength: diameter is what costs drag, and among
@@ -19631,6 +20266,46 @@ function selectLines(tensions, {
     };
   });
 
+  // Sized line by line, a set can still fall short level by level: the
+  // default wing's main lines came to 1382 daN, under the 1400 the DHV's
+  // calculation asks of every level, and its brake's first level to 82, a
+  // DC 40 a side, where it asks 150. A real wing's are well over: the Lynx
+  // 2 M's nine mains a side come to 2015 daN after bending, both sides, and
+  // its brake line from the handle is a PPSL 200 a side, 424. The weakest
+  // line of a short level is taken up a size, and again, until each holds.
+  let levelSized = 0;
+  if (levelRule && levelRule.maxWeightKg > 0 && chosen.every((c) => Array.isArray(c.from) && Array.isArray(c.to))) {
+    const R = levelRule.rule ?? DHV_LINE_CALCULATION;
+    const up = (c) => sorted.find((mat) => rated(mat) > (c.ratedDaN ?? 0)
+      && mat.diameterMM >= (c.line?.diameterMM ?? 0) && mat.diameterMM >= minimumDiameterMM);
+    const take = (c, mat) => {
+      c.line = mat;
+      c.ratedDaN = rated(mat);
+      c.utilisation = c.requiredDaN / rated(mat);
+      c.massG = (mat.gramsPerM * c.lengthMM) / 1000;
+      c.sizedBy = 'level';
+      levelSized += 1;
+    };
+    for (const c of chosen) {
+      if (c.line && c.ratedDaN < R.lineMinDaN) {
+        const mat = sorted.find((m) => rated(m) >= R.lineMinDaN && m.diameterMM >= (c.line?.diameterMM ?? 0));
+        if (mat) take(c, mat);
+      }
+    }
+    for (let guard = 0; guard < 2000; guard++) {
+      const v = strengthByLevel(chosen, { maxWeightKg: levelRule.maxWeightKg, strength: (c) => c.ratedDaN });
+      const short = [
+        ...(v.suspension?.levels ?? []).filter((x) => x.sumDaN < R.levelMinDaN || x.g < R.levelMinG),
+        ...(v.brake?.levels ?? []).filter((x) => x.sumDaN < R.brakeLevelMinDaN),
+      ][0];
+      if (!short) break;
+      const weakest = short.members.filter((c) => c.line && up(c))
+        .sort((a, b) => (a.ratedDaN ?? 0) - (b.ratedDaN ?? 0))[0];
+      if (!weakest) break;
+      take(weakest, up(weakest));
+    }
+  }
+
   const unmet = chosen.filter((c) => !c.line);
   const totalMassG = chosen.reduce((s, c) => s + (c.massG || 0) * 2, 0);
 
@@ -19639,6 +20314,8 @@ function selectLines(tensions, {
     unmet,
     ok: unmet.length === 0,
     totalMassG,
+    levelSized,
+    levelRule: levelRule ? { maxWeightKg: levelRule.maxWeightKg, rule: levelRule.rule ?? DHV_LINE_CALCULATION } : null,
     byMaterial: groupLinesBy(chosen.filter((c) => c.line), (c) => c.line.code),
     loadCase,
     strengthBasis,
@@ -19655,6 +20332,93 @@ function groupLinesBy(arr, fn) {
 }
 
 /* --------------------------------------------------------------- stretch -- */
+
+/**
+ * Measured load and elongation of named lines, from OpenGlider's line types
+ * (`data/reference/line-stretch.tsv`): 56 sizes of Cousin's Vectraline, CTL
+ * 900 and Technoline and Liros's LTC, NTSL, TSL, DFL and DSL. Each curve is
+ * load in daN and elongation as a fraction, in pairs from nothing at no load;
+ * `byCode` holds the usable ones by the code the same line has in the
+ * catalogue (`line-materials.tsv`), and `rows` every one, with why a curve is
+ * not used where it is not.
+ */
+function parseLineStretch(tsv) {
+  const rows = [];
+  let head = null;
+  for (const raw of String(tsv ?? '').split(/\r?\n/)) {
+    if (!raw.trim() || raw.startsWith('#')) continue;
+    const f = raw.split('\t');
+    if (!head) { head = f.map((x) => x.trim()); continue; }
+    const at = (k) => (f[head.indexOf(k)] ?? '').trim();
+    const num = (k) => (at(k) === '' ? null : Number(at(k)));
+    const pairs = at('stretch').split(/\s+/).filter(Boolean)
+      .map((p) => p.split(':').map(Number));
+    if (pairs.some((p) => p.length !== 2 || !p.every(Number.isFinite))) {
+      throw new Error(`parseLineStretch: ${at('og_name')} has a stretch that is not load:elongation pairs (${at('stretch')})`);
+    }
+    const use = at('use');
+    rows.push({
+      maker: at('maker'),
+      family: at('family'),
+      item: at('item'),
+      name: at('og_name'),
+      catalogue: at('catalogue') || null,
+      diameterMM: num('diameter_mm'),
+      minBreakDaN: num('min_break_daN'),
+      gramsPerM: num('weight_g_per_m'),
+      curve: [[0, 0], ...pairs.map(([daN, pct]) => [daN, pct / 100])],
+      used: use === 'yes',
+      why: use === 'yes' ? null : use.replace(/^no:\s*/, ''),
+    });
+  }
+  const byCode = new Map(rows.filter((r) => r.catalogue).map((r) => [r.catalogue, r]));
+  return { rows, byCode };
+}
+
+/**
+ * A catalogue with the measured figures attached where a line has them: its
+ * load and elongation curve (`stretchCurve`, daN and fraction), and its
+ * weight per metre, which the catalogue only estimates from the line's area.
+ * A line whose curve is not used keeps the generic stretch, and says why.
+ */
+function withMeasuredLineData(table, stretch) {
+  if (!stretch?.byCode) return table;
+  return table.map((line) => {
+    const r = stretch.byCode.get(line.code);
+    if (!r) return line;
+    return {
+      ...line,
+      ...(r.used ? { stretchCurve: r.curve, stretchSource: `OpenGlider ${r.name}` } : { stretchNotUsed: r.why }),
+      ...(Number.isFinite(r.gramsPerM)
+        ? { gramsPerM: r.gramsPerM, gramsPerMEstimated: line.gramsPerM, weightSource: `OpenGlider ${r.name}` } : {}),
+    };
+  });
+}
+
+/**
+ * Elongation of a line under a load, as a fraction of its unloaded length.
+ *
+ * Its measured curve where it has one, straight between points and on along
+ * the last of them beyond, as OpenGlider reads its own; otherwise the
+ * generic model, `elongationAtRated` at the rated (kinked) strength and in
+ * proportion below it. On the thirteen lines with a measured curve the two
+ * differ by up to three times at the 5 daN a line is measured at
+ * (`docs/openglider.md`).
+ */
+function elongationOf(line, forceN, ratedN) {
+  const F = Math.max(0, forceN) / 10;   // daN, the curve's unit
+  const c = line?.stretchCurve;
+  if (c && c.length >= 2) {
+    let i = 1;
+    while (i < c.length - 1 && c[i][0] < F) i++;
+    const [f0, e0] = c[i - 1];
+    const [f1, e1] = c[i];
+    return e0 + ((F - f0) * (e1 - e0)) / ((f1 - f0) || 1);
+  }
+  const eps = line?.elongationAtRated ?? 0;
+  return ratedN > 0 ? eps * (forceN / ratedN) : 0;
+}
+
 
 /**
  * Elastic stretch under load (LEP section 18).
@@ -19729,15 +20493,15 @@ function lengthChain(selection, {
       };
     }
     const ratedN = (l.ratedDaN ?? l.line.strengthKinkedDaN) * 10;
-    const eps = l.line.elongationAtRated;
-    // Extension of a line of unloaded length L0 under force F.
-    const extend = (L0, forceN) => L0 * eps * (forceN / ratedN);
+    // Its measured curve where it has one (`elongationOf`), and the generic
+    // elongation in proportion to its rated strength where not.
+    const stretchAt = (forceN) => elongationOf(l.line, forceN, ratedN);
 
     const flying = l.lengthMM;                       // the design output
     const flightN = l.tensionN * atG;
     // Unloaded length that reaches the flying length under the flight load.
-    const sewn = flying / (1 + eps * (flightN / ratedN));
-    const reference = sewn + extend(sewn, measurementDaN * 10);
+    const sewn = flying / (1 + stretchAt(flightN));
+    const reference = sewn * (1 + stretchAt(measurementDaN * 10));
 
     return {
       ...l,
@@ -19746,6 +20510,9 @@ function lengthChain(selection, {
       referenceLengthMM: Math.round(reference),
       sewnLengthMM: Math.round(sewn),
       cutLengthMM: Math.round(sewn + loopAllowanceMM),
+      // Where its stretch came from: the line's own measured curve, or the
+      // generic elongation at its rated strength.
+      stretchFrom: l.line.stretchCurve ? 'measured' : 'generic',
       // The two differences a designer needs to see.
       flightStretchMM: flying - sewn,
       measurementStretchMM: reference - sewn,
@@ -19774,6 +20541,86 @@ function lengthChain(selection, {
       ? Math.max(...deltas.map((d) => Math.abs(d))) / 12 : 0,
   };
 }
+
+/* ---------------------------------------------------- strength by level -- */
+
+/**
+ * The line set's strength level by level, as the DHV calculates it for EN
+ * 926-1:2015 and NfL 2-565-20 (its "suspension line calculation", 2023):
+ * level 1 is the lines attached to the risers, and each further junction
+ * starts the next; each level's breaking strengths after bending, both sides
+ * of the wing, must sum to at least 1400 daN and to 14 times the maximum
+ * weight; every line must hold 20 daN; and each level of the brake lines 150
+ * daN. OpenGlider's `get_floor_strength` sums the same way, and counts a
+ * branch that has ended again at every level above it, its top lines still
+ * carrying its share — as a cut across the cascade at that height must.
+ *
+ * `lines` are the sized lines of one side (`selectLines`), joined end to end
+ * by where they meet; `strength(l)` is a line's strength after bending, daN.
+ */
+const DHV_LINE_CALCULATION = Object.freeze({
+  levelMinDaN: 1400,
+  levelMinG: 14,
+  lineMinDaN: 20,
+  brakeLevelMinDaN: 150,
+  source: 'DHV, "suspension line calculation" (service.dhv.de, 2023), for EN 926-1:2015 | NfL 2-565-20',
+});
+function strengthByLevel(lines, {
+  maxWeightKg, strength = (l) => l.ratedDaN ?? l.line?.strengthKinkedDaN, sides = 2,
+  brakeRows = ['K', 'BR'], tolerance = 1e-4,
+} = {}) {
+  const key = (p) => p.map((v) => Math.round(v / tolerance)).join(',');
+  const groups = { suspension: lines.filter((l) => !brakeRows.includes(l.row)), brake: lines.filter((l) => brakeRows.includes(l.row)) };
+  const out = {};
+  for (const [what, ls] of Object.entries(groups)) {
+    if (!ls.length) { out[what] = null; continue; }
+    const tops = new Set(ls.map((l) => key(l.to)));
+    // A line whose lower end no other line reaches hangs from a riser (or the
+    // handle): level 1. Each line above starts at the top of the one below.
+    const below = new Map();
+    for (const l of ls) below.set(key(l.to), l);
+    const levelOf = new Map();
+    const depth = (l) => {
+      if (levelOf.has(l)) return levelOf.get(l);
+      const parent = tops.has(key(l.from)) ? below.get(key(l.from)) : null;
+      const d = parent && parent !== l ? depth(parent) + 1 : 1;
+      levelOf.set(l, d);
+      return d;
+    };
+    ls.forEach(depth);
+    const topLevel = Math.max(...levelOf.values());
+    const startsAbove = new Set(ls.map((l) => key(l.from)));
+    // A line nothing starts from at its upper end is a branch's last.
+    const last = ls.filter((l) => !startsAbove.has(key(l.to)));
+    const levels = [];
+    for (let k = 1; k <= topLevel; k++) {
+      const at = ls.filter((l) => levelOf.get(l) === k);
+      const carried = last.filter((l) => levelOf.get(l) < k);
+      const all = [...at, ...carried];
+      const sum = sides * all.reduce((a, l) => a + (strength(l) || 0), 0);
+      const g = maxWeightKg > 0 ? sum / (maxWeightKg * 0.981) : NaN;
+      levels.push({ level: k, lines: at.length, carried: carried.length, sumDaN: sum, g, members: at });
+    }
+    const weakest = ls.reduce((a, l) => ((strength(l) || 0) < (strength(a) || 0) ? l : a), ls[0]);
+    out[what] = { levels, weakest: { name: weakest.name, strengthDaN: strength(weakest) } };
+  }
+  const D = DHV_LINE_CALCULATION;
+  const susp = out.suspension;
+  const problems = [];
+  if (susp) {
+    for (const v of susp.levels) {
+      if (v.sumDaN < D.levelMinDaN) problems.push(`level ${v.level} holds ${v.sumDaN.toFixed(0)} daN, under ${D.levelMinDaN}`);
+      if (Number.isFinite(v.g) && v.g < D.levelMinG) problems.push(`level ${v.level} holds ${v.g.toFixed(1)} g, under ${D.levelMinG}`);
+    }
+    if (susp.weakest.strengthDaN < D.lineMinDaN) problems.push(`${susp.weakest.name} holds ${susp.weakest.strengthDaN} daN, under ${D.lineMinDaN}`);
+  }
+  if (out.brake) {
+    for (const v of out.brake.levels) {
+      if (v.sumDaN < D.brakeLevelMinDaN) problems.push(`brake level ${v.level} holds ${v.sumDaN.toFixed(0)} daN, under ${D.brakeLevelMinDaN}`);
+    }
+  }
+  return { ...out, maxWeightKg, ok: problems.length === 0, problems, rule: D };
+}
 function stretchCorrection(selection, { atG = 1, loopAllowanceMM = 0 } = {}) {
   const corrected = selection.lines.map((l) => {
     if (!l.line) {
@@ -19785,7 +20632,7 @@ function stretchCorrection(selection, { atG = 1, loopAllowanceMM = 0 } = {}) {
     }
     const forceN = l.tensionN * atG;
     const ratedN = (l.ratedDaN ?? l.line.strengthKinkedDaN) * 10;
-    const stretchMM = l.lengthMM * l.line.elongationAtRated * (forceN / ratedN);
+    const stretchMM = l.lengthMM * elongationOf(l.line, forceN, ratedN);
     // Finished length: shortened by the stretch, so the flying length is the
     // design length.
     const finished = l.lengthMM - stretchMM;
@@ -19831,15 +20678,31 @@ function stretchCorrection(selection, { atG = 1, loopAllowanceMM = 0 } = {}) {
  * area, that gives the line drag coefficient — the `Cxs` that the equilibrium
  * solver has been taking as a typed-in constant since Phase 1.
  *
- * Two refinements matter and are both exposed:
+ * Three refinements matter and are all exposed:
  *
- *   - Lines are not normal to the flow. A line inclined at angle psi to the
- *     stream sees roughly `sin^2(psi)` of the normal-incidence drag, by the
- *     independence principle for yawed cylinders. Where line geometry is
- *     available the true inclination is used; otherwise a single factor
+ *   - Lines are not square to the flow. By the independence principle for
+ *     yawed cylinders, a line at an angle psi to the stream feels the force
+ *     of the flow's component square to it, (V sin psi)^2, square to its own
+ *     axis; its drag is that force's part along the flow, sin^3 psi of the
+ *     drag square on (Hoerner; Relf and Powell; the principle holds above a
+ *     Reynolds number of a few hundred). This took sin^2, the force, for the
+ *     drag: 3% too much on a line 15 degrees off square. Where the line's
+ *     geometry is known its own angle is used; otherwise a single factor
  *     stands in for the set.
- *   - Reynolds numbers here are a few thousand, where a smooth cylinder sits
- *     near Cd = 1.0-1.2. Sheathed lines are rougher and sit a little higher.
+ *   - A line's Reynolds number is a few hundred to a few thousand, on the
+ *     flow square to it and its own diameter, and its drag coefficient falls
+ *     with it: 1 + 10 Re^(-2/3), White's correlation for a cylinder, as
+ *     LEparagliding takes it from De Villiers' HEGALA report — 1.19 for a
+ *     0.5 mm line at 12 m/s, 1.06 for a 2.5 mm riser line. Given `air`, each
+ *     line has its own; given `cdCylinder`, every line that; with neither,
+ *     1.1. Sheathed lines had 5% added, which nothing sourced: a braided
+ *     cover's roughness moves a cylinder's drag near its drag crisis, at a
+ *     Reynolds number near 2 x 10^5, not at a line's.
+ *   - Its loops are in the flow too, the line doubled over them: a sewn
+ *     allowance at its length, and an imported line's as its program counts
+ *     them (`loopFrontalMM`), a spliced loop at sqrt 2 - 1 of its length.
+ *     Square to the flow, the gnuC2-23's lineset is then its program's drag
+ *     to the last digit.
  */
 /**
  * Wake shielding between lines.
@@ -19902,7 +20765,19 @@ function wakeShielding(lines, { flowDirection = [1, 0, 0], maxDeficit = 0.6 } = 
 }
 function lineDrag(selection, {
   wingAreaM2,
-  cdCylinder = 1.1,
+  // Every line's coefficient, when given; each line's own from its Reynolds
+  // number, given the air and the speed (`air`: speedMS, rho, muPaS); 1.1
+  // with neither.
+  cdCylinder = null,
+  air = null,
+  // The loops at a line's ends, sewn: the line doubled over them. A line
+  // that brings its own (`loopFrontalMM`, an imported design's) keeps it.
+  loopAllowanceMM = 0,
+  // The risers (a plan's `riserWebbing`), each with its material: a round
+  // one is a line; a strap is a flat plate broadside, Cd 1.98, without its
+  // loops, as LEparagliding counts both. One without a material is not
+  // counted, and said.
+  risers = [],
   inclinationFactor = null,
   flowDirection = [1, 0, 0],
   sides = 2,
@@ -19912,48 +20787,175 @@ function lineDrag(selection, {
 } = {}) {
   const wake = wakeInterference
     ? wakeShielding(selection.lines, { flowDirection }) : null;
+  const fn = Math.hypot(flowDirection[0], flowDirection[1], flowDirection[2]) || 1;
+  const flow = flowDirection.map((v) => v / fn);
+  const useReynolds = !Number.isFinite(cdCylinder) && !!air
+    && air.speedMS > 0 && air.rho > 0 && air.muPaS > 0;
+  const sinOf = (from, to) => {
+    if (!from || !to) return null;
+    const v = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    const n = Math.hypot(v[0], v[1], v[2]) || 1;
+    const cosPsi = Math.abs((v[0] * flow[0] + v[1] * flow[1] + v[2] * flow[2]) / n);
+    return Math.sqrt(Math.max(0, 1 - cosPsi * cosPsi));
+  };
+  // A cylinder's coefficient: given, or by its Reynolds number on the flow
+  // square to it.
+  const cylinderCd = (dM, sinPsi) => {
+    if (Number.isFinite(cdCylinder)) return { cd: cdCylinder, reynolds: null };
+    const reynolds = useReynolds ? (air.rho * air.speedMS * (sinPsi ?? 1) * dM) / air.muPaS : null;
+    return { cd: reynolds > 0 ? 1 + 10 * reynolds ** (-2 / 3) : 1.1, reynolds };
+  };
   let dragAreaM2 = 0;
   let lengthM = 0;
+  let cdArea = 0;
+  let plainArea = 0;
   const perLine = [];
 
   for (const l of selection.lines) {
     if (!l.line) continue;
-    const lenM = l.lengthMM / 1000;
+    // Its length in the flow: node to node, and its loops.
+    const loopMM = Number.isFinite(l.loopFrontalMM) ? l.loopFrontalMM : loopAllowanceMM;
+    const lenM = (l.lengthMM + loopMM) / 1000;
     const dM = l.line.diameterMM / 1000;
-
+    // Its angle to the flow, psi: the drag along the flow goes as sin^3.
+    const sinPsi = sinOf(l.from, l.to);
     let factor = inclinationFactor;
-    if (factor == null) {
-      if (l.from && l.to) {
-        const v = [l.to[0] - l.from[0], l.to[1] - l.from[1], l.to[2] - l.from[2]];
-        const n = Math.hypot(v[0], v[1], v[2]) || 1;
-        const cosPsi = Math.abs((v[0] * flowDirection[0] + v[1] * flowDirection[1]
-          + v[2] * flowDirection[2]) / n);
-        factor = 1 - cosPsi * cosPsi;   // sin^2 of the angle to the flow
-      } else {
-        factor = 0.85;
-      }
-    }
-
-    const cd = l.line.sheathed ? cdCylinder * 1.05 : cdCylinder;
+    if (factor == null) factor = sinPsi == null ? 0.85 : sinPsi ** 3;
+    const { cd, reynolds } = cylinderCd(dM, sinPsi);
     // Drag goes as velocity squared, so a velocity deficit of q on a shielded
     // line reduces its contribution by (1-q)^2.
     const shield = wake && wake.byLine.has(l.name)
       ? (1 - wake.byLine.get(l.name).deficit) ** 2 : 1;
     const area = dM * lenM * cd * factor * sides * shield;
     dragAreaM2 += area;
-    lengthM += lenM * sides;
-    perLine.push({ name: l.name, dragAreaM2: area, inclinationFactor: factor });
+    lengthM += (l.lengthMM / 1000) * sides;
+    cdArea += cd * dM * lenM;
+    plainArea += dM * lenM;
+    perLine.push({ name: l.name, dragAreaM2: area, inclinationFactor: factor, cd, reynolds });
   }
+
+  // The risers, each at its own angle to the flow.
+  let risersDragAreaM2 = 0;
+  const risersUncounted = [];
+  for (const r of risers ?? []) {
+    const mat = r.material;
+    if (!mat || !(mat.diameterMM > 0)) { risersUncounted.push(r.name ?? r.riser); continue; }
+    const strap = mat.section === 'rectangular';
+    const sinPsi = sinOf(r.from, r.to);
+    const factor = inclinationFactor ?? (sinPsi == null ? 1 : sinPsi ** 3);
+    const dM = mat.diameterMM / 1000;
+    const lenM = (r.lengthMM + (strap ? 0 : (r.loopFrontalMM ?? 0))) / 1000;
+    const { cd, reynolds } = strap ? { cd: 1.98, reynolds: null } : cylinderCd(dM, sinPsi);
+    const area = dM * lenM * cd * factor * sides;
+    risersDragAreaM2 += area;
+    perLine.push({ name: r.name, riser: true, strap, dragAreaM2: area, inclinationFactor: factor, cd, reynolds });
+  }
+  dragAreaM2 += risersDragAreaM2;
 
   return {
     dragAreaM2,
+    risersDragAreaM2,
+    risersUncounted,
     totalLengthM: lengthM,
     wake,
     cxLines: wingAreaM2 ? dragAreaM2 / wingAreaM2 : null,
+    // The lines' coefficient over the set, weighted by their frontal area,
+    // and what it came from.
+    cdMean: plainArea > 0 ? cdArea / plainArea : null,
+    cdBasis: Number.isFinite(cdCylinder) ? 'given' : useReynolds ? 'reynolds' : 'default',
     meanDiameterMM: selection.lines.filter((l) => l.line)
       .reduce((s2, l) => s2 + l.line.diameterMM * l.lengthMM, 0)
       / selection.lines.filter((l) => l.line).reduce((s2, l) => s2 + l.lengthMM, 0),
     perLine,
+  };
+}
+
+/**
+ * Where a lineset's weight and its drag act, in the central section's
+ * plane (`centralFrame`, wing3d.js): back from the nose along the central
+ * chord, and down from it. Each line at its middle — by its own mass, and
+ * by its own drag area as `lineDrag` gives it line by line, the risers'
+ * among them when it counts theirs. The two halves are mirror images, so
+ * one is all it takes.
+ *
+ * `massKg`, when given, is the lineset's weight as the balance carries it —
+ * typed, or a design's own — and what it has beyond the lines' own mass is
+ * the risers' webbing and hardware: it is put at the middle of the webbing
+ * (`webbing`, a plan's `riserWebbing`), or at the karabiners when the plan
+ * has none. A typed figure below the lines' own is taken as theirs, spread
+ * as they are.
+ *
+ * @param {object} selection  `selectLines` (its lines need `from` and `to`)
+ * @param {object} o
+ * @param {object} o.frame    `centralFrame(wing)`
+ * @param {object} [o.drag]   `lineDrag(selection, ...)`; without it the drag
+ *                            is weighted by each line's diameter by length
+ * @param {object[]} [o.webbing]
+ * @param {number[]} [o.karabiner]
+ * @param {number} [o.massKg]
+ * @param {number} [o.sides]
+ */
+function lineCentres(selection, {
+  frame, drag = null, webbing = [], karabiner = null, massKg = null, sides = 2,
+} = {}) {
+  if (!frame?.u) throw new Error('lineCentres needs the central frame (centralFrame)');
+  const { origin: o, u, v } = frame;
+  const inPlane = (p) => {
+    const d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+    return [d[0] * u[0] + d[1] * u[1] + d[2] * u[2], -(d[0] * v[0] + d[1] * v[1] + d[2] * v[2])];
+  };
+  let gSum = 0;
+  let gb = 0;
+  let gd = 0;
+  let aSum = 0;
+  let ab = 0;
+  let ad = 0;
+  let k = -1;
+  for (const l of selection?.lines ?? []) {
+    if (!l.line) continue;
+    k += 1;
+    if (!l.from || !l.to) continue;
+    const [b, dn] = inPlane([0, 1, 2].map((i) => (l.from[i] + l.to[i]) / 2));
+    const g = Number.isFinite(l.massG) ? l.massG : (l.line.gramsPerM ?? 0) * (l.lengthMM / 1000);
+    gSum += g; gb += g * b; gd += g * dn;
+    const area = drag?.perLine?.[k]?.dragAreaM2 ?? (l.line.diameterMM / 1000) * (l.lengthMM / 1000);
+    aSum += area; ab += area * b; ad += area * dn;
+  }
+  // The risers' drag, when the drag counts it, at the webbing's middle.
+  const riserDrag = new Map((drag?.perLine ?? []).filter((p) => p.riser).map((p) => [p.name, p.dragAreaM2]));
+  for (const w of webbing ?? []) {
+    const area = riserDrag.get(w.name);
+    if (!(area > 0) || !w.from || !w.to) continue;
+    const [b, dn] = inPlane([0, 1, 2].map((i) => (w.from[i] + w.to[i]) / 2));
+    aSum += area; ab += area * b; ad += area * dn;
+  }
+  if (!(gSum > 0) || !(aSum > 0)) return null;
+  const linesKg = (gSum * sides) / 1000;
+  const own = { backM: gb / gSum, downM: gd / gSum };
+  // The rest of the weight: the webbing's middle, or the karabiners.
+  const mids = (webbing ?? []).filter((w) => w.from && w.to)
+    .map((w) => inPlane([0, 1, 2].map((i) => (w.from[i] + w.to[i]) / 2)));
+  const rest = mids.length
+    ? { backM: mids.reduce((a, m) => a + m[0], 0) / mids.length, downM: mids.reduce((a, m) => a + m[1], 0) / mids.length }
+    : karabiner ? (([b, dn]) => ({ backM: b, downM: dn }))(inPlane(karabiner)) : null;
+  const total = Number.isFinite(massKg) && massKg > 0 ? massKg : linesKg;
+  const restKg = rest ? Math.max(0, total - linesKg) : 0;
+  const all = linesKg + restKg;
+  const mass = restKg > 0
+    ? {
+      backM: ((own.backM * linesKg) + (rest.backM * restKg)) / all,
+      downM: ((own.downM * linesKg) + (rest.downM * restKg)) / all,
+    }
+    : own;
+  return {
+    mass,
+    massKg: total,
+    linesKg,
+    restKg,
+    lines: own,
+    rest,
+    drag: { backM: ab / aSum, downM: ad / aSum },
+    dragAreaM2: aSum,
   };
 }
 
@@ -24404,12 +25406,25 @@ function writeDesignIntoLep(doc, model) {
   replaceSectionData(out, 3, anchorLines);
 
   if (balance && section(out, 8)) {
+    // The program sets the wing's attitude from where the karabiners hang:
+    // asin((Cp - calage) / line height), the pilot plumb under its Cp. So the
+    // point written is the one that gives this balance's attitude — the
+    // centre of pressure only when nothing below the wing acts but the
+    // pilot's weight. It wrote the centre of pressure, and a whole per cent:
+    // the program then flew the wing at another angle than the balance's.
+    const riserCm = model.riserLengthCm ?? 47;
+    const lineCm = (model.lineLengthM ?? 6.5) * 100;
+    const chordCm = (model.wing?.ribs?.[0]?.chord ?? 0) * 100;
+    const plumbPct = chordCm > 0 && Number.isFinite(balance.thetaDeg)
+      ? balance.calageFraction * 100
+        + (100 * (lineCm + riserCm) * Math.sin((balance.thetaDeg * Math.PI) / 180)) / chordCm
+      : balance.xcpFraction * 100;
     replaceSectionData(out, 8, [
-      `\t${balance.glideRatio.toFixed(1)}`,
-      `\t${(balance.xcpFraction * 100).toFixed(0)}`,
-      `\t${(balance.calageFraction * 100).toFixed(0)}`,
-      `\t${(model.riserLengthCm ?? 47).toFixed(0)}`,
-      `\t${((model.lineLengthM ?? 6.5) * 100).toFixed(0)}`,
+      `\t${balance.glideRatio.toFixed(2)}`,
+      `\t${plumbPct.toFixed(2)}`,
+      `\t${(balance.calageFraction * 100).toFixed(2)}`,
+      `\t${riserCm.toFixed(0)}`,
+      `\t${lineCm.toFixed(0)}`,
       `\t${(model.karabinerCm ?? 42).toFixed(0)}`,
     ]);
   }
@@ -25610,6 +26625,11 @@ function lepPlanForTool(geom, { ribOffset = 1 } = {}) {
       webbing.push({
         row, kind: 'webbing', name: `riser-${row}`, label: l.label, riser: row,
         from: m(l.from), to: m(l.to), lengthMM: Math.round(l.length * 10), anchors: [],
+        // What it is made of, and its loops in the flow as the program
+        // counts them: a round riser's like a line's, a strap's none.
+        material: l.material ?? null,
+        loopFrontalMM: l.material && l.material.section !== 'rectangular'
+          ? 20 * (l.material.loopCm ?? 0) * (l.material.loopKind === 'p' ? Math.SQRT2 - 1 : 1) : 0,
       });
       continue;
     }
@@ -25752,6 +26772,10 @@ function lepLineSelection(tensions, plan, {
       loadOnlyLine: null,
       // At the length that is bought: cut, with a loop at each end.
       massG: line ? (line.gramsPerM * cutMM) / 1000 : null,
+      // Its loops in the flow, as the program counts their frontal area: at
+      // their length, a spliced one at sqrt 2 - 1 of it (`lepLineGeometry`).
+      loopFrontalMM: o?.material ? 20 * (o.material.loopCm ?? 0)
+        * (o.material.loopKind === 'p' ? Math.SQRT2 - 1 : 1) : 0,
     };
   });
 
@@ -28607,7 +29631,7 @@ function lepAreas(table) {
  * rib's height in the arc. A rib on the centreline counts once, the rest
  * twice. cm.
  */
-function wingMassCentre(table, pct) {
+function lepWingMassCentre(table, pct) {
   const r = table.ribs;
   const centred = r[0].x < 0.2;
   let sum = 0;
@@ -28671,7 +29695,7 @@ function lepMainParameters(doc, table, geom = null) {
   out.planformCentroidPct = (100 * (cy / a - r[0].yLE)) / r[0].chord;
   out.planformCentroidMM = Math.trunc((out.planformCentroidPct / 100) * r[0].chord * 10);
   out.sectionCgPct = sectionCgPct;
-  out.wingMassCentreCm = wingMassCentre(table, sectionCgPct);
+  out.wingMassCentreCm = lepWingMassCentre(table, sectionCgPct);
 
   if (geom?.ok) {
     const lines = geom.lineLengthCm;
@@ -29194,9 +30218,29 @@ function parsePolar(text) {
   if (!points.length) throw new Error('No polar data rows found — is this an XFOIL polar file?');
   points.sort((a, b) => a.alphaDeg - b.alphaDeg);
 
-  // Zero-lift angle and Cm0 by interpolation through Cl = 0.
-  let alphaL0Deg = points[0].alphaDeg;
-  let cm0 = points[0].cm;
+  // A least-squares line through the polar's linear range, of its lift and
+  // of its moment against the angle.
+  const lin = points.filter((p) => Math.abs(p.cl) < 0.9);
+  const fit = (rows, y) => {
+    const n = rows.length;
+    const sx = rows.reduce((s, p) => s + p.alphaDeg, 0);
+    const sy = rows.reduce((s, p) => s + y(p), 0);
+    const sxy = rows.reduce((s, p) => s + p.alphaDeg * y(p), 0);
+    const sxx = rows.reduce((s, p) => s + p.alphaDeg * p.alphaDeg, 0);
+    const den = n * sxx - sx * sx;
+    if (n < 2 || !(Math.abs(den) > 1e-12)) return null;
+    const perDeg = (n * sxy - sx * sy) / den;
+    return { perDeg, at: (a) => (sy - perDeg * sx) / n + perDeg * a };
+  };
+
+  // Zero-lift angle and Cm0 by interpolation through Cl = 0. A polar that
+  // does not reach zero lift, swept from 0° as many are, had its first angle
+  // taken for it: a 4%-cambered section swept from 0° flew 4° short of its
+  // own lift. Its zero-lift angle is found along its lift slope, its Cm0
+  // along its moment's, from the lowest of its linear range, and it says so.
+  let alphaL0Deg = null;
+  let cm0 = null;
+  let zeroLiftExtrapolated = false;
   for (let i = 1; i < points.length; i++) {
     if (points[i - 1].cl <= 0 && points[i].cl >= 0) {
       const d = points[i].cl - points[i - 1].cl || 1;
@@ -29206,18 +30250,21 @@ function parsePolar(text) {
       break;
     }
   }
+  if (alphaL0Deg === null) {
+    const rows = lin.length >= 2 ? lin.slice(0, 4) : points.slice(0, 2);
+    const cl = fit(rows, (p) => p.cl);
+    const cm = fit(rows, (p) => p.cm);
+    if (!(cl && cl.perDeg > 0)) {
+      throw new Error('The polar never reaches zero lift and its lift does not rise with its angle, so its zero-lift angle cannot be found');
+    }
+    alphaL0Deg = -cl.at(0) / cl.perDeg;
+    cm0 = cm ? cm.at(alphaL0Deg) : rows[0].cm;
+    zeroLiftExtrapolated = true;
+  }
 
   // Lift slope from a least-squares fit over the linear range.
-  const lin = points.filter((p) => Math.abs(p.cl) < 0.9);
   let slope = 2 * Math.PI;
-  if (lin.length > 3) {
-    const n = lin.length;
-    const sx = lin.reduce((s, p) => s + p.alphaDeg, 0);
-    const sy = lin.reduce((s, p) => s + p.cl, 0);
-    const sxy = lin.reduce((s, p) => s + p.alphaDeg * p.cl, 0);
-    const sxx = lin.reduce((s, p) => s + p.alphaDeg * p.alphaDeg, 0);
-    slope = ((n * sxy - sx * sy) / (n * sxx - sx * sx)) * (180 / Math.PI);
-  }
+  if (lin.length > 3) slope = fit(lin, (p) => p.cl).perDeg * (180 / Math.PI);
 
   return {
     source: 'xfoil',
@@ -29227,6 +30274,7 @@ function parsePolar(text) {
     nCrit,
     alphaL0Deg,
     cm0,
+    zeroLiftExtrapolated,
     clMax: Math.max(...points.map((p) => p.cl)),
     cd0: Math.min(...points.map((p) => p.cd)),
     liftSlopePerRad: slope,
@@ -29309,6 +30357,7 @@ function runPackage(airfoil, { reynolds, mach, nCrit = 7, alphaRange, alphaStep 
 
 const REFERENCE_TOTALS = {"niviuk-artikr2-20":{"1":{"A":6619,"B":6595,"C":6579,"D":6704},"2":{"A":6588,"B":6563,"C":6547,"D":6676},"3":{"A":6573,"B":6547,"C":6529,"D":6656},"4":{"A":6592,"B":6569,"C":6548,"D":6669},"5":{"A":6544,"B":6522,"C":6500,"D":6620},"6":{"A":6511,"B":6488,"C":6468,"D":6588},"7":{"A":6466,"B":6444,"C":6424,"D":6535},"8":{"A":6471,"B":6454,"C":6430,"D":6534},"9":{"A":6382,"C":6353,"D":6428,"K":6196},"10":{"A":6261,"C":6246,"D":6313,"K":6080},"11":{"A":6180,"C":6183,"K":6023},"12":{"A":6171,"C":6197,"K":6028},"13":{"A":6033,"C":6043,"K":6118}},"niviuk-artikr2-21":{"1":{"A":6853,"B":6828,"C":6813,"D":6944},"2":{"A":6821,"B":6795,"C":6780,"D":6915},"3":{"A":6805,"B":6779,"C":6762,"D":6895},"4":{"A":6825,"B":6802,"C":6782,"D":6908},"5":{"A":6777,"B":6754,"C":6733,"D":6860},"6":{"A":6743,"B":6720,"C":6700,"D":6826},"7":{"A":6698,"B":6676,"C":6656,"D":6774},"8":{"A":6704,"B":6686,"C":6663,"D":6773},"9":{"A":6612,"C":6579,"D":6661,"K":6430},"10":{"A":6486,"C":6468,"D":6542,"K":6311},"11":{"A":6403,"C":6405,"K":6253},"12":{"A":6393,"C":6419,"K":6259},"13":{"A":6250,"C":6260,"K":6352}},"niviuk-artikr2-23":{"1":{"A":7093,"B":7068,"C":7051,"D":7186},"2":{"A":7061,"B":7034,"C":7018,"D":7157},"3":{"A":7046,"B":7019,"C":7001,"D":7138},"4":{"A":7067,"B":7043,"C":7021,"D":7153},"5":{"A":7018,"B":6994,"C":6972,"D":7103},"6":{"A":6983,"B":6959,"C":6939,"D":7068},"7":{"A":6937,"B":6914,"C":6892,"D":7014},"8":{"A":6943,"B":6924,"C":6900,"D":7013},"9":{"A":6847,"C":6814,"D":6898,"K":6673},"10":{"A":6717,"C":6700,"D":6775,"K":6550},"11":{"A":6630,"C":6635,"K":6490},"12":{"A":6620,"C":6650,"K":6497},"13":{"A":6473,"C":6483,"K":6594}},"niviuk-artikr2-24":{"1":{"A":7331,"B":7304,"C":7286,"D":7423},"2":{"A":7297,"B":7270,"C":7253,"D":7393},"3":{"A":7284,"B":7256,"C":7237,"D":7375},"4":{"A":7306,"B":7281,"C":7259,"D":7391},"5":{"A":7255,"B":7231,"C":7209,"D":7340},"6":{"A":7219,"B":7195,"C":7174,"D":7305},"7":{"A":7172,"B":7149,"C":7128,"D":7250},"8":{"A":7179,"B":7160,"C":7136,"D":7249},"9":{"A":7081,"C":7049,"D":7133,"K":6906},"10":{"A":6946,"C":6931,"D":7006,"K":6779},"11":{"A":6857,"C":6862,"K":6718},"12":{"A":6847,"C":6877,"K":6726},"13":{"A":6694,"C":6705,"K":6826}},"niviuk-artikr2-25":{"1":{"A":7549,"B":7521,"C":7502,"D":7642},"2":{"A":7514,"B":7486,"C":7467,"D":7612},"3":{"A":7501,"B":7473,"C":7452,"D":7594},"4":{"A":7525,"B":7499,"C":7475,"D":7610},"5":{"A":7474,"B":7449,"C":7425,"D":7560},"6":{"A":7437,"B":7412,"C":7390,"D":7523},"7":{"A":7389,"B":7365,"C":7343,"D":7467},"8":{"A":7396,"B":7376,"C":7351,"D":7467},"9":{"A":7298,"C":7264,"D":7348,"K":7129},"10":{"A":7160,"C":7143,"D":7218,"K":6999},"11":{"A":7068,"C":7072,"K":6936},"12":{"A":7057,"C":7088,"K":6944},"13":{"A":6900,"C":6910,"K":7048}},"niviuk-artikr2-27":{"1":{"A":7769,"B":7741,"C":7721,"D":7865},"2":{"A":7734,"B":7705,"C":7686,"D":7833},"3":{"A":7722,"B":7693,"C":7671,"D":7816},"4":{"A":7746,"B":7720,"C":7695,"D":7834},"5":{"A":7695,"B":7669,"C":7645,"D":7783},"6":{"A":7657,"B":7631,"C":7608,"D":7746},"7":{"A":7607,"B":7583,"C":7559,"D":7687},"8":{"A":7615,"B":7595,"C":7568,"D":7687},"9":{"A":7512,"C":7480,"D":7566,"K":7349},"10":{"A":7369,"C":7356,"D":7432,"K":7215},"11":{"A":7275,"C":7284,"K":7151},"12":{"A":7265,"C":7300,"K":7160},"13":{"A":7102,"C":7113,"K":7267}},"niviuk-hook6-20":{"1":{"A":6390,"B":6289,"C":6328,"D":6436,"K":6490},"2":{"A":6347,"B":6244,"C":6288,"D":6392,"K":6279},"3":{"A":6311,"B":6256,"C":6343,"D":6444,"K":6215},"4":{"A":6275,"B":6182,"C":6235,"D":6326,"K":6212},"5":{"A":6233,"B":6134,"C":6201,"K":6065},"6":{"A":6093,"B":6040,"C":6114,"K":6014},"7":{"A":5996,"B":5996,"C":6083,"K":6065},"8":{"A":5934,"B":5991,"C":6099,"K":6054},"9":{"A":5755,"B":5730,"C":5718,"K":5928},"10":{"A":5654,"B":5653,"K":5822},"11":{"K":5733}},"niviuk-hook6-22":{"1":{"A":6700,"B":6593,"C":6635,"D":6748,"K":6787},"2":{"A":6656,"B":6546,"C":6594,"D":6703,"K":6565},"3":{"A":6618,"B":6561,"C":6652,"D":6757,"K":6498},"4":{"A":6580,"B":6484,"C":6538,"D":6633,"K":6495},"5":{"A":6536,"B":6433,"C":6502,"K":6341},"6":{"A":6389,"B":6334,"C":6410,"K":6288},"7":{"A":6286,"B":6288,"C":6377,"K":6341},"8":{"A":6220,"B":6282,"C":6393,"K":6329},"9":{"A":6032,"B":6007,"C":5993,"K":6197},"10":{"A":5926,"B":5926,"K":6091},"11":{"K":6005}},"niviuk-hook6-24":{"1":{"A":6996,"B":6882,"C":6928,"D":7046,"K":7140},"2":{"A":6950,"B":6834,"C":6885,"D":6999,"K":6909},"3":{"A":6910,"B":6851,"C":6947,"D":7057,"K":6839},"4":{"A":6870,"B":6770,"C":6827,"D":6926,"K":6835},"5":{"A":6825,"B":6717,"C":6790,"K":6674},"6":{"A":6671,"B":6614,"C":6693,"K":6619},"7":{"A":6562,"B":6565,"C":6658,"K":6674},"8":{"A":6493,"B":6559,"C":6675,"K":6662},"9":{"A":6297,"B":6269,"C":6255,"K":6525},"10":{"A":6185,"B":6184,"K":6408},"11":{"K":6310}},"niviuk-hook6-26":{"1":{"A":7280,"B":7162,"C":7210,"D":7332,"K":7468},"2":{"A":7234,"B":7114,"C":7168,"D":7286,"K":7228},"3":{"A":7194,"B":7134,"C":7234,"D":7348,"K":7155},"4":{"A":7154,"B":7050,"C":7110,"D":7214,"K":7154},"5":{"A":7108,"B":6997,"C":7072,"K":6988},"6":{"A":6948,"B":6891,"C":6972,"K":6931},"7":{"A":6837,"B":6840,"C":6937,"K":6990},"8":{"A":6765,"B":6834,"C":6955,"K":6977},"9":{"A":6559,"B":6532,"C":6516,"K":6834},"10":{"A":6443,"B":6443,"K":6714},"11":{"K":6613}},"niviuk-hook6-28":{"1":{"A":7553,"B":7428,"C":7480,"D":7607,"K":7740},"2":{"A":7507,"B":7380,"C":7438,"D":7561,"K":7491},"3":{"A":7468,"B":7405,"C":7511,"D":7629,"K":7417},"4":{"A":7427,"B":7320,"C":7383,"D":7490,"K":7417},"5":{"A":7381,"B":7266,"C":7343,"K":7245},"6":{"A":7215,"B":7156,"C":7240,"K":7187},"7":{"A":7100,"B":7105,"C":7204,"K":7248},"8":{"A":7026,"B":7099,"C":7223,"K":7236},"9":{"A":6812,"B":6783,"C":6767,"K":7088},"10":{"A":6692,"B":6690,"K":6963},"11":{"K":6859}},"niviuk-hook6-31":{"1":{"A":7944,"B":7813,"C":7868,"D":8002,"K":8161},"2":{"A":7899,"B":7766,"C":7828,"D":7957,"K":7901},"3":{"A":7861,"B":7795,"C":7907,"D":8032,"K":7824},"4":{"A":7819,"B":7707,"C":7773,"D":7886,"K":7827},"5":{"A":7773,"B":7653,"C":7733,"K":7647},"6":{"A":7599,"B":7538,"C":7625,"K":7586},"7":{"A":7479,"B":7485,"C":7588,"K":7652},"8":{"A":7402,"B":7480,"C":7608,"K":7641},"9":{"A":7176,"B":7145,"C":7128,"K":7487},"10":{"A":7049,"B":7048,"K":7356},"11":{"K":7246}},"niviuk-ikuma3-20":{"1":{"A":6544,"B":6463,"C":6544,"D":6616,"K":6869},"2":{"A":6507,"B":6428,"C":6496,"D":6571,"K":6488},"3":{"A":6463,"B":6384,"C":6457,"D":6530,"K":6356},"4":{"A":6470,"B":6391,"C":6482,"D":6548,"K":6369},"5":{"A":6389,"B":6315,"C":6405,"D":6472,"K":6164},"6":{"A":6353,"B":6281,"C":6358,"D":6424,"K":6017},"7":{"A":6290,"B":6224,"C":6300,"D":6360,"K":5965},"8":{"A":6297,"B":6232,"C":6323,"D":6364,"K":6052},"9":{"A":6199,"B":6161,"C":6221,"K":5909},"10":{"A":6109,"B":6079,"C":6139,"K":5835},"11":{"A":6014,"B":6002,"C":6049,"K":5830},"12":{"A":5997,"B":5989,"C":6036,"K":5933}},"niviuk-ikuma3-22":{"1":{"A":6877,"B":6782,"C":6870,"D":6946,"K":7228},"2":{"A":6839,"B":6746,"C":6820,"D":6900,"K":6830},"3":{"A":6796,"B":6704,"C":6782,"D":6859,"K":6693},"4":{"A":6804,"B":6713,"C":6810,"D":6879,"K":6708},"5":{"A":6715,"B":6637,"C":6732,"D":6803,"K":6496},"6":{"A":6678,"B":6601,"C":6684,"D":6752,"K":6344},"7":{"A":6614,"B":6543,"C":6625,"D":6687,"K":6291},"8":{"A":6622,"B":6553,"C":6649,"D":6692,"K":6385},"9":{"A":6521,"B":6480,"C":6543,"K":6236},"10":{"A":6427,"B":6395,"C":6459,"K":6159},"11":{"A":6328,"B":6315,"C":6366,"K":6156},"12":{"A":6312,"B":6302,"C":6352,"K":6264}},"niviuk-ikuma3-24":{"1":{"A":7188,"B":7092,"C":7191,"D":7269,"K":7562},"2":{"A":7149,"B":7055,"C":7138,"D":7221,"K":7146},"3":{"A":7104,"B":7011,"C":7099,"D":7179,"K":7004},"4":{"A":7112,"B":7020,"C":7128,"D":7201,"K":7020},"5":{"A":7025,"B":6939,"C":7046,"D":7120,"K":6797},"6":{"A":6986,"B":6902,"C":6995,"D":7068,"K":6638},"7":{"A":6919,"B":6841,"C":6933,"D":6999,"K":6584},"8":{"A":6927,"B":6852,"C":6958,"D":7004,"K":6682},"9":{"A":6801,"B":6784,"C":6847,"K":6527},"10":{"A":6703,"B":6694,"C":6758,"K":6446},"11":{"A":6599,"B":6610,"C":6660,"K":6442},"12":{"A":6582,"B":6597,"C":6646,"K":6555}},"niviuk-ikuma3-26":{"1":{"A":7483,"B":7384,"C":7486,"D":7568,"K":7899},"2":{"A":7443,"B":7346,"C":7432,"D":7518,"K":7467},"3":{"A":7398,"B":7301,"C":7392,"D":7475,"K":7319},"4":{"A":7407,"B":7311,"C":7422,"D":7498,"K":7337},"5":{"A":7318,"B":7229,"C":7338,"D":7414,"K":7107},"6":{"A":7278,"B":7191,"C":7285,"D":7359,"K":6943},"7":{"A":7208,"B":7128,"C":7221,"D":7289,"K":6886},"8":{"A":7217,"B":7139,"C":7247,"D":7294,"K":6989},"9":{"A":7085,"B":7068,"C":7132,"K":6829},"10":{"A":6983,"B":6974,"C":7039,"K":6745},"11":{"A":6875,"B":6887,"C":6938,"K":6742},"12":{"A":6857,"B":6873,"C":6923,"K":6861}},"niviuk-ikuma3-28":{"1":{"A":7766,"B":7669,"C":7770,"D":7855,"K":8215},"2":{"A":7726,"B":7629,"C":7714,"D":7804,"K":7766},"3":{"A":7680,"B":7584,"C":7675,"D":7761,"K":7614},"4":{"A":7691,"B":7595,"C":7707,"D":7784,"K":7633},"5":{"A":7599,"B":7511,"C":7620,"D":7699,"K":7395},"6":{"A":7558,"B":7472,"C":7565,"D":7643,"K":7225},"7":{"A":7487,"B":7407,"C":7500,"D":7570,"K":7168},"8":{"A":7496,"B":7419,"C":7527,"D":7576,"K":7275},"9":{"A":7363,"B":7344,"C":7408,"K":7109},"10":{"A":7257,"B":7247,"C":7312,"K":7023},"11":{"A":7145,"B":7156,"C":7206,"K":7020},"12":{"A":7127,"B":7142,"C":7190,"K":7143}},"niviuk-ikuma3-30":{"1":{"A":8039,"B":7933,"C":8034,"D":8123,"K":8513},"2":{"A":7997,"B":7893,"C":7977,"D":8070,"K":8050},"3":{"A":7951,"B":7849,"C":7937,"D":8026,"K":7892},"4":{"A":7962,"B":7860,"C":7971,"D":8051,"K":7913},"5":{"A":7869,"B":7774,"C":7882,"D":7964,"K":7668},"6":{"A":7826,"B":7734,"C":7825,"D":7906,"K":7493},"7":{"A":7753,"B":7667,"C":7758,"D":7830,"K":7434},"8":{"A":7763,"B":7680,"C":7786,"D":7837,"K":7546},"9":{"A":7629,"B":7592,"C":7661,"K":7374},"10":{"A":7519,"B":7491,"C":7561,"K":7285},"11":{"A":7403,"B":7398,"C":7452,"K":7283},"12":{"A":7385,"B":7383,"C":7436,"K":7411}},"niviuk-skin4p-14":{"1":{"A":5413,"B":5495,"C":5264,"D":5254,"E":5252,"F":5263,"G":5279,"H":5303,"I":5352},"2":{"A":5346,"B":5439,"C":5207,"D":5197,"E":5198,"F":5208,"G":5226,"H":5247,"I":5293},"3":{"A":5309,"B":5396,"C":5151,"D":5143,"E":5145,"F":5156,"G":5172,"H":5195,"I":5240},"4":{"A":5286,"B":5377,"C":5083,"D":5077,"E":5084,"F":5093,"G":5113,"H":5129,"I":5166},"5":{"A":5286,"B":5375,"C":4962,"D":4959,"E":4968,"F":4980,"G":4993,"H":5012,"I":5048},"6":{"A":5310,"B":5396,"C":4816,"D":4819,"E":4824,"F":4835,"G":4850,"H":4862,"I":4888},"7":{"A":5280,"B":5359,"K":4884},"8":{"A":5222,"B":5311,"K":4853},"9":{"A":5187,"B":5267,"K":4905},"10":{"A":5160,"B":5246},"11":{"A":5148,"B":5227},"12":{"A":5152,"B":5233},"13":{"A":5086,"B":5147}},"niviuk-skin4p-16":{"1":{"A":5782,"B":5871,"C":5630,"D":5618,"E":5617,"F":5629,"G":5646,"H":5672,"I":5724},"2":{"A":5712,"B":5812,"C":5572,"D":5562,"E":5563,"F":5574,"G":5593,"H":5615,"I":5664},"3":{"A":5674,"B":5768,"C":5516,"D":5507,"E":5509,"F":5521,"G":5538,"H":5562,"I":5610},"4":{"A":5651,"B":5749,"C":5445,"D":5439,"E":5446,"F":5456,"G":5477,"H":5494,"I":5534},"5":{"A":5652,"B":5748,"C":5317,"D":5314,"E":5323,"F":5336,"G":5349,"H":5370,"I":5408},"6":{"A":5679,"B":5772,"C":5161,"D":5165,"E":5170,"F":5181,"G":5197,"H":5210,"I":5238},"7":{"A":5653,"B":5737,"K":5221},"8":{"A":5592,"B":5687,"K":5188},"9":{"A":5555,"B":5641,"K":5246},"10":{"A":5527,"B":5619},"11":{"A":5514,"B":5600},"12":{"A":5520,"B":5607},"13":{"A":5450,"B":5516}},"niviuk-skin4p-18":{"1":{"A":6133,"B":6228,"C":5973,"D":5961,"E":5960,"F":5972,"G":5991,"H":6018,"I":6073},"2":{"A":6061,"B":6168,"C":5916,"D":5904,"E":5906,"F":5917,"G":5937,"H":5961,"I":6013},"3":{"A":6021,"B":6121,"C":5859,"D":5849,"E":5851,"F":5864,"G":5882,"H":5907,"I":5958},"4":{"A":5998,"B":6103,"C":5785,"D":5779,"E":5786,"F":5796,"G":5818,"H":5837,"I":5879},"5":{"A":6000,"B":6103,"C":5651,"D":5647,"E":5657,"F":5670,"G":5684,"H":5706,"I":5747},"6":{"A":6030,"B":6129,"C":5486,"D":5489,"E":5495,"F":5506,"G":5523,"H":5537,"I":5566},"7":{"A":6003,"B":6093,"K":5566},"8":{"A":5939,"B":6041,"K":5532},"9":{"A":5900,"B":5993,"K":5594},"10":{"A":5872,"B":5970},"11":{"A":5859,"B":5951},"12":{"A":5865,"B":5958},"13":{"A":5791,"B":5862}},"niviuk-skin4p-20":{"1":{"A":6465,"B":6567,"C":6298,"D":6285,"E":6284,"F":6297,"G":6317,"H":6345,"I":6404},"2":{"A":6390,"B":6504,"C":6240,"D":6229,"E":6230,"F":6242,"G":6263,"H":6289,"I":6343},"3":{"A":6349,"B":6456,"C":6183,"D":6172,"E":6175,"F":6188,"G":6207,"H":6234,"I":6288},"4":{"A":6326,"B":6437,"C":6107,"D":6100,"E":6108,"F":6118,"G":6141,"H":6161,"I":6205},"5":{"A":6330,"B":6439,"C":5966,"D":5962,"E":5972,"F":5986,"G":6001,"H":6024,"I":6067},"6":{"A":6362,"B":6467,"C":5793,"D":5796,"E":5802,"F":5814,"G":5831,"H":5846,"I":5877},"7":{"A":6334,"B":6430,"K":5892},"8":{"A":6267,"B":6375,"K":5858},"9":{"A":6227,"B":6325,"K":5924},"10":{"A":6198,"B":6302},"11":{"A":6185,"B":6282},"12":{"A":6192,"B":6290},"13":{"A":6115,"B":6189}},"niviuk-takoo6-38":{"1":{"A":8741,"B":8653,"C":8647,"D":8779,"E":8869},"2":{"A":8673,"B":8579,"C":8574,"D":8685,"E":8783},"3":{"A":8632,"B":8535,"C":8533,"D":8634,"E":8728},"4":{"A":8646,"B":8553,"C":8552,"D":8675,"E":8761},"5":{"A":8574,"B":8484,"C":8486,"D":8600,"E":8688},"6":{"A":8518,"B":8423,"C":8427,"D":8516,"E":8604},"7":{"A":8463,"B":8373,"C":8379,"D":8463,"E":8541},"8":{"A":8469,"B":8386,"C":8394,"D":8498,"E":8564},"9":{"A":8349,"B":8299,"C":8300,"D":8423,"E":8490},"10":{"A":8265,"B":8221,"C":8224,"D":8312,"E":8377},"11":{"A":8154,"B":8115,"C":8125,"D":8183,"E":8238},"12":{"A":8142,"B":8104,"C":8119,"D":8170,"E":8216},"13":{"A":8025,"B":8003,"C":8015,"D":8113}},"niviuk-takoo6-41":{"1":{"A":9082,"B":8989,"C":8985,"D":9120,"E":9216},"2":{"A":9012,"B":8912,"C":8910,"D":9024,"E":9127},"3":{"A":8970,"B":8868,"C":8868,"D":8972,"E":9072},"4":{"A":8985,"B":8887,"C":8889,"D":9015,"E":9106},"5":{"A":8913,"B":8817,"C":8821,"D":8939,"E":9033},"6":{"A":8854,"B":8755,"C":8760,"D":8853,"E":8946},"7":{"A":8798,"B":8704,"C":8712,"D":8799,"E":8882},"8":{"A":8805,"B":8719,"C":8727,"D":8836,"E":8906},"9":{"A":8683,"B":8629,"C":8630,"D":8760,"E":8831},"10":{"A":8596,"B":8547,"C":8551,"D":8645,"E":8713},"11":{"A":8481,"B":8439,"C":8448,"D":8512,"E":8569},"12":{"A":8469,"B":8428,"C":8442,"D":8498,"E":8546},"13":{"A":8348,"B":8322,"C":8334,"D":8440}},"niviuk-takoo6-44":{"1":{"A":9409,"B":9315,"C":9307,"D":9449,"E":9549},"2":{"A":9337,"B":9236,"C":9230,"D":9350,"E":9457},"3":{"A":9296,"B":9192,"C":9188,"D":9298,"E":9401},"4":{"A":9311,"B":9212,"C":9210,"D":9344,"E":9438},"5":{"A":9239,"B":9142,"C":9142,"D":9265,"E":9362},"6":{"A":9179,"B":9078,"C":9079,"D":9177,"E":9273},"7":{"A":9121,"B":9026,"C":9030,"D":9121,"E":9207},"8":{"A":9129,"B":9041,"C":9046,"D":9160,"E":9233},"9":{"A":9006,"B":8952,"C":8953,"D":9084,"E":9157},"10":{"A":8916,"B":8868,"C":8871,"D":8965,"E":9035},"11":{"A":8799,"B":8755,"C":8765,"D":8826,"E":8885},"12":{"A":8787,"B":8744,"C":8759,"D":8813,"E":8862},"13":{"A":8660,"B":8635,"C":8648,"D":8753}}};
 const LINE_MATERIALS_TSV = "name\tcode\tdiameter_100mm\tstrength_new_daN\tstrength_kinked_daN\tarea_mm2\tnote\nEdelrid 8000-25 (U25)\tU-025\t43.0\t25.0\t12.0\t0.15\t\nEdelrid 8000-45 (U50)\tU-050\t61.0\t56.5\t23.5\t0.29\t\nEdelrid 8000-65 (U70)\tU-070\t72.0\t66.3\t29.5\t0.41\t\nEdelrid 8000-80 (U90)\tU-090\t82.0\t97.6\t54.3\t0.53\t\nEdelrid 8000-120 (U120)\tU-120\t90.0\t115.3\t62.9\t0.64\t\nEdelrid 8000-130 (U130)\tU-130\t100.0\t122.6\t64.9\t0.79\t\nEdelrid 8000-135 (U135)\tU-135\t110.0\t160.0\t85.6\t0.95\tweniger Realwiderstand als PPSLS125!\nEdelrid 8000-160 (U190)\tU-190\t120.0\t193.0\t103.0\t1.13\t\nEdelrid 8000-160 (U200)\tU-200\t120.0\t200.0\t111.0\t1.13\t\nEdelrid 8000-200 (U230)\tU-230\t140.0\t230.0\t115.1\t1.54\t\nEdelrid 8000-280 (U280)\tU-280\t150.0\t263.8\t141.7\t1.77\t\nEdelrid 8000-360 (U360)\tU-360\t180.0\t360.0\t231.0\t2.54\t\nEdelrid 8000-430 (U430)\tU-430\t200.0\t430.0\t232.6\t3.14\t\nEdelrid 8001-50\t8001-050\t61.0\t50.0\t31.6\t0.29\t\nEdelrid 8001-70\t8001-070\t72.0\t71.1\t41.0\t0.41\t\nEdelrid 8001-90\t8001-090\t82.0\t97.6\t58.9\t0.53\t\nEdelrid 8001-130\t8001-130\t100.0\t112.1\t76.2\t0.79\t\nEdelrid 8001-135\t8001-135\t110.0\t131.8\t92.2\t0.95\t\nEdelrid 8001-190\t8001-190\t120.0\t193.0\t133.0\t1.13\t\nEdelrid 8001-230\t8001-230\t130.0\t206.4\t132.0\t1.33\t\nEdelrid 8001-280\t8001-280\t150.0\t238.4\t164.8\t1.77\t\nEdelrid 8001-340\t8001-340\t170.0\t279.5\t190.4\t2.27\t\nEdelrid 9200-30\t9200-30\t43.0\t30.0\t30.0\t0.15\t\nEdelrid 9200-70\t9200-70\t65.0\t70.0\t65.0\t0.33\t\nLiros PPSL 120\tPPSL120\t115.0\t120.0\t94.7\t1.04\t\nLiros PPSL 160\tPPSL160\t140.0\t160.0\t183.1\t1.54\t\nLiros PPSL 200\tPPSL200\t142.0\t200.0\t211.8\t1.58\t\nLiros PPSL 275\tPPSL275\t190.0\t275.0\t250.0\t2.84\t\nLiros PPSL 191\tPPSL191\t120.0\t150.0\t129.3\t1.13\t\nLiros PPSLS 65\tPPSLS 65\t76.0\t50.0\t49.95\t0.45\t\nLiros PPSLS 125\tPPSLS 125\t105.0\t107.0\t107.0\t0.87\t\nLiros PPSLS 180\tPPSLS 180\t125.0\t200.0\t194.4\t1.23\tweniger Realwiderstand als die U-190!\nLiros PPSLS 260\tPPSLS 260\t158.0\t280.0\t259.4\t1.96\t\nLiros DSL 70\tDSL70\t103.0\t73.0\t73.0\t0.83\t\nLiros DSL 70\tDSL070\t103.0\t73.0\t73.0\t0.83\t\nDC 35\tDC35\t49.0\t32.6\t33.6\t0.19\t\nDC 40\tDC40\t50.0\t47.4\t41.0\t0.2\t\nDC 60\tDC60\t60.0\t60.0\t43.2\t0.28\t\nDC 100\tDC100\t80.0\t89.0\t71.1\t0.5\t\nDC 120\tDC 120\t85.0\t117.5\t116.0\t0.57\t\nDC 160\tDC 160\t110.0\t127.9\t115.8\t0.95\t\nDC 200\tDC 200\t160.0\t258.3\t235.7\t2.01\t\nDC 300\tDC 300\t180.0\t339.3\t310.3\t2.54\t\nDC 161\tDC 161\t83.0\t145.8\t127.4\t0.54\t\nDC 201\tDC 201\t110.0\t161.3\t166.3\t0.95\t\nDC 301\tDC 301\t130.0\t228.4\t134.0\t1.33\t\nDC 401\tDC 401\t155.0\t381.2\t355.6\t1.89\t\nLiros TSL 140\tTSL140\t134.0\t140.0\t67.6\t1.41\t\nLiros TSL 190\tTSL190\t158.0\t190.0\t98.4\t1.96\t\nLiros TSL 220\tTSL220\t169.0\t220.0\t115.6\t2.24\t\nLiros TSL 280\tTSL280\t188.0\t280.0\t147.6\t2.78\t\nLiros TSL 380\tTSL380\t210.0\t380.0\t184.7\t3.46\t\nLiros DFL 115\tDFL-115\t140.0\t115.0\t115.0\t1.54\t\nLiros LTC 065\tLTC 065\t65.0\t65.0\t33.0\t0.33\t\nLiros LTC 080\tLTC 080\t70.0\t80.0\t43.0\t0.38\t\nLiros LTC 120\tLTC 120\t110.0\t120.0\t65.0\t0.95\t\nLiros LTC 160\tLTC 160\t120.0\t160.0\t75.0\t1.13\t\nLiros LTC 200\tLTC 200\t130.0\t200.0\t105.0\t1.33\t\nLiros TCR 80\tTCR 80\t66.0\t80.0\t42.0\t0.34\t\nLiros TCR 80\tTCR80\t66.0\t80.0\t42.0\t0.34\t\nCousin VLD0050\tVLD0050\t50.0\t50.0\t25.0\t0.2\t\nCousin V12-100\tV12-100\t60.0\t100.0\t30.3\t0.28\t\nCousin V16-140\tV16-140\t70.0\t140.0\t44.0\t0.38\t\nCousin V16-630\tV16-630\t100.0\t140.0\t92.7\t0.79\t\nEdelrid 7343-075\t7343-45\t100.0\t75.0\t28.7\t0.79\t\nEdelrid 7343-090\t7343-90\t120.0\t90.0\t45.7\t1.13\t\nEdelrid 7343-140\t7343-140\t130.0\t140.0\t64.3\t1.33\t\nEdelrid 7343-190\t7343-190\t150.0\t190.0\t89.8\t1.77\t\nEdelrid 7343-230\t7343-230\t170.0\t230.0\t115.9\t2.27\t\nEdelrid 7343-280\t7343-280\t180.0\t280.0\t139.0\t2.54\t\nEdelrid 7343-340\t7343-340\t200.0\t340.0\t154.3\t3.14\t\nEdelrid 7343-420\t7343-420\t220.0\t420.0\t197.9\t3.8\t\nEdelrid 6843-080\t6843-80\t120.0\t80.0\t46.0\t1.13\t\nEdelrid 6843-120\t6843-120\t130.0\t120.0\t56.1\t1.33\t\nEdelrid 6843-160\t6843-160\t160.0\t160.0\t84.2\t2.01\t\nEdelrid 6843-200\t6843-200\t190.0\t200.0\t104.6\t2.84\t\nEdelrid 6843-240\t6843-240\t210.0\t240.0\t116.2\t3.46\t\nEdelrid 6843-340\t6843-340\t250.0\t340.0\t176.3\t4.91\t\n";
+const LINE_STRETCH_TSV = "# Load and elongation of paraglider line, as OpenGlider carries it.\n#\n# Source OG: OpenGlider 0.8.1 (github.com/booya-at/OpenGlider, branch\n#   develop, commit ccdb7bf of 2026-02-06), openglider/lines/line_types/\n#   cousin.py and liros.py, GNU GPL v3 \u2014 the same licence as this project.\n#   OpenGlider does not say where it took them. Liros's points sit at 10 and\n#   30 daN, or at break, and each Liros size's strength is its name in daN;\n#   Cousin's sit every 5 daN, the steps of a load and elongation test.\n#   Retrieved 2026-10-27.\n#\n# OpenGlider gives loads in newtons; here they are daN. `stretch` is load in\n# daN and elongation in % of the unloaded length, in pairs, from nothing at\n# no load. `min_break_daN` and `weight_g_per_m` are OpenGlider's where it\n# gives them. `catalogue` is the code the same line has in\n# line-materials.tsv, where it has one. `use` says why a curve is not used:\n# DFL's is a placeholder, one DSL's falls as the load rises, and one\n# Technoline's reads as daN where the file says newtons.\n#\nmaker\tfamily\titem\tog_name\tcatalogue\tdiameter_mm\tmin_break_daN\tweight_g_per_m\tstretch\tuse\nCousin\tVectraline\t12100\tcousin.vectraline12100\tV12-100\t0.6\t\t\t5:0.4 10:0.9 15:1.3 20:1.5 25:1.9\tyes\nCousin\tVectraline\t16140\tcousin.vectraline16140\tV16-140\t0.7\t\t\t5:0.75 10:1 15:1.1 20:1.4 25:1.75 50:2.75\tyes\nCousin\tVectraline\t16240\tcousin.vectraline16240\t\t0.9\t115\t\t5:0.2 10:0.4 15:0.7 20:0.9 25:1 50:1.6 75:2.3 100:3\tyes\nCousin\tVectraline\t16330\tcousin.vectraline16330\t\t1\t145\t\t5:0.2 10:0.4 15:0.7 20:0.8 25:0.9 50:1.5 75:2 100:2.4 125:3 150:3.6\tyes\nCousin\tVectraline\t12470\tcousin.vectraline12470\t\t1.2\t200\t\t5:0.2 10:0.3 15:0.4 20:0.5 25:0.6 50:1 75:1.4 100:1.7 125:2.1 150:2.4 175:2.8 200:3.2\tyes\nCousin\tVectraline\t16560\tcousin.vectraline16560\t\t1.4\t\t\t5:0.1 10:0.3 15:0.4 20:0.5 25:0.6 50:1 75:1.2 100:1.5 125:1.9 150:2.1 175:2.4 200:2.7 225:3.1\tyes\nCousin\tVectraline\t12950\tcousin.vectraline12950\t\t1.6\t\t\t5:0.35 10:0.4 15:0.5 20:0.7 25:0.9 50:1.2 75:1.3 100:1.7 125:1.8 150:1.95 175:2.25 200:2.4 225:2.7\tyes\nCousin\tVectraline\t16999\tcousin.vectraline16999\t\t2.2\t\t\t5:0.05 10:0.35 15:0.5 20:0.7 25:0.9 50:1.05 75:1.25 100:1.4 125:1.6 150:1.8 175:2 200:2.1 225:2.3\tyes\nCousin\tCTL 900\t100\tcousin.ctl900100\t\t1.1\t90\t\t5:0.3 10:0.5 15:0.7 20:1 25:1.3 50:2.3 75:2.8\tyes\nCousin\tCTL 900\t120\tcousin.ctl900120\t\t1.2\t110\t\t5:0.2 10:0.3 15:0.5 20:0.7 25:0.85 50:1.7 75:2.55 100:3\tyes\nCousin\tCTL 900\t160\tcousin.ctl900160\t\t1.5\t150\t\t5:0.2 10:0.3 15:0.5 20:0.6 25:0.8 50:1.5 75:2.3 100:2.7 125:3.2 150:3.4\tyes\nCousin\tCTL 900\t230\tcousin.ctl900230\t\t1.8\t215\t\t5:0.2 10:0.3 15:0.5 20:0.6 25:0.7 50:1.2 75:1.8 100:2.2 125:2.7 150:3 175:3.3 200:3.6 225:3.9\tyes\nCousin\tCTL 900\t320\tcousin.ctl900320\t\t1.9\t300\t3.5\t5:0.2 10:0.3 15:0.4 20:0.4 25:0.5 50:0.9 75:1.3 100:1.7 125:2 150:2.3 175:2.7 200:2.8 225:2.9\tyes\nCousin\tCTL 900\t360\tcousin.ctl900360\t\t2.1\t350\t3.46\t5:0.1 10:0.2 15:0.3 20:0.3 25:0.4 50:0.8 75:1.1 100:1.4 125:1.7 150:2 175:2.3 200:2.5 225:2.7\tyes\nCousin\tCTL 900\t450\tcousin.ctl900450\t\t2.5\t415\t\t5:0.05 10:0.1 15:0.2 20:0.2 25:0.3 50:0.6 75:0.8 100:1.1 125:1.4 150:1.7 175:2 200:2.2 225:2.5\tyes\nCousin\tTechnoline\t1110\tcousin.technoline1110\t\t0.6\t56\t\t5:0.45 10:0.65 15:0.9 20:1.25 25:1.6 50:2.9\tyes\nCousin\tTechnoline\t1150\tcousin.technoline1150\t\t0.7\t74\t\t5:0.3 10:0.55 15:0.75 20:1 25:1.25 50:2.75\tyes\nCousin\tTechnoline\t1220\tcousin.technoline1220\t\t0.82\t105\t\t5:0.25 10:0.35 15:0.6 20:0.85 25:1 50:1.8 75:2.6\tyes\nCousin\tTechnoline\t1320\tcousin.technoline1320\t\t1\t145\t\t5:0.2 10:0.3 15:0.5 20:0.75 25:0.85 50:1.6 75:2.35 100:3\tyes\nCousin\tTechnoline\t1450\tcousin.technoline1450\t\t1.18\t218\t\t5:0.2 10:0.25 15:0.4 20:0.5 25:0.7 50:1.1 75:1.6 100:2 125:2.5 150:2.9 175:3.1\tyes\nCousin\tTechnoline\t1590\tcousin.technoline1590\t\t1.4\t268\t\t5:0.15 10:0.3 15:0.4 20:0.45 25:0.55 50:1 75:1.4 100:1.75 125:2.05 150:2.4 175:2.8 200:3.1\tyes\nCousin\tTechnoline\t1740\tcousin.technoline1740\t\t1.6\t337\t\t5:0.05 10:0.15 15:0.2 20:0.3 25:0.35 50:0.7 75:1.03 100:1.3 125:1.6 150:1.9 175:2.2 200:2.5 225:2.75\tyes\nCousin\tTechnoline\t1830\tcousin.technoline1830\t\t1.7\t380\t\t7.5:1.3 15:2.1\tno: read as newtons its loads give 1.3% at 7.5 daN, nine times its neighbour 1740; they read as daN\nLiros\tLTC\t25\tliros.ltc25\t\t0.39\t25\t0.13\t25:4.8\tyes\nLiros\tLTC\t45\tliros.ltc45\t\t0.55\t45\t0.28\t10:0.85\tyes\nLiros\tLTC\t65\tliros.ltc65\tLTC 065\t0.65\t65\t0.45\t10:0.8\tyes\nLiros\tLTC\t80\tliros.ltc80\tLTC 080\t0.7\t80\t0.57\t10:0.65 30:1.65\tyes\nLiros\tLTC\t120\tliros.ltc120\tLTC 120\t1.1\t120\t0.84\t10:0.6 30:1.2\tyes\nLiros\tLTC\t160\tliros.ltc160\tLTC 160\t1.2\t160\t1.17\t10:0.55 30:1.05\tyes\nLiros\tLTC\t200\tliros.ltc200\tLTC 200\t1.3\t200\t1.42\t10:0.6 30:1.1\tyes\nLiros\tLTC\t350\tliros.ltc350\t\t1.75\t350\t2.16\t10:0.35 30:0.8\tyes\nLiros\tLTC\t400\tliros.ltc400\t\t1.9\t400\t2.89\t10:0.35 30:0.89\tyes\nLiros\tNTSL\t120\tliros.ntsl120\t\t1.25\t120\t1.24\t10:0.29 30:0.94\tyes\nLiros\tNTSL\t160\tliros.ntsl160\t\t1.4\t160\t1.52\t10:0.235 30:0.797\tyes\nLiros\tNTSL\t200\tliros.ntsl200\t\t1.9\t200\t2.66\t10:0.55 30:1.34\tyes\nLiros\tNTSL\t250\tliros.ntsl250\t\t2.15\t250\t3.37\t10:0.46 30:1.38\tyes\nLiros\tNTSL\t350\tliros.ntsl350\t\t2.25\t350\t3.46\t10:0.23 30:0.46\tyes\nLiros\tTSL\t090\tliros.tsl090\t\t1.2\t90\t1.06\t10:0.45 30:1.38\tyes\nLiros\tTSL\t115\tliros.tsl115\t\t1.25\t115\t1.18\t10:0.42 30:1.21\tyes\nLiros\tTSL\t140\tliros.tsl140\tTSL140\t1.3\t140\t1.39\t10:0.25 30:0.88\tyes\nLiros\tTSL\t190\tliros.tsl190\tTSL190\t1.55\t190\t1.76\t10:0.25 30:0.71\tyes\nLiros\tTSL\t220\tliros.tsl220\tTSL220\t1.65\t220\t2.12\t10:0.29 30:0.75\tyes\nLiros\tTSL\t280\tliros.tsl280\tTSL280\t1.8\t280\t2.55\t10:0.17 30:0.46\tyes\nLiros\tTSL\t380\tliros.tsl380\tTSL380\t2.2\t380\t3.46\t10:0.18 30:0.46\tyes\nLiros\tTSL\t500\tliros.tsl500\t\t2.37\t500\t4.6\t10:0.16 30:0.42\tyes\nLiros\tDFL\t115\tliros.dfl115\tDFL-115\t1.4\t115\t1.18\t100:0\tno: no stretch given, 0% at 100 daN\nLiros\tDFL\t200\tliros.dfl200\t\t2\t200\t3.1\t100:0\tno: no stretch given, 0% at 100 daN\nLiros\tDFL\t232\tliros.dfl232\t\t1.9\t200\t2.58\t100:0\tno: no stretch given, 0% at 100 daN\nLiros\tDFL\t350\tliros.dfl350\t\t2.7\t350\t4.98\t100:0\tno: no stretch given, 0% at 100 daN\nLiros\tDSL\t25\tliros.dsl25\t\t0.8\t25\t0.53\t34:3.7\tyes\nLiros\tDSL\t35\tliros.dsl35\t\t0.9\t35\t0.64\t38:3.6\tyes\nLiros\tDSL\t70\tliros.dsl70\tDSL70\t0.95\t70\t0.67\t10:0.19 30:0.41\tyes\nLiros\tDSL\t110\tliros.dsl110\t\t1.2\t110\t1.02\t10:0.23 30:0.73\tyes\nLiros\tDSL\t140\tliros.dsl140\t\t1.25\t140\t1.14\t10:0.54 30:0.42\tno: its elongation falls as the load rises\nLiros\tDSL\t350\tliros.dsl350\t\t2\t350\t3.25\t10:0.15 30:0.33\tyes\nLiros\tDSL\t600\tliros.dsl600\t\t2.4\t600\t4.3\t10:0.08 30:0.24\tyes\n";
 const REFERENCE_WINGS = [["Niviuk Hook 6","20",20.0,10.3,5.3,47,2.43,17.15,null,3.97,55.0,70.0,205.0,"progression",4.0],["Niviuk Hook 6","22",22.0,10.8,5.3,47,2.55,18.87,null,4.2,60.0,80.0,215.0,"progression",4.0],["Niviuk Hook 6","24",24.0,11.28,5.3,47,2.66,20.59,null,4.5,70.0,92.0,226.0,"progression",4.0],["Niviuk Hook 6","26",26.0,11.74,5.3,47,2.77,22.3,null,4.8,80.0,105.0,235.0,"progression",4.0],["Niviuk Hook 6","28",28.0,12.18,5.3,47,2.87,24.02,null,5.1,95.0,120.0,244.0,"progression",4.0],["Niviuk Hook 6","31",31.0,12.82,5.3,47,3.02,26.59,null,5.5,110.0,135.0,258.0,"progression",4.0],["Niviuk Artik R 2","20",19.6,11.29,6.5,68,2.19,16.76,null,4.0,60.0,75.0,183.0,"performance XC",5.02],["Niviuk Artik R 2","21",21.0,11.68,6.5,68,2.26,17.97,null,4.2,70.0,85.0,190.0,"performance XC",5.02],["Niviuk Artik R 2","23",22.5,12.1,6.5,68,2.34,19.26,null,4.5,80.0,95.0,197.0,"performance XC",5.02],["Niviuk Artik R 2","24",24.0,12.49,6.5,68,2.42,20.54,null,4.8,90.0,105.0,203.0,"performance XC",5.02],["Niviuk Artik R 2","25",25.5,12.87,6.5,68,2.49,21.83,null,4.9,100.0,115.0,210.0,"performance XC",5.02],["Niviuk Artik R 2","27",27.0,13.25,6.5,68,2.57,23.11,null,5.4,110.0,125.0,216.0,"performance XC",5.02],["Niviuk Skin 4 P","14",14.0,8.28,4.9,39,2.02,11.84,null,0.95,50.0,75.0,287.0,"single surface",3.93],["Niviuk Skin 4 P","16",16.0,8.85,4.9,39,2.16,13.53,null,1.09,60.0,85.0,308.0,"single surface",3.93],["Niviuk Skin 4 P","18",18.0,9.39,4.9,39,2.3,15.22,null,1.19,70.0,90.0,328.0,"single surface",3.93],["Niviuk Skin 4 P","20",20.0,9.9,4.9,39,2.42,16.91,null,1.29,85.0,110.0,346.0,"single surface",3.93],["Niviuk Bi Skin 2 P","31",31.0,13.06,5.5,39,2.94,26.17,null,3.3,130.0,190.0,522.0,"single surface tandem",4.12],["PHI Allegro light","XS",20.4,11.09,6.03,72,2.29,17.49,8.81,3.0,50.0,75.0,235.0,"performance XC",null],["PHI Allegro light","S",22.11,11.55,6.03,72,2.39,18.91,9.14,3.35,65.0,85.0,238.5,"performance XC",null],["PHI Allegro light","M",23.85,12.0,6.03,72,2.48,20.4,9.49,3.57,75.0,95.0,252.5,"performance XC",null],["PHI Allegro light","ML",25.02,12.29,6.03,72,2.54,21.4,9.73,3.7,83.0,103.0,258.7,"performance XC",null],["PHI Allegro light","L",26.23,12.58,6.03,72,2.6,22.44,9.96,3.85,90.0,110.0,264.8,"performance XC",null],["PHI Allegro light","XL",28.62,13.14,6.03,72,2.72,24.48,10.4,4.15,105.0,130.0,276.7,"performance XC",null],["Ozone Geo 7","XS",22.2,10.69,5.16,48,2.63,18.7,8.23,3.34,55.0,70.0,244.6,"progression",null],["Ozone Geo 7","S",24.1,11.14,5.16,48,2.74,20.3,8.57,3.59,65.0,85.0,253.0,"progression",null],["Ozone Geo 7","MS",25.8,11.52,5.16,48,2.84,21.8,8.87,3.66,75.0,95.0,263.5,"progression",null],["Ozone Geo 7","ML",27.3,11.85,5.16,48,2.92,23.0,9.12,3.87,85.0,105.0,274.0,"progression",null],["Ozone Geo 7","L",29.0,12.22,5.16,48,3.01,24.5,9.4,4.11,95.0,115.0,284.4,"progression",null],["Ozone Ultralite 5","13",12.9,7.7,4.56,34,2.1,11.4,6.3,1.44,55.0,90.0,205.3,"hike and fly",null],["Ozone Ultralite 5","15",14.9,8.2,4.56,34,2.25,13.1,6.7,1.59,55.0,90.0,227.0,"hike and fly",null],["Ozone Ultralite 5","17",16.9,8.8,4.56,34,2.4,14.7,7.1,1.76,55.0,90.0,241.9,"hike and fly",null],["Ozone Ultralite 5","19",18.9,9.3,4.56,34,2.54,16.5,7.5,1.93,55.0,95.0,261.6,"hike and fly",null],["Ozone Ultralite 5","21",20.8,9.7,4.56,34,2.66,18.1,7.9,2.07,55.0,100.0,278.9,"hike and fly",null],["Ozone Ultralite 5","23",22.8,10.2,4.56,34,2.79,19.9,8.3,2.23,65.0,110.0,297.2,"hike and fly",null],["Ozone Ultralite 5","25",25.1,10.7,4.56,34,2.92,21.9,8.7,2.41,75.0,120.0,316.3,"hike and fly",null],["Ozone Zeno 2","S",21.0,12.0,6.9,78,2.19,17.7,9.5,4.7,75.0,90.0,186.0,"competition",null],["Ozone Zeno 2","MS",22.5,12.5,6.9,78,2.26,18.9,9.8,4.92,85.0,100.0,192.9,"competition",null],["Ozone Zeno 2","ML",24.1,12.9,6.9,78,2.3,20.3,10.2,5.22,95.0,110.0,200.1,"competition",null],["Ozone Zeno 2","L",26.5,13.5,6.9,78,2.46,22.2,10.7,5.62,105.0,125.0,210.1,"competition",null],["Ozone Alpina 5","XS",19.3,10.82,6.07,65,2.25,16.4,8.66,3.53,55.0,75.0,202.9,"performance XC",null],["Ozone Alpina 5","S",21.1,11.31,6.07,65,2.35,17.9,9.05,3.75,65.0,85.0,212.8,"performance XC",null],["Ozone Alpina 5","MS",22.8,11.76,6.07,65,2.45,19.4,9.41,3.96,75.0,95.0,221.5,"performance XC",null],["Ozone Alpina 5","ML",24.4,12.16,6.07,65,2.53,20.7,9.73,4.15,85.0,105.0,229.7,"performance XC",null],["Ozone Alpina 5","L",25.9,12.53,6.07,65,2.61,22.04,10.03,4.35,95.0,115.0,237.4,"performance XC",null],["Ozone Alpina 5","XL",27.8,13.0,6.07,65,2.71,23.7,10.4,4.62,110.0,130.0,246.6,"performance XC",null],["BGD Lynx 2","XS",19.5,10.9,6.2,65,2.2,16.5,8.7,3.2,60.0,75.0,null,"performance XC",null],["BGD Lynx 2","S",21.0,11.3,6.2,65,2.3,17.8,9.0,3.4,70.0,85.0,229.7,"performance XC",null],["BGD Lynx 2","M",23.0,11.8,6.2,65,2.4,19.5,9.5,3.7,75.0,95.0,241.6,"performance XC",null],["BGD Lynx 2","ML",25.0,12.3,6.2,65,2.5,21.2,9.9,4.0,88.0,108.0,252.4,"performance XC",null],["BGD Lynx 2","L",27.0,12.8,6.2,65,2.6,22.9,10.3,4.3,100.0,120.0,262.7,"performance XC",null],["Skywalk SAGE","75",20.26,11.34,6.4,68,2.2,17.29,9.22,3.5,55.0,75.0,202.0,"performance XC",null],["Skywalk SAGE","85",21.38,11.65,6.4,68,2.26,18.24,9.48,3.65,65.0,85.0,208.0,"performance XC",null],["Skywalk SAGE","95",22.7,12.01,6.4,68,2.33,19.37,9.76,3.8,75.0,95.0,215.0,"performance XC",null],["Skywalk SAGE","105",24.2,12.4,6.4,68,2.4,20.65,10.08,3.95,85.0,105.0,222.0,"performance XC",null],["Skywalk SAGE","115",25.67,12.77,6.4,68,2.48,21.9,10.38,4.15,95.0,115.0,229.0,"performance XC",null]];
 const SWOOP2_LEP = "**************************************************************\n* LABORATORI D'ENVOL PARAGLIDING DESIGN                      *\n* Input data file 3.30p version                              *\n**************************************************************\n* 20260818 updated to 20260829\n**************************************************************\n*             1. GEOMETRY                                    *\n**************************************************************\n* Brand name\n\"Laboratori d'envol\"\n* Wing name\n\"Swoop2\"\n* Drawing scale\n1.5\n* Wing scale \n0.847342687\n* Number of cells\n\t50\n* Number of ribs\n\t51\n* Alpha wingtip, parameter, (alpha center) \n\t5.0        1         0.0\n* Paraglider type and parameter\n\"ds\" 0\n* Rib geometric parameters\n* Rib    x-rib       y-LE       y-TE         xp         z     beta      RP        Washin     z_rot     z_pos\n 1       0.00      -0.00     246.74       0.00       0.00       0.00      33.33       0.00      0.00   \t50.0\n 2      29.39       0.19     246.69      29.38       0.66       2.54      33.33       0.00\t0.19   \t50.0\n 3      58.73       0.77     246.55      58.65       2.64       5.17      33.33       0.00\t0.38   \t50.0\n 4      87.96       1.72     246.32      87.69       5.92       7.81      33.33       0.00\t0.57   \t50.0\n 5     117.06       3.06     245.99     116.43      10.48      10.25      33.33       0.00\t0.75   \t50.0\n 6     145.97       4.78     245.58     144.76      16.27      12.88      33.33       0.00\t0.94   \t50.0\n 7     174.67       6.89     245.07     172.59      23.26      15.33      33.33       0.00\t1.12   \t50.0\n 8     203.11       9.38     244.47     199.84      31.38      17.77      33.33       0.00\t1.29   \t50.0\n 9     231.26      12.25     243.79     226.42      40.64      20.58      33.33       0.00\t1.49   \t50.0\n10     259.07      15.52     243.02     252.18      51.09      23.46      33.33       0.00\t1.68   \t50.0\n11     286.50      19.18     242.17     277.05      62.68      26.34      33.33       0.00\t1.88   \t50.0\n12     313.51      23.24     241.24     300.94      75.28      29.22      33.33       0.00\t2.06   \t50.0\n13     340.07      27.71     240.23     323.79      88.81      32.11      33.33       0.00\t2.25   \t50.0\n14     366.13      32.59     239.15     345.55     103.14      34.78      33.33       0.00\t2.41   \t50.0\n15     391.65      37.90     237.99     366.18     118.15      37.45      33.33       0.00\t2.57   \t50.0\n16     416.59      43.65     236.77     385.63     133.76      40.24      33.33       0.00\t2.73   \t50.0\n17     440.90      49.88     235.49     403.69     150.03      43.71      33.33       0.00\t2.92   \t50.0\n18     464.51      56.99     234.15     420.28     166.82      47.01      33.33       0.00\t3.09   \t50.0\n19     487.32      65.13     232.77     435.37     183.93      50.16      33.33       0.00\t3.25   \t50.0\n20     509.26      74.26     231.40     448.97     201.14      53.29      33.33       0.00\t3.39   \t50.0\n21     530.25      84.35     230.20     461.09     218.28      56.47      33.33       0.00\t3.52   \t50.0\n22     550.24      95.40     229.17     471.52     235.32      60.51      33.33       0.00\t3.68   \t50.0\n23     569.15     107.44     228.30     480.27     252.08      64.36      33.33       0.00\t3.81   \t50.0\n24     586.90     120.57     227.56     487.45     268.31      67.99      33.33       0.00\t3.92   \t50.0\n25     603.40     134.98     226.95     493.20     283.77      71.23      33.33       0.00\t4.00   \t50.0\n26     618.50     151.20     226.43     499.06     303.31      74.26      33.33       0.00\t4.07   \t50.0\n**************************************************************\n*             2. AIRFOILS       \t                     *\n**************************************************************\n* Airfoil name. intake in. intake out. open. disp   rweight \n1\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n2\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n3\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n4\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n5\tgnuReflex.txt         3.0      6.0\t1\t0\t1     17\n6\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n7\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n8\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n9\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n10\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n11\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n12\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n13\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n14\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n15\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n16\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n17\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n18\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n19\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n20\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n21\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n22\tgnuReflex.txt         3.0      6.0\t1\t0\t1     16\n23\tgnuReflex.txt         3.0      6.0\t0\t0\t1     16\n24\tgnuReflex.txt         3.0      6.0\t0\t0\t1     16\n25\tgnuReflex.txt         3.0      6.0\t0\t0\t1     16\n26\tgnuReflex.txt         3.0      6.0\t0\t0\t1     1\n*************************************************************\n*            3. ANCHOR POINTS                               *\n*************************************************************\n* Airf\tAnch\tA     B\t    C\tD\tE\tF\n1\t3\t11    39    67\t0\t0\t0\n2\t3\t11    39    67  0\t0\t95\n3\t3\t11    39    67\t0 \t0\t95\n4\t3\t11    39    67\t0 \t0\t95\n5\t3\t11    39    67\t0 \t0\t95\n6\t3\t11    39    67\t0 \t0\t95\n7\t3\t11    39    67\t0 \t0\t95\n8\t3\t11    39    67\t0 \t0\t95\n9\t3\t11    39    67\t0 \t0\t95\n10\t3\t11    39    67\t0 \t0\t95\n11\t3\t11    39    67\t0 \t0\t95\n12\t3\t11    39    67\t0 \t0\t95\n13\t3\t11    39    67\t0 \t0\t95\n14\t3\t11    39    67\t0\t0\t95\n15\t3\t11    39    67  0\t0\t95\n16\t3\t11    39    67\t0 \t0\t95\n17\t3\t11    39    67\t0 \t0\t95\n18\t3\t11    39    67\t0 \t0\t95\n19\t3\t11    39    67\t0 \t0\t95\n20\t3\t11    39    67\t0 \t0\t95\n21\t3\t11    39    67\t0 \t0\t95\n22\t3\t11    39    67\t0 \t0\t95\n23\t3\t11    39    67\t0 \t0\t95\n24\t3\t11    39    67\t0 \t0\t95\n25\t3\t11    39    67\t0 \t0\t95\n26\t3\t5.    40    77\t0\t0\t0\n*************************************************************\n*          4. AIRFOIL HOLES                                 *\n*************************************************************\n1\n1\n25\n9\n1 15.40\t 2.42\t1.86\t5.10\t0.\t0.\t0.\t0.\n1 23.13\t 1.66\t3.30\t7.12\t0.\t0.\t0.\t0.\n1 31.39\t 1.66\t2.51\t6.15\t0.\t0.\t0.\t0.\n1 44.91\t-0.15\t1.86\t4.96\t0.\t0.\t0.\t0.\n1 52.93\t-0.15\t2.70\t4.96\t0.\t0.\t0.\t0.\n1 60.78\t-0.80\t1.86\t3.55\t0.\t0.\t0.\t0.\n1 73.15 -0.35\t1.59    2.79\t0.\t0.\t0.\t0.\n1 79.00\t-0.53\t1.62\t1.62\t0.\t0.\t0.\t0.\n1 84.53\t-0.55\t1.3\t1.3\t0.\t0.\t0.\t0.\n*************************************************************\n*           5. SKIN TENSION                                 *\n*************************************************************\nExtrados\n0.\t\t0.0\t0.\t\t0.\n7.5\t\t1.3\t10.\t\t1.33\n15.\t\t2.5\t20.\t\t2.5\n80.\t\t2.5\t80.\t\t2.5\n90.\t\t1.33\t90.\t\t1.33\n100.\t\t0.0\t100.\t\t0.\n0.0114\n1000    1.0\n*************************************************************\n*           6. SEWING ALLOWANCES                            *\n*************************************************************\n10\t10\t20\tupper panels (mm)\n10\t10\t20\tlower panels (mm)\n10\tribs (mm)\n10\tvribs (mm)\n*************************************************************\n*           7. MARKS\n*************************************************************\n25.\t0.5\t0.15\n************************************************************\n*           8. Global angle of attack estimation           *\n*************************************************************\n* Finesse GR\n\t10.0\n* Plumb point % of chord\n\t40\n* Calage %\n\t32.5\n* Risers lenght cm\n\t47\n* Line lenght cm (without risers)\n\t708\n* Karabiners cm\n\t42\n***************************************************\n*          9. SUSPENSION LINES DESCRIPTION\n***************************************************\n3\n3\n12\n4\t1 1\t2 1\t3 1\t4 1 \t1 2\n4\t1 1\t2 1\t3 1\t4 2\t1 3\n4\t1 1\t2 1\t3 2\t4 3\t1 6\n4\t1 1\t2 1\t3 2\t4 4\t1 7\n4\t1 1\t2 2\t3 3\t4 5\t1 10\n4\t1 1\t2 2\t3 3\t4 6\t1 11\n4\t1 1\t2 2\t3 4\t4 7\t1 14\n4\t1 1\t2 2\t3 4\t4 8\t1 15\n4\t1 1\t2 3\t3 5\t4 9\t1 18\n4\t1 1\t2 3\t3 5\t4 10\t1 19\n4\t1 1\t2 3\t3 6\t4 11\t1 22\n4\t1 1\t2 3\t3 6\t4 12\t1 23\n12\n4\t1 1\t2 1\t3 1\t4 1 \t2 2\n4\t1 1\t2 1\t3 1\t4 2\t2 3\n4\t1 1\t2 1\t3 2\t4 3\t2 6\n4\t1 1\t2 1\t3 2\t4 4\t2 7\n4\t1 1\t2 2\t3 3\t4 5\t2 10\n4\t1 1\t2 2\t3 3\t4 6\t2 11\n4\t1 1\t2 2\t3 4\t4 7\t2 14\n4\t1 1\t2 2\t3 4\t4 8\t2 15\n4\t1 1\t2 3\t3 5\t4 9\t2 18\n4\t1 1\t2 3\t3 5\t4 10\t2 19\n4\t1 1\t2 3\t3 6\t4 11\t2 22\n4\t1 1\t2 3\t3 6\t4 12\t2 23\n16\n4\t1 1\t2 1\t3 1\t4 1 \t3 2\n4\t1 1\t2 1\t3 1\t4 2\t3 3\n4\t1 1\t2 1\t3 2\t4 3\t3 6\n4\t1 1\t2 1\t3 2\t4 4\t3 7\n4\t1 1\t2 2\t3 3\t4 5\t3 10\n4\t1 1\t2 2\t3 3\t4 6\t3 11\n4\t1 1\t2 2\t3 4\t4 7\t3 14\n4\t1 1\t2 2\t3 4\t4 8\t3 15\n4\t1 1\t2 3\t3 5\t4 9\t3 18\n4\t1 1\t2 3\t3 5\t4 10\t3 19\n4\t1 1\t2 3\t3 6\t4 11\t3 22\n4\t1 1\t2 3\t3 6\t4 12\t3 23\n3\t1 1\t2 4\t3 7\t0 0\t1 25\n3\t1 1\t2 4\t3 8\t0 0\t1 26\n3\t1 1\t2 4\t3 9\t0 0\t2 26\n3\t1 1\t2 4\t3 10\t0 0\t3 26\n***************************************************\n*       10. BRAKES\n***************************************************\n300\n12\n4\t1 1\t2 1\t3 1\t4 1 \t6 2\n4\t1 1\t2 1\t3 1\t4 2\t6 4\n4\t1 1\t2 1\t3 2\t4 3\t6 6\n4\t1 1\t2 1\t3 2\t4 4\t6 8\n4\t1 1\t2 2\t3 3\t4 5\t6 10\n4\t1 1\t2 2\t3 3\t4 6\t6 12\n4\t1 1\t2 2\t3 4\t4 7 \t6 14\n4\t1 1\t2 2\t3 4\t4 8\t6 16\n4\t1 1\t2 3\t3 5\t4 9\t6 18\n4\t1 1\t2 3\t3 5\t4 10\t6 20\n4\t1 1\t2 3\t3 6\t4 11\t6 22\n4\t1 1\t2 3\t3 6\t4 12\t6 24\n* Brake distribution\n0\t25\t50\t80\t100\n0 \t0\t0\t0\t0\n***************************************************\n*       11. Ramification lengths\n***************************************************\n3\t180\n4\t275\t85\n3\t135\n4\t200\t80\n***************************************************\n*\t12. H V and VH ribs\n***************************************************\n124\n80\t150\n1\t11\t1 1\t2 1\t2.0\t0\t0\t0\n2\t11\t2 1\t3 1\t2.0\t0\t0\t0\n3\t11\t3 1\t4 1\t2.0\t0\t0\t0\n4\t11\t4 1\t5 1\t2.0\t0\t0\t0\n5\t11\t5 1\t6 1\t2.0\t0\t0\t0\n6\t11\t6 1\t7 1\t2.0\t0\t0\t0\n7\t11\t7 1\t8 1\t2.0\t0\t0\t0\n8\t11\t8 1\t9 1\t2.0\t0\t0\t0\n9\t11\t9 1\t10 1\t2.0\t0\t0\t0\n10\t11\t10 1\t11 1\t2.0\t0\t0\t0\n11\t11\t11 1\t12 1\t2.0\t0\t0\t0\n12\t11\t12 1\t13 1\t2.0\t0\t0\t0\n13\t11\t13 1\t14 1\t2.0\t0\t0\t0\n14\t11\t14 1\t15 1\t2.0\t0\t0\t0\n15\t11\t15 1\t16 1\t2.0\t0\t0\t0\n16\t11\t16 1\t17 1\t2.0\t0\t0\t0\n17\t11\t17 1\t18 1\t2.0\t0\t0\t0\n18\t11\t18 1\t19 1\t2.0\t0\t0\t0\n19\t11\t19 1\t20 1\t2.0\t0\t0\t0\n20\t11\t20 1\t21 1\t2.0\t0\t0\t0\n21\t11\t21 1\t22 1\t2.0\t0\t0\t0\n22\t11\t22 1\t23 1\t2.0\t0\t0\t0\n23\t11\t23 1\t24 1\t2.0\t0\t0\t0\n24\t11\t1 2\t2 2\t2.0\t0\t0\t0\n25\t11\t2 2\t3 2\t2.0\t0\t0\t0\n26\t11\t3 2\t4 2\t2.0\t0\t0\t0\n27\t11\t4 2\t5 2\t2.0\t0\t0\t0\n28\t11\t5 2\t6 2\t2.0\t0\t0\t0\n29\t11\t6 2\t7 2\t2.0\t0\t0\t0\n30\t11\t7 2\t8 2\t2.0\t0\t0\t0\n31\t11\t8 2\t9 2\t2.0\t0\t0\t0\n32\t11\t9 2\t10 2\t2.0\t0\t0\t0\n33\t11\t10 2\t11 2\t2.0\t0\t0\t0\n34\t11\t11 2\t12 2\t2.0\t0\t0\t0\n35\t11\t12 2\t13 2\t2.0\t0\t0\t0\n36\t11\t13 2\t14 2\t2.0\t0\t0\t0\n37\t11\t14 2\t15 2\t2.0\t0\t0\t0\n38\t11\t15 2\t16 2\t2.0\t0\t0\t0\n39\t11\t16 2\t17 2\t2.0\t0\t0\t0\n40\t11\t17 2\t18 2\t2.0\t0\t0\t0\n41\t11\t18 2\t19 2\t2.0\t0\t0\t0\n42\t11\t19 2\t20 2\t2.0\t0\t0\t0\n43\t11\t20 2\t21 2\t2.0\t0\t0\t0\n44\t11\t21 2\t22 2\t2.0\t0\t0\t0\n45\t11\t22 2\t23 2\t2.0\t0\t0\t0\n46\t11\t23 2\t24 2\t2.0\t0\t0\t0\n47\t11\t1 3\t2 3\t2.0\t0\t0\t0\n48\t11\t2 3\t3 3\t2.0\t0\t0\t0\n49\t11\t3 3\t4 3\t2.0\t0\t0\t0\n50\t11\t4 3\t5 3\t2.0\t0\t0\t0\n51\t11\t5 3\t6 3\t2.0\t0\t0\t0\n52\t11\t6 3\t7 3\t2.0\t0\t0\t0\n53\t11\t7 3\t8 3\t2.0\t0\t0\t0\n54\t11\t8 3\t9 3\t2.0\t0\t0\t0\n55\t11\t9 3\t10 3\t2.0\t0\t0\t0\n56\t11\t10 3\t11 3\t2.0\t0\t0\t0\n57\t11\t11 3\t12 3\t2.0\t0\t0\t0\n58\t11\t12 3\t13 3\t2.0\t0\t0\t0\n58\t11\t13 3\t14 3\t2.0\t0\t0\t0\n60\t11\t14 3\t15 3\t2.0\t0\t0\t0\n61\t11\t15 3\t16 3\t2.0\t0\t0\t0\n62\t11\t16 3\t17 3\t2.0\t0\t0\t0\n63\t11\t17 3\t18 3\t2.0\t0\t0\t0\n64\t11\t18 3\t19 3\t2.0\t0\t0\t0\n65\t11\t19 3\t20 3\t2.0\t0\t0\t0\n66\t11\t20 3\t21 3\t2.0\t0\t0\t0\n67\t11\t21 3\t22 3\t2.0\t0\t0\t0\n68\t11\t22 3\t23 3\t2.0\t0\t0\t0\n69\t11\t23 3\t24 3\t2.0\t0\t0\t0\n70\t11\t24 1\t25 1\t2.0\t0\t0\t0\n71      15       2 1     1 0    60.0    28.0    85.     2.\n72      15       2 2     1 0    60.0    28.0    85.     2.\n73      15       2 3     1 0    60.0    28.0    85.     2.\n74      15       3 1     0 1    60.0    28.0    85.     2.\n75      15       3 2     0 1    60.0    28.0    85.     2.\n76      15       3 3     0 1    60.0    28.0    85.     2.\n77      15       6 1     1 0    60.0    28.0    85.     2.\n78      15       6 2     1 0    60.0    28.0    85.     2.\n79      15       6 3     1 0    60.0    28.0    85.     2.\n80      15       7 1     0 1    60.0    28.0    85.     2.\n81      15       7 2     0 1    60.0    28.0    85.     2.\n82      15       7 3     0 1    60.0    28.0    85.     2.\n83      15      10 1     1 0    60.0    28.0    85.     2.\n84      15      10 2     1 0    60.0    28.0    85.     2.\n85      15      10 3     1 0    60.0    28.0    85.     2.\n86      15      11 1     0 1    60.0    28.0    85.     2.\n87      15      11 2     0 1    60.0    28.0    85.     2.\n88      15      11 3     0 1    60.0    28.0    85.     2.\n89      15      14 1     1 0    60.0    28.0    85.     2.\n90      15      14 2     1 0    60.0    28.0    85.     2.\n91      15      14 3     1 0    60.0    28.0    85.     2.\n92      15      15 1     0 1    60.0    28.0    85.     2.\n93      15      15 2     0 1    60.0    28.0    85.     2.\n94      15      15 3     0 1    60.0    28.0    85.     2.\n95      15      18 1     1 0    60.0    28.0    85.     2.\n96      15      18 2     1 0    60.0    28.0    85.     2.\n97      15      18 3     1 0    60.0    28.0    85.     2.\n98      15      19 1     0 1    60.0    28.0    85.     2.\n99      15      19 2     0 1    60.0    28.0    85.     2.\n100     15      19 3     0 1    60.0    28.0    85.     2.\n101     15      22 1     1 0    60.0    28.0    85.     2.\n102     15      22 2     1 0    60.0    28.0    85.     2.\n103     15      22 3     1 0    60.0    28.0    85.     2.\n104     15      23 1     0 1    60.0    28.0    85.     2.\n105     15      23 2     0 1    60.0    28.0    85.     2.\n106     15      23 3     0 1    60.0    28.0    85.     2.\n107     15      25 1     1 0    60.0    28.0    85.     2.\n108     15      25 2     1 0    60.0    28.0    85.     2.\n109     15      25 3     1 0    60.0    28.0    85.     2.\n110\t16 \t4 11. 100.  7.0 11.0 \t5 11. 100.   7.0 11.0\n111\t16 \t8 11. 100.  7.0 11.0    9 11. 100.   7.0 11.0\n112\t16     12 11. 100.  7.0 11.0   13 11. 100.   7.0 11.0\n113\t16     16 11. 100.  7.0 11.0   17 11. 100.   7.0 11.0\n114\t16     20 11. 100.  7.0 11.0   21 11. 100.   7.0 11.0\n115\t16 \t4 39. 100. 11.0 11.0 \t5 39. 100.  11.0 11.0\n116\t16 \t8 39. 100. 11.0 11.0    9 39. 100.  11.0 11.0\n117\t16     12 39. 100. 11.0 11.0   13 39. 100.  11.0 11.0\n118\t16     16 39. 100. 11.0 11.0   17 39. 100.  11.0 11.0\n119\t16     20 39. 100. 11.0 11.0   21 39. 100.  11.0 11.0\n120\t16 \t4 72. 100. 11.0 11.0 \t5 72. 100.  11.0 11.0\n121\t16 \t8 72. 100. 11.0 11.0    9 72. 100.  11.0 11.0\n122\t16     12 72. 100. 11.0 11.0   13 72. 100.  11.0 11.0\n123\t16     16 72. 100. 11.0 11.0   17 72. 100.  11.0 11.0\n124\t16     20 72. 100. 11.0 11.0   21 72. 100.  11.0 11.0\n*****************************************************\n*\t15. Extrados colors\n*****************************************************\n26\n1\t1\n1\t61.\t0.\n2\t1\n1\t61.\t0.\n3\t1\n1\t61.\t0.\n4\t1\n1\t61.\t0.\n5\t1\n1\t61.\t0.\n6\t1\n1\t61.\t0.\n7\t1\n1\t61.\t0.\n8\t1\n1\t61.\t0.\n9\t1\n1\t61.\t0.\n10\t1\n1\t61.\t0.\n11\t1\n1\t61.\t0.\n12\t1\n1\t61.\t0.\n13\t1\n1\t61.\t0.\n14\t1\n1\t61.\t0.\n15\t1\n1\t61.\t0.\n16\t1\n1\t61.\t0.\n17\t1\n1\t61.\t0.\n18\t1\n1\t61.\t0.\n19\t1\n1\t61.\t0.\n20\t1\n1\t61.\t0.\n21\t1\n1\t61.\t0.\n22\t1\n1\t61.\t0.\n23\t1\n1\t61.\t0.\n24\t1\n1\t61.\t0.\n25\t1\n1\t61.\t0.\n26\t1\n1\t61.\t0.\n*****************************************************\n*\t16. Intrados colors\n*****************************************************\n26\n1\t1\n1\t48.\t0.\n2\t1\n1\t54.46\t0.\n3\t1\n1\t61.\t0.\n4\t1\n1\t61.\t0.\n5\t1\n1\t61.\t0.\n6\t1\n1\t61.\t0.\n7\t1\n1\t61.\t0.\n8\t1\n1\t61.\t0.\n9\t1\n1\t61.\t0.\n10\t1\n1\t61.\t0.\n11\t1\n1\t61.\t0.\n12\t1\n1\t61.\t0.\n13\t1\n1\t61.\t0.\n14\t1\n1\t61.\t0.\n15\t1\n1\t61.\t0.\n16\t1\n1\t61.\t0.\n17\t1\n1\t61.\t0.\n18\t1\n1\t61.\t0.\n19\t1\n1\t61.\t0.\n20\t1\n1\t61.\t0.\n21\t1\n1\t61.\t0.\n22\t1\n1\t61.\t0.\n23\t1\n1\t61.\t0.\n24\t1\n1\t61.\t0.\n25\t1\n1\t61.\t0.\n26\t1\n1\t61.\t0.\n*****************************************************\n*       17. Aditional rib points\n*****************************************************\n0\n*****************************************************\n*       18. Elastic lines corrections\n*****************************************************\n100\n75\t25\n40\t40\t20\n35\t35\t20\t10\n35\t35\t15\t10\t5\n1\t0.08\t0.2\t0.2\t\n2\t0.08\t0.2\t0.2\n3\t0.08\t0.2\t0.2\n4\t0.08\t0.2\t0.2\n5\t0.08\t0.2\t0.2\n******************************************************\n*       19. DXF layer names\n******************************************************\n10\ngeneral         default\nline-external\tcutexternal\nline-sewing     cutinternal\npoints\t\tpoints\ncircles\t\tcircles\ntriangles       triangle\nsquare          square\ntext\t\ttext\nreference       refer\nnotes           notes\n******************************************************\n*       20. Marks types\n******************************************************\n10\ntypepoint   1  0.25  1.2     2  0.3  1.2\ntypepoint2  1  0.25  1.2     2  0.2  1.2\ntypepoint3  1  0.25  1.2     2  0.2  1.2\ntypevent    1  10.   0.0     2  2.0  0.0\ntypetab     1  10.   0.0     3  2.0  0.0\ntypejonc    1  10.   0.0     2  2.0  0.0\ntyperef     1  5.0   1.      1  2.0  0.0\ntype8       1  0.2   5.5     1  0.0  3.9\ntype9       1  0.0   7.0     1  3.2  4.5\ntype10      1  0.0   6.0     1  0.0  3.33\n*******************************************************\n*       21. JONCS DEFINITION (NYLON RODS)\n*******************************************************\n2\n2\n1 1\n1\n1 1 25\n12.0  18.5     1.5   2.0\n7.0   15.0     2.0   2.0\n0.0    9.35    6.3   9.35\n2 4\n1\n1 1 25\n23.5  29.5   1.1   2.0\n63.0  70.0   1.1   2.0\n0.0    9.35  6.3   9.35\n*******************************************************\n*       22. NOSE MYLARS DEFINITION\n*******************************************************\n0\n*******************************************************\n*       23. TAB REINFORCEMENTS\n*******************************************************\n0\n*******************************************************\n*       24. GENERAL 2D DXF OPTIONS\n*******************************************************\n1\nA_lines_color\t1     red\nB_lines_color\t30    orange\nC_lines_color\t3     green\nD_lines_color\t4     cyan\nE_lines_color   6     magenta\nF_lines_color\t5     blue\n*******************************************************\n*       25. GENERAL 3D DXF OPTIONS\n*******************************************************\n1\nA_lines_color\t1     red\nB_lines_color\t8     grey\nC_lines_color\t8     grey\nD_lines_color\t8     grey\nE_lines_color   8     grey\nF_lines_color\t30    orange\nExtrados\t0\t5       blue\nVents\t\t0\t1       red\nIntrados\t0\t3\tgreen\n*******************************************************\n*       26. GLUE VENTS\n*******************************************************\n1\n1\t-4 \t 0.0 \t 0.0\n2\t-4 \t67.0 \t 0.0\n3\t-4 \t 0.0 \t67.0\n4\t-4 \t67.0 \t 0.0\n5\t-4 \t 0.0 \t67.0\n6\t-4 \t67.0 \t 0.0\n7\t-4 \t 0.0 \t67.0\n8\t-4 \t67.0 \t 0.0\n9\t-4 \t 0.0 \t67.0\n10\t-4 \t67.0 \t 0.0\n11\t-4 \t 0.0 \t67.0\n12\t-4 \t67.0 \t 0.0\n13\t-4 \t0.0 \t67.0\n14\t-4 \t67.0 \t 0.0\n15\t-4 \t0.0 \t67.0\n16\t-4 \t67.0 \t 0.0\n17\t-4 \t0.0 \t67.0\n18\t-4 \t67.0 \t 0.0\n19\t-4 \t0.0 \t67.0\n20\t-4 \t67.0 \t 0.0\n21\t-4 \t0.0 \t67.0\n22\t-4 \t67.0 \t 0.0\n23\t-4 \t0.0    100.0\n24\t-1\n25\t-1\n26\t-1\n*******************************************************\n*       27. SPECIAL WING TIP\n*******************************************************\n1\nAngleLE 55.\nAngleTE 5.\n*******************************************************\n*       28. PARAMETERS FOR CALAGE VARIATION\n*******************************************************\n1\n3\n11. 39. 67.0  0.0  0  0\n-3.0 10 5.0 20\n*******************************************************\n*       29. 3D SHAPING\n*******************************************************\n1\n1\ngroups \t1\ngroup   1       1       26\nupper\t0\t1\nlower\t0\t1\n* Print parameters\nInter3D 0\t1\t26\t0\nOvali3D 0\t1\t26\t0\ntesse3D 0\t1\t26\t0\nexteDXF 1\t1\t26\t1\nexteSTL 1\t1\t26\t1\n*******************************************************\n*       30. AIRFOIL THICKNESS MODIFICATION\n*******************************************************\n1\n1\t1.0\n2\t1.0\n3\t1.0\n4\t1.0\n5\t1.0\n6\t1.0\n7\t1.0\n8\t1.0\n9\t1.0\n10\t1.0\n11\t1.0\n12\t1.0\n13\t1.0\n14\t1.0\n15\t1.0\n16\t1.0\n17\t1.0\n18\t1.0\n19\t1.0\n20\t1.0\n21\t1.0\n22\t1.0\n23\t1.0\n24\t1.0\n25\t1.0\n26\t0.01\n*******************************************************\n*       31. NEW SKIN TENSION MODULE\n*******************************************************\n1\n1\n* Skin tension group number \"1\" from rib 1 to 26, 14 points, type \"1\"\n1      \t1\t27\t14\t1\n1\t0.\t\t0.03\t0.\t\t0.\n2\t5.\t\t0.4\t10.\t\t0.625\n3\t10.0\t\t1.0\t20.\t\t1.25\n4\t15.\t\t1.94\t30.\t\t1.875\n5\t17.5\t\t2.93\t35\t\t2.1875\n6\t20.\t\t3.32\t40.\t\t2.5\n7\t25.\t\t3.5\t65.\t\t2.5\n8\t50.\t\t3.5\t70.\t\t2.4\n9\t55.\t\t3.33\t75.\t\t2.3\n10\t65.\t\t2.77\t80.\t\t2.0\t\n11\t70.\t\t2.35\t85.\t\t1.5\n12\t90.\t\t0.67\t90.\t\t0.9\n13\t95.\t\t0.19\t95.\t\t0.3\n14\t100.\t\t0.0\t100.\t\t0.03\n*******************************************************\n*       32. PARAMETERS FOR PARTS SEPARATION\n*******************************************************\n1\npanel_x\t\t1.2\npanel_x_min\t1.0\npanel_y\t\t0.8\nrib_x\t\t1.0\nrib_y\t\t1.0\nrib_1y\t\t0.5\njonc_x\t\t1.0\njonc_y\t\t1.0\njonc_i\t\t1.0\nnotused\t\t1.0\n*******************************************************\n*       33. DETAILED RISERS\n*******************************************************\n0\n*******************************************************\n*       34. LINES CHARACTERISTICS TABLE\n*******************************************************\n1\n6\n1  c  5.0     Riser    1000 daN  u_dyneem    10.0   g   p 12. cm  7\n2  c  1.90    Line275   275 daN  s_dyneem    2.26   g   s 12. cm  1\n3  c  1.40    Line160   160 daN  s_dyneem    1.34   g   s 10. cm  3\n4  c  1.15    Line120   120 daN  s_dyneem    1.00   g   s 10. cm  5\n5  c  0.80    Line100U  100 daN  u_dyneem    0.43   g   p 8.  cm  2\n6  c  2.00    Line200B  200 daN  s_dynemm    3.10   g   s 12. cm  6\n*******************************************************\n*       35. SOLVE EQUILIBRIUM EQUATIONS\n*******************************************************\n0\n*******************************************************\n*       36. CREATE FILES FOR XFLR5 ANALYSIS\n*******************************************************\n0\n*******************************************************\n*       37. SOME SPECIAL PARAMETERS\n*******************************************************\n1\n6\n1341    1    use CAD colors for each line type according table 34\n2000\t\"2026-08-29\" edition date\n3001\t3    6.0   0.85  use cosinuidal mini-rib transitions\n2005\t0\n2006\t0\n3002\t55   ellipse segments\n***************************************************\n*\t38. HVR HOLES\n***************************************************\n1\n3\n1\t16\t1\t5\t70.\t50.\t0.5\t0.0\t0.0\n2\t15\t1\t3\t45.\t25.\t0.6\t0.0\t0.0\n3\t 9\t1\t4\t70\t0.6    -0.15\t0.0\t0.0\t\n***************************************************\n*\t39. HVR POSITION PARAMETERS\n***************************************************\n1\n6\nvrib_type1\t0.5\t1.0\nvrib_type2\t1.0\t1.0\nvrib_type3\t1.0\t1.0\nvrib_type4\t1.0\t1.0\nvrib_type5\t0.4\t1.0\nvrib_type6\t0.4\t1.0\n\n\n\n\nNote: sections 15 and 16 causes NaN problem.\nUse noNaN script or subtitute sections 15, 16 by:\n\n*****************************************************\n*\t15. Extrados colors\n*****************************************************\n0\n*****************************************************\n*\t16. Intrados colors\n*****************************************************\n26\n\n";
 const SWOOP2_SECTIONS = {"gnuReflex.txt": "gnuReflex                                         \n 180\n 110\n   7\n  65\n 1.000000     0.000000\n 0.993538     0.001003\n 0.983052     0.002359\n 0.971425     0.003599\n 0.958609     0.004927\n 0.944821     0.006369\n 0.930241     0.007826\n 0.915007     0.009295\n 0.899393     0.010792\n 0.883695     0.012327\n 0.868094     0.013925\n 0.852688     0.015622\n 0.837494     0.017465\n 0.822421     0.019510\n 0.807310     0.021781\n 0.792027     0.024280\n 0.776476     0.026978\n 0.760631     0.029827\n 0.744554     0.032770\n 0.728363     0.035736\n 0.712095     0.038675\n 0.695723     0.041590\n 0.679265     0.044494\n 0.662774     0.047401\n 0.646302     0.050323\n 0.629877     0.053270\n 0.613491     0.056255\n 0.597112     0.059290\n 0.580697     0.062379\n 0.564225     0.065509\n 0.547714     0.068664\n 0.531225     0.071815\n 0.514821     0.074933\n 0.498526     0.077997\n 0.482349     0.080987\n 0.466294     0.083883\n 0.450330     0.086669\n 0.434399     0.089344\n 0.418446     0.091921\n 0.402444     0.094421\n 0.386429     0.096863\n 0.370508     0.099243\n 0.354842     0.101531\n 0.339545     0.103665\n 0.324644     0.105593\n 0.310122     0.107276\n 0.295946     0.108685\n 0.282079     0.109802\n 0.268488     0.110614\n 0.255151     0.111111\n 0.242054     0.111286\n 0.229183     0.111131\n 0.216528     0.110642\n 0.204087     0.109813\n 0.191859     0.108643\n 0.179841     0.107129\n 0.168039     0.105279\n 0.156476     0.103099\n 0.145179     0.100597\n 0.134173     0.097786\n 0.123489     0.094683\n 0.113167     0.091313\n 0.103261     0.087713\n 0.093825     0.083910\n 0.084887     0.079930\n 0.076471     0.075823\n 0.068606     0.071644\n 0.061313     0.067457\n 0.054603     0.063321\n 0.048468     0.059291\n 0.042889     0.055413\n 0.037841     0.051723\n 0.033296     0.048221\n 0.029217     0.044891\n 0.025558     0.041714\n 0.022276     0.038678\n 0.019327     0.035771\n 0.016679     0.032985\n 0.014305     0.030302\n 0.012177     0.027715\n 0.010267     0.025220\n 0.008552     0.022813\n 0.007013     0.020490\n 0.005633     0.018245\n 0.004398     0.016076\n 0.003312     0.013970\n 0.002378     0.011918\n 0.001597     0.009913\n 0.000967     0.007950\n 0.000498     0.006032\n 0.000186     0.004162\n 0.000017     0.002335\n 0.000000     0.000000\n 0.000170    -0.001261\n 0.000523    -0.003090\n 0.001029    -0.004956\n 0.001692    -0.006841\n 0.002529    -0.008735\n 0.003555    -0.010626\n 0.004780    -0.012505\n 0.006210    -0.014362\n 0.007845    -0.016196\n 0.009682    -0.018017\n 0.011726    -0.019829\n 0.013991    -0.021631\n 0.016477    -0.023453\n 0.019180    -0.025326\n 0.022129    -0.027234\n 0.025371    -0.029153\n 0.030000    -0.031639\n 0.032868    -0.033101\n 0.037186    -0.035154\n 0.041949    -0.037262\n 0.047209    -0.039428\n 0.053008    -0.041622\n 0.060000    -0.043936\n 0.066642    -0.045932\n 0.074561    -0.048178\n 0.083116    -0.050385\n 0.092364    -0.052449\n 0.102487    -0.054391\n 0.113519    -0.056257\n 0.125332    -0.058021\n 0.137824    -0.059655\n 0.150923    -0.061135\n 0.164543    -0.062442\n 0.178620    -0.063567\n 0.193124    -0.064517\n 0.208015    -0.065308\n 0.223247    -0.065953\n 0.238812    -0.066467\n 0.254714    -0.066880\n 0.270923    -0.067228\n 0.287356    -0.067546\n 0.303884    -0.067859\n 0.320380    -0.068180\n 0.336750    -0.068483\n 0.352951    -0.068723\n 0.368979    -0.068870\n 0.384842    -0.068900\n 0.400575    -0.068792\n 0.416242    -0.068530\n 0.431912    -0.068113\n 0.447644    -0.067549\n 0.463461    -0.066854\n 0.479357    -0.066040\n 0.495326    -0.065116\n 0.511369    -0.064087\n 0.527486    -0.062962\n 0.543673    -0.061748\n 0.559918    -0.060455\n 0.576216    -0.059086\n 0.592569    -0.057649\n 0.608959    -0.056157\n 0.625340    -0.054616\n 0.641680    -0.053023\n 0.657969    -0.051369\n 0.674220    -0.049648\n 0.690443    -0.047857\n 0.706613    -0.046000\n 0.722724    -0.044063\n 0.738818    -0.042036\n 0.754919    -0.039924\n 0.771010    -0.037735\n 0.787077    -0.035465\n 0.803125    -0.033111\n 0.819183    -0.030667\n 0.835268    -0.028139\n 0.851357    -0.025542\n 0.867423    -0.022881\n 0.883466    -0.020162\n 0.899420    -0.017422\n 0.915119    -0.014699\n 0.930386    -0.012018\n 0.945040    -0.009433\n 0.958830    -0.007006\n 0.971525    -0.004711\n 0.983045    -0.002611\n 0.993514    -0.000905\n 1.000000     0.000000\n"};
@@ -29417,6 +30466,21 @@ const S = {
   // How far the speed bar shortens the front riser, and how far trimmers
   // let the rear one out (0, none), in millimetres.
   speedTravel: 150, trimTravel: 0,
+  // What the balance flies on. 'polar' takes the wing's own polar at the
+  // angle; 'calage' trims on it from where the risers hang, `calagePct` of
+  // the central chord; 'typed' takes the typed coefficients at the angle, as
+  // the handbook's worked example does. 36%: the Tuluaq-19's, the furthest
+  // aft of the three complete designs on file (32.5 to 36%). An import sets
+  // its own.
+  balanceMode: 'polar', calagePct: 36,
+  // Where the balance puts its forces on the polar. 'acting' puts each where
+  // it acts — the lift on its own line in the arc, from the vortex lattice;
+  // the wing's weight at its cloth's mass centre; the lines' weight and drag
+  // at theirs; the pilot below the karabiners — and 'rules' where chapter 4
+  // puts them. `pilotBelow` is how far the pilot's mass centre is below the
+  // karabiners, in metres (LEparagliding's Pmc; the gnuC2-23's file says
+  // 0.2), and `pilotHangs` whether he is free to swing about them or plumb.
+  balanceForces: 'acting', pilotBelow: 0.2, pilotHangs: 'free',
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
@@ -29431,6 +30495,8 @@ const S = {
     + 'batten    23.5 29.5   63.0 70.0   1.5',
   famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
   lineBrand: 'all', lineStrength: 'kinked', maxLineTypes: 5, serviceHours: 200,
+  // Size the line set to the DHV's calculation for EN 926-1, level by level.
+  dhvLevels: true,
   objLineScale: 1,
   clothLE: 'Porcher Skytex 27 hard', clothUpper: 'Porcher Skytex 32',
   clothLower: 'Porcher Skytex 32', clothRib: 'Porcher Skytex 40 hard',
@@ -29449,7 +30515,10 @@ const S = {
   // decision rather than a fact, so each is the user's to make.
   karabinerSep: 42,        // cm between the karabiners
   loopAllowance: 130,      // mm of line consumed by the loops at each end
-  cdCylinder: 1.1,         // drag coefficient of a line in cross-flow
+  // A line's drag coefficient in cross-flow, each line's own from its
+  // Reynolds number at the speed flown, or `cdCylinder` for every line.
+  lineCd: 'reynolds',
+  cdCylinder: 1.1,
   measureTension: 5,       // daN, the tension the PMA measures lengths at
   rowShareMode: 'convention',
   printMargin: 10, printOverlap: 15,
@@ -29510,6 +30579,21 @@ const COMPLETE_DESIGNS = [
     sections: () => (typeof GNUC2_SECTIONS === 'object' && GNUC2_SECTIONS ? GNUC2_SECTIONS : {}),
   },
 ];
+/**
+ * The line catalogue, with what is measured of some of its lines: their load
+ * and elongation and their weight, from OpenGlider's line types
+ * (`withMeasuredLineData`). Read once.
+ */
+let LINE_CATALOGUE = null;
+function lineCatalogue() {
+  if (!LINE_CATALOGUE) {
+    const cat = parseMaterialsTable(typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+    const stretch = typeof LINE_STRETCH_TSV === 'string' ? parseLineStretch(LINE_STRETCH_TSV) : null;
+    LINE_CATALOGUE = stretch ? withMeasuredLineData(cat, stretch) : cat;
+  }
+  return LINE_CATALOGUE;
+}
+
 /** A complete design by its picker id, when this build carries it. */
 const completeDesign = (id) => COMPLETE_DESIGNS.find((d) => d.id === id && d.lep().length) ?? null;
 /** Whether a picker id names a complete design at all. */
@@ -29762,8 +30846,8 @@ function applyReference() {
  */
 const IMPORT_OVERWRITES = [
   'name', 'span', 'rootChord', 'tipChord', 'cells', 'centreRib',
-  'lineLength', 'karabinerSep', 'alphaDeg', 'lineMass', 'cxLinesFromPlan', 'pilotMass', 'wingMass',
-  'anchorA', 'anchorB', 'anchorC', 'anchorD', 'intakeStart', 'intakeEnd',
+  'lineLength', 'karabinerSep', 'alphaDeg', 'calagePct', 'lineMass', 'cxLinesFromPlan', 'pilotMass', 'wingMass',
+  'pilotBelow', 'cxPilot', 'anchorA', 'anchorB', 'anchorC', 'anchorD', 'intakeStart', 'intakeEnd',
 ];
 
 /** Leave an imported design, restoring the parametric wing it replaced. */
@@ -29780,8 +30864,12 @@ function leaveImport() {
 
 function loadLepDesign(doc, sectionTexts = {}) {
   // What this design is about to overwrite, if it is replacing a parametric
-  // wing rather than another import.
+  // wing rather than another import. Replacing another import, it starts
+  // from the parametric wing's settings: a design whose file gives no pilot
+  // flew the last one's — the Swoop2 loaded after the gnuC2-23 took its
+  // 70 kg pilot and his drag from that design's section 35.
   if (!LEP) S._parametric = Object.fromEntries(IMPORT_OVERWRITES.map((k) => [k, S[k]]));
+  else if (S._parametric) Object.assign(S, S._parametric);
   const texts = { ...sectionTexts };
   const parsed = {};
   for (const [file, text] of Object.entries(texts)) {
@@ -29865,6 +30953,8 @@ function loadLepDesign(doc, sectionTexts = {}) {
   if (Number.isFinite(design.lineLengthM)) S.lineLength = design.lineLengthM;
   if (Number.isFinite(design.karabinerM)) S.karabinerSep = design.karabinerM * 100;
   if (geom?.ok) S.alphaDeg = Math.round(geom.aoaDeg * 100) / 100;
+  // Where its risers hang: what its own balance trims from.
+  if (geom?.ok && Number.isFinite(geom.calagePct)) S.calagePct = Math.round(geom.calagePct * 10) / 10;
   // Its own lines: what they weigh, as the program totals them, and their
   // own drag rather than a typed figure — the plan is the real one.
   if (geom?.ok && Number.isFinite(geom.totals.weightKg)) {
@@ -29878,6 +30968,15 @@ function loadLepDesign(doc, sectionTexts = {}) {
     S.pilotMass = e35.pilotKg;
     S.wingMass = e35.wingKg;
   }
+  // And how far below the karabiners it puts the pilot.
+  if (e35 && Number.isFinite(e35.pilotBelowM) && e35.pilotBelowM >= 0 && e35.pilotBelowM <= 1) {
+    S.pilotBelow = e35.pilotBelowM;
+  }
+  // And the drag it balanced him on: his Cd by his frontal area, over the
+  // wing's flat area — this tool's Cx pilot, which his drag is q S times.
+  // The tool's typed 0.015 is a third more than the gnuC2-23's own.
+  const drag35 = e35 && e35.pilotCd > 0 && e35.pilotAreaM2 > 0 && balance.flatAreaM2 > 0;
+  if (drag35) S.cxPilot = Math.round(((e35.pilotCd * e35.pilotAreaM2) / balance.flatAreaM2) * 1e5) / 1e5;
   const said = [];
   if (failed.length) said.push(`not read: ${failed.join('; ')}`);
   if (!haveAll) {
@@ -29907,6 +31006,7 @@ function loadLepDesign(doc, sectionTexts = {}) {
     said.push(balance.ok
       ? 'its section 35 balance is solved as its program solves it, under Balance'
         + (masses35 ? `, and its pilot (${e35.pilotKg} kg) and wing (${e35.wingKg} kg) are the ones this tool's balance flies` : '')
+        + (drag35 ? `, the pilot on his own drag, Cd ${e35.pilotCd} on ${e35.pilotAreaM2} m²` : '')
       : `its section 35 balance is not solved: ${balance.problems[0]}`);
   }
   // Which program drew it decides how some of its pieces are cut.
@@ -30151,11 +31251,47 @@ function rebuild() {
     // section polar when one is loaded, and says which in `polar.source`.
     const sectionSource = XPOLAR || null;
     const thin = thinAirfoil(airfoil);
+    // The section's moment at no lift and its zero-lift angle, for the
+    // balance and the lattice: a loaded XFOIL polar's, which the wing's polar
+    // flies on, or thin-aerofoil theory's.
+    const section0 = XPOLAR && Number.isFinite(XPOLAR.cm0) && Number.isFinite(XPOLAR.alphaL0Deg)
+      ? { cm0: XPOLAR.cm0, alphaL0Deg: XPOLAR.alphaL0Deg, source: 'XFOIL', extrapolated: !!XPOLAR.zeroLiftExtrapolated }
+      : { cm0: thin.cm0, alphaL0Deg: thin.alphaL0Deg, source: 'thin-aerofoil theory' };
     // The wing in its arc: its lift and induced drag as the lattice finds
     // them of this wing against itself laid flat. The balance's typed Cz is
     // a section's, and its induced drag is read at the angle the lattice's
     // flat plates would see, this one less the section's zero-lift angle.
     const arc = S.arcInFlight ? arcFactorsFor(wing) : null;
+    // Where the forces act, when the balance puts each where it acts
+    // (`balanceWhereForcesAct`): the lattice's centres — in the arc, or on
+    // the wing laid flat when it does not fly in it, as the polar does — and
+    // the wing's mass centre from its own cloth. Without a lattice, the
+    // rules.
+    const frame = centralFrame(wing);
+    const alongChord = (pt) => (pt[0] - frame.origin[0]) * frame.u[0] + (pt[2] - frame.origin[2]) * frame.u[2];
+    let acting = null;
+    if (S.balanceMode !== 'typed' && S.balanceForces === 'acting') {
+      try {
+        const lattice = arcFactorsFor(wing);
+        if (lattice) {
+          const fab = fabricSchedule({
+            leadingEdge: S.clothLE, upperSail: S.clothUpper, lowerSail: S.clothLower, rib: S.clothRib, diagonal: S.clothRib,
+          });
+          const gsm = fab.ok ? fab.gsmByLocation : { leadingEdge: 32, upperSail: 32, lowerSail: 32, rib: 40 };
+          acting = {
+            centresAt: (a) => lattice.forceCentreAt(a, { alphaL0Deg: section0.alphaL0Deg, flat: !S.arcInFlight }),
+            wingCentre: wingMassCentre(wing, {
+              upperGsm: gsm.upperSail, lowerGsm: gsm.lowerSail, ribGsm: gsm.rib, noseGsm: gsm.leadingEdge,
+              noseTo: S.noseClothTo / 100,
+            }),
+            pilotBelowM: S.pilotBelow,
+            pilotHangs: S.pilotHangs,
+          };
+        }
+      } catch (e) {
+        acting = null;
+      }
+    }
 
     // The balance and the polar, at a given line drag.
     //
@@ -30165,8 +31301,16 @@ function rebuild() {
     // every line's diameter, length and angle to the flow; solving the
     // flight once on the typed figure to get a plan, and again on that
     // plan's own drag, lets a design be flown on its own lines.
-    const flightAt = (cxLines) => ({
-      balance: solveEquilibrium({
+    const flightAt = (cxLines, lines = null) => {
+      const polarNow = wingPolar({
+        planform, airfoil, atm, mass: flightMass,
+        area: metrics.area, chordRef: metrics.mac,
+        twistAt,
+        cxLines, cxPilot: S.cxPilot,
+        alphaRange: [-2, 15], step: 1, sectionPolar: sectionSource,
+        arc,
+      });
+      const common = {
         area: metrics.area,
         span: imported ? imported.flatSpan : S.span,
         chord: imported ? imported.rootChord : S.rootChord,
@@ -30177,22 +31321,44 @@ function rebuild() {
         // altitude — so moving the altitude slider changed the polar, the
         // Reynolds number and the readout's density, and left the trim
         // speed where it was.
-        rho: atm.density, oswald: S.oswald, cxPilot: S.cxPilot, cxLines,
-        alphaDeg: S.alphaDeg, cz: S.cz, cx0a: S.cx0a, cm: S.cm,
-        legacySpreadsheet: S.legacy,
-        ...(arc ? { arc: { liftRatio: arc.liftRatio, inducedRatio: arc.inducedRatioAt(S.alphaDeg - thin.alphaL0Deg) } } : {}),
-      }),
-      polar: wingPolar({
-        planform, airfoil, atm, mass: flightMass,
-        area: metrics.area, chordRef: metrics.mac,
-        twistAt,
-        cxLines, cxPilot: S.cxPilot,
-        alphaRange: [-2, 14], step: 1, sectionPolar: sectionSource,
-        arc,
-      }),
-    });
+        rho: atm.density, cxPilot: S.cxPilot, cxLines,
+      };
+      if (S.balanceMode === 'typed') {
+        return {
+          polar: polarNow,
+          balance: solveEquilibrium({
+            ...common, oswald: S.oswald, alphaDeg: S.alphaDeg, cz: S.cz, cx0a: S.cx0a, cm: S.cm,
+            legacySpreadsheet: S.legacy,
+            ...(arc ? { arc: { liftRatio: arc.liftRatio, inducedRatio: arc.inducedRatioAt(S.alphaDeg - section0.alphaL0Deg) } } : {}),
+          }),
+        };
+      }
+      // On the wing's own polar: at the angle, or trimmed from the calage.
+      // A calage the wing cannot trim at is said, and the balance flown at
+      // the angle instead. Each force where it acts, or where the rules put
+      // it; the lines by the rules until a plan has placed them.
+      const where = acting ? { solve: balanceWhereForcesAct, ...acting, lines } : {};
+      const onPolarAt = (alphaDeg) => (acting
+        ? balanceWhereForcesAct({ polar: polarNow, alphaDeg, cm0: section0.cm0, ...common, ...acting, lines })
+        : balanceOnPolar({ polar: polarNow, alphaDeg, cm0: section0.cm0, ...common }));
+      if (S.balanceMode === 'calage') {
+        try {
+          return {
+            polar: polarNow,
+            balance: trimOnPolar({ polar: polarNow, calageFraction: S.calagePct / 100, cm0: section0.cm0, ...common, ...where }),
+          };
+        } catch (e) {
+          return { polar: polarNow, balance: { ...onPolarAt(S.alphaDeg), trimProblem: e.message } };
+        }
+      }
+      return { polar: polarNow, balance: onPolarAt(S.alphaDeg) };
+    };
     let { balance, polar } = flightAt(S.cxLines);
     let cxLinesUsed = S.cxLines;
+    // The angle the wing flies at: the one asked, or — trimmed from the
+    // calage — the one the calage gives. What follows the balance reads this,
+    // not the slider: the loads, the cloth's billow, the speed system.
+    const flownAlpha = () => balance.onPolar?.alphaDeg ?? S.alphaDeg;
 
     // The line catalogue the design is sized from.
     //
@@ -30202,15 +31368,14 @@ function rebuild() {
     // shelf.
     let lineTable;
     try {
-      const cat = parseMaterialsTable(
-        typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+      const cat = lineCatalogue();
       lineTable = S.lineBrand === 'all' ? cat : lineTableFor(cat, { brand: S.lineBrand });
     } catch (e) {
       lineTable = undefined;              // fall back to the built-in table
     }
     const loadsFor = (plan) => analyseLoads({
       plan, planform, stations: wing.stations,
-      totalMassKg: flightMass, alphaDeg: S.alphaDeg,
+      totalMassKg: flightMass, alphaDeg: flownAlpha(),
       wingAreaM2: metrics.area, rowShareMode: S.rowShareMode, airfoil,
       anchors: airfoil.anchors,
     });
@@ -30221,10 +31386,28 @@ function rebuild() {
       : selectLines(tensions, {
         ...(lineTable ? { table: lineTable } : {}),
         strengthBasis: S.lineStrength,
+        // Every level of the set as strong as the DHV's calculation asks, at
+        // the all-up weight set.
+        levelRule: S.dhvLevels ? { maxWeightKg: flightMass } : null,
       }));
-    const dragOf = (selection) => lineDrag(selection, {
-      wingAreaM2: metrics.area, cdCylinder: S.cdCylinder,
-    });
+    // Each line's own drag coefficient, from its Reynolds number at the
+    // speed the balance flies, on the flow at the angle it flies — or one
+    // typed for every line — its loops in the flow, and the plan's risers
+    // where their material is known.
+    const dragOf = (selection, plan = null) => {
+      const a = (flownAlpha() * Math.PI) / 180;
+      // The flow at that angle to the central chord, from below it.
+      const flow = [0, 1, 2].map((i) => Math.cos(a) * frame.u[i] + Math.sin(a) * frame.v[i]);
+      return lineDrag(selection, {
+        wingAreaM2: metrics.area,
+        loopAllowanceMM: S.loopAllowance,
+        risers: plan?.riserWebbing ?? [],
+        ...(S.lineCd === 'fixed'
+          ? { cdCylinder: S.cdCylinder }
+          : { air: { speedMS: balance.speedMS, rho: atm.density, muPaS: atm.dynamicViscosity } }),
+        flowDirection: flow,
+      });
+    };
 
     // The riser-based line plan, which is what the merge option and the load
     // model act on. The geometric cascade above stays for the front view,
@@ -30251,9 +31434,9 @@ function rebuild() {
       // anchor positions.
       //
       // A paraglider's angle of incidence is set by its line lengths, and the
-      // point it hangs from is the calage — which `solveEquilibrium` has just
-      // computed. Using a geometric centroid instead put the maillon 18.7
-      // points of chord too far forward on a typical wing, so the model
+      // point it hangs from is the calage — which the balance has just
+      // computed. Using a geometric centroid instead puts the maillon 8.3
+      // points of chord too far forward on the default wing, so the model
       // pitched nose-down against the attitude it would really fly at.
       calageFraction: usableCalage(balance).ok ? balance.calageFraction : null,
       wing, airfoil, layout: riserLayout,
@@ -30292,16 +31475,29 @@ function rebuild() {
     const first = lepPlan || buildLinePlan(planOptions);
     let dirs = null;
     let cxPlan = null;
+    // And where its lines' weight and drag act, for a balance that puts
+    // each force where it acts: their own centres, the plan hung where the
+    // first pass put it.
+    let linesActing = null;
     try {
       const l0 = loadsFor(first);
       if (!lepPlan) dirs = riserResultants(first, l0.tensions);
-      cxPlan = dragOf(selectionFor(first, l0.tensions)).cxLines;
+      const sel0 = selectionFor(first, l0.tensions);
+      const drag0 = dragOf(sel0, first);
+      cxPlan = drag0.cxLines;
+      if (acting) {
+        const c = lineCentres(sel0, {
+          frame, drag: drag0, webbing: first.riserWebbing, karabiner: first.karabiner, massKg: S.lineMass,
+        });
+        if (c) linesActing = { ...c, fromM: alongChord(first.karabiner) };
+      }
     } catch (e) {
       dirs = null;
     }
-    if (S.cxLinesFromPlan && Number.isFinite(cxPlan) && cxPlan > 0) {
-      ({ balance, polar } = flightAt(cxPlan));
-      cxLinesUsed = cxPlan;
+    const planCx = S.cxLinesFromPlan && Number.isFinite(cxPlan) && cxPlan > 0;
+    if (planCx || linesActing) {
+      ({ balance, polar } = flightAt(planCx ? cxPlan : S.cxLines, linesActing));
+      cxLinesUsed = planCx ? cxPlan : S.cxLines;
       planOptions.calageFraction = usableCalage(balance).ok ? balance.calageFraction : null;
     }
     if (lepPlan) {
@@ -30311,7 +31507,7 @@ function rebuild() {
       // plan places the riser tops before any load is known, so it is built
       // once, loaded, and built again with each riser pointed along its
       // resultant. One pass closes it to a fraction of a degree.
-      linePlan = (dirs && Object.keys(dirs).length) || cxLinesUsed !== S.cxLines
+      linePlan = (dirs && Object.keys(dirs).length) || cxLinesUsed !== S.cxLines || linesActing
         ? buildLinePlan({ ...planOptions, ...(dirs && Object.keys(dirs).length ? { riserDirections: dirs } : {}) })
         : first;
     }
@@ -30332,7 +31528,7 @@ function rebuild() {
     // (1 - dCp/2) q.
     let billow = null;
     if (S.applyOval && S.ovalFromPressure && !ownPanels) {
-      const cl = chordwiseLoading(airfoil, S.alphaDeg);
+      const cl = chordwiseLoading(airfoil, flownAlpha());
       const qPa = 0.5 * atm.density * balance.speedMS * balance.speedMS;
       // The loading is singular at the nose; a real suction peak is not.
       const dcpAt = (pt) => Math.max(-4, Math.min(4, pt.dcp));
@@ -30467,6 +31663,7 @@ function rebuild() {
     let lineSelection = null;
     let lengths = null;
     let lineDragOwn = null;
+    let levelStrength = null;
     try {
       loads = loadsFor(linePlan);
       lineSelection = selectionFor(linePlan, loads.tensions);
@@ -30482,7 +31679,10 @@ function rebuild() {
       // The drag of the lines actually in the plan, which is what the
       // balance flies on when it is asked to, and is shown beside the typed
       // figure when it is not.
-      lineDragOwn = dragOf(lineSelection);
+      lineDragOwn = dragOf(lineSelection, linePlan);
+      // Its strength level by level, as the DHV calculates it for EN 926-1,
+      // at the all-up weight set.
+      levelStrength = strengthByLevel(lineSelection.lines, { maxWeightKg: flightMass });
     } catch (e) {
       loads = null;
     }
@@ -30514,9 +31714,29 @@ function rebuild() {
       freeBody = { ok: false, problems: [e.message], note: e.message };
     }
 
+    // An imported design's own calage, trimmed on this tool's polar: the
+    // angle this tool's aerodynamics say the wing flies at where its lines
+    // hang it, beside the angle its file declares.
+    let designTrim = null;
+    if (imported && LEP.geom?.ok && Number.isFinite(LEP.geom.calagePct)) {
+      try {
+        designTrim = trimOnPolar({
+          polar, calageFraction: LEP.geom.calagePct / 100, cm0: section0.cm0,
+          area: metrics.area, span: imported.flatSpan, chord: imported.rootChord,
+          lineLength: hangDepthM, lineMass: S.lineMass, pilotMass: S.pilotMass, wingMass: S.wingMass,
+          rho: atm.density, cxPilot: S.cxPilot, cxLines: cxLinesUsed,
+          // Its own lines hang from its own karabiners, so the plan's
+          // centres are the ones the balance took.
+          ...(acting ? { solve: balanceWhereForcesAct, ...acting, lines: linesActing } : {}),
+        });
+      } catch (e) {
+        designTrim = { error: e.message };
+      }
+    }
+
     // The speed system, on the wing's own lift curve — the polar above, in
-    // its arc when the wing flies in it — from the angle the balance assumes,
-    // the risers the plan's rows give and the travel set.
+    // its arc when the wing flies in it — from the angle the balance flies
+    // at, the risers the plan's rows give and the travel set.
     let speedBar = null;
     let trimmers = null;
     try {
@@ -30530,19 +31750,23 @@ function rebuild() {
         const lift = liftModelFromWing({
           planform, airfoil, atm, mass: flightMass, area: metrics.area, polar,
         });
+        // From the angle the balance flies at, on the polar's own drag
+        // when the balance is flown on the polar: its first row is then the
+        // balance's own trim.
+        const onPolar = S.balanceMode !== 'typed';
         speedBar = acceleratedPolarFromWing({
-          riser: riserS, chordM: chordS, liftModel: lift, steps: 6,
+          riser: riserS, chordM: chordS, liftModel: lift, steps: 6, ownProfileDrag: onPolar,
           base: {
             area: metrics.area, span: imported ? imported.flatSpan : S.span, chord: chordS,
             lineLength: hangDepthM, lineMass: S.lineMass, pilotMass: S.pilotMass, wingMass: S.wingMass,
             rho: atm.density, cxPilot: S.cxPilot, cxLines: cxLinesUsed, cx0a: S.cx0a, cm: S.cm,
-            alphaDeg: S.alphaDeg,
+            alphaDeg: flownAlpha(),
           },
         });
         speedBar.floorCz = lift.czRange[0];
         if (S.trimTravel > 0) {
           trimmers = trimEnvelope({
-            riser: riserS, chordM: chordS, liftModel: lift, trimAlphaDeg: S.alphaDeg,
+            riser: riserS, chordM: chordS, liftModel: lift, trimAlphaDeg: flownAlpha(),
             trimmer: { travelMM: S.trimTravel }, steps: 3,
           });
         }
@@ -30555,10 +31779,11 @@ function rebuild() {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, worstDev, worstPhi, imported, vribs,
       hangDepthM, riserM, freeBody, lineDragOwn, cxLinesUsed, billow,
-      linePlan, loads, lineSelection, lengths, riserSplit, rods,
+      linePlan, loads, lineSelection, lengths, riserSplit, rods, levelStrength,
       rodSpecResult,
       writtenCascade,
       atm, polar, trim, nd, thin, polarIssues, arc, speedBar, trimmers,
+      alphaFlown: flownAlpha(), designTrim, acting, linesActing, section0,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
       error: null,
@@ -30994,11 +32219,63 @@ function buildControls() {
   slider(B, 'wingMass', 'Wing mass', 1, 12, 0.1, (v) => v.toFixed(1), ' kg');
   slider(B, 'lineMass', 'Line mass', 0, 2, 0.05, (v) => v.toFixed(2), ' kg');
   slider(B, 'lineLength', 'Line length', 3, 9, 0.05, (v) => v.toFixed(2), ' m');
-  slider(B, 'alphaDeg', 'Angle of attack', 0, 15, 0.1, (v) => v.toFixed(1), '°');
-  numberField(B, 'cz', 'Cz at alpha', 0.01);
-  numberField(B, 'cx0a', 'Cx0 wing', 0.001);
-  numberField(B, 'cm', 'Cm', 0.001);
-  numberField(B, 'oswald', 'Oswald e', 0.01);
+  selectField(B, 'balanceMode', 'Balance on', [
+    ['polar', 'the wing\u2019s own polar, at the angle'],
+    ['calage', 'the wing\u2019s own polar, trimmed from the calage'],
+    ['typed', 'typed coefficients, as the handbook\u2019s example'],
+  ]);
+  hint(B, S.balanceMode === 'typed'
+    ? 'The handbook\u2019s balance: its Cz, Cx0, Cm and Oswald factor typed, whatever the wing. They are the 2012 '
+      + 'example sheet\u2019s until changed.'
+    : `On the wing\u2019s own polar: its lift, induced and profile drag at the angle, in its arc when it flies in it, and `
+      + `the section\u2019s Cm0. ${S.balanceMode === 'calage'
+        ? 'The angle is where the pilot hangs at the calage: the trim follows from where the risers hang, as on a wing.'
+        : 'The angle is assumed; trimmed from the calage, it follows from where the risers hang instead.'}`);
+  // Where the forces act, on the polar: each where it does, or where the
+  // handbook's rules put them.
+  const forcesS = selectField(B, 'balanceForces', 'Forces act', [
+    ['acting', 'each where it acts'],
+    ['rules', 'where the handbook\u2019s rules put them'],
+  ]);
+  const pilotHangsS = selectField(B, 'pilotHangs', 'The pilot hangs', [
+    ['free', 'free to swing about the karabiners'],
+    ['plumb', 'plumb, as the handbook and LEparagliding put him'],
+  ]);
+  // Free to swing, his weight and drag come to rest in line with the
+  // karabiners and put no moment about them, however far below he is; held
+  // plumb, his drag that far below pitches the wing down.
+  const pilotBelowS = slider(B, 'pilotBelow', 'Pilot below the karabiners', 0, 0.8, 0.01, (v) => v.toFixed(2), ' m');
+  if (S.balanceMode === 'typed') {
+    hideField(forcesS);
+  } else {
+    hint(B, S.balanceForces === 'acting'
+      ? 'Each force where it acts: the lift on its own line in the arc, from the vortex lattice \u2014 '
+        + 'the centroid of its strips\u2019 lift, moved by the section\u2019s Cm0 \u2014 the drags at their own '
+        + 'centres, the wing\u2019s weight at its cloth\u2019s mass centre, the lines\u2019 weight and drag at '
+        + 'their own, and the pilot below the karabiners \u2014 free to swing, his weight and drag in line with them, '
+        + 'so that how far below does not move the balance; held plumb, his drag that far below pitches the wing down.'
+      : 'Where chapter 4 puts them: the lift and the wing\u2019s drag on the central chord at 0.25 \u2212 Cm0/Cz '
+        + 'of it, the wing\u2019s weight a third of the way back, the lines\u2019 weight half way down and their '
+        + 'drag a third, the pilot at the karabiners.');
+  }
+  if (S.balanceMode === 'typed' || S.balanceForces !== 'acting') {
+    hideField(pilotBelowS);
+    hideField(pilotHangsS);
+  } else if (S.pilotHangs !== 'plumb') hideField(pilotBelowS);
+  // Trimmed from the calage, the angle is the balance's answer, and the
+  // slider is only what the ribs are yawed for, when they are.
+  const yawOnly = S.balanceMode === 'calage';
+  const alphaS = slider(B, 'alphaDeg', yawOnly ? 'Ribs yawed for' : 'Angle of attack', 0, 15, 0.1, (v) => v.toFixed(1), '°');
+  const calageS = slider(B, 'calagePct', 'Calage', 25, 60, 0.5, (v) => v.toFixed(1), '% c');
+  if (yawOnly && S.zRotation !== 'auto') hideField(alphaS);
+  if (!yawOnly) hideField(calageS);
+  const typedOnly = [
+    numberField(B, 'cz', 'Cz at alpha', 0.01),
+    numberField(B, 'cx0a', 'Cx0 wing', 0.001),
+    numberField(B, 'cm', 'Cm', 0.001),
+    numberField(B, 'oswald', 'Oswald e', 0.01),
+  ];
+  if (S.balanceMode !== 'typed') typedOnly.forEach(hideField);
   numberField(B, 'cxPilot', 'Cx pilot', 0.001);
   numberField(B, 'cxLines', 'Cx lines', 0.001);
   checkField(B, 'cxLinesFromPlan', 'Fly on the drag of the lines in the plan');
@@ -31012,13 +32289,15 @@ function buildControls() {
     hint(B, a
       ? `The balance and the polar fly the wing as it sits in its arc: by the vortex lattice, against the same wing `
         + `laid flat, ${(a.liftRatio * 100).toFixed(0)}% of the lift at the same angle and `
-        + `${(a.inducedRatioAt(S.alphaDeg - (M.thin?.alphaL0Deg ?? 0)) * 100 - 100).toFixed(0)}% more induced drag at the same lift. `
+        + `${(a.inducedRatioAt((M.alphaFlown ?? S.alphaDeg) - (M.thin?.alphaL0Deg ?? 0)) * 100 - 100).toFixed(0)}% more induced drag at the same lift. `
         + 'Unticked, the wing flies flat, as the handbook\u2019s balance and the lifting line describe it.'
       : 'The balance and the polar fly the wing flat, as the handbook\u2019s balance and the lifting line describe it: '
         + 'ticked, they fly it in its arc, by the vortex lattice.');
   }
-  checkField(B, 'legacy', 'Match the 2012 example sheet');
-  hint(B, 'The default applies the moment equation as published in 4.2. The checkbox drops the aerodynamic and wing-drag moments, which is what the handbook\u2019s own worked example does.');
+  const legacyC = checkField(B, 'legacy', 'Match the 2012 example sheet');
+  if (S.balanceMode === 'typed') {
+    hint(B, 'The default applies the moment equation as published in 4.2. The checkbox drops the aerodynamic and wing-drag moments, which is what the handbook\u2019s own worked example does.');
+  } else hideField(legacyC);
   const balanceHost = el('div');
   balanceHost.id = 'balanceTable';
   B.append(balanceHost);
@@ -31049,9 +32328,10 @@ function buildControls() {
     slider(SP, 'trimTravel', 'Trimmer travel', 0, 150, 5, (v) => (v ? `${v.toFixed(0)} mm` : 'none'));
     hint(SP, 'The bar shortens the front riser by its travel, the rear by nothing and the risers between in '
       + 'proportion; a trimmer lets the rear riser out. Each turns the wing nose down. The speeds are the '
-      + 'balance\u2019s equations on the wing\u2019s own lift curve — the polar\u2019s, in its arc when it flies '
-      + 'in it — from the angle the balance assumes, not on its typed Cz, so its trim can differ from the '
-      + 'balance\u2019s; and they stop meaning anything where the lift falls to the collapse floor.');
+      + 'balance\u2019s equations on the wing\u2019s own polar — in its arc when it flies in it — from the '
+      + 'angle the balance flies at, so on the polar the first row is the balance\u2019s trim; balanced on '
+      + 'typed coefficients, the balance flies those and the bar the polar, and the two trims differ. They '
+      + 'stop meaning anything where the lift falls to the collapse floor.');
     const spHost = el('div');
     spHost.id = 'speedTable';
     SP.append(spHost);
@@ -31355,8 +32635,7 @@ function buildControls() {
 
   selectField(AS, 'lineBrand', 'Line materials from', (() => {
     try {
-      const cat = parseMaterialsTable(
-        typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+      const cat = lineCatalogue();
       return [['all', `every brand (${cat.length})`],
         ...materialBrands(cat).map((b) => [b.name, `${b.name} (${b.count})`])];
     } catch { return [['all', 'every brand']]; }
@@ -31379,6 +32658,12 @@ function buildControls() {
     ['kinked', 'kinked strength (conservative)'],
     ['new', 'new strength'],
   ]);
+  if (!(LEP?.design && LEP.geom?.ok)) {
+    checkField(AS, 'dhvLevels', 'Size each level to the DHV line calculation');
+    hint(AS, 'Each line is sized to its own load at the limit case. The DHV\u2019s calculation for EN 926-1 also asks '
+      + 'each level of the set, both sides, for 1400 daN and 14 times the weight after bending, and each level of '
+      + 'the brake for 150: ticked, the weakest lines of a level short of that are taken up a size until it holds.');
+  }
   if (LEP?.design && LEP.geom?.ok) {
     // Its loops are its own: each line type states one, and the lengths to
     // cut are the program's. A typed allowance was offered and ignored.
@@ -31401,7 +32686,17 @@ function buildControls() {
     ['convention', 'the handbook convention'],
     ['pressure', 'the section pressure distribution'],
   ]);
-  numberField(AS, 'cdCylinder', 'Line drag coefficient', 0.8, 1.4, 0.05);
+  selectField(AS, 'lineCd', 'Line drag coefficient', [
+    ['reynolds', 'each line\u2019s, from its Reynolds number'],
+    ['fixed', 'one for every line'],
+  ]);
+  const cdS = numberField(AS, 'cdCylinder', 'Every line\u2019s drag coefficient', 0.8, 1.4, 0.05);
+  if (S.lineCd !== 'fixed') hideField(cdS);
+  hint(AS, S.lineCd === 'fixed'
+    ? 'Every line at the coefficient typed, at its angle to the flow.'
+    : 'Each line at 1 + 10 Re^(-2/3), White\u2019s correlation for a cylinder, as LEparagliding takes it, on its own '
+      + 'diameter and the flow square to it at the speed flown \u2014 1.08 to 1.24 on the sets here \u2014 and its drag along '
+      + 'the flow as sin\u00b3 of its angle to it.');
   // What the billow from pressure is worked out at; a design that cuts its
   // own panels states its billow, and the control would change nothing.
   if (!ownCut) numberField(AS, 'sailTension', 'Sail tension across the cell (N/m)', 5, 500, 1);
@@ -31503,7 +32798,7 @@ function buildControls() {
           // A circle through the same projected span, whatever the arc type.
           projectedRatio: Math.min(0.99, Math.max(0.64, M.lobeM.spanRatio ?? S.projectedRatio)),
           layout: RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'],
-          alphaDeg: S.alphaDeg,
+          alphaDeg: M.alphaFlown ?? S.alphaDeg,
           ovalAmount: S.applyOval ? S.ovalAmount / 100 : 0,
           // The design's own riser, at every size: it is hardware.
           riserLengthM: M.riserM ?? 0.5,
@@ -31736,8 +33031,7 @@ function buildControls() {
     // and "will this cascade hold its trim" had no way to ask.
     if (!M.loads || !M.lengths) { setStatus('No loads to optimise.'); return; }
     try {
-      const cat = parseMaterialsTable(
-        typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+      const cat = lineCatalogue();
       const table = S.lineBrand === 'all' ? cat : lineTableFor(cat, { brand: S.lineBrand });
       const opt = optimiseLineSet(M.loads.tensions, {
         table, maxTypes: S.maxLineTypes, strengthBasis: S.lineStrength,
@@ -31982,7 +33276,7 @@ function buildControls() {
     try {
       save('leparagliding.txt', designToLep({
         wing: M.wing, airfoil: M.airfoil, name: S.name,
-        balance: M.balance, lineLengthM: S.lineLength,
+        balance: M.balance, lineLengthM: S.lineLength, riserLengthCm: (M.riserM ?? 0.5) * 100,
         airfoilFile: `${(M.airfoil.name || 'airfoil').replace(/\s+/g, '')}.txt`,
       }, LEP ? LEP.doc : null));
     } catch (e) { setStatus(`Could not write LEP file: ${e.message}`); }
@@ -32083,7 +33377,8 @@ function buildControls() {
   xg.append(polIn, polFile);
   F.append(xg);
   if (XPOLAR) {
-    hint(F, `Section polar from XFOIL: Re ${XPOLAR.reynolds ? XPOLAR.reynolds.toExponential(2) : '?'}, M ${XPOLAR.mach ?? '?'}, ${XPOLAR.points.length} points. The wing polar now uses measured section data.`);
+    hint(F, `Section polar from XFOIL: Re ${XPOLAR.reynolds ? XPOLAR.reynolds.toExponential(2) : '?'}, M ${XPOLAR.mach ?? '?'}, ${XPOLAR.points.length} points. The wing polar and the balance now fly on it: zero lift at ${XPOLAR.alphaL0Deg.toFixed(2)}° and Cm0 ${XPOLAR.cm0.toFixed(4)}`
+      + (XPOLAR.zeroLiftExtrapolated ? ', found along its lift slope, as it does not reach zero lift.' : '.'));
     button(F, 'Drop XFOIL polar', () => { XPOLAR = null; buildControls(); rebuild(); });
   } else {
     hint(F, 'Export the section and a command file at the current Reynolds and Mach number, run XFOIL, then import the polar back. Until then the section model is thin-airfoil theory plus a friction correlation — good for comparing, not for predicting.');
@@ -33077,6 +34372,19 @@ function drawSection() {
   c.path([cp, [cp[0], pilotPt[1]]], '#e8c547', 0.7, { dash: '2 4', opacity: 0.8 });
   c.dot(cp, '#e8c547', 3);
   c.text('Cp', cp, '#e8c547', 9, 'start', [5, -6]);
+  // Each force where it acts: the wing's own force through the point its
+  // lift's line meets its drag's, below the chord in the arc, and the
+  // wing's mass centre.
+  const act = b.acting;
+  if (act) {
+    const f = rot([act.cpPoint.backM, -act.cpPoint.downM]);
+    c.path([f, cp], '#e8c547', 0.7, { opacity: 0.8 });
+    c.dot(f, '#e8c547', 2.4);
+    c.text('F', f, '#e8c547', 9, 'end', [-5, 3]);
+    const wm = rot([act.wing.backM, -act.wing.downM]);
+    c.dot(wm, '#9aa7b0', 2.2);
+    c.text('m', wm, '#9aa7b0', 8, 'start', [4, 3]);
+  }
   // σ, not C: C is also a line row, and the two were drawn side by side.
   const cal = rot([b.calageMetres, 0]);
   c.dot(cal, '#e85bc4', 3);
@@ -33095,7 +34403,7 @@ function drawSection() {
   enablePanZoom('vp-section');
   const gap = (cp[0] - pilotPt[0]) * 100;
   document.getElementById('note-section').textContent =
-    `α ${S.alphaDeg.toFixed(1)}°  ·  θ ${b.thetaDeg.toFixed(2)}° nose down  ·  `
+    `α ${(M.alphaFlown ?? S.alphaDeg).toFixed(1)}°  ·  θ ${b.thetaDeg.toFixed(2)}° nose down  ·  `
     + `γ ${b.gammaDeg.toFixed(2)}°  ·  σ ${(b.calageFraction * 100).toFixed(1)}% c`
     + (own ? ` (the design hangs at ${own.calagePct.toFixed(1)}%, white)` : '')
     + `  ·  pilot ${H.toFixed(2)} m down, ${Math.abs(gap).toFixed(0)} cm `
@@ -33209,6 +34517,28 @@ function drawSpeedTable() {
   }
 }
 
+/** Where each force acts, as `balanceWhereForcesAct` has it, for the Balance table. */
+function actingRows(a) {
+  const c = (x) => `${(x * 100).toFixed(1)}% c`;
+  const pt = (q) => `${c(q.backM / a.chordM)} back, ${q.downM.toFixed(2)} m down`;
+  return [
+    ['— where each acts —', 'moments about the karabiners'],
+    ['Lift\u2019s line', `crosses the central chord at ${c(a.liftCrossingFraction)}, where the rule puts it at `
+      + `${c(a.ruleCpFraction)}: its strips\u2019 lift centred ${pt(a.liftCentroid)}, the section\u2019s Cm0 moving `
+      + `its line ${(a.liftLine.shiftM * 100).toFixed(1)} cm along the flow (vortex lattice)`, true],
+    ['Wing\u2019s drag', `profile at ${pt(a.profile)}, induced at ${pt(a.induced)}`],
+    ['Wing\u2019s force', `through ${pt(a.cpPoint)}, where its lift meets its drag: the point LEparagliding `
+      + 'asks a designer for'],
+    ['Wing\u2019s mass', `${pt(a.wing)}, from its own cloth`],
+    ['Lines\u2019 weight and drag', a.lines
+      ? `weight at ${pt(a.lines.mass)}, drag at ${pt(a.lines.drag)}, from the plan`
+      : 'by the rules: no plan has placed them'],
+    ['Pilot', `${a.pilot.belowM.toFixed(2)} m below the karabiners, `
+      + (a.pilot.hangs === 'free' ? `free to swing: ${a.pilot.leanDeg.toFixed(1)}\u00b0 behind plumb` : 'held plumb')],
+    ['Plumb under the pilot', c(a.plumbFraction)],
+  ];
+}
+
 function drawBalanceTable() {
   const host = document.getElementById('balanceTable');
   if (!host) return;
@@ -33222,18 +34552,34 @@ function drawBalanceTable() {
     ['Glide angle γ', b.gammaDeg.toFixed(2) + '°'],
     // θ = γ − α (handbook [10]): positive is nose DOWN.
     ['Attitude θ, nose down', b.thetaDeg.toFixed(2) + '°'],
+    // What it was flown on: the polar at the angle, the polar trimmed from
+    // the calage, or the typed coefficients.
+    ['Flown on', b.onPolar
+      ? `the wing's polar at ${b.onPolar.alphaDeg.toFixed(2)}°`
+        + (S.balanceMode === 'calage' && !b.trimProblem ? `, where a ${S.calagePct.toFixed(1)}% calage trims it` : '')
+        + `: Cz ${b.onPolar.CL.toFixed(3)}, induced ${b.onPolar.CDi.toFixed(4)}, profile ${b.onPolar.CDprofile.toFixed(4)}`
+      : `typed coefficients at ${S.alphaDeg.toFixed(1)}°: Cz ${S.cz.toFixed(2)}, Cx0 ${S.cx0a.toFixed(3)}, Cm ${S.cm.toFixed(3)}`, true],
+    ...(b.trimProblem ? [['Not trimmed', `${b.trimProblem}: flown at ${S.alphaDeg.toFixed(1)}° instead`, true]] : []),
+    ...(b.onPolar && M.section0
+      ? [['The section\u2019s Cm0', `${M.section0.cm0.toFixed(4)}, from ${M.section0.source}; zero-lift angle `
+        + `${M.section0.alphaL0Deg.toFixed(2)}°${M.section0.extrapolated ? ', along its lift slope' : ''}`]]
+      : []),
     ['Cz 3D', b.cz3D.toFixed(3)],
-    ['The arc', b.arc
-      ? `lift ×${b.arc.liftRatio.toFixed(3)}, induced drag ×${b.arc.inducedRatio.toFixed(3)} at the same lift (vortex lattice)`
-      : 'not flown: the wing is taken flat'],
-    // The balance is the handbook's, from the typed section coefficients and
-    // the typed Oswald factor. The planform's own factor comes out of the
-    // lifting line behind the polar; it is shown beside the one used, not
-    // substituted for it, so the two can be compared.
-    ['Oswald e', `${S.oswald.toFixed(2)} typed`
-      + (M.polar?.bestGlide && Number.isFinite(M.polar.bestGlide.oswald)
-        ? `; ${M.polar.arc ? 'the polar\'s, in the arc on the flat span,' : 'the planform\'s lifting line gives'} `
-          + `${M.polar.bestGlide.oswald.toFixed(3)}` : '')],
+    ['The arc', b.onPolar
+      ? (M.polar?.arc ? `lift ×${M.polar.arc.liftRatio.toFixed(3)}, in the polar it flies on (vortex lattice)`
+        : 'not flown: the polar is the flat wing\'s')
+      : (b.arc
+        ? `lift ×${b.arc.liftRatio.toFixed(3)}, induced drag ×${b.arc.inducedRatio.toFixed(3)} at the same lift (vortex lattice)`
+        : 'not flown: the wing is taken flat')],
+    // Typed, the balance takes the typed Oswald factor, and the polar's is
+    // shown beside it so the two can be compared; on the polar it is the
+    // polar's.
+    ['Oswald e', b.onPolar
+      ? `${b.onPolar.oswald.toFixed(3)}, the polar's on the flat span`
+      : `${S.oswald.toFixed(2)} typed`
+        + (M.polar?.bestGlide && Number.isFinite(M.polar.bestGlide.oswald)
+          ? `; ${M.polar.arc ? 'the polar\'s, in the arc on the flat span,' : 'the planform\'s lifting line gives'} `
+            + `${M.polar.bestGlide.oswald.toFixed(3)}` : '')],
     ['CxT', b.cxTotal.toFixed(4)],
     ['— induced', (b.dragBreakdown.induced * 100).toFixed(1) + '%'],
     ['— lines', (b.dragBreakdown.lines * 100).toFixed(1) + '%'],
@@ -33241,11 +34587,17 @@ function drawBalanceTable() {
     ...(M.lineDragOwn && Number.isFinite(M.lineDragOwn.cxLines)
       ? [['Cx lines of this lineset', `${M.lineDragOwn.cxLines.toFixed(4)} — `
         + `${(M.lineDragOwn.dragAreaM2).toFixed(3)} m² of drag area, mean `
-        + `${M.lineDragOwn.meanDiameterMM.toFixed(2)} mm`]]
+        + `${M.lineDragOwn.meanDiameterMM.toFixed(2)} mm, Cd ${M.lineDragOwn.cdMean.toFixed(3)} `
+        + (M.lineDragOwn.cdBasis === 'reynolds' ? 'by each line\u2019s Reynolds number' : 'typed')
+        + (M.lineDragOwn.risersDragAreaM2 > 0
+          ? `; its risers ${M.lineDragOwn.risersDragAreaM2.toFixed(3)} m² of it`
+          : M.lineDragOwn.risersUncounted.length ? '; its risers\u2019 webbing not counted' : '')]]
       : []),
     ['— pilot', (b.dragBreakdown.pilot * 100).toFixed(1) + '%'],
     ['— profile', (b.dragBreakdown.profile * 100).toFixed(1) + '%'],
-    ['Centre of pressure', (b.xcpFraction * 100).toFixed(1) + '% c'],
+    ['Centre of pressure', (b.xcpFraction * 100).toFixed(1) + '% c'
+      + (b.acting ? ': where the wing\u2019s own force, its lift and drag, crosses the central chord' : '')],
+    ...(b.acting ? actingRows(b.acting) : []),
     ['Calage', b.calageMetres.toFixed(3) + ' m', true],
     ['Calage fraction', (b.calageFraction * 100).toFixed(1) + '% c', true],
     ['Pilot below the wing', `${M.hangDepthM.toFixed(2)} m (lines + ${(M.riserM * 100).toFixed(0)} cm risers)`],
@@ -33278,6 +34630,14 @@ function drawBalanceTable() {
       ['Attitude (assiette)', `${g.assietteDeg.toFixed(2)}°`],
       ['Angle of attack', `${g.aoaDeg.toFixed(2)}°`],
     );
+    const dt = M.designTrim;
+    if (dt) {
+      rows.push(['Its calage on this polar', dt.error
+        ? `does not trim: ${dt.error}`
+        : `trims at ${dt.onPolar.alphaDeg.toFixed(2)}° (${dt.onPolar.alphaDeg >= g.aoaDeg ? '+' : ''}`
+          + `${(dt.onPolar.alphaDeg - g.aoaDeg).toFixed(2)}° on its own), Cz ${dt.cz3D.toFixed(3)}, `
+          + `${dt.speedKMH.toFixed(1)} km/h, glide ${dt.glideRatio.toFixed(2)}`, true]);
+    }
     // Its output's section 1, as printed, and what each label describes
     // where the figure is not that.
     const mp = LEP.main;
@@ -33527,6 +34887,38 @@ function drawLinePlan() {
   }
 }
 
+/**
+ * The line set's strength level by level, against the DHV's line
+ * calculation for EN 926-1 (`strengthByLevel`): each level's strengths after
+ * bending, both sides, against 1400 daN and 14 times the weight; the brake
+ * levels against 150 daN.
+ */
+function drawLevelStrength(host) {
+  const v = M.levelStrength;
+  if (!v?.suspension) return;
+  const own = M.linePlan?.source === 'LEparagliding';
+  host.append(el('div', 'hint', `Strength by level, as the DHV calculates a line set for EN 926-1: each level's `
+    + `lines ${own ? 'at the strength the design gives them' : 'at their strength after bending'}, both sides, `
+    + `a branch that has ended counted again above it; at least ${v.rule.levelMinDaN} daN and ${v.rule.levelMinG} `
+    + `times the ${v.maxWeightKg.toFixed(0)} kg all-up weight set, and every line ${v.rule.lineMinDaN} daN.`));
+  const t = el('table', 'tbl');
+  const head = el('tr');
+  for (const h of ['level', 'lines', 'carried up', 'daN', 'g']) head.append(el('th', '', h));
+  t.append(head);
+  const row = (label, x, min) => {
+    const tr = el('tr', x.sumDaN < min || (Number.isFinite(x.g) && label !== 'brake' && x.g < v.rule.levelMinG) ? 'em' : null);
+    for (const c of [label === 'brake' ? `brake ${x.level}` : String(x.level), String(x.lines), String(x.carried),
+      x.sumDaN.toFixed(0), Number.isFinite(x.g) ? x.g.toFixed(1) : '—']) tr.append(el('td', '', c));
+    t.append(tr);
+  };
+  for (const x of v.suspension.levels) row('suspension', x, v.rule.levelMinDaN);
+  for (const x of v.brake?.levels ?? []) row('brake', x, v.rule.brakeLevelMinDaN);
+  host.append(t);
+  host.append(el('div', v.ok ? 'muted' : 'note', v.ok
+    ? `Every level holds; the weakest line, ${v.suspension.weakest.name}, ${v.suspension.weakest.strengthDaN} daN.`
+    : `Short of the calculation: ${v.problems.join('; ')}.`));
+}
+
 /** The cascade as a table: every line, its level, length and load. */
 function drawCascadeTable() {
   // Its own place, at the foot of the Lines group.
@@ -33587,6 +34979,7 @@ function drawCascadeTable() {
     t.append(tr);
   }
   host.append(t);
+  drawLevelStrength(host);
   if (own && M.lineSelection?.overloaded?.length) {
     host.append(el('div', 'note',
       `${M.lineSelection.overloaded.length} of the design's lines are past `
@@ -34587,7 +35980,7 @@ function drawRib() {
     if (it && sectionHere?.points && it.end > it.start) {
       const opening = [-it.end, -it.start];
       // The rib's own angle of attack: the wing's, plus its washin.
-      const trimDeg = S.alphaDeg + (rib.alphaDeg || 0);
+      const trimDeg = (M.alphaFlown ?? S.alphaDeg) + (rib.alphaDeg || 0);
       const at = (a) => intakeFeed(sectionHere, a, opening, { thinAirfoilFn: thinAirfoil });
       const feed = { bar: at(trimDeg - 3), trim: at(trimDeg), slow: at(trimDeg + 6) };
       const where = (f) => `${(Math.abs(f.stagnation) * 100).toFixed(1)}% `

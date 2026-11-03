@@ -1,12 +1,10 @@
 # Loads, line materials and drag
 
-Phase 2's keystone: turning lift into load, load into line tension, and
-tension into a line thick enough to hold it. Several roadmap items depended on
-this one.
+Phase 2's keystone: lift into load, load into line tension, and tension into
+a line thick enough to hold it.
 
-Reference data: the **PHI ALLEGRO X-alps 21** line sheet and PHI's measured
-line materials table (78 line types), plus the ALLEGRO light size table across
-six sizes. Under `data/reference/`.
+Reference data, in `data/reference/`: the **PHI ALLEGRO X-alps 21** line
+sheet, PHI's measured table of 78 line types, the ALLEGRO light's six sizes.
 
 ---
 
@@ -17,13 +15,15 @@ lifting-line spanwise lift
   -> load per rib          (lift over the span each rib owns)
   -> load per anchor       (split between rows by chordwise share)
   -> tension per line      (a line carries everything above it)
-  -> line selection        (smallest line whose kinked strength clears it)
-  -> stretch correction    (cut short so it flies to length)
+  -> line selection        (the thinnest that clears it; each level to the DHV's)
+  -> stretch correction    (cut short to fly to length; measured where it can be)
   -> line drag             (diameter x length -> Cx, back into the balance)
 ```
 
 Only step 3 is exact. Steps 1 and 2 are models, and step 4 depends on a
 materials table. Those are stated at the top of the module rather than buried.
+The level sums and the measured stretch came from OpenGlider, and
+`docs/openglider.md` section 1 has both.
 
 **Load case.** EN 926-1 load-tests a paraglider to 8g, so that is the design
 case, with a further factor on each line — 1.5 on main lines, 2.0 on brakes,
@@ -74,27 +74,27 @@ Dyneema", with the aramid U-135 for Dyneema: a ranking of sizes, not fibres.)
 
 ## 3. Line drag, and closing a Phase 1 loop
 
-`cxLines` has been a typed-in constant since Phase 1, defaulting to the
-handbook's 0.020. It need not be. A line is a bluff cylinder: drag area is
-diameter times length times a coefficient near 1.1, adjusted for inclination
-to the flow by `sin^2(psi)` — the independence principle for yawed cylinders —
-and divided by wing area.
+`cxLines` had been a typed 0.020 since Phase 1. A line is a bluff cylinder:
+its drag area is diameter by length by its coefficient — 1 + 10 Re^-2/3 on
+its own diameter and the flow square to it, White's correlation as
+LEparagliding takes it, 1.08 to 1.24 on the sets here — and by sin³ of its angle
+to the flow, the force square to it that the independence principle gives
+(sin²) taken along the flow; with its loops, the line doubled over them,
+and an imported design's risers as its program counts them, a strap at Cd
+1.98. Square to the flow, the gnuC2-23's set is its program's drag to the
+last digit; at its section 17's 9.45° each line's own angle takes 8.5% off.
 
 Computed for a modern thin lineset it comes out near **0.006-0.010**, roughly
 a third of the handbook's figure, which came from a 2012 school wing with more
-and thicker line. Since line drag is a large share of a paraglider's total,
-the difference is not academic:
+and thicker line:
 
 | | glide ratio | line share of drag |
 | --- | --- | --- |
 | assumed 0.020 | 8.48 | 27.7% |
-| computed 0.0055 | **10.62** | 9.6% |
+| computed 0.0054 | **10.64** | 9.4% |
 
-(The test wing, 46 lines a side.)
-
-That is most of why modern wings glide better than the handbook's example.
-`equilibriumInputsFrom` hands the computed drag and the lineset's own mass
-straight back to `solveEquilibrium`.
+(The test wing, 46 lines a side, at Cd 1.1: most of why modern wings out-glide
+the handbook's example.) `equilibriumInputsFrom` hands it to the balance.
 
 ---
 

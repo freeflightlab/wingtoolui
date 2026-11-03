@@ -10,12 +10,12 @@ openings, diagonals and rods, panel development, nesting, and DXF or printed
 patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
-One offline HTML file, 1.5 MB, no build step and no network. That constraint
+One offline HTML file, 1.6 MB, no build step and no network. That constraint
 drove the architecture: 40 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 71,000 lines**: 28,400 core, 6,200 interface, 18,300 tests, 6,000
-tools, 12,100 documentation.
+**About 75,100 lines**: 29,600 core, 6,800 interface, 19,200 tests, 6,400
+tools, 13,100 documentation.
 
 ## 2. What is genuinely validated
 
@@ -36,7 +36,7 @@ by tests. One design read exactly was evidence about that design; two are
 evidence about the reader.
 
 **Against 21 wings' line sheets from five manufacturers, and 55 published
-sizes**, in 143 reference tables, six of them the makers' own line-plan
+sizes**, in 144 reference tables, six of them the makers' own line-plan
 drawings transcribed line by line. Every line sheet is held to five physical
 invariants, not merely parsed. The anchor-density tables the generator works
 from are **measured from the corpus**, not hand-entered — the row ratios on 19
@@ -54,6 +54,14 @@ worst against a 118 mm limit. That is a tolerance this project had taken on
 the standard's word for many rounds.
 
 **All 55 published sizes run the full pipeline with zero failures.**
+
+**Against the DHV's line calculation for EN 926-1.** Each level of the line
+set, both sides, after bending, at least 1400 daN and 14 times the weight;
+each brake level 150 daN. The three complete designs' own sets hold every
+level; this tool's, sized line by line, did not — the default wing's mains
+1382 daN, its brake's first level 82, where the Lynx 2 M's sheet gives 2015
+and 424 — and is sized to the calculation now. Thirteen of the catalogue's
+lines stretch on their own measured curves, from OpenGlider's line types.
 
 ## 3. What is estimated, and says so
 
@@ -82,9 +90,22 @@ cases, short on three. The wing is not flat. In its arc — the published one
 slope, and the same 6° trims at CL 0.59 and 29.1 to 36.9 km/h, short on one.
 On the Lynx 2 M, the derived polar in its arc comes nearer all four of its
 published figures: glide within 2%, sink 12% low, trim 12% slow. The
-interface flies the wing in its arc. What remains is the assumed angle —
-`trimFromCalage` solves the trim from where the risers hang, in the core —
-and a section lift curve from thin-aerofoil theory.
+interface flies the wing in its arc, on its own polar, at the angle or
+trimmed from the calage; trimmed from 34%, where built wings hang, all four
+certified cases are above 30 km/h in the arc. What remains is a section lift
+curve from thin-aerofoil theory and a centre of pressure from the root
+section, which the lattice puts 2.5 to 5 points of chord forward of where the
+wing's swept planform carries its lift.
+
+**The handbook's balance counted the pitching moment twice.** Its 4.2 puts
+the lift at the centre of pressure, which already carries the section's
+moment, and adds −q0·Cm again in a seventh term; the worked example and the
+author's program leave it out. Counted twice it put a cambered wing's calage
+6 points of chord aft, which is where this project's "real wings hang at 40
+to 45%" came from, and a rule built on it refused calages forward of the
+centre of pressure, where a wing gliding nose down hangs: the three complete
+designs' files do. Counted once, a pilot with nothing below the wing but
+weight hangs plumb under its centre of pressure, to the micrometre.
 
 **Generated linesets are long on two-liners.** Built with their own counts,
 the three-liners land from 3% under to 12% over their published totals and
@@ -121,17 +142,31 @@ off and does not yet know why.
 The gnuC2-23 also asks its program to solve its longitudinal balance, and
 every figure the program prints of it reproduces to the last digit. On the
 same coefficients, this tool's own balance — the handbook's — flies the same
-speed and glide and hangs the pilot within 0.12% of chord of the program's.
-That agreement is partly luck: two of the handbook's rules for where forces
-act are each worth nearly 2% of chord, and on that wing they cancel
-(`docs/validation.md` §2.9).
+speed and glide and hangs the pilot 0.39% of chord aft of the program's:
+what the handbook's rules for where forces act come to in the program's
+moments, +0.42%. Two of those rules are each worth nearly 2% of chord, and
+on that wing they cancel (`docs/validation.md` §2.9).
+
+The tool's balance no longer leans on that cancellation: it puts each force
+where the wing itself says it acts — the lift on its own line in the arc,
+from the vortex lattice, the wing's weight at its cloth's mass centre, the
+lines' at their own — and returns the program's section 17 to the
+micrometre on the program's points. Its lines' drag is each line's own, its
+Cd from its Reynolds number as the program takes it and sin³ of its angle
+to the flow: square to the flow, the gnuC2-23's 95 lines are the program's
+drag to the last digit, and their drag is centred within 3 mm of where it
+centres it. On its own points it hangs the gnuC2-23 at 32.4% of chord at
+the 4.51° its file declares, where the file hangs it at 33% and the rules
+at 25.5%; on the Swoop2's reflex section neither balance hangs it where its
+file does (`docs/balance.md`).
 
 ## 5. What is missing
 
-**44 open items in the roadmap.** The substantial ones:
+**45 open items in the roadmap.** The substantial ones:
 
-- The trim from the calage in the interface: its balance takes an angle of
-  attack and typed coefficients, as the handbook's does.
+- The balance's last approximations: one Cm0 at every angle, the risers'
+  drag on this tool's own plans, which give their webbing no width, and the
+  wing's rods and reinforcement spread like its cloth.
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
 - Collapse (Z) lines: three reference wings carry them; the model does not.
@@ -158,8 +193,9 @@ act are each worth nearly 2% of chord, and on that wing they cancel
    look right, run clean and do nothing — including a bill of materials built
    with no line data. Both stages exist because unit tests could not see them.
 4. **The two-liner surplus and the sink residual.** One is a level the
-   generator lacks; the other is an assumed angle the interface still uses.
-   Both are explained and neither is closed.
+   generator lacks; the other is where the trim comes from: a calage no
+   Geo 7 publishes, a section lift curve from thin-aerofoil theory. Both are
+   explained and neither is closed.
 
 ## 7. Honest summary
 
@@ -180,10 +216,11 @@ which overstated the arc's gain in efficiency threefold, and the trailing
 legs left the strips at their quarter chord, which made an arched wing's
 solution run away above 9° and overstated the lift the arc costs by half.
 With the arc, a wing's derived glide, sink and trim come near its published
-ones. It is good enough to compare designs and rank trades; the trim still
-comes from an assumed angle and the section's lift curve from thin-aerofoil
-theory, and it is not good enough to predict a polar a manufacturer would
-publish.
+ones. It is good enough to compare designs and rank trades; the trim comes
+from an angle or a calage on the wing's own polar, with the lift on its own
+line in the arc and every other force where it acts, and the section's lift
+curve and moment from thin-aerofoil theory unless an XFOIL polar is loaded,
+and it is not good enough to predict a polar a manufacturer would publish.
 
 **The geometry and construction side is strong.** It reproduces a published
 design exactly, holds 21 wings to physical invariants, and its constants are

@@ -154,6 +154,12 @@ const NEEDS = {
   ovalAmount: { applyOval: true }, ovalFromPressure: { applyOval: true },
   sailTension: { applyOval: true, ovalFromPressure: true },
   cxLines: { cxLinesFromPlan: false },
+  cdCylinder: { lineCd: 'fixed' },
+  // The handbook's typed coefficients are only flown when asked for, and the
+  // calage only sets the trim when the trim is solved from it.
+  cz: { balanceMode: 'typed' }, cx0a: { balanceMode: 'typed' }, cm: { balanceMode: 'typed' },
+  oswald: { balanceMode: 'typed' }, legacy: { balanceMode: 'typed' },
+  calagePct: { balanceMode: 'calage' },
 };
 // Chosen from a list of published wings or real ones to compare against:
 // what they do is tested by name in the interface test.

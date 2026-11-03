@@ -2723,16 +2723,18 @@ export function hangPointFromAnchors(wing, fractions, calageFraction = null) {
   //
   // A paraglider's angle of incidence is set by its line lengths: the wing
   // hangs from the maillon and sits at whatever attitude those lengths
-  // dictate. The point it hangs from is the calage — where the moment
-  // balances, with the lift acting forward of it and the section's own
-  // pitching moment making up the difference. That is chapter 4's whole
-  // subject and `solveEquilibrium` computes it.
+  // dictate. The point it hangs from is the calage — where the moments of
+  // the wing's lift and drag at its centre of pressure, the weights and the
+  // drag below it balance. That is chapter 4's whole subject and
+  // `solveEquilibrium` computes it.
   //
   // This used a load-weighted average of the anchor positions instead, which
-  // is a plausible-looking geometric proxy and not the same thing. On a
-  // typical wing it came out at 31.9% of chord where the equilibrium says
-  // **50.6%** — the wing was hung 18.7 points of chord too far forward, so
-  // the model pitched nose-down against the attitude it would really fly at.
+  // is a plausible-looking geometric proxy and not the same thing. On the
+  // default wing it comes out at 31.0% of chord where the balance on its
+  // polar says 40.8% at 5 degrees — 39.3% with each force where the
+  // handbook's rules put it — so the model pitched nose-down against the
+  // attitude it would really fly at. (This said 50.6% and 18.7 points, from
+  // a balance that counted the pitching moment twice.)
   //
   // These are flying machines. Where the mass hangs decides how they fly, and
   // a geometric average of some attachment points does not know that.
@@ -2742,18 +2744,13 @@ export function hangPointFromAnchors(wing, fractions, calageFraction = null) {
       return (rootRib.xLE ?? 0) + calageFraction * (rootRib.chord ?? 0);
     }
   }
-  // A calage that cannot balance is not used.
+  // A calage that is not this wing's is not used.
   //
   // `solveEquilibrium` has a `legacySpreadsheet` mode that reproduces a 2012
-  // worksheet, and it omits the aerofoil's own pitching moment from the
-  // balance. The number it returns is right for matching that worksheet and
-  // wrong as geometry: it puts the hang point FORWARD of the centre of
-  // pressure, where the lift-weight couple adds to the section's nose-down
-  // moment instead of opposing it. A wing hung there could not fly.
-  //
-  // `usableCalage` below is the guard. Legacy remains available for
-  // reproducing the worksheet's numbers; it just does not get to place the
-  // lines.
+  // worksheet, whose glide is not its own coefficients' (`usableCalage`).
+  // The number it returns is right for matching that worksheet and wrong as
+  // geometry. Legacy remains available for reproducing the worksheet's
+  // numbers; it just does not get to place the lines.
 
   // Without a solved equilibrium, fall back to the anchor centroid — better
   // than the leading edge, and the caller is told which was used.
@@ -2763,11 +2760,21 @@ export function hangPointFromAnchors(wing, fractions, calageFraction = null) {
 /**
  * Whether a solved calage can be used to hang a wing.
  *
- * Taking moments about the hang point, lift acting FORWARD of it gives a
- * nose-up couple, which is what balances an aerofoil's nose-down pitching
- * moment. So a usable calage sits AFT of the centre of pressure. One forward
- * of it describes a wing that cannot balance, and the 2012-spreadsheet mode
- * returns exactly that because it leaves the aerofoil moment out.
+ * Any calage on the chord can, but the 2012 worksheet's. Its glide is not its
+ * own coefficients': it takes the induced drag of the 2D lift coefficient,
+ * 0.070 where its finite-span lift gives 0.027, and flies 11.5 degrees down
+ * where its lift and drag give 7.2, so the attitude its calage is solved at
+ * belongs to no wing.
+ *
+ * This refused a calage forward of the centre of pressure, reasoning that the
+ * lift-weight couple must oppose the section's nose-down moment. The lift at
+ * the centre of pressure already carries that moment; the couple was counted
+ * twice. A pilot with nothing but weight below the wing hangs plumb under the
+ * centre of pressure, and a wing gliding nose down puts the foot of that
+ * plumb line on the chord FORWARD of it, by the line height times tan theta —
+ * which is where LEparagliding's own section 8 puts the three complete
+ * designs on file: calages of 33, 32.5 and 36% under plumb points of 38, 40
+ * and 39%. Drag below the wing swings the pilot back from there.
  */
 export function usableCalage(balance) {
   if (!balance || !Number.isFinite(balance.calageFraction)) {
@@ -2776,14 +2783,11 @@ export function usableCalage(balance) {
   if (!(balance.calageFraction > 0 && balance.calageFraction < 1)) {
     return { ok: false, why: 'calage is not a fraction of chord' };
   }
-  if (Number.isFinite(balance.xcpFraction)
-    && balance.calageFraction < balance.xcpFraction) {
+  if (balance.mode === 'legacy-2012-spreadsheet') {
     return {
       ok: false,
-      why: `the calage (${(balance.calageFraction * 100).toFixed(1)}%) is `
-        + `forward of the centre of pressure `
-        + `(${(balance.xcpFraction * 100).toFixed(1)}%), so the wing could not `
-        + 'balance there',
+      why: 'the 2012 worksheet\'s calage is solved at a glide its own coefficients do not give, '
+        + 'so it hangs no wing',
     };
   }
   return { ok: true, why: null };

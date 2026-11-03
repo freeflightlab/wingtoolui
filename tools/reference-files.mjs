@@ -32,6 +32,8 @@ const NOT_LINES = [
   // whose line sheets are here.
   /^published-/,
   /materials|families|risers|min-strength|joncs/,
+  // OpenGlider's line types: load and elongation, not a line sheet.
+  /^line-stretch\.tsv$/,
 ];
 
 /**

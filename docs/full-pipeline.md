@@ -237,25 +237,44 @@ root, 0.55 m tip, 1.4 m sweep, 90 kg, 6°):
 
 | section | Cz | Cm0 | trim | glide | calage |
 | --- | --- | --- | --- | --- | --- |
-| NACA 4412 | 1.122 | −0.1055 | 33.6 km/h | 10.19 | 0.508 |
-| NACA 4415 | 1.127 | −0.1052 | 33.6 km/h | 10.19 | 0.506 |
-| NACA 2414 | 0.892 | −0.0526 | 37.7 km/h | 9.77 | 0.455 |
+| NACA 4412 | 1.122 | −0.1055 | 33.6 km/h | 10.19 | 0.444 |
+| NACA 4415 | 1.127 | −0.1052 | 33.6 km/h | 10.19 | 0.443 |
+| NACA 2414 | 0.892 | −0.0526 | 37.7 km/h | 9.77 | 0.415 |
 
 Dropping camber from 4% to 2% moves trim speed by **4 km/h** and the calage
-by a tenth of itself — which it should, and previously did not. (The table
-here had Cz 1.079 and Cm0 −0.0948 for the 4412; Cz and Cm0 come from the
-section alone, so those two columns were out whatever wing they were made
-on.)
+by three points of chord — which it should, and previously did not. (The
+table here had Cz 1.079 and Cm0 −0.0948 for the 4412; Cz and Cm0 come from
+the section alone, so those two columns were out whatever wing they were
+made on. Its calages were 0.506 to 0.508 and 0.455 until the balance stopped
+counting the pitching moment twice, `docs/departures.md` §5.)
 
-**The interface does not use it.** Its balance is the handbook's, from the
-typed "Cz at alpha" (0.90), "Cm" (−0.042) and "Oswald e" (0.90), and changing
-the section there still changes nothing about the trim: 41.99 km/h, glide 7.50
-and calage 33.22% in the wing's arc, 37.69, 8.48 and 34.19% flown flat, with
-NACA 4415, 4412, 2414 or 0012. The polar beside it is the section's. The
-balance table shows the polar's own Oswald factor next to the typed one
-(0.960 on the default wing flat, 0.814 in its arc on the flat span) so the
-two can be compared; taking the coupled solve into the interface is an open
-item, not a claim.
+**The interface flies it on the polar.** Its balance, by default, takes the
+lift, the induced and profile drag at the angle from the wing's own polar and
+the section's Cm0, so changing the section changes the trim, and puts each
+force where it acts (`balanceWhereForcesAct`, `docs/balance.md`); in
+brackets, the calage on the handbook's rules for where they act
+(`balanceOnPolar`). On the default wing at 5°:
+
+| section | in its arc | flat |
+| --- | --- | --- |
+| NACA 4415 | 34.97 km/h, glide 8.10, calage 40.83% (39.31%) | 31.83 km/h, 8.63, 40.82% (37.12%) |
+| NACA 4412 | 35.04 km/h, 8.16, 41.13% (39.70%) | 31.90 km/h, 8.70, 41.15% (37.50%) |
+| NACA 2414 | 38.75 km/h, 8.01, 37.72% (34.85%) | 35.39 km/h, 8.72, 38.79% (34.18%) |
+| NACA 0012 | 44.03 km/h, 7.46, 30.95% (25.83%) | 40.44 km/h, 8.30, 33.34% (27.29%) |
+
+Where each acts, camber moves the calage three quarters as far as on the
+rules — 9.9 points from the NACA 4415 to the 0012 in the arc, where the
+rules say 13.5 — because the rule carries the section's moment on the
+central chord and the lattice on each strip's own, smaller outboard. On the symmetric section the lift's line is
+3.3 points of chord aft of the quarter chord in the arc and 5.8 flat, where
+the planform's quarter-chord line runs back toward the tips.
+
+Set to the handbook's typed "Cz at alpha" (0.90), "Cm" (−0.042) and "Oswald
+e" (0.90), the section changes nothing but the arc's induced drag at its own
+zero-lift angle: 41.99 km/h, glide 7.50 to 7.52 and a calage of 29.73 to
+29.81% in the wing's arc, 37.69, 8.48 and 31.38% flown flat. The balance
+table shows the polar's span efficiency beside the typed one there (0.960 on
+the default wing flat, 0.814 in its arc on the flat span).
 
 ### Two mistakes worth recording
 

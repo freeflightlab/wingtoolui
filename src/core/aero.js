@@ -455,6 +455,28 @@ export function wingPolar({
   };
 }
 
+/**
+ * A wing polar's coefficients at any angle within its points, along straight
+ * lines between them: lift, induced and profile drag, and the span
+ * efficiency the two make on its aspect ratio. Null outside its range.
+ */
+export function polarAt(polar, alphaDeg) {
+  const pts = polar?.points ?? [];
+  if (pts.length < 2 || !(alphaDeg >= pts[0].alphaDeg - 1e-9) || !(alphaDeg <= pts[pts.length - 1].alphaDeg + 1e-9)) return null;
+  let i = 0;
+  while (i < pts.length - 2 && pts[i + 1].alphaDeg < alphaDeg) i++;
+  const a = pts[i];
+  const b = pts[i + 1];
+  const f = (alphaDeg - a.alphaDeg) / (b.alphaDeg - a.alphaDeg);
+  const at = (k) => a[k] + f * (b[k] - a[k]);
+  const CL = at('CL');
+  const CDi = at('CDi');
+  return {
+    alphaDeg, CL, CDi, CDprofile: at('CDprofile'),
+    oswald: CDi > 0 ? (CL * CL) / (Math.PI * polar.aspectRatio * CDi) : NaN,
+  };
+}
+
 /** Interpolate a section polar's drag at a given lift coefficient. */
 function sectionCd(sp, cl) {
   const pts = sp.points;

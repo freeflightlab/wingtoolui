@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2687-test validation suite and a benchmark with regression budgets
+- [x] 2753-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -375,9 +375,12 @@ validation notes flagged.
 - [x] **Riser-aware line plans.** `RISER_LAYOUTS` puts four rows on three
       risers, and `applyRiserSplit` adds the split A that every Niviuk in the
       reference set uses. Exposed as a control. See `docs/risers.md`.
-- [ ] **Per-rib balance.** The current solve treats the central section as
-      representative, as the handbook does. Solving spanwise would let washin
-      and taper feed back into trim.
+- [x] **Per-rib balance.** The solve treated the central section as
+      representative, as the handbook does. The lift's line is the spanwise
+      lattice's now, every rib's chord, sweep and washin in it, so washin
+      and taper feed back into the trim; the balance itself is taken in the
+      central section's plane, where a symmetric wing's moments are
+      (`docs/balance.md`).
 - [x] **Ovalization from pressure**, rather than a flat 6%.
       `billowFromPressure` closes the loop and `applyOvalization` takes a
       `pressure` option, with the panel's own width supplying the spacing.
@@ -812,9 +815,13 @@ validation notes flagged.
       The reference wings' arc is an ellipse through their projected span
       now: the round of 10-19, below.
 - [ ] **Single-skins are built as four rows** where the Skin 4 P and Bi Skin
-      2 P have nine.
-- [ ] **The interface's balance is the handbook's**, on typed coefficients;
-      the coupled solve and the trim from the calage are core and suite only.
+      2 P have nine, and double-surface: OpenGlider's `SingleSkinRib`, an arch
+      a parabola of set height between attachment points, is a model for the
+      ribs (`docs/openglider.md` section 2).
+- [x] **The interface's balance is the handbook's**, on typed coefficients;
+      the coupled solve and the trim from the calage were core and suite
+      only. It flies the wing's own polar now, at the angle or trimmed from
+      the calage: the round "the balance on the wing's own polar", below.
 - [x] **The speed system, trimmers and riser webbing** (`risers.js`) were core
       and suite only. The speed system and the trimmers are in the
       interface: the round "the speed system in the interface", below. The
@@ -1027,13 +1034,14 @@ validation notes flagged.
       the normal wash (`trefftzDrag`) it keeps it, an elliptical wing is still
       1.006, and the gnuC2-23's span efficiency is 1.21 on its projected span,
       not 1.52; the 37° test arc gains 3% over the flat wing, not 11%.
-- [ ] **This tool's balance with every force where it acts** — the
+- [x] **This tool's balance with every force where it acts** — the
       handbook's rules cancel on the gnuC2-23 because its centre of
       pressure sits 0.395 m below the chord, a figure its designer typed
-      from XFLR5. With the arched wing's own centre of pressure (the vortex
-      lattice gives it) and the line plan's own drag and mass centres, the
-      tool's designs could be balanced the way the program balances them
-      rather than on a cancellation measured once.
+      from XFLR5. The balance on the polar now takes the arched wing's own
+      lift from the vortex lattice, its cloth's mass centre and the line
+      plan's own centres, and at the gnuC2-23's 4.51° hangs it at 32.4% of
+      chord where its file says 33% and the rules 25.5% (rounds of
+      2026-10-28 and 11-02, `docs/balance.md`).
 
 ### Round of 2026-10-26: what the audit found
 
@@ -1133,6 +1141,154 @@ validation notes flagged.
       (The page itself holds steady in Chromium: 5,505 nodes and 6.5 MB of
       heap after 60 rebuilds.) The selectors search the page from its roots
       now, and the control probe keeps the registry it reads for itself.
+
+### Round of 2026-10-27: the balance on the wing's own polar
+
+- [x] **The handbook's 4.2 counts the pitching moment twice** — it puts the
+      lift at the centre of pressure, which the sheet places from the
+      pitching moment, and adds −q0·Cm again in a seventh term, without the
+      chord. The sheet leaves it out, and so does the author's program. The
+      balance counts it once (`printedAeroMoment` restores the term): a pilot
+      with nothing below the wing but weight hangs plumb under the centre of
+      pressure, to the micrometre. On a NACA 4415 at 5° the second count had
+      put the calage 6.1 points of chord aft, and the calages "real wings
+      use, 40 to 45%" were partly it: counted once, the lift real wings trim
+      at needs 32 to 36%, where the three complete designs hang theirs.
+- [x] **A calage forward of the centre of pressure was refused** — for
+      "adding to the section's nose-down moment", the same moment counted
+      twice. A wing gliding nose down hangs the foot of its plumb line
+      forward of its centre of pressure; the three designs' files hang them
+      at 33, 32.5 and 36% under plumb points of 38, 40 and 39%. Refused, the
+      13 m² Ultralite 5 was hung from its anchors' centre. Only the 2012
+      worksheet's calage is refused now, for its glide, which its own
+      coefficients do not give.
+- [x] **The interface's balance on the wing's own polar** — **Balance on**:
+      the polar at the angle (the default), the polar trimmed from the
+      calage, or the handbook's typed coefficients. On the polar the lift,
+      induced and profile drag are the polar's at the angle, in its arc, the
+      centre of pressure from the section's Cm0 on the wing's own lift; the
+      loads, the billow and the speed system follow the angle it flies at,
+      and the bar's first row is the balance's trim. Trimmed from the
+      calage, the calage is the design's own on an import, and an imported
+      design's calage is trimmed on this polar whatever the mode, beside the
+      angle its file declares: the Tuluaq-19's 36% at 7.51° for its 7.41.
+- [x] **The trim from the calage against the certificates** — no Geo 7's
+      calage is published; from 34%, in its arc, all four certified cases
+      trim above 30 km/h, and the lightest only from a calage forward of
+      37.1% (`docs/certification.md` section 4). The handbook's balance on
+      the gnuC2-23's own coefficients hangs the pilot 0.39% of chord aft of
+      the program's, which is what the handbook's rules for where forces act
+      come to in the program's moments, +0.42%.
+- [x] **The centre of pressure from the planform in its arc** — the 2D
+      balance took the root section's, Xcp = 0.25 − Cm0/CL. The lattice puts
+      the wing's lift 2.2 to 5.9 points of chord further aft on the three
+      designs, where their swept quarter-chord lines carry it, and 0.38 to
+      0.60 m below the chord; the balance takes it there now (round of
+      2026-10-28).
+
+### Round of 2026-10-27: OpenGlider, read
+
+- [x] **OpenGlider read, its code and its data** — `develop` at `ccdb7bf`,
+      version 0.8.1: what it has, what was taken, what was not and why, and
+      four slips in it (`docs/openglider.md`). The first review had gone no
+      further than its README.
+- [x] **Measured line stretch and weights** — its 56 line types' load and
+      elongation (`data/reference/line-stretch.tsv`); thirteen of the
+      catalogue's lines stretch on their own curve now, where the generic
+      3.5 and 5% at the rated strength was up to three times a sheathed
+      Technora line's at 5 daN, and 3.6 times a sheathed Dyneema one's. Liros's
+      weights confirm the sheathed 0.98 g/m per mm² and put bare aramid at
+      1.11, where 0.9 was a guess.
+- [x] **The line set level by level, as the DHV calculates it** — OpenGlider
+      sums its levels; the DHV's calculation for EN 926-1 asks each 1400 daN
+      and 14 g after bending, both sides, and each brake level 150. Sized line
+      by line, the default wing's mains came to 1382 daN and its brake's first
+      level to 82; the set is sized to the calculation now, and the Lines
+      group shows every level against it.
+- [ ] **A folded allowance where a panel's edge is hemmed** — cut as the
+      mirror of the panel's edge about the fold, so it lies flat folded, as
+      OpenGlider's `FoldedCut` cuts the entry. A wing of this tool's own has
+      one allowance all round.
+- [ ] **Mini-ribs on a wing of this tool's own** — OpenGlider's `MiniRib`
+      blends a cell's unballooned shape in its middle to its ballooned one at
+      its ends; an imported design's are its program's here.
+
+### Round of 2026-10-28: every force where it acts
+
+- [x] **The lift on its own line** — the centroid of the lattice strips'
+      lift in the wing's arc, moved along the flow by the sections' Cm0 on
+      their own chords (`latticeCentres`, `liftLine`). On the gnuC2-23 at
+      4.51° it is 31.2% back and 0.60 m below the chord, its line crossing
+      the chord at 30.6% where the rule's 0.25 − Cm0/CL says 26.9%.
+- [x] **The wing's weight at its cloth's mass centre** — the skins cell by
+      cell and the ribs as their sections, each by its own cloth
+      (`wingMassCentre`): 51% back and 0.73 m down on the gnuC2-23, where
+      its program's 36% rule says 44% and 0.89 m.
+- [x] **The lines' weight and drag at their own centres** — line by line
+      from the plan, the set's weight beyond its lines at the risers
+      (`lineCentres`); on the gnuC2-23 the weight within 1.4 mm of where its
+      program centres it, and with each line's own drag (round of 11-02)
+      the drag within 3 mm.
+- [x] **The pilot free to swing** — his weight and drag in line with the
+      karabiners, no moment about them however far below; or plumb, as the
+      handbook and the program hang him, 0.18% of chord aft on the
+      gnuC2-23's section 17. The program's section 17 comes back to the
+      micrometre through the same moments (`calageFromForces`), and the
+      handbook's calage with every point where its rules put it.
+- [x] **An export flies at the balance's angle** — section 8 gave the
+      program the centre of pressure to a whole per cent, which it reads as
+      the point the pilot hangs plumb under; it is the karabiners' plumb
+      point now, to a hundredth, with the plan's riser.
+- [ ] **The risers' drag on this tool's own plans** — counted on an
+      imported design as its program counts it (round of 11-02); this
+      tool's plans give their webbing a weight but no width, so its drag is
+      not in the lineset's, and the Balance panel says so. A width for each
+      riser, from the makers' drawings, would count it; four straps in
+      tandem shield each other by an amount nothing here measures.
+- [x] **A line at an angle to the flow** — sin³ of its angle (round of
+      11-02).
+- [x] **The section's moment from an XFOIL polar** — in the balance and
+      the lattice (round of 11-02).
+- [ ] **The wing's mass beyond its cloth where it is** — rods, tapes,
+      diagonals and the anchors' reinforcement, 8% of the SAGE, are taken
+      as spread like the cloth; the nose and the anchor rows carry them.
+
+### Round of 2026-11-02: each line's own drag
+
+- [x] **Each line's drag coefficient from its Reynolds number** — 1 + 10
+      Re^-2/3 on its own diameter, the flow square to it (White's
+      correlation, as LEparagliding takes it), where every line was 1.1,
+      5% more if sheathed, a factor without a source. One typed coefficient
+      for every line stays a choice in Assumptions. Square to the flow the
+      gnuC2-23's 95 lines are its program's drag to the last digit.
+- [x] **A line at an angle to the flow** — its drag goes as sin³ of the
+      angle (the cross-flow principle: the force on it as sin², the drag
+      its part along the flow), where it went as sin²: 8.5% off the
+      gnuC2-23's set at its section 17's 9.45°.
+- [x] **The loops in a line's frontal area** — the line doubled over its
+      loop allowance, or over an imported line's loops as its program counts
+      them, a spliced loop at √2 − 1 of its length.
+- [x] **An imported design's risers' drag** — as its program counts it, a
+      strap broadside at Cd 1.98 and a round riser as a line: 0.017 m² of
+      the gnuC2-23's 0.50, 0.065 of the Tuluaq-19's 0.40.
+- [x] **The section's moment and zero-lift angle from an XFOIL polar** —
+      in the balance, the trim and the lattice's angle, named in the Balance
+      panel; thin-aerofoil theory's without one.
+- [x] **A polar that does not reach zero lift** — its first angle was taken
+      for its zero-lift angle: 4° out on a cambered section swept from 0°,
+      and on the suite's polar so cut the default wing flew 44 km/h at 5°
+      for the whole polar's 35. Found along its lift slope now, within 0.4
+      points of chord of the whole polar's calage, and the panel says so.
+- [x] **Each imported design its own pilot** — loading one design after
+      another kept the first's pilot, wing mass and pilot drag: the Swoop2
+      and the Tuluaq-19 were balanced with the gnuC2-23's 70 kg pilot on a
+      4 kg wing. Each starts from the parametric wing's now, its section 35
+      over them; the gnuC2-23's pilot flies on his own drag, Cd 0.6 on
+      0.438 m².
+- [x] **What it changes** — the default wing's lineset Cx 0.0079 → 0.0091,
+      thin lines' Cd 1.21 and their loops, its calage at 5° 40.9 → 40.8%;
+      the gnuC2-23 at its 4.51° 33.0 → 32.4%, the rules 26.3 → 25.5%; the
+      test wing's glide 10.62 → 10.64 (`docs/loads-and-materials.md` §3).
 
 ## Phase 3 — construction detail
 

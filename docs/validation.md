@@ -226,13 +226,30 @@ left at 0.578), on the same coefficients, masses and drag:
 | | the program's equations | the handbook's (`solveEquilibrium`) |
 | --- | --- | --- |
 | speed, glide | 33.97 km/h, 8.267 | 33.97 km/h, 8.267 |
-| calage | 47.88% of chord | 48.00% |
+| calage | 47.88% of chord | 48.27% |
 
-The forces agree to rounding; the calage is close only because two of the
-handbook's rules for where forces act, each worth nearly 2% of chord here,
-cancel (`docs/gnuc2-23.md` has all five). The program's line Cd, 1 + 10
-Re^-2/3, is 1.085 over this lineset; `lineDrag` takes 1.1, 5% more if
-sheathed, and counts each line's inclination, which the program does not.
+The forces agree to rounding. The calage is 0.39% of chord aft of the
+program's, and the handbook's rules for where forces act, each measured in
+the program's moments, come to +0.42%: the difference is those rules and
+nothing else, to 0.03%. Two of them, each worth nearly 2% of chord here,
+cancel (`docs/gnuc2-23.md` has all five). This table said 48.00%, 0.12%
+away, while the balance counted the section's pitching moment twice
+(`docs/departures.md` §5): the second count, −0.27%, cancelled most of the
+rest. `lineDrag` now takes each line's Cd as the program does, 1 + 10
+Re^-2/3 on its own diameter, and its loops as it counts them: square to the
+flow its drag is the program's to the last digit over all 95 lines. It
+also takes sin³ of each line's angle to the flow, which the program does
+not: 8.5% off at section 17's 9.45°.
+
+The balance with every force where it acts (`balanceWhereForcesAct`,
+`docs/balance.md`) takes moments about the karabiners. Given the program's
+points and its pilot plumb, it returns the 47.88% and the 44.17% the program
+prints, to the micrometre. Given its own — the lattice's lift in the wing's
+arc, its cloth's mass centre, the plan's line centres, the pilot on his
+own drag — it hangs the gnuC2-23 at 32.4% of chord at the 4.51° its file
+declares, where the file hangs it at 33% and the rules at 25.5%; its lines'
+weight is centred within 1.4 mm of where the program centres it, and their
+drag within 3 mm.
 
 ---
 
@@ -306,10 +323,11 @@ per millimetre of diameter ranks sizes rather than materials:
 ### 4.2 Line drag taken as a constant
 
 `cxLines` was a typed-in 0.020 from Phase 1. Computed from an actual lineset —
-diameter × length, with sin²ψ for inclination — a modern thin set gives about
-0.0055. The effect is not academic: on the suite's test wing the glide ratio
-goes from 8.48 to 10.62, with line drag falling from 27.7% to 9.6% of the
-total. That is most of why modern wings out-glide the handbook's 2012 example.
+diameter × length × its Cd at its Reynolds number, with sin³ψ for its angle
+to the flow — the suite's test wing gives 0.0054. The effect is not
+academic: its glide ratio goes from 8.48 to 10.64, with line drag falling
+from 27.7% to 9.4% of the total. That is most of why modern wings out-glide
+the handbook's 2012 example.
 
 ### 4.3 The collapse floor, which governs top speed
 

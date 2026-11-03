@@ -10,7 +10,7 @@ import { readFileSync, readdirSync, writeFileSync } from 'fs';
 import { parseLineTable, summarise, parseUpLineSheet, parseBgdLineTable,
   parsePhiLineSheet, parseSimpleLineSheet, parseStatedTopology } from '../src/core/lineplan.js';
 import { parseSizeFamilies } from '../src/core/scaling.js';
-import { parseMaterialsTable } from '../src/core/loads.js';
+import { parseMaterialsTable, parseLineStretch } from '../src/core/loads.js';
 import { parseLep, describeLep } from '../src/core/lep.js';
 
 const files = readdirSync('data/reference').filter((f) => f.endsWith('.tsv')).sort();
@@ -43,6 +43,12 @@ for (const f of files) {
       }
       other.push({ f, kind: 'line suppliers\' data', detail:
         `${kinds.family ?? 0} line families, ${kinds.size ?? 0} sizes, ${kinds.bending ?? 0} bending tests` });
+    } else if (f === 'line-stretch.tsv') {
+      // OpenGlider's line types: load and elongation measured, some weights.
+      const st = parseLineStretch(body);
+      other.push({ f, kind: 'line stretch', detail:
+        `${st.rows.length} line types from OpenGlider, ${st.rows.filter((r) => r.used).length} with a curve to use, `
+        + `${st.byCode.size} in the catalogue` });
     } else if (f === 'published-specs.tsv') {
       other.push({ f, kind: 'makers\' specifications', detail: `${dataRows()} sizes, to check size-families.tsv against` });
     } else if (f === 'published-cells.tsv') {

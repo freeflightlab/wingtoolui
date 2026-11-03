@@ -99,6 +99,21 @@ const S = {
   // How far the speed bar shortens the front riser, and how far trimmers
   // let the rear one out (0, none), in millimetres.
   speedTravel: 150, trimTravel: 0,
+  // What the balance flies on. 'polar' takes the wing's own polar at the
+  // angle; 'calage' trims on it from where the risers hang, `calagePct` of
+  // the central chord; 'typed' takes the typed coefficients at the angle, as
+  // the handbook's worked example does. 36%: the Tuluaq-19's, the furthest
+  // aft of the three complete designs on file (32.5 to 36%). An import sets
+  // its own.
+  balanceMode: 'polar', calagePct: 36,
+  // Where the balance puts its forces on the polar. 'acting' puts each where
+  // it acts — the lift on its own line in the arc, from the vortex lattice;
+  // the wing's weight at its cloth's mass centre; the lines' weight and drag
+  // at theirs; the pilot below the karabiners — and 'rules' where chapter 4
+  // puts them. `pilotBelow` is how far the pilot's mass centre is below the
+  // karabiners, in metres (LEparagliding's Pmc; the gnuC2-23's file says
+  // 0.2), and `pilotHangs` whether he is free to swing about them or plumb.
+  balanceForces: 'acting', pilotBelow: 0.2, pilotHangs: 'free',
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
@@ -113,6 +128,8 @@ const S = {
     + 'batten    23.5 29.5   63.0 70.0   1.5',
   famCount: 4, famSmallest: 20, famLargest: 29, famLoadLo: 70, famLoadHi: 115,
   lineBrand: 'all', lineStrength: 'kinked', maxLineTypes: 5, serviceHours: 200,
+  // Size the line set to the DHV's calculation for EN 926-1, level by level.
+  dhvLevels: true,
   objLineScale: 1,
   clothLE: 'Porcher Skytex 27 hard', clothUpper: 'Porcher Skytex 32',
   clothLower: 'Porcher Skytex 32', clothRib: 'Porcher Skytex 40 hard',
@@ -131,7 +148,10 @@ const S = {
   // decision rather than a fact, so each is the user's to make.
   karabinerSep: 42,        // cm between the karabiners
   loopAllowance: 130,      // mm of line consumed by the loops at each end
-  cdCylinder: 1.1,         // drag coefficient of a line in cross-flow
+  // A line's drag coefficient in cross-flow, each line's own from its
+  // Reynolds number at the speed flown, or `cdCylinder` for every line.
+  lineCd: 'reynolds',
+  cdCylinder: 1.1,
   measureTension: 5,       // daN, the tension the PMA measures lengths at
   rowShareMode: 'convention',
   printMargin: 10, printOverlap: 15,
@@ -192,6 +212,21 @@ const COMPLETE_DESIGNS = [
     sections: () => (typeof GNUC2_SECTIONS === 'object' && GNUC2_SECTIONS ? GNUC2_SECTIONS : {}),
   },
 ];
+/**
+ * The line catalogue, with what is measured of some of its lines: their load
+ * and elongation and their weight, from OpenGlider's line types
+ * (`withMeasuredLineData`). Read once.
+ */
+let LINE_CATALOGUE = null;
+function lineCatalogue() {
+  if (!LINE_CATALOGUE) {
+    const cat = parseMaterialsTable(typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+    const stretch = typeof LINE_STRETCH_TSV === 'string' ? parseLineStretch(LINE_STRETCH_TSV) : null;
+    LINE_CATALOGUE = stretch ? withMeasuredLineData(cat, stretch) : cat;
+  }
+  return LINE_CATALOGUE;
+}
+
 /** A complete design by its picker id, when this build carries it. */
 const completeDesign = (id) => COMPLETE_DESIGNS.find((d) => d.id === id && d.lep().length) ?? null;
 /** Whether a picker id names a complete design at all. */
@@ -444,8 +479,8 @@ function applyReference() {
  */
 const IMPORT_OVERWRITES = [
   'name', 'span', 'rootChord', 'tipChord', 'cells', 'centreRib',
-  'lineLength', 'karabinerSep', 'alphaDeg', 'lineMass', 'cxLinesFromPlan', 'pilotMass', 'wingMass',
-  'anchorA', 'anchorB', 'anchorC', 'anchorD', 'intakeStart', 'intakeEnd',
+  'lineLength', 'karabinerSep', 'alphaDeg', 'calagePct', 'lineMass', 'cxLinesFromPlan', 'pilotMass', 'wingMass',
+  'pilotBelow', 'cxPilot', 'anchorA', 'anchorB', 'anchorC', 'anchorD', 'intakeStart', 'intakeEnd',
 ];
 
 /** Leave an imported design, restoring the parametric wing it replaced. */
@@ -462,8 +497,12 @@ function leaveImport() {
 
 function loadLepDesign(doc, sectionTexts = {}) {
   // What this design is about to overwrite, if it is replacing a parametric
-  // wing rather than another import.
+  // wing rather than another import. Replacing another import, it starts
+  // from the parametric wing's settings: a design whose file gives no pilot
+  // flew the last one's — the Swoop2 loaded after the gnuC2-23 took its
+  // 70 kg pilot and his drag from that design's section 35.
   if (!LEP) S._parametric = Object.fromEntries(IMPORT_OVERWRITES.map((k) => [k, S[k]]));
+  else if (S._parametric) Object.assign(S, S._parametric);
   const texts = { ...sectionTexts };
   const parsed = {};
   for (const [file, text] of Object.entries(texts)) {
@@ -547,6 +586,8 @@ function loadLepDesign(doc, sectionTexts = {}) {
   if (Number.isFinite(design.lineLengthM)) S.lineLength = design.lineLengthM;
   if (Number.isFinite(design.karabinerM)) S.karabinerSep = design.karabinerM * 100;
   if (geom?.ok) S.alphaDeg = Math.round(geom.aoaDeg * 100) / 100;
+  // Where its risers hang: what its own balance trims from.
+  if (geom?.ok && Number.isFinite(geom.calagePct)) S.calagePct = Math.round(geom.calagePct * 10) / 10;
   // Its own lines: what they weigh, as the program totals them, and their
   // own drag rather than a typed figure — the plan is the real one.
   if (geom?.ok && Number.isFinite(geom.totals.weightKg)) {
@@ -560,6 +601,15 @@ function loadLepDesign(doc, sectionTexts = {}) {
     S.pilotMass = e35.pilotKg;
     S.wingMass = e35.wingKg;
   }
+  // And how far below the karabiners it puts the pilot.
+  if (e35 && Number.isFinite(e35.pilotBelowM) && e35.pilotBelowM >= 0 && e35.pilotBelowM <= 1) {
+    S.pilotBelow = e35.pilotBelowM;
+  }
+  // And the drag it balanced him on: his Cd by his frontal area, over the
+  // wing's flat area — this tool's Cx pilot, which his drag is q S times.
+  // The tool's typed 0.015 is a third more than the gnuC2-23's own.
+  const drag35 = e35 && e35.pilotCd > 0 && e35.pilotAreaM2 > 0 && balance.flatAreaM2 > 0;
+  if (drag35) S.cxPilot = Math.round(((e35.pilotCd * e35.pilotAreaM2) / balance.flatAreaM2) * 1e5) / 1e5;
   const said = [];
   if (failed.length) said.push(`not read: ${failed.join('; ')}`);
   if (!haveAll) {
@@ -589,6 +639,7 @@ function loadLepDesign(doc, sectionTexts = {}) {
     said.push(balance.ok
       ? 'its section 35 balance is solved as its program solves it, under Balance'
         + (masses35 ? `, and its pilot (${e35.pilotKg} kg) and wing (${e35.wingKg} kg) are the ones this tool's balance flies` : '')
+        + (drag35 ? `, the pilot on his own drag, Cd ${e35.pilotCd} on ${e35.pilotAreaM2} m²` : '')
       : `its section 35 balance is not solved: ${balance.problems[0]}`);
   }
   // Which program drew it decides how some of its pieces are cut.
@@ -833,11 +884,47 @@ function rebuild() {
     // section polar when one is loaded, and says which in `polar.source`.
     const sectionSource = XPOLAR || null;
     const thin = thinAirfoil(airfoil);
+    // The section's moment at no lift and its zero-lift angle, for the
+    // balance and the lattice: a loaded XFOIL polar's, which the wing's polar
+    // flies on, or thin-aerofoil theory's.
+    const section0 = XPOLAR && Number.isFinite(XPOLAR.cm0) && Number.isFinite(XPOLAR.alphaL0Deg)
+      ? { cm0: XPOLAR.cm0, alphaL0Deg: XPOLAR.alphaL0Deg, source: 'XFOIL', extrapolated: !!XPOLAR.zeroLiftExtrapolated }
+      : { cm0: thin.cm0, alphaL0Deg: thin.alphaL0Deg, source: 'thin-aerofoil theory' };
     // The wing in its arc: its lift and induced drag as the lattice finds
     // them of this wing against itself laid flat. The balance's typed Cz is
     // a section's, and its induced drag is read at the angle the lattice's
     // flat plates would see, this one less the section's zero-lift angle.
     const arc = S.arcInFlight ? arcFactorsFor(wing) : null;
+    // Where the forces act, when the balance puts each where it acts
+    // (`balanceWhereForcesAct`): the lattice's centres — in the arc, or on
+    // the wing laid flat when it does not fly in it, as the polar does — and
+    // the wing's mass centre from its own cloth. Without a lattice, the
+    // rules.
+    const frame = centralFrame(wing);
+    const alongChord = (pt) => (pt[0] - frame.origin[0]) * frame.u[0] + (pt[2] - frame.origin[2]) * frame.u[2];
+    let acting = null;
+    if (S.balanceMode !== 'typed' && S.balanceForces === 'acting') {
+      try {
+        const lattice = arcFactorsFor(wing);
+        if (lattice) {
+          const fab = fabricSchedule({
+            leadingEdge: S.clothLE, upperSail: S.clothUpper, lowerSail: S.clothLower, rib: S.clothRib, diagonal: S.clothRib,
+          });
+          const gsm = fab.ok ? fab.gsmByLocation : { leadingEdge: 32, upperSail: 32, lowerSail: 32, rib: 40 };
+          acting = {
+            centresAt: (a) => lattice.forceCentreAt(a, { alphaL0Deg: section0.alphaL0Deg, flat: !S.arcInFlight }),
+            wingCentre: wingMassCentre(wing, {
+              upperGsm: gsm.upperSail, lowerGsm: gsm.lowerSail, ribGsm: gsm.rib, noseGsm: gsm.leadingEdge,
+              noseTo: S.noseClothTo / 100,
+            }),
+            pilotBelowM: S.pilotBelow,
+            pilotHangs: S.pilotHangs,
+          };
+        }
+      } catch (e) {
+        acting = null;
+      }
+    }
 
     // The balance and the polar, at a given line drag.
     //
@@ -847,8 +934,16 @@ function rebuild() {
     // every line's diameter, length and angle to the flow; solving the
     // flight once on the typed figure to get a plan, and again on that
     // plan's own drag, lets a design be flown on its own lines.
-    const flightAt = (cxLines) => ({
-      balance: solveEquilibrium({
+    const flightAt = (cxLines, lines = null) => {
+      const polarNow = wingPolar({
+        planform, airfoil, atm, mass: flightMass,
+        area: metrics.area, chordRef: metrics.mac,
+        twistAt,
+        cxLines, cxPilot: S.cxPilot,
+        alphaRange: [-2, 15], step: 1, sectionPolar: sectionSource,
+        arc,
+      });
+      const common = {
         area: metrics.area,
         span: imported ? imported.flatSpan : S.span,
         chord: imported ? imported.rootChord : S.rootChord,
@@ -859,22 +954,44 @@ function rebuild() {
         // altitude — so moving the altitude slider changed the polar, the
         // Reynolds number and the readout's density, and left the trim
         // speed where it was.
-        rho: atm.density, oswald: S.oswald, cxPilot: S.cxPilot, cxLines,
-        alphaDeg: S.alphaDeg, cz: S.cz, cx0a: S.cx0a, cm: S.cm,
-        legacySpreadsheet: S.legacy,
-        ...(arc ? { arc: { liftRatio: arc.liftRatio, inducedRatio: arc.inducedRatioAt(S.alphaDeg - thin.alphaL0Deg) } } : {}),
-      }),
-      polar: wingPolar({
-        planform, airfoil, atm, mass: flightMass,
-        area: metrics.area, chordRef: metrics.mac,
-        twistAt,
-        cxLines, cxPilot: S.cxPilot,
-        alphaRange: [-2, 14], step: 1, sectionPolar: sectionSource,
-        arc,
-      }),
-    });
+        rho: atm.density, cxPilot: S.cxPilot, cxLines,
+      };
+      if (S.balanceMode === 'typed') {
+        return {
+          polar: polarNow,
+          balance: solveEquilibrium({
+            ...common, oswald: S.oswald, alphaDeg: S.alphaDeg, cz: S.cz, cx0a: S.cx0a, cm: S.cm,
+            legacySpreadsheet: S.legacy,
+            ...(arc ? { arc: { liftRatio: arc.liftRatio, inducedRatio: arc.inducedRatioAt(S.alphaDeg - section0.alphaL0Deg) } } : {}),
+          }),
+        };
+      }
+      // On the wing's own polar: at the angle, or trimmed from the calage.
+      // A calage the wing cannot trim at is said, and the balance flown at
+      // the angle instead. Each force where it acts, or where the rules put
+      // it; the lines by the rules until a plan has placed them.
+      const where = acting ? { solve: balanceWhereForcesAct, ...acting, lines } : {};
+      const onPolarAt = (alphaDeg) => (acting
+        ? balanceWhereForcesAct({ polar: polarNow, alphaDeg, cm0: section0.cm0, ...common, ...acting, lines })
+        : balanceOnPolar({ polar: polarNow, alphaDeg, cm0: section0.cm0, ...common }));
+      if (S.balanceMode === 'calage') {
+        try {
+          return {
+            polar: polarNow,
+            balance: trimOnPolar({ polar: polarNow, calageFraction: S.calagePct / 100, cm0: section0.cm0, ...common, ...where }),
+          };
+        } catch (e) {
+          return { polar: polarNow, balance: { ...onPolarAt(S.alphaDeg), trimProblem: e.message } };
+        }
+      }
+      return { polar: polarNow, balance: onPolarAt(S.alphaDeg) };
+    };
     let { balance, polar } = flightAt(S.cxLines);
     let cxLinesUsed = S.cxLines;
+    // The angle the wing flies at: the one asked, or — trimmed from the
+    // calage — the one the calage gives. What follows the balance reads this,
+    // not the slider: the loads, the cloth's billow, the speed system.
+    const flownAlpha = () => balance.onPolar?.alphaDeg ?? S.alphaDeg;
 
     // The line catalogue the design is sized from.
     //
@@ -884,15 +1001,14 @@ function rebuild() {
     // shelf.
     let lineTable;
     try {
-      const cat = parseMaterialsTable(
-        typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+      const cat = lineCatalogue();
       lineTable = S.lineBrand === 'all' ? cat : lineTableFor(cat, { brand: S.lineBrand });
     } catch (e) {
       lineTable = undefined;              // fall back to the built-in table
     }
     const loadsFor = (plan) => analyseLoads({
       plan, planform, stations: wing.stations,
-      totalMassKg: flightMass, alphaDeg: S.alphaDeg,
+      totalMassKg: flightMass, alphaDeg: flownAlpha(),
       wingAreaM2: metrics.area, rowShareMode: S.rowShareMode, airfoil,
       anchors: airfoil.anchors,
     });
@@ -903,10 +1019,28 @@ function rebuild() {
       : selectLines(tensions, {
         ...(lineTable ? { table: lineTable } : {}),
         strengthBasis: S.lineStrength,
+        // Every level of the set as strong as the DHV's calculation asks, at
+        // the all-up weight set.
+        levelRule: S.dhvLevels ? { maxWeightKg: flightMass } : null,
       }));
-    const dragOf = (selection) => lineDrag(selection, {
-      wingAreaM2: metrics.area, cdCylinder: S.cdCylinder,
-    });
+    // Each line's own drag coefficient, from its Reynolds number at the
+    // speed the balance flies, on the flow at the angle it flies — or one
+    // typed for every line — its loops in the flow, and the plan's risers
+    // where their material is known.
+    const dragOf = (selection, plan = null) => {
+      const a = (flownAlpha() * Math.PI) / 180;
+      // The flow at that angle to the central chord, from below it.
+      const flow = [0, 1, 2].map((i) => Math.cos(a) * frame.u[i] + Math.sin(a) * frame.v[i]);
+      return lineDrag(selection, {
+        wingAreaM2: metrics.area,
+        loopAllowanceMM: S.loopAllowance,
+        risers: plan?.riserWebbing ?? [],
+        ...(S.lineCd === 'fixed'
+          ? { cdCylinder: S.cdCylinder }
+          : { air: { speedMS: balance.speedMS, rho: atm.density, muPaS: atm.dynamicViscosity } }),
+        flowDirection: flow,
+      });
+    };
 
     // The riser-based line plan, which is what the merge option and the load
     // model act on. The geometric cascade above stays for the front view,
@@ -933,9 +1067,9 @@ function rebuild() {
       // anchor positions.
       //
       // A paraglider's angle of incidence is set by its line lengths, and the
-      // point it hangs from is the calage — which `solveEquilibrium` has just
-      // computed. Using a geometric centroid instead put the maillon 18.7
-      // points of chord too far forward on a typical wing, so the model
+      // point it hangs from is the calage — which the balance has just
+      // computed. Using a geometric centroid instead puts the maillon 8.3
+      // points of chord too far forward on the default wing, so the model
       // pitched nose-down against the attitude it would really fly at.
       calageFraction: usableCalage(balance).ok ? balance.calageFraction : null,
       wing, airfoil, layout: riserLayout,
@@ -974,16 +1108,29 @@ function rebuild() {
     const first = lepPlan || buildLinePlan(planOptions);
     let dirs = null;
     let cxPlan = null;
+    // And where its lines' weight and drag act, for a balance that puts
+    // each force where it acts: their own centres, the plan hung where the
+    // first pass put it.
+    let linesActing = null;
     try {
       const l0 = loadsFor(first);
       if (!lepPlan) dirs = riserResultants(first, l0.tensions);
-      cxPlan = dragOf(selectionFor(first, l0.tensions)).cxLines;
+      const sel0 = selectionFor(first, l0.tensions);
+      const drag0 = dragOf(sel0, first);
+      cxPlan = drag0.cxLines;
+      if (acting) {
+        const c = lineCentres(sel0, {
+          frame, drag: drag0, webbing: first.riserWebbing, karabiner: first.karabiner, massKg: S.lineMass,
+        });
+        if (c) linesActing = { ...c, fromM: alongChord(first.karabiner) };
+      }
     } catch (e) {
       dirs = null;
     }
-    if (S.cxLinesFromPlan && Number.isFinite(cxPlan) && cxPlan > 0) {
-      ({ balance, polar } = flightAt(cxPlan));
-      cxLinesUsed = cxPlan;
+    const planCx = S.cxLinesFromPlan && Number.isFinite(cxPlan) && cxPlan > 0;
+    if (planCx || linesActing) {
+      ({ balance, polar } = flightAt(planCx ? cxPlan : S.cxLines, linesActing));
+      cxLinesUsed = planCx ? cxPlan : S.cxLines;
       planOptions.calageFraction = usableCalage(balance).ok ? balance.calageFraction : null;
     }
     if (lepPlan) {
@@ -993,7 +1140,7 @@ function rebuild() {
       // plan places the riser tops before any load is known, so it is built
       // once, loaded, and built again with each riser pointed along its
       // resultant. One pass closes it to a fraction of a degree.
-      linePlan = (dirs && Object.keys(dirs).length) || cxLinesUsed !== S.cxLines
+      linePlan = (dirs && Object.keys(dirs).length) || cxLinesUsed !== S.cxLines || linesActing
         ? buildLinePlan({ ...planOptions, ...(dirs && Object.keys(dirs).length ? { riserDirections: dirs } : {}) })
         : first;
     }
@@ -1014,7 +1161,7 @@ function rebuild() {
     // (1 - dCp/2) q.
     let billow = null;
     if (S.applyOval && S.ovalFromPressure && !ownPanels) {
-      const cl = chordwiseLoading(airfoil, S.alphaDeg);
+      const cl = chordwiseLoading(airfoil, flownAlpha());
       const qPa = 0.5 * atm.density * balance.speedMS * balance.speedMS;
       // The loading is singular at the nose; a real suction peak is not.
       const dcpAt = (pt) => Math.max(-4, Math.min(4, pt.dcp));
@@ -1149,6 +1296,7 @@ function rebuild() {
     let lineSelection = null;
     let lengths = null;
     let lineDragOwn = null;
+    let levelStrength = null;
     try {
       loads = loadsFor(linePlan);
       lineSelection = selectionFor(linePlan, loads.tensions);
@@ -1164,7 +1312,10 @@ function rebuild() {
       // The drag of the lines actually in the plan, which is what the
       // balance flies on when it is asked to, and is shown beside the typed
       // figure when it is not.
-      lineDragOwn = dragOf(lineSelection);
+      lineDragOwn = dragOf(lineSelection, linePlan);
+      // Its strength level by level, as the DHV calculates it for EN 926-1,
+      // at the all-up weight set.
+      levelStrength = strengthByLevel(lineSelection.lines, { maxWeightKg: flightMass });
     } catch (e) {
       loads = null;
     }
@@ -1196,9 +1347,29 @@ function rebuild() {
       freeBody = { ok: false, problems: [e.message], note: e.message };
     }
 
+    // An imported design's own calage, trimmed on this tool's polar: the
+    // angle this tool's aerodynamics say the wing flies at where its lines
+    // hang it, beside the angle its file declares.
+    let designTrim = null;
+    if (imported && LEP.geom?.ok && Number.isFinite(LEP.geom.calagePct)) {
+      try {
+        designTrim = trimOnPolar({
+          polar, calageFraction: LEP.geom.calagePct / 100, cm0: section0.cm0,
+          area: metrics.area, span: imported.flatSpan, chord: imported.rootChord,
+          lineLength: hangDepthM, lineMass: S.lineMass, pilotMass: S.pilotMass, wingMass: S.wingMass,
+          rho: atm.density, cxPilot: S.cxPilot, cxLines: cxLinesUsed,
+          // Its own lines hang from its own karabiners, so the plan's
+          // centres are the ones the balance took.
+          ...(acting ? { solve: balanceWhereForcesAct, ...acting, lines: linesActing } : {}),
+        });
+      } catch (e) {
+        designTrim = { error: e.message };
+      }
+    }
+
     // The speed system, on the wing's own lift curve — the polar above, in
-    // its arc when the wing flies in it — from the angle the balance assumes,
-    // the risers the plan's rows give and the travel set.
+    // its arc when the wing flies in it — from the angle the balance flies
+    // at, the risers the plan's rows give and the travel set.
     let speedBar = null;
     let trimmers = null;
     try {
@@ -1212,19 +1383,23 @@ function rebuild() {
         const lift = liftModelFromWing({
           planform, airfoil, atm, mass: flightMass, area: metrics.area, polar,
         });
+        // From the angle the balance flies at, on the polar's own drag
+        // when the balance is flown on the polar: its first row is then the
+        // balance's own trim.
+        const onPolar = S.balanceMode !== 'typed';
         speedBar = acceleratedPolarFromWing({
-          riser: riserS, chordM: chordS, liftModel: lift, steps: 6,
+          riser: riserS, chordM: chordS, liftModel: lift, steps: 6, ownProfileDrag: onPolar,
           base: {
             area: metrics.area, span: imported ? imported.flatSpan : S.span, chord: chordS,
             lineLength: hangDepthM, lineMass: S.lineMass, pilotMass: S.pilotMass, wingMass: S.wingMass,
             rho: atm.density, cxPilot: S.cxPilot, cxLines: cxLinesUsed, cx0a: S.cx0a, cm: S.cm,
-            alphaDeg: S.alphaDeg,
+            alphaDeg: flownAlpha(),
           },
         });
         speedBar.floorCz = lift.czRange[0];
         if (S.trimTravel > 0) {
           trimmers = trimEnvelope({
-            riser: riserS, chordM: chordS, liftModel: lift, trimAlphaDeg: S.alphaDeg,
+            riser: riserS, chordM: chordS, liftModel: lift, trimAlphaDeg: flownAlpha(),
             trimmer: { travelMM: S.trimTravel }, steps: 3,
           });
         }
@@ -1237,10 +1412,11 @@ function rebuild() {
       planform, lobe, airfoil, wing, metrics, lobeM, projArea,
       panels, balance, worstDev, worstPhi, imported, vribs,
       hangDepthM, riserM, freeBody, lineDragOwn, cxLinesUsed, billow,
-      linePlan, loads, lineSelection, lengths, riserSplit, rods,
+      linePlan, loads, lineSelection, lengths, riserSplit, rods, levelStrength,
       rodSpecResult,
       writtenCascade,
       atm, polar, trim, nd, thin, polarIssues, arc, speedBar, trimmers,
+      alphaFlown: flownAlpha(), designTrim, acting, linesActing, section0,
       nested: M.nested, fabric: M.fabric, fabricError: M.fabricError,
       nestStale: true,
       error: null,
@@ -1676,11 +1852,63 @@ function buildControls() {
   slider(B, 'wingMass', 'Wing mass', 1, 12, 0.1, (v) => v.toFixed(1), ' kg');
   slider(B, 'lineMass', 'Line mass', 0, 2, 0.05, (v) => v.toFixed(2), ' kg');
   slider(B, 'lineLength', 'Line length', 3, 9, 0.05, (v) => v.toFixed(2), ' m');
-  slider(B, 'alphaDeg', 'Angle of attack', 0, 15, 0.1, (v) => v.toFixed(1), '°');
-  numberField(B, 'cz', 'Cz at alpha', 0.01);
-  numberField(B, 'cx0a', 'Cx0 wing', 0.001);
-  numberField(B, 'cm', 'Cm', 0.001);
-  numberField(B, 'oswald', 'Oswald e', 0.01);
+  selectField(B, 'balanceMode', 'Balance on', [
+    ['polar', 'the wing\u2019s own polar, at the angle'],
+    ['calage', 'the wing\u2019s own polar, trimmed from the calage'],
+    ['typed', 'typed coefficients, as the handbook\u2019s example'],
+  ]);
+  hint(B, S.balanceMode === 'typed'
+    ? 'The handbook\u2019s balance: its Cz, Cx0, Cm and Oswald factor typed, whatever the wing. They are the 2012 '
+      + 'example sheet\u2019s until changed.'
+    : `On the wing\u2019s own polar: its lift, induced and profile drag at the angle, in its arc when it flies in it, and `
+      + `the section\u2019s Cm0. ${S.balanceMode === 'calage'
+        ? 'The angle is where the pilot hangs at the calage: the trim follows from where the risers hang, as on a wing.'
+        : 'The angle is assumed; trimmed from the calage, it follows from where the risers hang instead.'}`);
+  // Where the forces act, on the polar: each where it does, or where the
+  // handbook's rules put them.
+  const forcesS = selectField(B, 'balanceForces', 'Forces act', [
+    ['acting', 'each where it acts'],
+    ['rules', 'where the handbook\u2019s rules put them'],
+  ]);
+  const pilotHangsS = selectField(B, 'pilotHangs', 'The pilot hangs', [
+    ['free', 'free to swing about the karabiners'],
+    ['plumb', 'plumb, as the handbook and LEparagliding put him'],
+  ]);
+  // Free to swing, his weight and drag come to rest in line with the
+  // karabiners and put no moment about them, however far below he is; held
+  // plumb, his drag that far below pitches the wing down.
+  const pilotBelowS = slider(B, 'pilotBelow', 'Pilot below the karabiners', 0, 0.8, 0.01, (v) => v.toFixed(2), ' m');
+  if (S.balanceMode === 'typed') {
+    hideField(forcesS);
+  } else {
+    hint(B, S.balanceForces === 'acting'
+      ? 'Each force where it acts: the lift on its own line in the arc, from the vortex lattice \u2014 '
+        + 'the centroid of its strips\u2019 lift, moved by the section\u2019s Cm0 \u2014 the drags at their own '
+        + 'centres, the wing\u2019s weight at its cloth\u2019s mass centre, the lines\u2019 weight and drag at '
+        + 'their own, and the pilot below the karabiners \u2014 free to swing, his weight and drag in line with them, '
+        + 'so that how far below does not move the balance; held plumb, his drag that far below pitches the wing down.'
+      : 'Where chapter 4 puts them: the lift and the wing\u2019s drag on the central chord at 0.25 \u2212 Cm0/Cz '
+        + 'of it, the wing\u2019s weight a third of the way back, the lines\u2019 weight half way down and their '
+        + 'drag a third, the pilot at the karabiners.');
+  }
+  if (S.balanceMode === 'typed' || S.balanceForces !== 'acting') {
+    hideField(pilotBelowS);
+    hideField(pilotHangsS);
+  } else if (S.pilotHangs !== 'plumb') hideField(pilotBelowS);
+  // Trimmed from the calage, the angle is the balance's answer, and the
+  // slider is only what the ribs are yawed for, when they are.
+  const yawOnly = S.balanceMode === 'calage';
+  const alphaS = slider(B, 'alphaDeg', yawOnly ? 'Ribs yawed for' : 'Angle of attack', 0, 15, 0.1, (v) => v.toFixed(1), '°');
+  const calageS = slider(B, 'calagePct', 'Calage', 25, 60, 0.5, (v) => v.toFixed(1), '% c');
+  if (yawOnly && S.zRotation !== 'auto') hideField(alphaS);
+  if (!yawOnly) hideField(calageS);
+  const typedOnly = [
+    numberField(B, 'cz', 'Cz at alpha', 0.01),
+    numberField(B, 'cx0a', 'Cx0 wing', 0.001),
+    numberField(B, 'cm', 'Cm', 0.001),
+    numberField(B, 'oswald', 'Oswald e', 0.01),
+  ];
+  if (S.balanceMode !== 'typed') typedOnly.forEach(hideField);
   numberField(B, 'cxPilot', 'Cx pilot', 0.001);
   numberField(B, 'cxLines', 'Cx lines', 0.001);
   checkField(B, 'cxLinesFromPlan', 'Fly on the drag of the lines in the plan');
@@ -1694,13 +1922,15 @@ function buildControls() {
     hint(B, a
       ? `The balance and the polar fly the wing as it sits in its arc: by the vortex lattice, against the same wing `
         + `laid flat, ${(a.liftRatio * 100).toFixed(0)}% of the lift at the same angle and `
-        + `${(a.inducedRatioAt(S.alphaDeg - (M.thin?.alphaL0Deg ?? 0)) * 100 - 100).toFixed(0)}% more induced drag at the same lift. `
+        + `${(a.inducedRatioAt((M.alphaFlown ?? S.alphaDeg) - (M.thin?.alphaL0Deg ?? 0)) * 100 - 100).toFixed(0)}% more induced drag at the same lift. `
         + 'Unticked, the wing flies flat, as the handbook\u2019s balance and the lifting line describe it.'
       : 'The balance and the polar fly the wing flat, as the handbook\u2019s balance and the lifting line describe it: '
         + 'ticked, they fly it in its arc, by the vortex lattice.');
   }
-  checkField(B, 'legacy', 'Match the 2012 example sheet');
-  hint(B, 'The default applies the moment equation as published in 4.2. The checkbox drops the aerodynamic and wing-drag moments, which is what the handbook\u2019s own worked example does.');
+  const legacyC = checkField(B, 'legacy', 'Match the 2012 example sheet');
+  if (S.balanceMode === 'typed') {
+    hint(B, 'The default applies the moment equation as published in 4.2. The checkbox drops the aerodynamic and wing-drag moments, which is what the handbook\u2019s own worked example does.');
+  } else hideField(legacyC);
   const balanceHost = el('div');
   balanceHost.id = 'balanceTable';
   B.append(balanceHost);
@@ -1731,9 +1961,10 @@ function buildControls() {
     slider(SP, 'trimTravel', 'Trimmer travel', 0, 150, 5, (v) => (v ? `${v.toFixed(0)} mm` : 'none'));
     hint(SP, 'The bar shortens the front riser by its travel, the rear by nothing and the risers between in '
       + 'proportion; a trimmer lets the rear riser out. Each turns the wing nose down. The speeds are the '
-      + 'balance\u2019s equations on the wing\u2019s own lift curve — the polar\u2019s, in its arc when it flies '
-      + 'in it — from the angle the balance assumes, not on its typed Cz, so its trim can differ from the '
-      + 'balance\u2019s; and they stop meaning anything where the lift falls to the collapse floor.');
+      + 'balance\u2019s equations on the wing\u2019s own polar — in its arc when it flies in it — from the '
+      + 'angle the balance flies at, so on the polar the first row is the balance\u2019s trim; balanced on '
+      + 'typed coefficients, the balance flies those and the bar the polar, and the two trims differ. They '
+      + 'stop meaning anything where the lift falls to the collapse floor.');
     const spHost = el('div');
     spHost.id = 'speedTable';
     SP.append(spHost);
@@ -2037,8 +2268,7 @@ function buildControls() {
 
   selectField(AS, 'lineBrand', 'Line materials from', (() => {
     try {
-      const cat = parseMaterialsTable(
-        typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+      const cat = lineCatalogue();
       return [['all', `every brand (${cat.length})`],
         ...materialBrands(cat).map((b) => [b.name, `${b.name} (${b.count})`])];
     } catch { return [['all', 'every brand']]; }
@@ -2061,6 +2291,12 @@ function buildControls() {
     ['kinked', 'kinked strength (conservative)'],
     ['new', 'new strength'],
   ]);
+  if (!(LEP?.design && LEP.geom?.ok)) {
+    checkField(AS, 'dhvLevels', 'Size each level to the DHV line calculation');
+    hint(AS, 'Each line is sized to its own load at the limit case. The DHV\u2019s calculation for EN 926-1 also asks '
+      + 'each level of the set, both sides, for 1400 daN and 14 times the weight after bending, and each level of '
+      + 'the brake for 150: ticked, the weakest lines of a level short of that are taken up a size until it holds.');
+  }
   if (LEP?.design && LEP.geom?.ok) {
     // Its loops are its own: each line type states one, and the lengths to
     // cut are the program's. A typed allowance was offered and ignored.
@@ -2083,7 +2319,17 @@ function buildControls() {
     ['convention', 'the handbook convention'],
     ['pressure', 'the section pressure distribution'],
   ]);
-  numberField(AS, 'cdCylinder', 'Line drag coefficient', 0.8, 1.4, 0.05);
+  selectField(AS, 'lineCd', 'Line drag coefficient', [
+    ['reynolds', 'each line\u2019s, from its Reynolds number'],
+    ['fixed', 'one for every line'],
+  ]);
+  const cdS = numberField(AS, 'cdCylinder', 'Every line\u2019s drag coefficient', 0.8, 1.4, 0.05);
+  if (S.lineCd !== 'fixed') hideField(cdS);
+  hint(AS, S.lineCd === 'fixed'
+    ? 'Every line at the coefficient typed, at its angle to the flow.'
+    : 'Each line at 1 + 10 Re^(-2/3), White\u2019s correlation for a cylinder, as LEparagliding takes it, on its own '
+      + 'diameter and the flow square to it at the speed flown \u2014 1.08 to 1.24 on the sets here \u2014 and its drag along '
+      + 'the flow as sin\u00b3 of its angle to it.');
   // What the billow from pressure is worked out at; a design that cuts its
   // own panels states its billow, and the control would change nothing.
   if (!ownCut) numberField(AS, 'sailTension', 'Sail tension across the cell (N/m)', 5, 500, 1);
@@ -2185,7 +2431,7 @@ function buildControls() {
           // A circle through the same projected span, whatever the arc type.
           projectedRatio: Math.min(0.99, Math.max(0.64, M.lobeM.spanRatio ?? S.projectedRatio)),
           layout: RISER_LAYOUTS[S.riserLayout] || RISER_LAYOUTS['A/B/C+D'],
-          alphaDeg: S.alphaDeg,
+          alphaDeg: M.alphaFlown ?? S.alphaDeg,
           ovalAmount: S.applyOval ? S.ovalAmount / 100 : 0,
           // The design's own riser, at every size: it is hardware.
           riserLengthM: M.riserM ?? 0.5,
@@ -2418,8 +2664,7 @@ function buildControls() {
     // and "will this cascade hold its trim" had no way to ask.
     if (!M.loads || !M.lengths) { setStatus('No loads to optimise.'); return; }
     try {
-      const cat = parseMaterialsTable(
-        typeof LINE_MATERIALS_TSV === 'string' ? LINE_MATERIALS_TSV : '');
+      const cat = lineCatalogue();
       const table = S.lineBrand === 'all' ? cat : lineTableFor(cat, { brand: S.lineBrand });
       const opt = optimiseLineSet(M.loads.tensions, {
         table, maxTypes: S.maxLineTypes, strengthBasis: S.lineStrength,
@@ -2664,7 +2909,7 @@ function buildControls() {
     try {
       save('leparagliding.txt', designToLep({
         wing: M.wing, airfoil: M.airfoil, name: S.name,
-        balance: M.balance, lineLengthM: S.lineLength,
+        balance: M.balance, lineLengthM: S.lineLength, riserLengthCm: (M.riserM ?? 0.5) * 100,
         airfoilFile: `${(M.airfoil.name || 'airfoil').replace(/\s+/g, '')}.txt`,
       }, LEP ? LEP.doc : null));
     } catch (e) { setStatus(`Could not write LEP file: ${e.message}`); }
@@ -2765,7 +3010,8 @@ function buildControls() {
   xg.append(polIn, polFile);
   F.append(xg);
   if (XPOLAR) {
-    hint(F, `Section polar from XFOIL: Re ${XPOLAR.reynolds ? XPOLAR.reynolds.toExponential(2) : '?'}, M ${XPOLAR.mach ?? '?'}, ${XPOLAR.points.length} points. The wing polar now uses measured section data.`);
+    hint(F, `Section polar from XFOIL: Re ${XPOLAR.reynolds ? XPOLAR.reynolds.toExponential(2) : '?'}, M ${XPOLAR.mach ?? '?'}, ${XPOLAR.points.length} points. The wing polar and the balance now fly on it: zero lift at ${XPOLAR.alphaL0Deg.toFixed(2)}° and Cm0 ${XPOLAR.cm0.toFixed(4)}`
+      + (XPOLAR.zeroLiftExtrapolated ? ', found along its lift slope, as it does not reach zero lift.' : '.'));
     button(F, 'Drop XFOIL polar', () => { XPOLAR = null; buildControls(); rebuild(); });
   } else {
     hint(F, 'Export the section and a command file at the current Reynolds and Mach number, run XFOIL, then import the polar back. Until then the section model is thin-airfoil theory plus a friction correlation — good for comparing, not for predicting.');
@@ -3759,6 +4005,19 @@ function drawSection() {
   c.path([cp, [cp[0], pilotPt[1]]], '#e8c547', 0.7, { dash: '2 4', opacity: 0.8 });
   c.dot(cp, '#e8c547', 3);
   c.text('Cp', cp, '#e8c547', 9, 'start', [5, -6]);
+  // Each force where it acts: the wing's own force through the point its
+  // lift's line meets its drag's, below the chord in the arc, and the
+  // wing's mass centre.
+  const act = b.acting;
+  if (act) {
+    const f = rot([act.cpPoint.backM, -act.cpPoint.downM]);
+    c.path([f, cp], '#e8c547', 0.7, { opacity: 0.8 });
+    c.dot(f, '#e8c547', 2.4);
+    c.text('F', f, '#e8c547', 9, 'end', [-5, 3]);
+    const wm = rot([act.wing.backM, -act.wing.downM]);
+    c.dot(wm, '#9aa7b0', 2.2);
+    c.text('m', wm, '#9aa7b0', 8, 'start', [4, 3]);
+  }
   // σ, not C: C is also a line row, and the two were drawn side by side.
   const cal = rot([b.calageMetres, 0]);
   c.dot(cal, '#e85bc4', 3);
@@ -3777,7 +4036,7 @@ function drawSection() {
   enablePanZoom('vp-section');
   const gap = (cp[0] - pilotPt[0]) * 100;
   document.getElementById('note-section').textContent =
-    `α ${S.alphaDeg.toFixed(1)}°  ·  θ ${b.thetaDeg.toFixed(2)}° nose down  ·  `
+    `α ${(M.alphaFlown ?? S.alphaDeg).toFixed(1)}°  ·  θ ${b.thetaDeg.toFixed(2)}° nose down  ·  `
     + `γ ${b.gammaDeg.toFixed(2)}°  ·  σ ${(b.calageFraction * 100).toFixed(1)}% c`
     + (own ? ` (the design hangs at ${own.calagePct.toFixed(1)}%, white)` : '')
     + `  ·  pilot ${H.toFixed(2)} m down, ${Math.abs(gap).toFixed(0)} cm `
@@ -3891,6 +4150,28 @@ function drawSpeedTable() {
   }
 }
 
+/** Where each force acts, as `balanceWhereForcesAct` has it, for the Balance table. */
+function actingRows(a) {
+  const c = (x) => `${(x * 100).toFixed(1)}% c`;
+  const pt = (q) => `${c(q.backM / a.chordM)} back, ${q.downM.toFixed(2)} m down`;
+  return [
+    ['— where each acts —', 'moments about the karabiners'],
+    ['Lift\u2019s line', `crosses the central chord at ${c(a.liftCrossingFraction)}, where the rule puts it at `
+      + `${c(a.ruleCpFraction)}: its strips\u2019 lift centred ${pt(a.liftCentroid)}, the section\u2019s Cm0 moving `
+      + `its line ${(a.liftLine.shiftM * 100).toFixed(1)} cm along the flow (vortex lattice)`, true],
+    ['Wing\u2019s drag', `profile at ${pt(a.profile)}, induced at ${pt(a.induced)}`],
+    ['Wing\u2019s force', `through ${pt(a.cpPoint)}, where its lift meets its drag: the point LEparagliding `
+      + 'asks a designer for'],
+    ['Wing\u2019s mass', `${pt(a.wing)}, from its own cloth`],
+    ['Lines\u2019 weight and drag', a.lines
+      ? `weight at ${pt(a.lines.mass)}, drag at ${pt(a.lines.drag)}, from the plan`
+      : 'by the rules: no plan has placed them'],
+    ['Pilot', `${a.pilot.belowM.toFixed(2)} m below the karabiners, `
+      + (a.pilot.hangs === 'free' ? `free to swing: ${a.pilot.leanDeg.toFixed(1)}\u00b0 behind plumb` : 'held plumb')],
+    ['Plumb under the pilot', c(a.plumbFraction)],
+  ];
+}
+
 function drawBalanceTable() {
   const host = document.getElementById('balanceTable');
   if (!host) return;
@@ -3904,18 +4185,34 @@ function drawBalanceTable() {
     ['Glide angle γ', b.gammaDeg.toFixed(2) + '°'],
     // θ = γ − α (handbook [10]): positive is nose DOWN.
     ['Attitude θ, nose down', b.thetaDeg.toFixed(2) + '°'],
+    // What it was flown on: the polar at the angle, the polar trimmed from
+    // the calage, or the typed coefficients.
+    ['Flown on', b.onPolar
+      ? `the wing's polar at ${b.onPolar.alphaDeg.toFixed(2)}°`
+        + (S.balanceMode === 'calage' && !b.trimProblem ? `, where a ${S.calagePct.toFixed(1)}% calage trims it` : '')
+        + `: Cz ${b.onPolar.CL.toFixed(3)}, induced ${b.onPolar.CDi.toFixed(4)}, profile ${b.onPolar.CDprofile.toFixed(4)}`
+      : `typed coefficients at ${S.alphaDeg.toFixed(1)}°: Cz ${S.cz.toFixed(2)}, Cx0 ${S.cx0a.toFixed(3)}, Cm ${S.cm.toFixed(3)}`, true],
+    ...(b.trimProblem ? [['Not trimmed', `${b.trimProblem}: flown at ${S.alphaDeg.toFixed(1)}° instead`, true]] : []),
+    ...(b.onPolar && M.section0
+      ? [['The section\u2019s Cm0', `${M.section0.cm0.toFixed(4)}, from ${M.section0.source}; zero-lift angle `
+        + `${M.section0.alphaL0Deg.toFixed(2)}°${M.section0.extrapolated ? ', along its lift slope' : ''}`]]
+      : []),
     ['Cz 3D', b.cz3D.toFixed(3)],
-    ['The arc', b.arc
-      ? `lift ×${b.arc.liftRatio.toFixed(3)}, induced drag ×${b.arc.inducedRatio.toFixed(3)} at the same lift (vortex lattice)`
-      : 'not flown: the wing is taken flat'],
-    // The balance is the handbook's, from the typed section coefficients and
-    // the typed Oswald factor. The planform's own factor comes out of the
-    // lifting line behind the polar; it is shown beside the one used, not
-    // substituted for it, so the two can be compared.
-    ['Oswald e', `${S.oswald.toFixed(2)} typed`
-      + (M.polar?.bestGlide && Number.isFinite(M.polar.bestGlide.oswald)
-        ? `; ${M.polar.arc ? 'the polar\'s, in the arc on the flat span,' : 'the planform\'s lifting line gives'} `
-          + `${M.polar.bestGlide.oswald.toFixed(3)}` : '')],
+    ['The arc', b.onPolar
+      ? (M.polar?.arc ? `lift ×${M.polar.arc.liftRatio.toFixed(3)}, in the polar it flies on (vortex lattice)`
+        : 'not flown: the polar is the flat wing\'s')
+      : (b.arc
+        ? `lift ×${b.arc.liftRatio.toFixed(3)}, induced drag ×${b.arc.inducedRatio.toFixed(3)} at the same lift (vortex lattice)`
+        : 'not flown: the wing is taken flat')],
+    // Typed, the balance takes the typed Oswald factor, and the polar's is
+    // shown beside it so the two can be compared; on the polar it is the
+    // polar's.
+    ['Oswald e', b.onPolar
+      ? `${b.onPolar.oswald.toFixed(3)}, the polar's on the flat span`
+      : `${S.oswald.toFixed(2)} typed`
+        + (M.polar?.bestGlide && Number.isFinite(M.polar.bestGlide.oswald)
+          ? `; ${M.polar.arc ? 'the polar\'s, in the arc on the flat span,' : 'the planform\'s lifting line gives'} `
+            + `${M.polar.bestGlide.oswald.toFixed(3)}` : '')],
     ['CxT', b.cxTotal.toFixed(4)],
     ['— induced', (b.dragBreakdown.induced * 100).toFixed(1) + '%'],
     ['— lines', (b.dragBreakdown.lines * 100).toFixed(1) + '%'],
@@ -3923,11 +4220,17 @@ function drawBalanceTable() {
     ...(M.lineDragOwn && Number.isFinite(M.lineDragOwn.cxLines)
       ? [['Cx lines of this lineset', `${M.lineDragOwn.cxLines.toFixed(4)} — `
         + `${(M.lineDragOwn.dragAreaM2).toFixed(3)} m² of drag area, mean `
-        + `${M.lineDragOwn.meanDiameterMM.toFixed(2)} mm`]]
+        + `${M.lineDragOwn.meanDiameterMM.toFixed(2)} mm, Cd ${M.lineDragOwn.cdMean.toFixed(3)} `
+        + (M.lineDragOwn.cdBasis === 'reynolds' ? 'by each line\u2019s Reynolds number' : 'typed')
+        + (M.lineDragOwn.risersDragAreaM2 > 0
+          ? `; its risers ${M.lineDragOwn.risersDragAreaM2.toFixed(3)} m² of it`
+          : M.lineDragOwn.risersUncounted.length ? '; its risers\u2019 webbing not counted' : '')]]
       : []),
     ['— pilot', (b.dragBreakdown.pilot * 100).toFixed(1) + '%'],
     ['— profile', (b.dragBreakdown.profile * 100).toFixed(1) + '%'],
-    ['Centre of pressure', (b.xcpFraction * 100).toFixed(1) + '% c'],
+    ['Centre of pressure', (b.xcpFraction * 100).toFixed(1) + '% c'
+      + (b.acting ? ': where the wing\u2019s own force, its lift and drag, crosses the central chord' : '')],
+    ...(b.acting ? actingRows(b.acting) : []),
     ['Calage', b.calageMetres.toFixed(3) + ' m', true],
     ['Calage fraction', (b.calageFraction * 100).toFixed(1) + '% c', true],
     ['Pilot below the wing', `${M.hangDepthM.toFixed(2)} m (lines + ${(M.riserM * 100).toFixed(0)} cm risers)`],
@@ -3960,6 +4263,14 @@ function drawBalanceTable() {
       ['Attitude (assiette)', `${g.assietteDeg.toFixed(2)}°`],
       ['Angle of attack', `${g.aoaDeg.toFixed(2)}°`],
     );
+    const dt = M.designTrim;
+    if (dt) {
+      rows.push(['Its calage on this polar', dt.error
+        ? `does not trim: ${dt.error}`
+        : `trims at ${dt.onPolar.alphaDeg.toFixed(2)}° (${dt.onPolar.alphaDeg >= g.aoaDeg ? '+' : ''}`
+          + `${(dt.onPolar.alphaDeg - g.aoaDeg).toFixed(2)}° on its own), Cz ${dt.cz3D.toFixed(3)}, `
+          + `${dt.speedKMH.toFixed(1)} km/h, glide ${dt.glideRatio.toFixed(2)}`, true]);
+    }
     // Its output's section 1, as printed, and what each label describes
     // where the figure is not that.
     const mp = LEP.main;
@@ -4209,6 +4520,38 @@ function drawLinePlan() {
   }
 }
 
+/**
+ * The line set's strength level by level, against the DHV's line
+ * calculation for EN 926-1 (`strengthByLevel`): each level's strengths after
+ * bending, both sides, against 1400 daN and 14 times the weight; the brake
+ * levels against 150 daN.
+ */
+function drawLevelStrength(host) {
+  const v = M.levelStrength;
+  if (!v?.suspension) return;
+  const own = M.linePlan?.source === 'LEparagliding';
+  host.append(el('div', 'hint', `Strength by level, as the DHV calculates a line set for EN 926-1: each level's `
+    + `lines ${own ? 'at the strength the design gives them' : 'at their strength after bending'}, both sides, `
+    + `a branch that has ended counted again above it; at least ${v.rule.levelMinDaN} daN and ${v.rule.levelMinG} `
+    + `times the ${v.maxWeightKg.toFixed(0)} kg all-up weight set, and every line ${v.rule.lineMinDaN} daN.`));
+  const t = el('table', 'tbl');
+  const head = el('tr');
+  for (const h of ['level', 'lines', 'carried up', 'daN', 'g']) head.append(el('th', '', h));
+  t.append(head);
+  const row = (label, x, min) => {
+    const tr = el('tr', x.sumDaN < min || (Number.isFinite(x.g) && label !== 'brake' && x.g < v.rule.levelMinG) ? 'em' : null);
+    for (const c of [label === 'brake' ? `brake ${x.level}` : String(x.level), String(x.lines), String(x.carried),
+      x.sumDaN.toFixed(0), Number.isFinite(x.g) ? x.g.toFixed(1) : '—']) tr.append(el('td', '', c));
+    t.append(tr);
+  };
+  for (const x of v.suspension.levels) row('suspension', x, v.rule.levelMinDaN);
+  for (const x of v.brake?.levels ?? []) row('brake', x, v.rule.brakeLevelMinDaN);
+  host.append(t);
+  host.append(el('div', v.ok ? 'muted' : 'note', v.ok
+    ? `Every level holds; the weakest line, ${v.suspension.weakest.name}, ${v.suspension.weakest.strengthDaN} daN.`
+    : `Short of the calculation: ${v.problems.join('; ')}.`));
+}
+
 /** The cascade as a table: every line, its level, length and load. */
 function drawCascadeTable() {
   // Its own place, at the foot of the Lines group.
@@ -4269,6 +4612,7 @@ function drawCascadeTable() {
     t.append(tr);
   }
   host.append(t);
+  drawLevelStrength(host);
   if (own && M.lineSelection?.overloaded?.length) {
     host.append(el('div', 'note',
       `${M.lineSelection.overloaded.length} of the design's lines are past `
@@ -5269,7 +5613,7 @@ function drawRib() {
     if (it && sectionHere?.points && it.end > it.start) {
       const opening = [-it.end, -it.start];
       // The rib's own angle of attack: the wing's, plus its washin.
-      const trimDeg = S.alphaDeg + (rib.alphaDeg || 0);
+      const trimDeg = (M.alphaFlown ?? S.alphaDeg) + (rib.alphaDeg || 0);
       const at = (a) => intakeFeed(sectionHere, a, opening, { thinAirfoilFn: thinAirfoil });
       const feed = { bar: at(trimDeg - 3), trim: at(trimDeg), slow: at(trimDeg + 6) };
       const where = (f) => `${(Math.abs(f.stagnation) * 100).toFixed(1)}% `

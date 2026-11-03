@@ -107,8 +107,12 @@ if (!errors.length) {
   const S2 = globalThis.__S;
   const texts = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) texts(c, out); return out; };
   // The 2012 example sheet has no arc to fly, and a case above left it on.
+  // Typed coefficients, where the arc is the balance's own ratio: on the
+  // polar it is in the polar, at the angle less its shift.
   const legacyWas = S2.legacy;
+  const modeWas = S2.balanceMode;
   S2.legacy = false;
+  S2.balanceMode = 'typed';
   globalThis.__rebuild(); globalThis.__controls();
   const m1 = globalThis.__getM();
   const hint = texts(document.getElementById('g-balance')).find((t) => /fly the wing as it sits in its arc/.test(t)) || '';
@@ -116,7 +120,7 @@ if (!errors.length) {
   S2.arcInFlight = false; globalThis.__rebuild(); globalThis.__controls();
   const m0 = globalThis.__getM();
   const rowFlat = (() => { const t = texts(document.getElementById('balanceTable')); const i = t.indexOf('The arc'); return i >= 0 ? t[i + 1] : ''; })();
-  S2.arcInFlight = true; S2.legacy = legacyWas; globalThis.__rebuild(); globalThis.__controls();
+  S2.arcInFlight = true; S2.legacy = legacyWas; S2.balanceMode = modeWas; globalThis.__rebuild(); globalThis.__controls();
   const ok = m1.arc && m1.balance.arc && m1.polar.arc && !m0.arc && !m0.balance.arc && !m0.polar.arc
     && m1.arc.liftRatio > 0.7 && m1.arc.liftRatio < 0.9
     && Math.abs(m1.balance.cz3D / m0.balance.cz3D - m1.arc.liftRatio) < 1e-9
@@ -130,6 +134,244 @@ if (!errors.length) {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'} the wing flies in its arc: lift ×${m1.arc?.liftRatio.toFixed(3)}, trim `
     + `${m0.balance.speedKMH.toFixed(1)} km/h flat, ${m1.balance.speedKMH.toFixed(1)} in its arc; best glide `
     + `${m0.polar.bestGlide.glideRatio.toFixed(2)} flat, ${m1.polar.bestGlide.glideRatio.toFixed(2)}`);
+}
+// The balance on the wing's own polar: at the angle, or trimmed from the
+// calage, and the typed coefficients only when asked for. On the polar the
+// speed system's first row is the balance's own trim.
+{
+  const S2 = globalThis.__S;
+  const texts = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) texts(c, out); return out; };
+  const rowOf = (label) => { const t = texts(document.getElementById('balanceTable')); const i = t.indexOf(label); return i >= 0 ? t[i + 1] : ''; };
+  const shown = (label) => {
+    const n = globalThis.__inPage().filter((x) => x.attrs && x.attrs['aria-label'] === label).pop();
+    return !!n && !((n._field || n).style && (n._field || n).style.display === 'none');
+  };
+  const keep = { balanceMode: S2.balanceMode, calagePct: S2.calagePct, alphaDeg: S2.alphaDeg, legacy: S2.legacy, speedTravel: S2.speedTravel };
+  const bad = [];
+  S2.legacy = false; S2.speedTravel = 150;
+  // At the angle: the polar's lift, drag and span efficiency at it.
+  S2.balanceMode = 'polar'; globalThis.__rebuild(); globalThis.__controls();
+  const mp = globalThis.__getM();
+  const bp = mp.balance;
+  if (!(bp.onPolar && bp.onPolar.alphaDeg === S2.alphaDeg && mp.alphaFlown === S2.alphaDeg)) bad.push('the polar balance is not at the angle asked');
+  const p0 = mp.polar.points.find((x) => x.alphaDeg === Math.floor(S2.alphaDeg));
+  const p1 = mp.polar.points.find((x) => x.alphaDeg === Math.floor(S2.alphaDeg) + 1);
+  const f = S2.alphaDeg - Math.floor(S2.alphaDeg);
+  if (!(p0 && p1 && Math.abs(bp.cz3D - (p0.CL + f * (p1.CL - p0.CL))) < 1e-12)) bad.push(`its Cz ${bp.cz3D} is not the polar's at ${S2.alphaDeg}°`);
+  if (!(mp.speedBar && !mp.speedBar.error && Math.abs(mp.speedBar.rows[0].speedKMH - bp.speedKMH) < 0.01)) {
+    bad.push(`the bar's trim ${mp.speedBar?.rows?.[0]?.speedKMH} is not the balance's ${bp.speedKMH}`);
+  }
+  if (!/^the wing's polar at \d+\.\d\d°: Cz /.test(rowOf('Flown on'))) bad.push(`"Flown on" says "${rowOf('Flown on')}"`);
+  if (shown('Cz at alpha') || shown('Oswald e') || !shown('Angle of attack') || shown('Calage')) bad.push('the polar mode shows the wrong fields');
+  // From the calage: the angle is the answer, and the line plan hangs there.
+  S2.balanceMode = 'calage'; S2.calagePct = 39; globalThis.__rebuild(); globalThis.__controls();
+  const mc = globalThis.__getM();
+  const bc = mc.balance;
+  if (!(Math.abs(bc.calageFraction - 0.39) < 1e-4 && !bc.trimProblem && bc.onPolar.alphaDeg !== S2.alphaDeg && mc.alphaFlown === bc.onPolar.alphaDeg)) {
+    bad.push(`a 39% calage did not trim: ${bc.calageFraction}, ${bc.trimProblem}`);
+  }
+  if (!new RegExp('where a 39\\.0% calage trims it').test(rowOf('Flown on'))) bad.push(`"Flown on" says "${rowOf('Flown on')}" from the calage`);
+  // The angle is the answer; the slider is only what the ribs are yawed
+  // for, and only when they are.
+  const yawWas = S2.zRotation;
+  S2.zRotation = 'none'; globalThis.__rebuild(); globalThis.__controls();
+  const hiddenUnyawed = !shown('Angle of attack') && !shown('Ribs yawed for') && shown('Calage');
+  S2.zRotation = 'auto'; globalThis.__rebuild(); globalThis.__controls();
+  const shownYawed = !shown('Angle of attack') && shown('Ribs yawed for') && shown('Calage');
+  S2.zRotation = yawWas; globalThis.__rebuild(); globalThis.__controls();
+  if (!(hiddenUnyawed && shownYawed)) bad.push(`the calage mode shows the wrong fields (unyawed ${hiddenUnyawed}, yawed ${shownYawed})`);
+  if (!(mc.speedBar && !mc.speedBar.error && mc.speedBar.rows[0].alphaDeg === bc.onPolar.alphaDeg)) bad.push('the bar does not start from the trimmed angle');
+  // A calage the wing cannot trim at: said, and flown at the angle.
+  S2.calagePct = 10; globalThis.__rebuild(); globalThis.__controls();
+  const bu = globalThis.__getM().balance;
+  if (!(bu.trimProblem && /outside what this wing can trim at/.test(bu.trimProblem) && bu.onPolar.alphaDeg === S2.alphaDeg
+    && /flown at \d+\.\d° instead/.test(rowOf('Not trimmed')))) bad.push(`an untrimmable calage was not said: ${bu.trimProblem}`);
+  // Typed, the handbook's numbers are on offer and the balance takes them.
+  S2.balanceMode = 'typed'; globalThis.__rebuild(); globalThis.__controls();
+  const bt = globalThis.__getM().balance;
+  if (bt.onPolar || !shown('Cz at alpha') || !shown('Oswald e') || !/^typed coefficients at /.test(rowOf('Flown on'))) bad.push('the typed mode is not typed');
+  Object.assign(S2, keep); globalThis.__rebuild(); globalThis.__controls();
+  if (bad.length) errors.push(`the balance modes: ${bad.join('; ')}`);
+  console.log(`  ${bad.length ? 'FAIL' : 'ok  '} the balance on the polar: ${bp.speedKMH.toFixed(1)} km/h at ${S2.alphaDeg}°, `
+    + `the bar's trim with it; a 39% calage trims at ${bc.onPolar.alphaDeg.toFixed(2)}°; typed on request`);
+}
+// Every force where it acts: on the polar the balance takes moments about
+// the karabiners with the lift on its own line in the arc, the drags and the
+// weights at their own centres and the pilot below the karabiners, the
+// lines' from the plan; the handbook's rules on request, and the typed
+// coefficients on the rules alone.
+{
+  const S2 = globalThis.__S;
+  const texts = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) texts(c, out); return out; };
+  const rowOf = (label) => { const t = texts(document.getElementById('balanceTable')); const i = t.indexOf(label); return i >= 0 ? t[i + 1] : ''; };
+  const shown = (label) => {
+    const n = globalThis.__inPage().filter((x) => x.attrs && x.attrs['aria-label'] === label).pop();
+    return !!n && !((n._field || n).style && (n._field || n).style.display === 'none');
+  };
+  const keep = {
+    balanceMode: S2.balanceMode, balanceForces: S2.balanceForces, pilotBelow: S2.pilotBelow, pilotHangs: S2.pilotHangs,
+    calagePct: S2.calagePct, legacy: S2.legacy,
+  };
+  const bad = [];
+  const go = () => { globalThis.__rebuild(); globalThis.__controls(); return globalThis.__getM(); };
+  S2.legacy = false;
+  S2.balanceMode = 'polar'; S2.balanceForces = 'acting'; S2.pilotHangs = 'free'; S2.pilotBelow = 0.2;
+  const ma = go();
+  const ba = ma.balance;
+  const a = ba.acting;
+  if (!(ba.mode === 'where-forces-act' && a && a.lines && !a.linesByRule && Math.abs(ba.momentResidual) < 1e-6)) {
+    bad.push(`the default balance is not every force where it acts: ${ba.mode}, lines ${a?.lines ? 'from the plan' : 'by rule'}`);
+  }
+  // The plan is hung where this balance hangs the pilot.
+  if (!(Math.abs(ma.linePlan.karabiner[0] - ma.wing.ribs[0].xLE - ba.calageMetres) < 1e-9)) {
+    bad.push(`the plan hangs at ${ma.linePlan.karabiner[0]} where the balance says ${ba.calageMetres}`);
+  }
+  if (!(shown('Forces act') && shown('The pilot hangs'))) bad.push('its fields are not shown');
+  if (!/^crosses the central chord at \d+\.\d% c, where the rule puts it at \d+\.\d% c/.test(rowOf('Lift\u2019s line'))
+    || !/from its own cloth$/.test(rowOf('Wing\u2019s mass')) || !/from the plan$/.test(rowOf('Lines\u2019 weight and drag'))
+    || !/^0\.20 m below the karabiners, free to swing: \d\.\d° behind plumb$/.test(rowOf('Pilot'))) {
+    bad.push(`the Balance table does not say where each acts: "${rowOf('Lift\u2019s line').slice(0, 60)}" / "${rowOf('Pilot')}"`);
+  }
+  // Free to swing, how far below he hangs does not move the balance, and
+  // the field is not offered; held plumb it does, and is.
+  S2.pilotBelow = 0.4;
+  const bFreeLow = go().balance;
+  const offeredFree = shown('Pilot below the karabiners');
+  S2.pilotBelow = 0.2; S2.pilotHangs = 'plumb';
+  const bPlumb = go().balance;
+  const offeredPlumb = shown('Pilot below the karabiners');
+  const plumbRow = rowOf('Pilot');
+  S2.pilotBelow = 0.4;
+  const bPlumbLow = go().balance;
+  S2.pilotBelow = 0.2; S2.pilotHangs = 'free';
+  if (!(Math.abs(bFreeLow.calageFraction - ba.calageFraction) < 1e-12 && !offeredFree && offeredPlumb
+    && bPlumb.calageFraction > ba.calageFraction && bPlumbLow.calageFraction > bPlumb.calageFraction
+    && /^0\.20 m below the karabiners, held plumb$/.test(plumbRow))) {
+    bad.push(`the pilot's hang: free ${ba.calageFraction} and 0.4 m down ${bFreeLow.calageFraction} (field ${offeredFree}); `
+      + `plumb ${bPlumb.calageFraction}, 0.4 m ${bPlumbLow.calageFraction} (field ${offeredPlumb}); "${plumbRow}"`);
+  }
+  S2.balanceForces = 'rules';
+  const mr = go();
+  if (!(mr.balance.mode === 'handbook-4.2' && !mr.balance.acting && !shown('Pilot below the karabiners') && !shown('The pilot hangs')
+    && shown('Forces act') && rowOf('Lift\u2019s line') === '' && mr.balance.speedKMH === ba.speedKMH)) {
+    bad.push(`the rules on request are not the rules: ${mr.balance.mode}`);
+  }
+  S2.balanceMode = 'typed';
+  const mt = go();
+  if (!(mt.balance.mode === 'handbook-4.2' && !shown('Forces act') && !shown('Pilot below the karabiners'))) bad.push('the typed balance is not on the rules');
+  // Trimmed from the calage on it.
+  S2.balanceMode = 'calage'; S2.balanceForces = 'acting'; S2.calagePct = 45;
+  const mc = go();
+  if (!(mc.balance.mode === 'where-forces-act' && !mc.balance.trimProblem && Math.abs(mc.balance.calageFraction - 0.45) < 1e-4
+    && mc.alphaFlown === mc.balance.onPolar.alphaDeg)) {
+    bad.push(`a 45% calage does not trim on it: ${mc.balance.trimProblem || mc.balance.calageFraction}`);
+  }
+  Object.assign(S2, keep); go();
+  if (bad.length) errors.push(`every force where it acts: ${bad.join('; ')}`);
+  console.log(`  ${bad.length ? 'FAIL' : 'ok  '} every force where it acts: at ${S2.alphaDeg}° the lift's line crosses the chord at `
+    + `${(a.liftCrossingFraction * 100).toFixed(1)}% (the rule's ${(a.ruleCpFraction * 100).toFixed(1)}%), calage `
+    + `${(ba.calageFraction * 100).toFixed(1)}% where the rules say ${(mr.balance.calageFraction * 100).toFixed(1)}%; plumb `
+    + `${(bPlumb.calageFraction * 100).toFixed(1)}%; a 45% calage trims at ${mc.balance.onPolar.alphaDeg.toFixed(2)}°`);
+}
+// Each line's drag by its own Reynolds number, or one typed for every line;
+// the tool's own risers said not to be counted; and a loaded XFOIL polar's
+// moment and zero-lift angle in the balance.
+{
+  const S2 = globalThis.__S;
+  const texts = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) texts(c, out); return out; };
+  const rowOf = (label) => { const t = texts(document.getElementById('balanceTable')); const i = t.indexOf(label); return i >= 0 ? t[i + 1] : ''; };
+  const shown = (label) => {
+    const n = globalThis.__inPage().filter((x) => x.attrs && x.attrs['aria-label'] === label).pop();
+    return !!n && !((n._field || n).style && (n._field || n).style.display === 'none');
+  };
+  const keep = { lineCd: S2.lineCd, cdCylinder: S2.cdCylinder, balanceMode: S2.balanceMode };
+  const bad = [];
+  const go = () => { globalThis.__rebuild(); globalThis.__controls(); return globalThis.__getM(); };
+  S2.balanceMode = 'polar'; S2.lineCd = 'reynolds';
+  const mr = go();
+  const dr = mr.lineDragOwn;
+  if (!(dr.cdBasis === 'reynolds' && dr.cdMean > 1.1 && dr.cdMean < 1.3 && dr.risersUncounted.length === mr.linePlan.riserWebbing.length
+    && /by each line\u2019s Reynolds number; its risers\u2019 webbing not counted$/.test(rowOf('Cx lines of this lineset'))
+    && shown('Line drag coefficient') && !shown('Every line\u2019s drag coefficient'))) {
+    bad.push(`by Reynolds number: ${dr.cdBasis}, Cd ${dr.cdMean}, "${rowOf('Cx lines of this lineset')}"`);
+  }
+  S2.lineCd = 'fixed'; S2.cdCylinder = 1.0;
+  const mf = go();
+  if (!(mf.lineDragOwn.cdBasis === 'given' && mf.lineDragOwn.cdMean === 1 && shown('Every line\u2019s drag coefficient')
+    && /Cd 1\.000 typed/.test(rowOf('Cx lines of this lineset')))) bad.push(`typed: ${mf.lineDragOwn.cdBasis}, ${mf.lineDragOwn.cdMean}`);
+  Object.assign(S2, keep);
+  // A polar in XFOIL's format, its numbers made up near a NACA 4415's: its
+  // Cm0 and zero-lift angle in the balance.
+  const polarText = [
+    '', '       XFOIL         Version 6.99', '', ' Calculated polar for: NACA 4415', '',
+    ' 1 1 Reynolds number fixed          Mach number fixed', '',
+    ' xtrf =   1.000 (top)        1.000 (bottom)', ' Mach =   0.030     Re =     1.500 e 6     Ncrit =   7.000', '',
+    '  alpha    CL        CD       CDp       CM     Top_Xtr  Bot_Xtr', ' ------- -------- --------- --------- -------- ------- -------',
+    '  -4.000  -0.0121   0.00821   0.00295  -0.0912  0.6512  0.2011', '  -2.000   0.2118   0.00755   0.00241  -0.0928  0.6011  0.2544',
+    '   0.000   0.4361   0.00731   0.00218  -0.0941  0.5433  0.3122', '   2.000   0.6598   0.00752   0.00236  -0.0950  0.4712  0.3901',
+    '   4.000   0.8811   0.00821   0.00301  -0.0955  0.3855  0.4899', '   6.000   1.0977   0.00949   0.00426  -0.0952  0.2901  0.6011',
+    '   8.000   1.3021   0.01184   0.00655  -0.0931  0.1855  0.7122', '  10.000   1.4655   0.01655   0.01118  -0.0872  0.0912  0.8011',
+  ].join('\n');
+  S2.balanceMode = 'polar';
+  const m0 = go();
+  const xp = globalThis.__parsePolar(polarText);
+  globalThis.__setXPOLAR(xp);
+  const mx = go();
+  const rowX = rowOf('The section\u2019s Cm0');
+  // Swept from 0°, it never reaches zero lift: found along its lift slope,
+  // where its first angle was taken for it.
+  const from0 = globalThis.__parsePolar(polarText.split('\n').filter((l) => !/^\s+-[42]\.000\s/.test(l)).join('\n'));
+  globalThis.__setXPOLAR(from0);
+  const m00 = go();
+  const row00 = rowOf('The section\u2019s Cm0');
+  globalThis.__setXPOLAR({ ...from0, alphaL0Deg: from0.points[0].alphaDeg, cm0: from0.points[0].cm, zeroLiftExtrapolated: false });
+  const mFirst = go();
+  globalThis.__setXPOLAR(null);
+  const mb = go();
+  if (!(m0.section0.source === 'thin-aerofoil theory' && mx.section0.source === 'XFOIL' && mx.section0.cm0 === xp.cm0
+    && /^-0\.0913, from XFOIL; zero-lift angle -3\.89°$/.test(rowX) && mx.balance.calageFraction !== m0.balance.calageFraction
+    && mb.section0.source === 'thin-aerofoil theory' && mb.balance.calageFraction === m0.balance.calageFraction)) {
+    bad.push(`the XFOIL moment: ${m0.section0.source} -> ${mx.section0.source}, "${rowX}"`);
+  }
+  const off00 = Math.abs(m00.balance.calageFraction - mx.balance.calageFraction);
+  const offFirst = Math.abs(mFirst.balance.calageFraction - mx.balance.calageFraction);
+  if (!(m00.section0.extrapolated && /, along its lift slope$/.test(row00) && !/along/.test(rowX)
+    && Math.abs(m00.section0.alphaL0Deg - mx.section0.alphaL0Deg) < 0.1 && off00 < 0.005 && offFirst > 4 * off00)) {
+    bad.push(`a polar swept from 0°: "${row00}", calage ${off00} off the whole polar's, its first angle ${offFirst}`);
+  }
+  Object.assign(S2, keep); go();
+  if (bad.length) errors.push(`line drag and the section's moment: ${bad.join('; ')}`);
+  console.log(`  ${bad.length ? 'FAIL' : 'ok  '} each line's drag by its Reynolds number, Cd ${dr.cdMean.toFixed(3)} over the default set, `
+    + `typed on request; its risers said not to be counted; an XFOIL polar's Cm0 ${xp.cm0.toFixed(4)} in the balance, where `
+    + `thin-aerofoil theory says ${m0.section0.cm0.toFixed(4)}; one swept from 0° finds its zero lift along its lift slope, `
+    + `its calage ${(off00 * 100).toFixed(2)}% of chord from the whole polar's, where its first angle put it ${(offFirst * 100).toFixed(2)}%`);
+}
+// The line set level by level, as the DHV calculates it for EN 926-1: the
+// default wing's set is sized to it, the Lines group shows every level, and
+// unticked, its mains and its brake fall short. An imported design's own set
+// is shown against it and never resized.
+{
+  const S2 = globalThis.__S;
+  const texts = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) texts(c, out); return out; };
+  const keep = { dhvLevels: S2.dhvLevels, lineBrand: S2.lineBrand };
+  S2.dhvLevels = true; S2.lineBrand = 'all';
+  globalThis.__rebuild(); globalThis.__controls();
+  const on = globalThis.__getM();
+  const shownOn = texts(document.getElementById('cascadeTable'));
+  S2.dhvLevels = false; globalThis.__rebuild(); globalThis.__controls();
+  const off = globalThis.__getM();
+  const shownOff = texts(document.getElementById('cascadeTable'));
+  Object.assign(S2, keep); globalThis.__rebuild(); globalThis.__controls();
+  const sizedUp = on.lineSelection.levelSized;
+  const ok = on.levelStrength?.ok && sizedUp > 0 && off.levelStrength && !off.levelStrength.ok
+    && shownOn.some((t) => /as the DHV calculates a line set for EN 926-1/.test(t)) && shownOn.some((t) => /^Every level holds/.test(t))
+    && shownOff.some((t) => /^Short of the calculation: /.test(t));
+  if (!ok) {
+    errors.push(`the DHV line calculation is not in the interface as it should be: on ${on.levelStrength?.ok} (${sizedUp} sized up), `
+      + `off ${off.levelStrength?.ok}; ${shownOff.filter((t) => /Short|DHV/.test(t)).join(' | ').slice(0, 200)}`);
+  }
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} the line set level by level, as the DHV calculates it: ${sizedUp} lines sized up to hold; `
+    + `unticked, ${off.levelStrength?.problems.join('; ')}`);
 }
 // The speed system in the interface: the wing across the bar on its own
 // lift curve, the trimmers with it, and nothing when the bar has no travel.
@@ -960,6 +1202,44 @@ try {
       console.log(`  ok   and its own table of risers and calage as its 3.28 prints it (${cvG.speedPivotLast.length} rows to `
         + `${cvG.speedPivotLast[cvG.speedPivotLast.length - 1].alphaDeg.toFixed(2)}°), and its section 1 as printed: `
         + 'a 2.81 m arrow for its 2.94, 6.25 m karabiners to tip for 6.47');
+      // Every force where it acts, on its own lines: their weight and drag
+      // centred where its program centres them, and at its own angle the
+      // balance hangs it within a point of its own calage, where the rules
+      // hang it 7.5 points forward. Its pilot flies on his own drag.
+      {
+        const keepG = { balanceMode: S3.balanceMode, balanceForces: S3.balanceForces };
+        S3.balanceMode = 'polar'; S3.balanceForces = 'acting';
+        globalThis.__rebuild();
+        const mg = globalThis.__getM();
+        const lepG = globalThis.__getLEP();
+        const own = lepG?.balance?.lines?.massCentreM;
+        const la = mg.linesActing;
+        S3.balanceForces = 'rules';
+        globalThis.__rebuild();
+        const rulesG = globalThis.__getM().balance;
+        Object.assign(S3, keepG);
+        globalThis.__rebuild();
+        const ownDrag = lepG?.balance?.lines?.dragCentreM;
+        const okG = S3.pilotBelow === 0.2 && S3.alphaDeg === 4.51 && own && la && ownDrag
+          && Math.abs(la.mass.backM - own.y) < 0.003 && Math.abs(la.mass.downM - own.z) < 0.003
+          && Math.abs(la.drag.downM - ownDrag.z) < 0.005
+          && Math.abs(S3.cxPilot - (0.6 * 0.438) / lepG.balance.flatAreaM2) < 1e-5
+          && Math.abs(mg.balance.calageFraction - 0.3236) < 0.002 && Math.abs(rulesG.calageFraction - 0.2548) < 0.003
+          && mg.designTrim && !mg.designTrim.error && Math.abs(mg.designTrim.onPolar.alphaDeg - 4.63) < 0.05;
+        if (!okG) {
+          console.log(`  FAIL the gnuC2-23, every force where it acts: pilot ${S3.pilotBelow} m below, Cx ${S3.cxPilot}, lines' weight at `
+            + `${la?.mass?.backM?.toFixed(4)}/${la?.mass?.downM?.toFixed(4)} against its program's ${own?.y?.toFixed(4)}/${own?.z?.toFixed(4)}, `
+            + `drag ${la?.drag?.downM?.toFixed(3)} against ${ownDrag?.z?.toFixed(3)}; `
+            + `calage at ${S3.alphaDeg}° ${(mg.balance.calageFraction * 100).toFixed(2)}% (rules ${(rulesG.calageFraction * 100).toFixed(2)}%); `
+            + `its 33% trims at ${mg.designTrim?.onPolar?.alphaDeg ?? mg.designTrim?.error}`);
+          process.exit(1);
+        }
+        console.log(`  ok   and every force where it acts, on its own lines: their weight within `
+          + `${(Math.max(Math.abs(la.mass.backM - own.y), Math.abs(la.mass.downM - own.z)) * 1000).toFixed(1)} mm of where its program `
+          + `centres it and their drag within ${(Math.abs(la.drag.downM - ownDrag.z) * 1000).toFixed(1)} mm; its pilot on his own drag; `
+          + `at its own ${S3.alphaDeg}° a calage of ${(mg.balance.calageFraction * 100).toFixed(2)}% against its 33% `
+          + `(the rules ${(rulesG.calageFraction * 100).toFixed(1)}%), and its 33% trims at ${mg.designTrim.onPolar.alphaDeg.toFixed(2)}°`);
+      }
     }
 
     // A damaged design file loads what it can and says what it could not:
@@ -2024,8 +2304,12 @@ try {
       console.log(`  ok   and their bills come to a sane share of the published weight (${seen.join(', ')}); `
         + `an ultralight in the default cloths (${light.pct}%) and a single-surface wing (${skin.pct}%) are said to be over`);
     }
-    // And the free body does catch the disagreement the legacy sheet makes.
+    // And the free body does catch the disagreement the legacy sheet makes:
+    // its calage does not hang the lines, and the wing is drawn where they
+    // hang. (The sheet is only flown on typed coefficients.)
+    const modeWasL = S1.balanceMode;
     S1.legacy = true;
+    S1.balanceMode = 'typed';
     globalThis.__rebuild();
     const legacyBody = globalThis.__getM().freeBody;
     if (!legacyBody || legacyBody.ok || !/hanging from/.test(legacyBody.note)) {
@@ -2034,6 +2318,7 @@ try {
       process.exit(1);
     }
     console.log('  ok   and one hung away from where its balance solves is reported as such');
+    S1.balanceMode = modeWasL;
     S1.legacy = wasLegacy;
     S1.reference = wasRef;
     globalThis.__rebuild();
@@ -2084,7 +2369,8 @@ try {
     const byLabel = (label) => globalThis.__inPage()
       .filter((n) => n.attrs && n.attrs['aria-label'] === label).pop();
     const kara = byLabel('Karabiner separation (cm)');
-    const cd = byLabel('Line drag coefficient');
+    // The number typed for every line; the select beside it chooses it.
+    const cd = byLabel('Every line\u2019s drag coefficient');
     const cz = byLabel('Cz at alpha');
     const bad = [];
     if (!kara || Number(kara.step) !== 1 || Number(kara.min) !== 20 || Number(kara.max) !== 70) {

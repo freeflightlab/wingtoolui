@@ -84,36 +84,43 @@ lift coefficient real wings trim at. Nothing was fitted to get there: the
 arc is the published one, and the lattice is validated where its answers
 are known. Its glide, on the handbook's line drag of 0.020, is 8.0.
 
-## 4. What this does not do
+## 4. Trimmed from the calage
 
-It does not fix it in the solve this section ran. That solve assumes the angle
-of attack, 6°, and finds where the risers must hang for it; the trim lift
-coefficient follows from the assumed angle, not from the wing.
+That solve assumes the angle of attack, 6°, and finds where the risers must
+hang for it; the trim lift coefficient follows from the assumed angle, not
+from the wing. `trimFromCalage` runs it the other way round: it takes where
+the risers hang and returns the angle the wing settles at.
 
-The core now has the solve the other way round. `trimFromCalage` takes where
-the risers hang and returns the angle the wing settles at. At a 42% calage the
-same four cases trim at CL 0.58 to 0.63, the range real wings use:
+No Geo 7's calage is published. Where built wings hang theirs is on file: the
+three complete designs, 32.5, 33 and 36% of the central chord. At 34% the
+four cases trim at CL 0.60 to 0.61 flat and 0.51 in the arc:
 
-| wing | all-up | assumed 6° | from a 42% calage | sink |
-| --- | --- | --- | --- | --- |
-| Geo 7 XS | 55 kg | 24.9 km/h | 29.4 km/h | 0.92 m/s |
-| Geo 7 XS | 70 kg | 28.1 km/h | 32.8 km/h | 1.02 m/s |
-| Geo 7 L | 95 kg | 28.7 km/h | 32.6 km/h | 0.99 m/s |
-| Geo 7 L | 115 kg | 31.6 km/h | 35.6 km/h | 1.08 m/s |
+| wing | all-up | assumed 6°, flat | from 34%, flat | from 34%, in its arc | certificate |
+| --- | --- | --- | --- | --- | --- |
+| Geo 7 XS | 55 kg | 24.9 km/h | 28.7 km/h | 31.3 km/h | more than 30 |
+| Geo 7 XS | 70 kg | 28.1 km/h | 32.3 km/h | 35.2 km/h | more than 30 |
+| Geo 7 L | 95 kg | 28.7 km/h | 33.3 km/h | 36.0 km/h | more than 30 |
+| Geo 7 L | 115 kg | 31.6 km/h | 36.5 km/h | 39.5 km/h | more than 30 |
 
-Three of four are then above the certified 30 km/h, and the sinks are the 1.0
-a wing of that size does. The XS at its lightest is still under, at 29.4.
+In its arc all four are above the certified 30 km/h, and the certificate
+bounds the calage: the XS at 55 kg trims above 30 only from a calage forward
+of 37.1% — the range the built designs hang in. The sinks, 1.12 to 1.41 m/s
+in the arc at 34%, are 0.1 to 0.3 above what a wing of this size does; the
+NACA 4415 standing in for the Geo 7's unpublished section is the likeliest
+part of that.
 
-Flown in its arc, the same 42% calage trims faster still — 32.9 to 40.0
-km/h at CL 0.46 to 0.50 — which says the 42% was a guess for a flat wing;
-no Geo 7's calage is published.
+This section used to say "at a 42% calage the same four cases trim at CL
+0.58 to 0.63, the range real wings use". They did only while the balance
+counted the section's pitching moment twice (`docs/departures.md` §5);
+counted once, 42% trims them at CL 0.79 to 0.82 flat, 24.9 km/h at the
+lightest, and the 42% itself was a guess.
 
-Neither solve is what the interface runs: its balance takes the typed angle
-and coefficients, as the handbook's does, in the wing's arc unless that is
-unticked. The test that pins the flat shortfall — three of four cases below
-30 km/h on the assumed angle — still runs the flat wing, so that work on it
-shows as movement rather than being absorbed silently, and a second holds
-the wing in its arc to one of four.
+The interface trims from the calage too, when its balance is set to it: the
+calage defaults to the design's own on an import, and the angle it gives is
+shown beside the one the design declares. The tests that pin the flat
+shortfall on the assumed angle — three of four cases below 30 km/h — still
+run, so that work on it shows as movement rather than being absorbed
+silently, and a second holds the wing in its arc to one of four.
 
 ## 5. On modelling collapse
 

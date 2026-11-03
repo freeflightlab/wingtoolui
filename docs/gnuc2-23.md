@@ -122,9 +122,10 @@ left at k = 0.578, so the 44.56 km/h and glide of 6.13 it prints are the wing
 on 58% of its typed lift. Solved at the speed where k is 1, the same
 equations give **33.97 km/h, a glide of 8.27 and a calage of 47.9%** — and
 this tool's own balance, the handbook's, on the same coefficients, the same
-speed and glide and a calage 0.12% of chord from it (validation §2.9). The
-handbook's rules cost little here because two of them cancel. Each put
-into the program's moments by itself (`lepCalageFromMoments`):
+speed and glide and a calage 0.39% of chord aft of it, which is the sum of
+the handbook's rules below, +0.42% (validation §2.9). The rules cost little
+here because two of them cancel. Each put into the program's moments by
+itself (`lepCalageFromMoments`):
 
 | the handbook's rule | where the program puts it | the calage moves |
 | --- | --- | --- |
@@ -137,6 +138,19 @@ into the program's moments by itself (`lepCalageFromMoments`):
 How well the first two cancel on another wing depends on its centre of
 pressure's height, which the program takes typed, from XFLR5: the agreement
 is a measurement on this design, not a licence for the rules.
+
+This tool's own balance now puts each force where the wing says it acts
+(`docs/balance.md`): its lift on its own line in the arc, centred 31.2% of
+the chord back and 0.60 m below it at 4.51°, its cloth's weight 51% back and
+0.73 m down, its lines' at their own centres — the weight within 1.4 mm of
+the program's and the drag within 3 mm, each line's Cd from its Reynolds
+number as the program takes it — and its pilot on the drag its section 35
+gives him, Cd 0.6 on 0.438 m². At the 4.51° the file declares it hangs the
+pilot at 32.4%, where the file hangs him at 33% and the rules at 25.5%. Put
+into the
+program's own section 17 at its 9.45°, the lattice's point in place of the
+typed one moves the calage from 47.9% to 55%: the typed point is 6 points of
+chord forward of the lattice's lift.
 
 **Three figures it prints that are not what they say.** Reproduced as
 printed, with what the label describes beside them: the vault arrow scales

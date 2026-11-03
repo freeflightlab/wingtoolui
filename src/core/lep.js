@@ -608,12 +608,25 @@ export function writeDesignIntoLep(doc, model) {
   replaceSectionData(out, 3, anchorLines);
 
   if (balance && section(out, 8)) {
+    // The program sets the wing's attitude from where the karabiners hang:
+    // asin((Cp - calage) / line height), the pilot plumb under its Cp. So the
+    // point written is the one that gives this balance's attitude — the
+    // centre of pressure only when nothing below the wing acts but the
+    // pilot's weight. It wrote the centre of pressure, and a whole per cent:
+    // the program then flew the wing at another angle than the balance's.
+    const riserCm = model.riserLengthCm ?? 47;
+    const lineCm = (model.lineLengthM ?? 6.5) * 100;
+    const chordCm = (model.wing?.ribs?.[0]?.chord ?? 0) * 100;
+    const plumbPct = chordCm > 0 && Number.isFinite(balance.thetaDeg)
+      ? balance.calageFraction * 100
+        + (100 * (lineCm + riserCm) * Math.sin((balance.thetaDeg * Math.PI) / 180)) / chordCm
+      : balance.xcpFraction * 100;
     replaceSectionData(out, 8, [
-      `\t${balance.glideRatio.toFixed(1)}`,
-      `\t${(balance.xcpFraction * 100).toFixed(0)}`,
-      `\t${(balance.calageFraction * 100).toFixed(0)}`,
-      `\t${(model.riserLengthCm ?? 47).toFixed(0)}`,
-      `\t${((model.lineLengthM ?? 6.5) * 100).toFixed(0)}`,
+      `\t${balance.glideRatio.toFixed(2)}`,
+      `\t${plumbPct.toFixed(2)}`,
+      `\t${(balance.calageFraction * 100).toFixed(2)}`,
+      `\t${riserCm.toFixed(0)}`,
+      `\t${lineCm.toFixed(0)}`,
       `\t${(model.karabinerCm ?? 42).toFixed(0)}`,
     ]);
   }

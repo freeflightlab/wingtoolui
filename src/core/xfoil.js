@@ -143,9 +143,29 @@ export function parsePolar(text) {
   if (!points.length) throw new Error('No polar data rows found — is this an XFOIL polar file?');
   points.sort((a, b) => a.alphaDeg - b.alphaDeg);
 
-  // Zero-lift angle and Cm0 by interpolation through Cl = 0.
-  let alphaL0Deg = points[0].alphaDeg;
-  let cm0 = points[0].cm;
+  // A least-squares line through the polar's linear range, of its lift and
+  // of its moment against the angle.
+  const lin = points.filter((p) => Math.abs(p.cl) < 0.9);
+  const fit = (rows, y) => {
+    const n = rows.length;
+    const sx = rows.reduce((s, p) => s + p.alphaDeg, 0);
+    const sy = rows.reduce((s, p) => s + y(p), 0);
+    const sxy = rows.reduce((s, p) => s + p.alphaDeg * y(p), 0);
+    const sxx = rows.reduce((s, p) => s + p.alphaDeg * p.alphaDeg, 0);
+    const den = n * sxx - sx * sx;
+    if (n < 2 || !(Math.abs(den) > 1e-12)) return null;
+    const perDeg = (n * sxy - sx * sy) / den;
+    return { perDeg, at: (a) => (sy - perDeg * sx) / n + perDeg * a };
+  };
+
+  // Zero-lift angle and Cm0 by interpolation through Cl = 0. A polar that
+  // does not reach zero lift, swept from 0° as many are, had its first angle
+  // taken for it: a 4%-cambered section swept from 0° flew 4° short of its
+  // own lift. Its zero-lift angle is found along its lift slope, its Cm0
+  // along its moment's, from the lowest of its linear range, and it says so.
+  let alphaL0Deg = null;
+  let cm0 = null;
+  let zeroLiftExtrapolated = false;
   for (let i = 1; i < points.length; i++) {
     if (points[i - 1].cl <= 0 && points[i].cl >= 0) {
       const d = points[i].cl - points[i - 1].cl || 1;
@@ -155,18 +175,21 @@ export function parsePolar(text) {
       break;
     }
   }
+  if (alphaL0Deg === null) {
+    const rows = lin.length >= 2 ? lin.slice(0, 4) : points.slice(0, 2);
+    const cl = fit(rows, (p) => p.cl);
+    const cm = fit(rows, (p) => p.cm);
+    if (!(cl && cl.perDeg > 0)) {
+      throw new Error('The polar never reaches zero lift and its lift does not rise with its angle, so its zero-lift angle cannot be found');
+    }
+    alphaL0Deg = -cl.at(0) / cl.perDeg;
+    cm0 = cm ? cm.at(alphaL0Deg) : rows[0].cm;
+    zeroLiftExtrapolated = true;
+  }
 
   // Lift slope from a least-squares fit over the linear range.
-  const lin = points.filter((p) => Math.abs(p.cl) < 0.9);
   let slope = 2 * Math.PI;
-  if (lin.length > 3) {
-    const n = lin.length;
-    const sx = lin.reduce((s, p) => s + p.alphaDeg, 0);
-    const sy = lin.reduce((s, p) => s + p.cl, 0);
-    const sxy = lin.reduce((s, p) => s + p.alphaDeg * p.cl, 0);
-    const sxx = lin.reduce((s, p) => s + p.alphaDeg * p.alphaDeg, 0);
-    slope = ((n * sxy - sx * sy) / (n * sxx - sx * sx)) * (180 / Math.PI);
-  }
+  if (lin.length > 3) slope = fit(lin, (p) => p.cl).perDeg * (180 / Math.PI);
 
   return {
     source: 'xfoil',
@@ -176,6 +199,7 @@ export function parsePolar(text) {
     nCrit,
     alphaL0Deg,
     cm0,
+    zeroLiftExtrapolated,
     clMax: Math.max(...points.map((p) => p.cl)),
     cd0: Math.min(...points.map((p) => p.cd)),
     liftSlopePerRad: slope,

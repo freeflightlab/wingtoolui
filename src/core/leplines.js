@@ -737,6 +737,11 @@ export function lepPlanForTool(geom, { ribOffset = 1 } = {}) {
       webbing.push({
         row, kind: 'webbing', name: `riser-${row}`, label: l.label, riser: row,
         from: m(l.from), to: m(l.to), lengthMM: Math.round(l.length * 10), anchors: [],
+        // What it is made of, and its loops in the flow as the program
+        // counts them: a round riser's like a line's, a strap's none.
+        material: l.material ?? null,
+        loopFrontalMM: l.material && l.material.section !== 'rectangular'
+          ? 20 * (l.material.loopCm ?? 0) * (l.material.loopKind === 'p' ? Math.SQRT2 - 1 : 1) : 0,
       });
       continue;
     }
@@ -879,6 +884,10 @@ export function lepLineSelection(tensions, plan, {
       loadOnlyLine: null,
       // At the length that is bought: cut, with a loop at each end.
       massG: line ? (line.gramsPerM * cutMM) / 1000 : null,
+      // Its loops in the flow, as the program counts their frontal area: at
+      // their length, a spliced one at sqrt 2 - 1 of it (`lepLineGeometry`).
+      loopFrontalMM: o?.material ? 20 * (o.material.loopCm ?? 0)
+        * (o.material.loopKind === 'p' ? Math.SQRT2 - 1 : 1) : 0,
     };
   });
 
