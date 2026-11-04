@@ -152,6 +152,9 @@ const S = {
   // Reynolds number at the speed flown, or `cdCylinder` for every line.
   lineCd: 'reynolds',
   cdCylinder: 1.1,
+  // The width of the webbing the tool's own risers are made of, in mm, as
+  // the DHV's published bills of materials give it on most solo wings.
+  riserWebbingWidth: 12,
   measureTension: 5,       // daN, the tension the PMA measures lengths at
   rowShareMode: 'convention',
   printMargin: 10, printOverlap: 15,
@@ -1074,6 +1077,8 @@ function rebuild() {
       calageFraction: usableCalage(balance).ok ? balance.calageFraction : null,
       wing, airfoil, layout: riserLayout,
       everyNthRib: 2, lineLengthM: S.lineLength, riserLengthM: riserM,
+      // Each riser a strap of the webbing set, which is its drag.
+      riserMaterial: riserWebbingMaterial(S.riserWebbingWidth),
       mergeRows: MERGES[S.mergeRows] || null,
       // The brake as written, when a K row is; the brake lines checkbox still
       // decides whether there are any.
@@ -2330,6 +2335,18 @@ function buildControls() {
     : 'Each line at 1 + 10 Re^(-2/3), White\u2019s correlation for a cylinder, as LEparagliding takes it, on its own '
       + 'diameter and the flow square to it at the speed flown \u2014 1.08 to 1.24 on the sets here \u2014 and its drag along '
       + 'the flow as sin\u00b3 of its angle to it.');
+  // The tool's own risers' webbing, which is their drag; an imported design's
+  // risers are its own.
+  if (LEP?.design && LEP.geom?.ok) {
+    hint(AS, 'The risers are the design\u2019s own, and their drag is as its program counts it.');
+  } else {
+    numberField(AS, 'riserWebbingWidth', 'Riser webbing width (mm)', 0, 30, 1);
+    liveHint(AS, () => (S.riserWebbingWidth > 0
+      ? `Each riser a strap ${S.riserWebbingWidth} mm wide, broadside to the flow at Cd 1.98, as LEparagliding counts one. `
+        + 'The bills of materials the DHV publishes give 12 mm of aramid and polyester on six of the eight dated from 2020, '
+        + 'and 20 mm on two; a tandem\u2019s is 19.'
+      : 'No width: the risers\u2019 drag is not counted.'));
+  }
   // What the billow from pressure is worked out at; a design that cuts its
   // own panels states its billow, and the control would change nothing.
   if (!ownCut) numberField(AS, 'sailTension', 'Sail tension across the cell (N/m)', 5, 500, 1);
@@ -4891,8 +4908,12 @@ function billOfMaterials() {
   }
 
   const webbing = M.linePlan && M.linePlan.riserWebbing ? M.linePlan.riserWebbing : [];
+  const widths = [...new Set(webbing.map((w) => w.material?.diameterMM).filter((x) => x > 0))];
   const risers = webbing.length
-    ? { count: webbing.length * 2, lengthM: (webbing.reduce((a, w) => a + w.lengthMM, 0) * 2) / 1000 }
+    ? {
+      count: webbing.length * 2, lengthM: (webbing.reduce((a, w) => a + w.lengthMM, 0) * 2) / 1000,
+      widthMM: widths.length === 1 ? widths[0] : null,
+    }
     : null;
 
   const entry = REFERENCE_LIB.find((e) => e.id === S._appliedReference);

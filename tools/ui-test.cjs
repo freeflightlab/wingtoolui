@@ -274,8 +274,9 @@ if (!errors.length) {
     + `${(bPlumb.calageFraction * 100).toFixed(1)}%; a 45% calage trims at ${mc.balance.onPolar.alphaDeg.toFixed(2)}°`);
 }
 // Each line's drag by its own Reynolds number, or one typed for every line;
-// the tool's own risers said not to be counted; and a loaded XFOIL polar's
-// moment and zero-lift angle in the balance.
+// the tool's own risers' drag counted on the webbing set, and said not to be
+// without one; and a loaded XFOIL polar's moment and zero-lift angle in the
+// balance.
 {
   const S2 = globalThis.__S;
   const texts = (n, out = []) => { if (!n) return out; if (n._text) out.push(n._text); for (const c of n.children || []) texts(c, out); return out; };
@@ -284,17 +285,26 @@ if (!errors.length) {
     const n = globalThis.__inPage().filter((x) => x.attrs && x.attrs['aria-label'] === label).pop();
     return !!n && !((n._field || n).style && (n._field || n).style.display === 'none');
   };
-  const keep = { lineCd: S2.lineCd, cdCylinder: S2.cdCylinder, balanceMode: S2.balanceMode };
+  const keep = { lineCd: S2.lineCd, cdCylinder: S2.cdCylinder, balanceMode: S2.balanceMode, riserWebbingWidth: S2.riserWebbingWidth };
   const bad = [];
   const go = () => { globalThis.__rebuild(); globalThis.__controls(); return globalThis.__getM(); };
-  S2.balanceMode = 'polar'; S2.lineCd = 'reynolds';
+  S2.balanceMode = 'polar'; S2.lineCd = 'reynolds'; S2.riserWebbingWidth = 12;
   const mr = go();
   const dr = mr.lineDragOwn;
-  if (!(dr.cdBasis === 'reynolds' && dr.cdMean > 1.1 && dr.cdMean < 1.3 && dr.risersUncounted.length === mr.linePlan.riserWebbing.length
-    && /by each line\u2019s Reynolds number; its risers\u2019 webbing not counted$/.test(rowOf('Cx lines of this lineset'))
-    && shown('Line drag coefficient') && !shown('Every line\u2019s drag coefficient'))) {
+  const straps = dr.perLine.filter((p) => p.riser);
+  if (!(dr.cdBasis === 'reynolds' && dr.cdMean > 1.1 && dr.cdMean < 1.3 && dr.risersUncounted.length === 0
+    && straps.length === mr.linePlan.riserWebbing.length && straps.every((p) => p.strap && p.cd === 1.98)
+    && /by each line\u2019s Reynolds number; its risers 0\.\d{3} m² of it$/.test(rowOf('Cx lines of this lineset'))
+    && shown('Line drag coefficient') && !shown('Every line\u2019s drag coefficient') && shown('Riser webbing width (mm)'))) {
     bad.push(`by Reynolds number: ${dr.cdBasis}, Cd ${dr.cdMean}, "${rowOf('Cx lines of this lineset')}"`);
   }
+  // No width, no strap: the risers' drag said not to be counted.
+  S2.riserWebbingWidth = 0;
+  const m0w = go();
+  if (!(m0w.lineDragOwn.risersDragAreaM2 === 0 && m0w.lineDragOwn.risersUncounted.length === m0w.linePlan.riserWebbing.length
+    && /; its risers\u2019 webbing not counted$/.test(rowOf('Cx lines of this lineset'))
+    && m0w.lineDragOwn.dragAreaM2 < dr.dragAreaM2)) bad.push(`no webbing: "${rowOf('Cx lines of this lineset')}"`);
+  S2.riserWebbingWidth = 12;
   S2.lineCd = 'fixed'; S2.cdCylinder = 1.0;
   const mf = go();
   if (!(mf.lineDragOwn.cdBasis === 'given' && mf.lineDragOwn.cdMean === 1 && shown('Every line\u2019s drag coefficient')
@@ -342,7 +352,8 @@ if (!errors.length) {
   Object.assign(S2, keep); go();
   if (bad.length) errors.push(`line drag and the section's moment: ${bad.join('; ')}`);
   console.log(`  ${bad.length ? 'FAIL' : 'ok  '} each line's drag by its Reynolds number, Cd ${dr.cdMean.toFixed(3)} over the default set, `
-    + `typed on request; its risers said not to be counted; an XFOIL polar's Cm0 ${xp.cm0.toFixed(4)} in the balance, where `
+    + `typed on request; its ${straps.length} risers' straps ${dr.risersDragAreaM2.toFixed(3)} m² of its ${dr.dragAreaM2.toFixed(3)}, `
+    + `said not to be counted without a width; an XFOIL polar's Cm0 ${xp.cm0.toFixed(4)} in the balance, where `
     + `thin-aerofoil theory says ${m0.section0.cm0.toFixed(4)}; one swept from 0° finds its zero lift along its lift slope, `
     + `its calage ${(off00 * 100).toFixed(2)}% of chord from the whole polar's, where its first angle put it ${(offFirst * 100).toFixed(2)}%`);
 }

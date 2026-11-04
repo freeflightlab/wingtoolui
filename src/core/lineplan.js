@@ -1298,6 +1298,9 @@ function buildLinePlanInner({
   // The riser webbing between karabiner and lines. It hangs vertically: the
   // pilot's weight pulls straight down on it.
   riserLengthM = 0.50,
+  // What each strap is made of (`riserWebbingMaterial`, risers.js): its
+  // width is its drag. Without one the plan's risers have no width.
+  riserMaterial = null,
   // Where the wing balances, as a fraction of chord, from the equilibrium
   // solve. The lines converge there, because that is what decides the
   // attitude the wing flies at.
@@ -1952,6 +1955,7 @@ function buildLinePlanInner({
         to: (riserTops[riser] ?? firstTop).slice(),
         lengthMM: Math.round(riserLengthM * 1000),
         anchors: [],
+        ...(riserMaterial ? { material: riserMaterial } : {}),
       });
     }
     plan.riserTop = firstTop;
@@ -2731,7 +2735,7 @@ export function hangPointFromAnchors(wing, fractions, calageFraction = null) {
   // This used a load-weighted average of the anchor positions instead, which
   // is a plausible-looking geometric proxy and not the same thing. On the
   // default wing it comes out at 31.0% of chord where the balance on its
-  // polar says 40.8% at 5 degrees — 39.3% with each force where the
+  // polar says 41.9% at 5 degrees — 39.3% with each force where the
   // handbook's rules put it — so the model pitched nose-down against the
   // attitude it would really fly at. (This said 50.6% and 18.7 points, from
   // a balance that counted the pitching moment twice.)

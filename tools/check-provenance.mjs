@@ -21,6 +21,7 @@ const MATERIAL_TABLES = [
   ['ribstress', 'SAIL_CLOTH'],
   ['reinforcement', 'ROD_MATERIALS'],
   ['risers', 'RISER_HARDWARE'],
+  ['risers', 'RISER_WEBBING'],
   ['pma', 'PMA_STRENGTH'],
   ['trimdrift', 'FIBRE_BEHAVIOUR'],
   ['fabric', 'CLOTH'],

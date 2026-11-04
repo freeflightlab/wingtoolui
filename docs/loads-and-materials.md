@@ -75,18 +75,18 @@ Dyneema", with the aramid U-135 for Dyneema: a ranking of sizes, not fibres.)
 ## 3. Line drag, and closing a Phase 1 loop
 
 `cxLines` had been a typed 0.020 since Phase 1. A line is a bluff cylinder:
-its drag area is diameter by length by its coefficient — 1 + 10 Re^-2/3 on
-its own diameter and the flow square to it, White's correlation as
-LEparagliding takes it, 1.08 to 1.24 on the sets here — and by sin³ of its angle
-to the flow, the force square to it that the independence principle gives
-(sin²) taken along the flow; with its loops, the line doubled over them,
-and an imported design's risers as its program counts them, a strap at Cd
-1.98. Square to the flow, the gnuC2-23's set is its program's drag to the
-last digit; at its section 17's 9.45° each line's own angle takes 8.5% off.
+its drag area is diameter by length by 1 + 10 Re^-2/3 on its own diameter
+and the flow square to it, White's correlation as LEparagliding takes it
+(1.08 to 1.24 on the sets here), by sin³ of its angle to the flow, its loops
+in it. A riser is a strap broadside at Cd 1.98, as the program counts one:
+an imported design's as its file has it, this tool's 12 mm wide, the main
+webbing of six of the eight wings from 2020 whose bills of materials the DHV
+publishes (`RISER_WEBBING`). Square to the flow, the gnuC2-23's set is its
+program's drag to the last digit; at 9.45° its lines' own angles take 8.5%.
 
-Computed for a modern thin lineset it comes out near **0.006-0.010**, roughly
-a third of the handbook's figure, which came from a 2012 school wing with more
-and thicker line:
+Computed for a modern thin lineset it comes out near **0.006-0.010**, a third
+to a half of the handbook's figure, from a 2012 school wing with more and
+thicker line; 12 mm risers add 0.003 to it:
 
 | | glide ratio | line share of drag |
 | --- | --- | --- |

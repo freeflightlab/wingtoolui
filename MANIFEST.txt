@@ -6,16 +6,16 @@ but it cannot be rebuilt, tested or audited.
 
      16027  build.py
       1539  package.json
-     21898  README.md
-     97016  ROADMAP.md
-     15545  CHANGELOG.md
+     21978  README.md
+     97942  ROADMAP.md
+     16896  CHANGELOG.md
      35149  LICENSE
 
 src/core/   40 files — the maths — every module the build inlines
      19989  src/core/aero.js
      14267  src/core/airfoil.js
       8096  src/core/atmosphere.js
-     24460  src/core/bom.js
+     24579  src/core/bom.js
       5574  src/core/compare.js
      34060  src/core/equilibrium.js
      65042  src/core/export.js
@@ -29,7 +29,7 @@ src/core/   40 files — the maths — every module the build inlines
      24189  src/core/lepbalance.js
     102453  src/core/leplines.js
      58790  src/core/lepstructure.js
-    203348  src/core/lineplan.js
+    203577  src/core/lineplan.js
       6341  src/core/lines.js
      97784  src/core/loads.js
      10837  src/core/lobe.js
@@ -43,7 +43,7 @@ src/core/   40 files — the maths — every module the build inlines
      35880  src/core/reinforcement.js
      32491  src/core/ribholes.js
      51952  src/core/ribstress.js
-     39050  src/core/risers.js
+     42354  src/core/risers.js
      56092  src/core/scaling.js
      10103  src/core/shaping3d.js
      20548  src/core/trimdrift.js
@@ -54,7 +54,7 @@ src/core/   40 files — the maths — every module the build inlines
      10291  src/core/xfoil.js
 
 src/ui/   3 files — the interface: markup, style and the one script
-    288740  src/ui/app.js
+    289953  src/ui/app.js
       6070  src/ui/index.html
      15860  src/ui/style.css
 
@@ -63,14 +63,14 @@ tests/   5 files — validation suite, benchmark and the Phase 1 audit
      20395  tests/full-pipeline.mjs
      18515  tests/phase1-audit.mjs
       8521  tests/reference-sweep.mjs
-    985086  tests/run-tests.js
+    988306  tests/run-tests.js
 
 tools/   23 files — build helpers, figures, audit, legacy .xls reader, the interface test
      31061  tools/audit.mjs
      11195  tools/catalogue.mjs
       2999  tools/check-assertions.mjs
       7819  tools/check-options.mjs
-      2667  tools/check-provenance.mjs
+      2698  tools/check-provenance.mjs
       5155  tools/check-references.mjs
       3022  tools/check-units.mjs
       6370  tools/check.mjs
@@ -88,11 +88,11 @@ tools/   23 files — build helpers, figures, audit, legacy .xls reader, the int
       2905  tools/read_xlsx.py
       5015  tools/reference-files.mjs
       3021  tools/relabel-niviuk-totals.mjs
-    156905  tools/ui-test.cjs
+    157774  tools/ui-test.cjs
 
 docs/   46 files — notes on what was validated and what was not
-      5352  docs/assumptions.md
-      9253  docs/balance.md
+      5538  docs/assumptions.md
+      9463  docs/balance.md
       4115  docs/brakes.md
       6760  docs/cad-export.md
       6926  docs/certification.md
@@ -106,9 +106,9 @@ docs/   46 files — notes on what was validated and what was not
      15892  docs/environment-and-aero.md
       2890  docs/fabric.md
       5011  docs/free-body.md
-     15755  docs/full-pipeline.md
+     15751  docs/full-pipeline.md
      13486  docs/gnuc2-23.md
-      7238  docs/hang-point.md
+      7239  docs/hang-point.md
       4639  docs/inflated.md
      14804  docs/inspection.md
       8580  docs/intake.md
@@ -119,7 +119,7 @@ docs/   46 files — notes on what was validated and what was not
      12343  docs/line-sets.md
       6423  docs/line-sheets.md
       6265  docs/load-cases.md
-     21004  docs/loads-and-materials.md
+     21027  docs/loads-and-materials.md
       6199  docs/nesting.md
      12214  docs/niviuk-import.md
      15308  docs/openglider.md
@@ -201,7 +201,7 @@ data/reference/lep/   12 files — complete LEparagliding designs: input, sectio
       2624  data/reference/lep/tuluaq19-gnua.txt
      28116  data/reference/lep/tuluaq19-lep-out.txt
 
-285 files, 4205 KB
-sha256 of the tree: a5771bc40cf8c947ebd0261c084927f6
+285 files, 4216 KB
+sha256 of the tree: 3c789a9aaacb17fb096227d0e2d1bfc1
 
 Verify with:  node tools/audit.mjs

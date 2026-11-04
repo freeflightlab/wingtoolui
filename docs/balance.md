@@ -124,9 +124,11 @@ gnuC2-23 is flown with the pilot its section 35 balances, 70 kg on a 4 kg
 wing with his own drag; the other two leave section 35 off and are flown
 with this tool's, 80 kg on 5 kg, Cx 0.015.
 
-On the default wing at 5° the calage moves from 39.3% to 40.8%: its lines'
-drag acts 2.93 m down where the rule has 2.33, their weight at 6.17 m with
-the risers' webbing, and the pilot hangs 1.3° behind plumb.
+On the default wing at 5° the calage moves from 39.3% to 41.9%. It flies on
+the handbook's typed line drag, 0.020, unless asked to fly on its plan's,
+and that drag acts where the plan's own does: 3.91 m down with its 12 mm
+risers, 2.93 m without them, where the rule has 2.33. Their weight is at
+6.17 m with the risers' webbing, and the pilot hangs 1.3° behind plumb.
 
 The gnuC2-23's section 17 asks for the calage at 9.45°, the angle its
 designer typed beside the centre of pressure. In the program's own
@@ -147,10 +149,10 @@ hangs from: the program gives back the balance's attitude.
 
 - The sections' moment is one Cm0 at every angle, the polar's at zero
   lift, though an XFOIL polar's Cm moves a little with the angle.
-- The risers' drag is counted on an imported design, as its program counts
-  it, a strap at Cd 1.98; this tool's own plans give their webbing a weight
-  but no width, so its drag is not in the lineset's, and the Balance panel
-  says so.
+- Each riser's strap is counted alone, at a flat plate's 1.98 broadside, as
+  the program counts one: three or four straps one behind another shield
+  each other by an amount nothing here measures, and a strap forty times as
+  long as it is wide makes less drag than a plate without ends.
 - The wing is the central section's plane: what the lattice finds spanwise
   is summed into it, and the speed system still turns the wing about the
   karabiners by the risers' geometry (`docs/speed-system.md`).

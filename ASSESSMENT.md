@@ -14,8 +14,8 @@ One offline HTML file, 1.6 MB, no build step and no network. That constraint
 drove the architecture: 40 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 75,100 lines**: 29,600 core, 6,800 interface, 19,200 tests, 6,400
-tools, 13,100 documentation.
+**About 75,300 lines**: 29,700 core, 6,800 interface, 19,200 tests, 6,400
+tools, 13,200 documentation.
 
 ## 2. What is genuinely validated
 
@@ -164,8 +164,8 @@ file does (`docs/balance.md`).
 
 **45 open items in the roadmap.** The substantial ones:
 
-- The balance's last approximations: one Cm0 at every angle, the risers'
-  drag on this tool's own plans, which give their webbing no width, and the
+- The balance's last approximations: one Cm0 at every angle, each riser
+  strap's drag counted alone, as if no other were in front of it, and the
   wing's rods and reinforcement spread like its cloth.
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
@@ -182,7 +182,7 @@ file does (`docs/balance.md`).
 
 ## 6. What I would tell a reviewer to check first
 
-1. **The provenance stage.** Run `npm run check:provenance`. Three of seven
+1. **The provenance stage.** Run `npm run check:provenance`. Three of eight
    material tables are my estimates and say so — the sail and rib cloth
    strengths and the fibres' drift. If that discipline had slipped,
    everything downstream would be suspect.

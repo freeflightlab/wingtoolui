@@ -257,13 +257,13 @@ brackets, the calage on the handbook's rules for where they act
 
 | section | in its arc | flat |
 | --- | --- | --- |
-| NACA 4415 | 34.97 km/h, glide 8.10, calage 40.83% (39.31%) | 31.83 km/h, 8.63, 40.82% (37.12%) |
-| NACA 4412 | 35.04 km/h, 8.16, 41.13% (39.70%) | 31.90 km/h, 8.70, 41.15% (37.50%) |
-| NACA 2414 | 38.75 km/h, 8.01, 37.72% (34.85%) | 35.39 km/h, 8.72, 38.79% (34.18%) |
-| NACA 0012 | 44.03 km/h, 7.46, 30.95% (25.83%) | 40.44 km/h, 8.30, 33.34% (27.29%) |
+| NACA 4415 | 34.97 km/h, glide 8.10, calage 41.94% (39.31%) | 31.83 km/h, 8.63, 41.74% (37.12%) |
+| NACA 4412 | 35.04 km/h, 8.16, 42.25% (39.70%) | 31.90 km/h, 8.70, 42.07% (37.50%) |
+| NACA 2414 | 38.75 km/h, 8.01, 39.10% (34.85%) | 35.39 km/h, 8.72, 39.93% (34.18%) |
+| NACA 0012 | 44.03 km/h, 7.46, 32.75% (25.83%) | 40.44 km/h, 8.30, 34.85% (27.29%) |
 
-Where each acts, camber moves the calage three quarters as far as on the
-rules — 9.9 points from the NACA 4415 to the 0012 in the arc, where the
+Where each acts, camber moves the calage two thirds as far as on the
+rules — 9.2 points from the NACA 4415 to the 0012 in the arc, where the
 rules say 13.5 — because the rule carries the section's moment on the
 central chord and the lattice on each strip's own, smaller outboard. On the symmetric section the lift's line is
 3.3 points of chord aft of the quarter chord in the arc and 5.8 flat, where

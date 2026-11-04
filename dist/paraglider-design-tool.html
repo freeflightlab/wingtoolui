@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-FgAmoL0ybxWMW26KwzpiH2hnJP9yIDR+Op0Tr3lqZJc='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-y+PgGkabmzR47Ef3lJH+cyJkTbTIMAFSw5T/dqsohwc='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Paraglider Design Tool</title>
 <style>/* Palette note: the geometry colours are the AutoCAD Color Index values the
    handbook's own panel subroutine writes into its DXF (2 yellow, 3 green,
@@ -584,7 +584,7 @@ input[type=range]::-moz-range-thumb {
 <div class="shell">
 
   <header class="masthead">
-    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.7.0</span></div>
+    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.8.0</span></div>
     <input class="wingname" id="wingName" value="gnu-01" aria-label="Wing name">
     <div class="readout" id="readout"></div>
     <button class="themebtn" id="themeBtn" aria-label="Switch between dark and light">Light</button>
@@ -5951,6 +5951,9 @@ function buildLinePlanInner({
   // The riser webbing between karabiner and lines. It hangs vertically: the
   // pilot's weight pulls straight down on it.
   riserLengthM = 0.50,
+  // What each strap is made of (`riserWebbingMaterial`, risers.js): its
+  // width is its drag. Without one the plan's risers have no width.
+  riserMaterial = null,
   // Where the wing balances, as a fraction of chord, from the equilibrium
   // solve. The lines converge there, because that is what decides the
   // attitude the wing flies at.
@@ -6605,6 +6608,7 @@ function buildLinePlanInner({
         to: (riserTops[riser] ?? firstTop).slice(),
         lengthMM: Math.round(riserLengthM * 1000),
         anchors: [],
+        ...(riserMaterial ? { material: riserMaterial } : {}),
       });
     }
     plan.riserTop = firstTop;
@@ -7384,7 +7388,7 @@ function hangPointFromAnchors(wing, fractions, calageFraction = null) {
   // This used a load-weighted average of the anchor positions instead, which
   // is a plausible-looking geometric proxy and not the same thing. On the
   // default wing it comes out at 31.0% of chord where the balance on its
-  // polar says 40.8% at 5 degrees — 39.3% with each force where the
+  // polar says 41.9% at 5 degrees — 39.3% with each force where the
   // handbook's rules put it — so the model pitched nose-down against the
   // attitude it would really fly at. (This said 50.6% and 18.7 points, from
   // a balance that counted the pitching moment twice.)
@@ -9560,6 +9564,50 @@ Object.defineProperty(RISER_HARDWARE, 'provenance', {
 function hardwareForSize(table, size) {
   for (const step of table) if (step.sizes.includes(size)) return step;
   return table[table.length - 1];
+}
+
+/**
+ * The webbing a riser is sewn from, as the makers' bills of materials give
+ * it. The DHV publishes one with each wing it certifies; each entry is the
+ * main riser webbing of one such list, its width and fibre as the list
+ * gives them. A riser is a strap, and its drag is its width broadside to the
+ * flow: LEparagliding counts it so, at Cd 1.98, and this tool's own plans
+ * did not count it at all, having no width to count.
+ *
+ * Twelve millimetres of aramid and polyester is the main webbing of six of
+ * the eight lists here dated from 2020, all of Swing's and the Nova Codex's;
+ * twenty of the other two, and of a 2008 school wing's; a tandem's is 19.
+ * `dated` is the list's own date where it gives one, and otherwise the year
+ * its DHV number or folder carries. Retrieved 2026-11-03.
+ */
+const DHV_FILES = 'https://service.dhv.de/dbfiles';
+const RISER_WEBBING = {
+  'Swing Arcus 2 RS': { dated: '2020-12-07', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-2602-21.pdf` },
+  'Swing Nyos 2 RS': { dated: '2021-10-26', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: 'https://www.dhv.de/dbfiles/tmo/stuecklisten/S_GS-01-2686-22.pdf' },
+  'Swing Verso RS': { dated: '2023', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: `${DHV_FILES}/managed/pruefung/2023/01/swing_verso_rs-stckliste-202.pdf` },
+  'Nova Codex': { dated: '2023-12-12', widthMM: 12, fibre: 'polyester/aramid', maker: 'Cousin', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-2844-23.pdf` },
+  // Its German list names the Stellar RS, its English one the Libra RS.
+  'Swing Stellar RS': { dated: '2024-01-25', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: `${DHV_FILES}/managed/pruefung/2024/01/swing_stellar_rs-stckliste-2.pdf` },
+  'Nova Glitch': { dated: '2024-08-08', widthMM: 20, fibre: 'polyester', maker: 'Güth & Wolf', source: `${DHV_FILES}/managed/pruefung/2024/08/bill_of_material-glitch.pdf` },
+  'Swing Miura 2 RS D-Lite': { dated: '2025', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: `${DHV_FILES}/managed/pruefung/2025/01/swing_miura_2_rs_dlite-stckl.pdf` },
+  // The list does not name its wing.
+  'DHV list GS-01-3027-25': { dated: '2025', widthMM: 20, fibre: 'polyester/aramid', maker: 'Cousin', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-3027-25.pdf` },
+  'Pro-Design Cuga': { dated: '2008', widthMM: 20, fibre: 'polyester', maker: 'Güth & Wolf', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-1795-08.pdf` },
+  'Sol Kangaroo 3 (tandem)': { dated: '2010', widthMM: 19, fibre: 'not stated', maker: 'Fitanew', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-1873-10.pdf` },
+};
+Object.defineProperty(RISER_WEBBING, 'provenance', {
+  value: 'DHV-published bills of materials (Stücklisten), each wing\'s main riser webbing; retrieved 2026-11-03',
+  enumerable: false,
+});
+
+/**
+ * A riser strap of webbing so wide, as `lineDrag` takes a riser's material:
+ * rectangular, its width where a line has its diameter. No width, no strap,
+ * and `lineDrag` says its risers were not counted.
+ */
+function riserWebbingMaterial(widthMM) {
+  if (!(widthMM > 0)) return null;
+  return { name: `riser webbing ${widthMM} mm`, diameterMM: widthMM, section: 'rectangular' };
 }
 
 /* --------------------------------------------------- lift from the wing -- */
@@ -19088,7 +19136,7 @@ function buildBOM({
   // A design that states its rods without a diameter has a length and no
   // mass, and says so.
   rods = null,
-  // Riser webbing: `{ count, lengthM }` for both sides.
+  // Riser webbing: `{ count, lengthM, widthMM }` for both sides.
   risers = null,
   // What the wing is set to weigh, to say how much of it this accounts for.
   wingMassKg = null,
@@ -19301,7 +19349,7 @@ function buildBOM({
 
   // ---- riser webbing -----------------------------------------------------
   const webbing = risers && risers.count
-    ? { item: 'Riser webbing', count: risers.count, lengthM: risers.lengthM }
+    ? { item: 'Riser webbing', count: risers.count, lengthM: risers.lengthM, widthMM: risers.widthMM ?? null }
     : null;
 
   // ---- hardware ----------------------------------------------------------
@@ -19413,7 +19461,8 @@ function bomText(bom) {
         + `${bom.webbing.lengthM.toFixed(1).padStart(6)} m  not weighed`);
       // What the figure is of, since a riser set has more webbing in it
       // than this.
-      out.push('    the straps from the karabiner to the lines; a speed system\'s own webbing is not in it');
+      out.push(`    the straps from the karabiner to the lines${bom.webbing.widthMM ? `, ${bom.webbing.widthMM} mm wide` : ''}; `
+        + 'a speed system\'s own webbing is not in it');
     }
   }
 
@@ -30519,6 +30568,9 @@ const S = {
   // Reynolds number at the speed flown, or `cdCylinder` for every line.
   lineCd: 'reynolds',
   cdCylinder: 1.1,
+  // The width of the webbing the tool's own risers are made of, in mm, as
+  // the DHV's published bills of materials give it on most solo wings.
+  riserWebbingWidth: 12,
   measureTension: 5,       // daN, the tension the PMA measures lengths at
   rowShareMode: 'convention',
   printMargin: 10, printOverlap: 15,
@@ -31441,6 +31493,8 @@ function rebuild() {
       calageFraction: usableCalage(balance).ok ? balance.calageFraction : null,
       wing, airfoil, layout: riserLayout,
       everyNthRib: 2, lineLengthM: S.lineLength, riserLengthM: riserM,
+      // Each riser a strap of the webbing set, which is its drag.
+      riserMaterial: riserWebbingMaterial(S.riserWebbingWidth),
       mergeRows: MERGES[S.mergeRows] || null,
       // The brake as written, when a K row is; the brake lines checkbox still
       // decides whether there are any.
@@ -32697,6 +32751,18 @@ function buildControls() {
     : 'Each line at 1 + 10 Re^(-2/3), White\u2019s correlation for a cylinder, as LEparagliding takes it, on its own '
       + 'diameter and the flow square to it at the speed flown \u2014 1.08 to 1.24 on the sets here \u2014 and its drag along '
       + 'the flow as sin\u00b3 of its angle to it.');
+  // The tool's own risers' webbing, which is their drag; an imported design's
+  // risers are its own.
+  if (LEP?.design && LEP.geom?.ok) {
+    hint(AS, 'The risers are the design\u2019s own, and their drag is as its program counts it.');
+  } else {
+    numberField(AS, 'riserWebbingWidth', 'Riser webbing width (mm)', 0, 30, 1);
+    liveHint(AS, () => (S.riserWebbingWidth > 0
+      ? `Each riser a strap ${S.riserWebbingWidth} mm wide, broadside to the flow at Cd 1.98, as LEparagliding counts one. `
+        + 'The bills of materials the DHV publishes give 12 mm of aramid and polyester on six of the eight dated from 2020, '
+        + 'and 20 mm on two; a tandem\u2019s is 19.'
+      : 'No width: the risers\u2019 drag is not counted.'));
+  }
   // What the billow from pressure is worked out at; a design that cuts its
   // own panels states its billow, and the control would change nothing.
   if (!ownCut) numberField(AS, 'sailTension', 'Sail tension across the cell (N/m)', 5, 500, 1);
@@ -35258,8 +35324,12 @@ function billOfMaterials() {
   }
 
   const webbing = M.linePlan && M.linePlan.riserWebbing ? M.linePlan.riserWebbing : [];
+  const widths = [...new Set(webbing.map((w) => w.material?.diameterMM).filter((x) => x > 0))];
   const risers = webbing.length
-    ? { count: webbing.length * 2, lengthM: (webbing.reduce((a, w) => a + w.lengthMM, 0) * 2) / 1000 }
+    ? {
+      count: webbing.length * 2, lengthM: (webbing.reduce((a, w) => a + w.lengthMM, 0) * 2) / 1000,
+      widthMM: widths.length === 1 ? widths[0] : null,
+    }
     : null;
 
   const entry = REFERENCE_LIB.find((e) => e.id === S._appliedReference);

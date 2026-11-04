@@ -4,6 +4,34 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.8.0 — 2026-11-03
+
+The risers' webbing, and its drag.
+
+**Added**
+
+- This tool's own risers have a width now, and their drag is counted: each
+  a strap broadside to the flow at Cd 1.98, as LEparagliding counts one, at
+  its own angle to the flow. **Riser webbing width**, under Assumptions, is
+  12 mm by default, the main riser webbing of six of the eight wings dated
+  from 2020 whose bills of materials the DHV publishes — all of Swing's and
+  the Nova Codex, aramid and polyester; the Nova Glitch and a 2025 list that
+  does not name its wing have 20 mm. Ten lists are in `RISER_WEBBING`
+  (risers.js), each with its address, under the provenance check; 0 leaves
+  the risers' drag out, and the Balance table says so. An imported design's
+  risers are still its own.
+- On the default wing the straps add 0.003 to its lines' 0.009 and move
+  their drag's centre from 2.93 to 3.91 m down. It flies on the handbook's
+  typed line drag unless asked to fly on its plan's, so its speed and glide
+  do not move; its calage at 5° does, from 40.8% to 41.9% of chord.
+- The bill of materials says how wide the riser webbing is.
+
+**Documents**
+
+- `docs/loads-and-materials.md` §3, `docs/balance.md`, `docs/hang-point.md`
+  and `docs/full-pipeline.md` §6 with the risers counted; the straps in
+  tandem, each counted as if alone, are an open item.
+
 ## 1.7.0 — 2026-11-02
 
 Each line's own drag, and the section's moment from XFOIL.

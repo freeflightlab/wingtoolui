@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2753-test validation suite and a benchmark with regression budgets
+- [x] 2758-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -1239,12 +1239,10 @@ validation notes flagged.
       program the centre of pressure to a whole per cent, which it reads as
       the point the pilot hangs plumb under; it is the karabiners' plumb
       point now, to a hundredth, with the plan's riser.
-- [ ] **The risers' drag on this tool's own plans** — counted on an
-      imported design as its program counts it (round of 11-02); this
-      tool's plans give their webbing a weight but no width, so its drag is
-      not in the lineset's, and the Balance panel says so. A width for each
-      riser, from the makers' drawings, would count it; four straps in
-      tandem shield each other by an amount nothing here measures.
+- [x] **The risers' drag on this tool's own plans** — counted on an
+      imported design as its program counts it (round of 11-02), and on
+      this tool's own on a webbing width from the makers' bills of
+      materials (round of 11-03).
 - [x] **A line at an angle to the flow** — sin³ of its angle (round of
       11-02).
 - [x] **The section's moment from an XFOIL polar** — in the balance and
@@ -1289,6 +1287,24 @@ validation notes flagged.
       thin lines' Cd 1.21 and their loops, its calage at 5° 40.9 → 40.8%;
       the gnuC2-23 at its 4.51° 33.0 → 32.4%, the rules 26.3 → 25.5%; the
       test wing's glide 10.62 → 10.64 (`docs/loads-and-materials.md` §3).
+
+### Round of 2026-11-03: the risers' webbing
+
+- [x] **The risers' drag on this tool's own plans** — each riser a strap
+      of webbing 12 mm wide, a setting under Assumptions, counted broadside
+      at Cd 1.98 as LEparagliding counts one, at its own angle to the flow.
+      The width is the main riser webbing of six of the eight wings dated
+      from 2020 whose bills of materials the DHV publishes — all of Swing's
+      and the Nova Codex, 12 mm of aramid and polyester — where the Nova
+      Glitch and a 2025 list that does not name its wing have 20 mm
+      (`RISER_WEBBING`, risers.js, each list's address with it). On the
+      default wing the straps add 0.003 to its lines' 0.009 and move their
+      drag's centre from 2.93 to 3.91 m down: its calage at 5° 40.8 →
+      41.9%. The bill of materials names the width.
+- [ ] **Risers in tandem** — each strap is counted alone, at the 1.98 of a
+      plate without ends: three or four straps one behind another shield
+      each other, and a strap forty times as long as it is wide makes less
+      than that. Nothing here measures either.
 
 ## Phase 3 — construction detail
 

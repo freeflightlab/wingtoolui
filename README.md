@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2753 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2758 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -70,7 +70,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2753 unit checks against known geometry and the sources |
+| `npm test` | 2758 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -121,8 +121,9 @@ selection from measured materials sized across the speedbar range and level
 by level to the DHV's line calculation for EN 926-1, elastic stretch on
 measured curves where a line has one, gust load factors, asymmetric and
 collapse load cases, and each line's drag — its Cd from its Reynolds number,
-sin³ of its angle to the flow, its loops — fed back into the balance where
-it acts.
+sin³ of its angle to the flow, its loops — and its risers' straps, at a
+webbing width from the makers' bills of materials, fed back into the balance
+where it acts.
 
 **Interoperability.** Reads and writes `leparagliding.txt`; reads production
 line sheets in four manufacturers' formats; imports aerofoils in three.
@@ -294,7 +295,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2753 checks |
+| unit suite | the maths, 2758 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |

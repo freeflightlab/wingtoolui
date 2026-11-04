@@ -275,6 +275,50 @@ export function hardwareForSize(table, size) {
   return table[table.length - 1];
 }
 
+/**
+ * The webbing a riser is sewn from, as the makers' bills of materials give
+ * it. The DHV publishes one with each wing it certifies; each entry is the
+ * main riser webbing of one such list, its width and fibre as the list
+ * gives them. A riser is a strap, and its drag is its width broadside to the
+ * flow: LEparagliding counts it so, at Cd 1.98, and this tool's own plans
+ * did not count it at all, having no width to count.
+ *
+ * Twelve millimetres of aramid and polyester is the main webbing of six of
+ * the eight lists here dated from 2020, all of Swing's and the Nova Codex's;
+ * twenty of the other two, and of a 2008 school wing's; a tandem's is 19.
+ * `dated` is the list's own date where it gives one, and otherwise the year
+ * its DHV number or folder carries. Retrieved 2026-11-03.
+ */
+const DHV_FILES = 'https://service.dhv.de/dbfiles';
+export const RISER_WEBBING = {
+  'Swing Arcus 2 RS': { dated: '2020-12-07', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-2602-21.pdf` },
+  'Swing Nyos 2 RS': { dated: '2021-10-26', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: 'https://www.dhv.de/dbfiles/tmo/stuecklisten/S_GS-01-2686-22.pdf' },
+  'Swing Verso RS': { dated: '2023', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: `${DHV_FILES}/managed/pruefung/2023/01/swing_verso_rs-stckliste-202.pdf` },
+  'Nova Codex': { dated: '2023-12-12', widthMM: 12, fibre: 'polyester/aramid', maker: 'Cousin', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-2844-23.pdf` },
+  // Its German list names the Stellar RS, its English one the Libra RS.
+  'Swing Stellar RS': { dated: '2024-01-25', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: `${DHV_FILES}/managed/pruefung/2024/01/swing_stellar_rs-stckliste-2.pdf` },
+  'Nova Glitch': { dated: '2024-08-08', widthMM: 20, fibre: 'polyester', maker: 'Güth & Wolf', source: `${DHV_FILES}/managed/pruefung/2024/08/bill_of_material-glitch.pdf` },
+  'Swing Miura 2 RS D-Lite': { dated: '2025', widthMM: 12, fibre: 'aramid/polyester', maker: 'Cousin', source: `${DHV_FILES}/managed/pruefung/2025/01/swing_miura_2_rs_dlite-stckl.pdf` },
+  // The list does not name its wing.
+  'DHV list GS-01-3027-25': { dated: '2025', widthMM: 20, fibre: 'polyester/aramid', maker: 'Cousin', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-3027-25.pdf` },
+  'Pro-Design Cuga': { dated: '2008', widthMM: 20, fibre: 'polyester', maker: 'Güth & Wolf', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-1795-08.pdf` },
+  'Sol Kangaroo 3 (tandem)': { dated: '2010', widthMM: 19, fibre: 'not stated', maker: 'Fitanew', source: `${DHV_FILES}/tmo/stuecklisten/S_GS-01-1873-10.pdf` },
+};
+Object.defineProperty(RISER_WEBBING, 'provenance', {
+  value: 'DHV-published bills of materials (Stücklisten), each wing\'s main riser webbing; retrieved 2026-11-03',
+  enumerable: false,
+});
+
+/**
+ * A riser strap of webbing so wide, as `lineDrag` takes a riser's material:
+ * rectangular, its width where a line has its diameter. No width, no strap,
+ * and `lineDrag` says its risers were not counted.
+ */
+export function riserWebbingMaterial(widthMM) {
+  if (!(widthMM > 0)) return null;
+  return { name: `riser webbing ${widthMM} mm`, diameterMM: widthMM, section: 'rectangular' };
+}
+
 /* --------------------------------------------------- lift from the wing -- */
 
 /**

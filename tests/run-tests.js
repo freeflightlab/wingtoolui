@@ -157,7 +157,7 @@ import {
   acceleratedPolar, travelForSpeedRange, RISER_HARDWARE, hardwareForSize,
   liftModelFromWing, acceleratedPolarFromWing, collapseFloorForTopSpeed,
   riserLengthsWithTrim, alphaChangeWithTrim, trimEnvelope, DEFAULT_TRIMMER,
-  buildRiserWebbing, riserSteps, totalLineLength,
+  buildRiserWebbing, riserSteps, totalLineLength, RISER_WEBBING, riserWebbingMaterial,
 } from '../src/core/risers.js';
 import {
   parseSizeTable, fitScalingFamily, scaleToArea, generateFamily,
@@ -15408,6 +15408,52 @@ section('Each line\'s drag, by its Reynolds number and its angle to the flow');
   check('a strap riser is a flat plate broadside, Cd 1.98, and one with no material is said, not counted',
     strapT.perLine.every((pl) => pl.cd === 1.98 && pl.strap) && bareRiser.risersDragAreaM2 === 0
     && bareRiser.risersUncounted.join() === 'riser-A');
+}
+
+section('The risers\' webbing, and its drag');
+
+{
+  // The tool's own risers had a weight and no width, so their drag was not
+  // counted. The DHV publishes each certified wing's bill of materials; its
+  // main riser webbing is 12 mm of aramid and polyester on most solo wings
+  // since 2020, and each strap is counted as LEparagliding counts one.
+  const lists = Object.entries(RISER_WEBBING);
+  const recent = lists.filter(([, w]) => Number(w.dated.slice(0, 4)) >= 2020);
+  check('ten wings\' main riser webbing, each from its DHV bill of materials',
+    lists.length === 10 && lists.every(([, w]) => w.widthMM > 0 && /^https:\/\/(service|www)\.dhv\.de\/dbfiles\//.test(w.source))
+      && /DHV/.test(RISER_WEBBING.provenance) && !Object.keys(RISER_WEBBING).includes('provenance'));
+  check('12 mm on six of the eight dated from 2020, 20 mm on the other two',
+    recent.length === 8 && recent.filter(([, w]) => w.widthMM === 12).length === 6
+      && recent.filter(([, w]) => w.widthMM === 20).length === 2,
+    recent.map(([k, w]) => `${k} ${w.widthMM}`).join(', '));
+  const strap = riserWebbingMaterial(12);
+  check('a riser\'s webbing is a rectangular strap, its width where a line has its diameter; no width, no strap',
+    strap.section === 'rectangular' && strap.diameterMM === 12
+      && riserWebbingMaterial(0) === null && riserWebbingMaterial(null) === null);
+  const afW = naca4('4415');
+  afW.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const optsW = { wing: demoWing(), airfoil: afW, layout: RISER_LAYOUTS['A/B/C+D'], everyNthRib: 2, lineLengthM: 6.5 };
+  const bareW = buildLinePlan(optsW);
+  const sewnW = buildLinePlan({ ...optsW, riserMaterial: strap });
+  check('a plan\'s risers carry the webbing they are sewn from, and nothing else in it moves',
+    sewnW.riserWebbing.length === 3 && sewnW.riserWebbing.every((w) => w.material === strap)
+      && bareW.riserWebbing.every((w) => !w.material)
+      && JSON.stringify(sewnW.lines.map((l) => [l.lengthMM, l.to])) === JSON.stringify(bareW.lines.map((l) => [l.lengthMM, l.to])));
+  // Each strap broadside: its width by its length at 1.98, by sin^3 of its
+  // own angle to the flow, on both sides.
+  const alW = (5 * Math.PI) / 180;
+  const flowW = [Math.cos(alW), 0, Math.sin(alW)];
+  const byHand = sewnW.riserWebbing.reduce((acc, w) => {
+    const v = [0, 1, 2].map((i) => w.to[i] - w.from[i]);
+    const c = (v[0] * flowW[0] + v[1] * flowW[1] + v[2] * flowW[2]) / Math.hypot(v[0], v[1], v[2]);
+    return acc + 2 * 0.012 * (w.lengthMM / 1000) * 1.98 * (1 - c * c) ** 1.5;
+  }, 0);
+  const strapsW = lineDrag({ lines: [] }, { wingAreaM2: 22.3, risers: sewnW.riserWebbing, flowDirection: flowW });
+  const noneW = lineDrag({ lines: [] }, { wingAreaM2: 22.3, risers: bareW.riserWebbing, flowDirection: flowW });
+  check('each strap\'s drag is its width by its length at Cd 1.98 and its own angle to the flow; without a width it is said, not counted',
+    Math.abs(strapsW.risersDragAreaM2 - byHand) < 1e-12 && strapsW.risersUncounted.length === 0
+      && noneW.risersDragAreaM2 === 0 && noneW.risersUncounted.length === 3,
+    `${strapsW.risersDragAreaM2.toFixed(4)} m2, three straps a side`);
 }
 
 section('The wing hangs over its maillon');

@@ -79,7 +79,7 @@ export function buildBOM({
   // A design that states its rods without a diameter has a length and no
   // mass, and says so.
   rods = null,
-  // Riser webbing: `{ count, lengthM }` for both sides.
+  // Riser webbing: `{ count, lengthM, widthMM }` for both sides.
   risers = null,
   // What the wing is set to weigh, to say how much of it this accounts for.
   wingMassKg = null,
@@ -292,7 +292,7 @@ export function buildBOM({
 
   // ---- riser webbing -----------------------------------------------------
   const webbing = risers && risers.count
-    ? { item: 'Riser webbing', count: risers.count, lengthM: risers.lengthM }
+    ? { item: 'Riser webbing', count: risers.count, lengthM: risers.lengthM, widthMM: risers.widthMM ?? null }
     : null;
 
   // ---- hardware ----------------------------------------------------------
@@ -404,7 +404,8 @@ export function bomText(bom) {
         + `${bom.webbing.lengthM.toFixed(1).padStart(6)} m  not weighed`);
       // What the figure is of, since a riser set has more webbing in it
       // than this.
-      out.push('    the straps from the karabiner to the lines; a speed system\'s own webbing is not in it');
+      out.push(`    the straps from the karabiner to the lines${bom.webbing.widthMM ? `, ${bom.webbing.widthMM} mm wide` : ''}; `
+        + 'a speed system\'s own webbing is not in it');
     }
   }
 
