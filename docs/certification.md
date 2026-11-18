@@ -52,13 +52,13 @@ Run at the weights the wings were actually flown at:
 
 | wing | all-up | trim speed | certificate |
 | --- | --- | --- | --- |
-| Geo 7 XS | 55 kg | 24.9 km/h | more than 30 |
-| Geo 7 XS | 70 kg | 28.1 km/h | more than 30 |
-| Geo 7 L | 95 kg | 28.7 km/h | more than 30 |
-| Geo 7 L | 115 kg | 31.6 km/h | more than 30 |
+| Geo 7 XS | 55 kg | 25.1 km/h | more than 30 |
+| Geo 7 XS | 70 kg | 28.3 km/h | more than 30 |
+| Geo 7 L | 95 kg | 28.9 km/h | more than 30 |
+| Geo 7 L | 115 kg | 31.8 km/h | more than 30 |
 
 **Short on three of four.** The mechanism is visible in the same solve: the
-model trims at **CL 0.806**, where a real wing trims nearer 0.55 to 0.65. It
+model trims at **CL 0.797**, where a real wing trims nearer 0.55 to 0.65. It
 is flying too slowly because it is flying at too high a lift coefficient.
 
 Bringing the speed up to the certified minimum, at the same glide, moves sink
@@ -70,14 +70,14 @@ its arc — the handbook's ellipse through the Geo 7's published projected
 span, 0.77 of its flat one, as the picker builds it — the vortex lattice
 gives it seven tenths of the flat wing's lift slope (`arcFactors`,
 `docs/environment-and-aero.md` section 6), and the same assumed 6° trims it
-at CL 0.59:
+at CL 0.58:
 
 | wing | all-up | flat, 6° | in its arc, 6° | certificate |
 | --- | --- | --- | --- | --- |
-| Geo 7 XS | 55 kg | 24.9 km/h | 29.1 km/h | more than 30 |
-| Geo 7 XS | 70 kg | 28.1 km/h | 32.8 km/h | more than 30 |
-| Geo 7 L | 95 kg | 28.7 km/h | 33.6 km/h | more than 30 |
-| Geo 7 L | 115 kg | 31.6 km/h | 36.9 km/h | more than 30 |
+| Geo 7 XS | 55 kg | 25.1 km/h | 29.3 km/h | more than 30 |
+| Geo 7 XS | 70 kg | 28.3 km/h | 33.0 km/h | more than 30 |
+| Geo 7 L | 95 kg | 28.9 km/h | 33.8 km/h | more than 30 |
+| Geo 7 L | 115 kg | 31.8 km/h | 37.2 km/h | more than 30 |
 
 Three of four above the certified 30 km/h, the lightest XS just under, at a
 lift coefficient real wings trim at. Nothing was fitted to get there: the
@@ -93,19 +93,19 @@ the risers hang and returns the angle the wing settles at.
 
 No Geo 7's calage is published. Where built wings hang theirs is on file: the
 three complete designs, 32.5, 33 and 36% of the central chord. At 34% the
-four cases trim at CL 0.60 to 0.61 flat and 0.51 in the arc:
+four cases trim at CL 0.58 to 0.59 flat and 0.50 in the arc:
 
 | wing | all-up | assumed 6°, flat | from 34%, flat | from 34%, in its arc | certificate |
 | --- | --- | --- | --- | --- | --- |
-| Geo 7 XS | 55 kg | 24.9 km/h | 28.7 km/h | 31.3 km/h | more than 30 |
-| Geo 7 XS | 70 kg | 28.1 km/h | 32.3 km/h | 35.2 km/h | more than 30 |
-| Geo 7 L | 95 kg | 28.7 km/h | 33.3 km/h | 36.0 km/h | more than 30 |
-| Geo 7 L | 115 kg | 31.6 km/h | 36.5 km/h | 39.5 km/h | more than 30 |
+| Geo 7 XS | 55 kg | 25.1 km/h | 29.2 km/h | 31.6 km/h | more than 30 |
+| Geo 7 XS | 70 kg | 28.3 km/h | 32.8 km/h | 35.5 km/h | more than 30 |
+| Geo 7 L | 95 kg | 28.9 km/h | 33.8 km/h | 36.4 km/h | more than 30 |
+| Geo 7 L | 115 kg | 31.8 km/h | 37.1 km/h | 40.0 km/h | more than 30 |
 
 In its arc all four are above the certified 30 km/h, and the certificate
 bounds the calage: the XS at 55 kg trims above 30 only from a calage forward
-of 37.1% — the range the built designs hang in. The sinks, 1.12 to 1.41 m/s
-in the arc at 34%, are 0.1 to 0.3 above what a wing of this size does; the
+of 37.8% — the range the built designs hang in. The sinks, 1.15 to 1.45 m/s
+in the arc at 34%, are 0.1 to 0.4 above what a wing of this size does; the
 NACA 4415 standing in for the Geo 7's unpublished section is the likeliest
 part of that.
 

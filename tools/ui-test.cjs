@@ -357,6 +357,43 @@ if (!errors.length) {
     + `thin-aerofoil theory says ${m0.section0.cm0.toFixed(4)}; one swept from 0° finds its zero lift along its lift slope, `
     + `its calage ${(off00 * 100).toFixed(2)}% of chord from the whole polar's, where its first angle put it ${(offFirst * 100).toFixed(2)}%`);
 }
+// A five-digit section from the picker: its own mean line in the balance,
+// the reflexed one carrying almost no moment, and the hint saying which.
+{
+  const S2 = globalThis.__S;
+  const keep = { airfoilCode: S2.airfoilCode, balanceMode: S2.balanceMode };
+  const go = () => { globalThis.__rebuild(); globalThis.__controls(); return globalThis.__getM(); };
+  const hintText = () => {
+    const out = [];
+    const walk = (n) => {
+      if (!n) return;
+      if (n.className === 'hint' && n._text && n.style.display !== 'none') out.push(n._text);
+      for (const c of n.children || []) walk(c);
+    };
+    walk(globalThis.document.getElementById('g-airfoil'));
+    return out.join(' | ');
+  };
+  S2.balanceMode = 'polar';
+  const bad = [];
+  const got = {};
+  for (const code of ['4415', '23015', '23115']) {
+    S2.airfoilCode = code;
+    const m = go();
+    got[code] = { cm0: m.section0.cm0, aL0: m.section0.alphaL0Deg, kmh: m.balance.speedKMH, calage: m.balance.calageFraction, hint: hintText() };
+  }
+  if (!(Math.abs(got['4415'].cm0 + 0.10624) < 5e-5 && Math.abs(got['4415'].aL0 + 4.1545) < 0.002
+    && Math.abs(got['23015'].cm0 + 0.01284) < 5e-5 && Math.abs(got['23115'].cm0 - 0.00113) < 5e-5
+    && got['23115'].kmh > got['23015'].kmh && got['23015'].kmh > got['4415'].kmh
+    && /Five digits: drawn for a lift coefficient of 0\.30, its camber greatest 15% of chord back, and reflexed/.test(got['23115'].hint)
+    && /Four digits: 4% camber, greatest 40% of chord back/.test(got['4415'].hint))) {
+    bad.push(JSON.stringify(got));
+  }
+  Object.assign(S2, keep); go();
+  if (bad.length) errors.push(`five-digit sections: ${bad.join('; ')}`);
+  console.log(`  ${bad.length ? 'FAIL' : 'ok  '} a five-digit section on its own mean line: Cm0 ${got['23015'].cm0.toFixed(4)} on the 23015, `
+    + `${got['23115'].cm0.toFixed(4)} reflexed, against the 4415's ${got['4415'].cm0.toFixed(4)}; trimmed at 5°, `
+    + `${got['4415'].kmh.toFixed(1)}, ${got['23015'].kmh.toFixed(1)} and ${got['23115'].kmh.toFixed(1)} km/h`);
+}
 // The line set level by level, as the DHV calculates it for EN 926-1: the
 // default wing's set is sized to it, the Lines group shows every level, and
 // unticked, its mains and its brake fall short. An imported design's own set

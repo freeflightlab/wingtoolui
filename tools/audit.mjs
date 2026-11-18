@@ -136,12 +136,12 @@ const { alphaChange, riserSet } = await import('../src/core/risers.js');
 const af = naca4('4415');
 const anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
 const claims = [
-  ['A row share at 6 deg is 38.0%',
-    rowSharesFromPressure(af, anchors, 6).shares.A * 100, 38.0, 0.3],
-  ['D row share at 6 deg is 16.8%',
-    rowSharesFromPressure(af, anchors, 6).shares.D * 100, 16.8, 0.3],
-  ['zero-lift angle of a 4415 is -4.27 deg',
-    chordwiseLoading(af, 0).alphaL0Deg, -4.27, 0.02],
+  ['A row share at 6 deg is 37.2%',
+    rowSharesFromPressure(af, anchors, 6).shares.A * 100, 37.2, 0.3],
+  ['D row share at 6 deg is 16.6%',
+    rowSharesFromPressure(af, anchors, 6).shares.D * 100, 16.6, 0.3],
+  ['zero-lift angle of a 4415 is -4.154 deg',
+    chordwiseLoading(af, 0).alphaL0Deg, -4.154, 0.002],
   ['line-length law slope is -5.12',
     LINE_LENGTH_PER_SPAN.slope, -5.120, 0.001],
   ['the law gives 17.95 m/m at AR 6.4', lineLengthPerSpan(6.4), 17.95, 0.02],

@@ -158,8 +158,19 @@ Cm_c/4   =  (pi/4)(A2 - A1) = (1/2) integral (dyc/dx)(cos 2t - cos t) dt
 Note the **1/2** on the moment, not 1/4 — the `pi/4` prefactor multiplies
 coefficients that each already carry a `2/pi`. This was wrong in a first
 draft and produced exactly half the correct moment. Checked against the
-standard worked example for NACA 2412, which gives alpha_L0 = -2.07 deg and
-Cm_c/4 = -0.0531.
+standard worked example for NACA 2412, which gives alpha_L0 = -2.077 deg and
+Cm_c/4 = -0.0531, and the tool now gives exactly.
+
+**The theory is written on the mean line**, and a section the tool generates
+carries the one it was built on. The mean of the two surfaces at one x is
+not that line where the thickness is laid perpendicular to a sloping one:
+taken off the surfaces, as it was, the 2412 read -2.115 deg, the default
+NACA 4415 -4.275 deg and -0.1052 where its line gives -4.154 and -0.1062,
+and the error grew with the thickness. The chordwise loading the rows'
+shares are taken from, when asked for and across the speed bar, is worked
+on the same line: the A row's share at 5° went from 36.1% to 35.3%. A
+section read from coordinates has only its surfaces, and is worked on their
+mean.
 
 Thin-airfoil theory reliably **overpredicts** the moment for a real section:
 NACA 4412 measures about -0.093 against a theoretical -0.106. Treat it as a
@@ -216,15 +227,45 @@ On NACA 4412 with reflex from 65% chord:
 
 | Reflex | alpha_L0 | Cm_c/4 |
 | --- | --- | --- |
-| 0.0% | -4.23 deg | -0.1055 |
-| 0.5% | -3.44 deg | -0.0896 |
-| 1.0% | -2.65 deg | -0.0737 |
-| 1.5% | -1.86 deg | -0.0578 |
-| 2.0% | -1.06 deg | -0.0419 |
+| 0.0% | -4.15 deg | -0.1062 |
+| 0.5% | -3.36 deg | -0.0903 |
+| 1.0% | -2.57 deg | -0.0744 |
+| 1.5% | -1.78 deg | -0.0585 |
+| 2.0% | -0.99 deg | -0.0426 |
 
-3% reflex starting at 85% chord takes Cm0 positive (+0.074). The cost is
+These are worked on the mean line the section was built on, with the rise
+on it; taken off the mean of the surfaces, as they were until the round of
+2026-11-17, each zero-lift angle read 0.08° further below zero and each
+moment 0.0007 smaller.
+
+3% reflex starting at 85% chord takes Cm0 positive (+0.073). The cost is
 visible in the same table: the zero-lift angle moves toward zero, so the
 section makes less lift at a given angle.
+
+### Five-digit sections
+
+The NACA five-digit series, `LPSTT`, puts the camber far forward — at 0.05 P
+of chord, 15% on the 230 — on a mean line drawn for an ideal lift
+coefficient of 0.15 L, and with S = 1 turns it back up behind so that the
+section carries no moment about its quarter chord (`naca5`, airfoil.js). The
+mean lines are tabulated (NASA TM-4741, after Ladson and Brooks's TM X-3284)
+for L = 2, and the suite holds each to what it was drawn to:
+
+| mean line | maximum camber | at | ideal Cl | Cm_c/4 | zero-lift |
+| --- | --- | --- | --- | --- | --- |
+| 230 | 1.84% | 15.0% | 0.300 | -0.0128 | -1.09° |
+| 231, reflexed | 2.08% | 15.0% | 0.302 | +0.0011 | -0.75° |
+| 240 | 2.08% | 20.0% | 0.300 | -0.0183 | -1.29° |
+| 241, reflexed | 2.41% | 20.0% | 0.301 | +0.0001 | -0.85° |
+
+The ideal lift is within 3% of 0.3 on all nine lines (0.308 on the 210 and
+0.305 on the 221, which a 2026 rederivation of the constants also finds in
+the tabulated k1), and the reflexed lines' moment within 0.0014 of zero.
+The interface offers the 23015 and the reflexed 23115. Reflex of this kind
+trims a wing faster on less lift, but it is not the positive moment a
+reflex paraglider wants: the Swoop2's section carries +0.025. A five-digit
+code used to be read by the four-digit reader, '23012' as 2% camber at 30%;
+each code goes to its own now.
 
 ---
 
@@ -317,8 +358,8 @@ section 5's residual. Its best glide falls from 9.41 to 8.43 on the
 handbook's line drag of 0.020, and is 9.69 on a modern lineset's 0.010. On
 the Lynx 2 M, the one wing here with a published polar, in the arc solved to
 its published projected area, every figure the derived lift curve gives
-comes nearer the published one (`docs/validation.md` §2.7): trim 30.1 →
-34.3 km/h against 39, best glide 12.2 → 10.8 against 11, minimum sink 0.69
+comes nearer the published one (`docs/validation.md` §2.7): trim 30.3 →
+34.5 km/h against 39, best glide 12.2 → 10.8 against 11, minimum sink 0.69
 → 0.88 m/s against 1.0.
 
 What the arc does not change is the section and the angle. The trim comes

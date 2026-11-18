@@ -14,8 +14,8 @@ One offline HTML file, 1.6 MB, no build step and no network. That constraint
 drove the architecture: 40 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 75,300 lines**: 29,700 core, 6,800 interface, 19,200 tests, 6,400
-tools, 13,200 documentation.
+**About 75,700 lines**: 29,800 core, 6,800 interface, 19,300 tests, 6,400
+tools, 13,300 documentation.
 
 ## 2. What is genuinely validated
 
@@ -111,7 +111,9 @@ weight hangs plumb under its centre of pressure, to the micrometre.
 the three-liners land from 3% under to 12% over their published totals and
 the two-liners, and the Lynx 2, a third over: each Ozone two-liner has sixteen
 short bridles a side at the top of its front row, a level the generator does
-not build. Across the 55 published sizes the pipeline runs +15% (−21% to
+not build — each pair on one rib, one tab behind the other, as Ozone's own
+rigging diagrams draw it, so the front row's support is two points a rib,
+not the extra ribs its sheet's names count. Across the 55 published sizes the pipeline runs +15% (−21% to
 +46%). A wing from the picker hangs from its own cascade where its sheets are
 on file and from anchors solved to its published total where they are not. In
 shape the rows that carry the wing are 88 mm from the 28 sheets with

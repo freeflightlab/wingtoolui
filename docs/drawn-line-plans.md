@@ -303,9 +303,11 @@ difference was read as their shape.
 
 - **The two-liners' bridles.** An Ozone two-liner's A row carries sixteen short
   bridles, `A1a` to `A8b`, on eight lines `A1` to `A8` that do not reach the
-  canopy. The corpus counts all of them as anchors — 31 on the Alpina 5. Whether
-  the bridles of neighbouring lines share ribs the sheets do not say, and no
-  drawing of an Ozone two-liner is on file.
+  canopy. Ozone's rigging diagrams of the Alpina 5, the Zeno 2 and the Lyght,
+  supplied by the user, draw each pair on one rib, one tab behind the other
+  along the chord: not two neighbouring ribs. The corpus counts all of them as
+  anchors — 31 on the Alpina 5, where the canopy has 23 A tabs on 15 ribs, and
+  30 on the Zeno 2 for its 22 on 14.
 - **Middle lines the generator cannot shape** are paired: the Zeno 2's C top
   lines hang on its B middles, UP's Torre and Meru 2 have a level between their
   middles and their mains, Niviuk's Hook 6 shares middles between its C and D

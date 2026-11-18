@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-y+PgGkabmzR47Ef3lJH+cyJkTbTIMAFSw5T/dqsohwc='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Ej+l82W19TcvgZyKfEri5tfP48sHVzTFdqvCBEX4cbY='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Paraglider Design Tool</title>
 <style>/* Palette note: the geometry colours are the AutoCAD Color Index values the
    handbook's own panel subroutine writes into its DXF (2 yellow, 3 green,
@@ -584,7 +584,7 @@ input[type=range]::-moz-range-thumb {
 <div class="shell">
 
   <header class="masthead">
-    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.8.0</span></div>
+    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.9.0</span></div>
     <input class="wingname" id="wingName" value="gnu-01" aria-label="Wing name">
     <div class="readout" id="readout"></div>
     <button class="themebtn" id="themeBtn" aria-label="Switch between dark and light">Light</button>
@@ -1165,18 +1165,14 @@ function cosineSpacing(n) {
  * @param {number} n    points per surface
  */
 function naca4(code, n = 80, { closedTrailingEdge = true } = {}) {
-  if (!/^\d{4,5}$/.test(code)) throw new Error(`Not a NACA 4-digit code: ${code}`);
+  // Four digits only. A five-digit code was let through and read as four:
+  // '23012' came out 2% camber at 30% and 12% thick, a section with no name,
+  // and '44150' 150% thick. Five digits are `naca5`'s, and `nacaSection`
+  // sends either code where it belongs.
+  if (!/^\d{4}$/.test(code)) throw new Error(`Not a NACA 4-digit code: ${code}`);
   const m = parseInt(code[0], 10) / 100;
   const p = parseInt(code[1], 10) / 10;
   const t = parseInt(code.slice(2), 10) / 100;
-
-  // a0..a4. The set is quoted for a 20% section; t/0.2 scales it, which is
-  // the same as the 5*t written below.
-  const a4 = closedTrailingEdge ? 0.1036 : 0.1015;
-
-  const yt = (x) =>
-    5 * t * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x
-      + 0.2843 * x ** 3 - a4 * x ** 4);
 
   const camber = (x) => {
     // A code with a camber digit but zero position (e.g. '4012') is not a
@@ -1194,6 +1190,20 @@ function naca4(code, n = 80, { closedTrailingEdge = true } = {}) {
       dy: ((2 * m) / q) * (p - x),
     };
   };
+  return sectionOnMeanLine(`NACA ${code}`, camber, t, n, closedTrailingEdge);
+}
+
+/**
+ * A section built as the NACA families are: the four-digit thickness laid
+ * perpendicular to a mean line. a0..a4 are quoted for a 20% section and
+ * scaled by t/0.2, the 5*t below; the last is 0.1036 for a closed trailing
+ * edge (above).
+ */
+function sectionOnMeanLine(name, camber, t, n, closedTrailingEdge) {
+  const a4 = closedTrailingEdge ? 0.1036 : 0.1015;
+  const yt = (x) =>
+    5 * t * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x
+      + 0.2843 * x ** 3 - a4 * x ** 4);
 
   const xs = cosineSpacing(n);
   const upper = [];
@@ -1209,11 +1219,99 @@ function naca4(code, n = 80, { closedTrailingEdge = true } = {}) {
 
   const pts = upper.slice().reverse().concat(lower.slice(1));
   return finalise({
-    name: `NACA ${code}`,
+    name,
     points: pts,
     intake: { start: 0.012, end: 0.055 },
     anchors: { A: 0.085, B: 0.30, C: 0.53, D: 0.78 },
+    // The mean line it was built on, exactly. Thin-aerofoil theory is
+    // written on the mean line, and the mean of the two surfaces at one x is
+    // not it where the thickness is laid perpendicular to a sloping line:
+    // taken off the surfaces, the NACA 4415's zero-lift angle came out
+    // -4.275 deg against its line's -4.154, and a 23015's moment -0.0096
+    // against -0.0128.
+    meanLine: { at: camber, of: name },
   });
+}
+
+/**
+ * The NACA five-digit mean lines, tabulated for a design lift coefficient
+ * of 0.3 (L = 2) and scaled linearly to any other: `r`, where the cubic
+ * forward part meets the straight or reflexed after part, `k1`, and for the
+ * reflexed lines `k2/k1`. Indexed by P, the maximum camber at 0.05 P of
+ * chord. NASA TM-4741 (Ladson, Brooks, Hill and Sproles, 1996) after TM
+ * X-3284 (Ladson and Brooks, 1975); the same in Abbott and von Doenhoff.
+ *
+ * The suite holds them to the conditions they were drawn to: the maximum
+ * camber at 0.05 P, an ideal lift coefficient of 0.3 by thin-aerofoil theory
+ * (within 3%: the 210's is 0.308, the 221's 0.305, which a 2026 rederivation
+ * finds in the tabulated k1 too), and for the reflexed lines no moment about
+ * the quarter chord (within 0.0014).
+ */
+const NACA5_MEAN_LINES = {
+  standard: {
+    1: { r: 0.0580, k1: 361.40 },
+    2: { r: 0.1260, k1: 51.640 },
+    3: { r: 0.2025, k1: 15.957 },
+    4: { r: 0.2900, k1: 6.643 },
+    5: { r: 0.3910, k1: 3.230 },
+  },
+  reflexed: {
+    2: { r: 0.1300, k1: 51.990, k2k1: 0.000764 },
+    3: { r: 0.2170, k1: 15.793, k2k1: 0.00677 },
+    4: { r: 0.3180, k1: 6.520, k2k1: 0.0303 },
+    5: { r: 0.4410, k1: 3.191, k2k1: 0.1355 },
+  },
+};
+
+/**
+ * The mean line of a five-digit code, `{ yc, dy }` at x, as NASA's program
+ * writes it: forward of r a cubic, aft of it a straight line to the trailing
+ * edge on a standard line, a gentle cubic back up on a reflexed one.
+ */
+function naca5MeanLine(code) {
+  if (!/^\d{5}$/.test(code)) throw new Error(`Not a NACA 5-digit code: ${code}`);
+  const L = parseInt(code[0], 10);
+  const P = parseInt(code[1], 10);
+  const S = parseInt(code[2], 10);
+  const family = S === 0 ? 'standard' : S === 1 ? 'reflexed' : null;
+  const c = family && NACA5_MEAN_LINES[family][P];
+  if (!c) {
+    throw new Error(`NACA ${code}: there is no ${S === 1 ? 'reflexed ' : ''}five-digit mean line `
+      + `${S > 1 ? `of type ${S}` : `with its maximum camber at ${5 * P}% of chord`}`);
+  }
+  const k1 = (c.k1 * L) / 2;
+  const kk = c.k2k1 ?? 0;
+  const { r } = c;
+  const r3 = r ** 3;
+  const o3 = (1 - r) ** 3;
+  return {
+    r, k1, k2k1: kk, designCl: 0.15 * L, maxCamberAt: 0.05 * P, reflexed: S === 1,
+    at: (x) => (x < r
+      ? { yc: (k1 / 6) * ((x - r) ** 3 - kk * o3 * x - r3 * x + r3), dy: (k1 / 6) * (3 * (x - r) ** 2 - kk * o3 - r3) }
+      : { yc: (k1 / 6) * (kk * (x - r) ** 3 - kk * o3 * x - r3 * x + r3), dy: (k1 / 6) * (3 * kk * (x - r) ** 2 - kk * o3 - r3) }),
+  };
+}
+
+/**
+ * NACA five-digit section, `LPSTT`: a design lift coefficient of 0.15 L,
+ * the maximum camber at 0.05 P of chord, a standard (S = 0) or reflexed
+ * (S = 1) mean line, TT% thick. The 230 lines put their camber far forward,
+ * and the reflexed ones turn back up behind it so the section carries no
+ * moment about its quarter chord: the 23112 against the 23012's -0.013. The
+ * thickness is the four-digit's, closed at the trailing edge as there.
+ */
+function naca5(code, n = 80, { closedTrailingEdge = true } = {}) {
+  const line = naca5MeanLine(code);
+  const t = parseInt(code.slice(3), 10) / 100;
+  return sectionOnMeanLine(`NACA ${code}`, line.at, t, n, closedTrailingEdge);
+}
+
+/** A NACA section by its code: four digits or five. */
+function nacaSection(code, n = 80, opts = {}) {
+  const c = String(code).trim();
+  if (/^\d{4}$/.test(c)) return naca4(c, n, opts);
+  if (/^\d{5}$/.test(c)) return naca5(c, n, opts);
+  throw new Error(`Not a NACA 4- or 5-digit code: ${code}`);
 }
 
 /**
@@ -1482,11 +1580,18 @@ function applyReflex(af, { amount = 0.012, start = 0.65, exponent = 2.0 } = {}) 
   }
 
   const pts = up.slice().reverse().concat(lo.slice(1));
+  // A section that knows its mean line keeps knowing it, with the rise on it.
+  const base = af.meanLine?.at;
+  const riseSlope = (x) => (x <= start ? 0
+    : (amount * exponent * Math.pow((x - start) / (1 - start), exponent - 1)) / (1 - start));
   return finalise({
     ...af,
     name: `${af.name} reflex ${(amount * 100).toFixed(1)}%`,
     points: pts,
     reflex: { amount, start, exponent },
+    meanLine: base
+      ? { at: (x) => { const b = base(x); return { yc: b.yc + rise(x), dy: b.dy + riseSlope(x) }; }, of: af.meanLine.of }
+      : undefined,
   });
 }
 
@@ -1740,6 +1845,18 @@ function camberLine(airfoil, n = 200) {
     throw new Error(`camberLine: n is a sample count, not a physical `
       + `quantity (got ${n})`);
   }
+  // A generated section knows its own mean line (`sectionOnMeanLine`,
+  // airfoil.js); a section read from coordinates has only its surfaces.
+  const own = airfoil.meanLine?.at;
+  if (own) {
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = (Math.PI * i) / n;
+      const x = (1 - Math.cos(t)) / 2;
+      pts.push({ t, x, y: own(x).yc });
+    }
+    return pts;
+  }
   const { upper, lower } = splitSurfaces(airfoil);
   const at = (poly, x) => {
     for (let i = 1; i < poly.length; i++) {
@@ -1799,7 +1916,10 @@ function thinAirfoil(airfoil, opts = 400) {
   }
   const n = typeof opts === 'object' && opts ? (opts.samples ?? 400) : opts;
   const cl = camberLine(airfoil, n);
-  const slope = (i) => {
+  // The slope of a section's own mean line where it knows it; differenced
+  // off the camber points where it does not.
+  const own = airfoil.meanLine?.at;
+  const slope = own ? (i) => own(cl[i].x).dy : (i) => {
     const a = cl[Math.max(0, i - 1)];
     const b = cl[Math.min(cl.length - 1, i + 1)];
     return (b.y - a.y) / (b.x - a.x || 1e-12);
@@ -6111,7 +6231,11 @@ function buildLinePlanInner({
   //
   // Which is what the structure asks for: the leading edge needs support at
   // nearly every cell to hold its shape, while the rear carries less load and
-  // less shape. A single integer cannot say that — at 2 it undershoots a
+  // less shape. The two-liners' A counts are their sheets' names, eight of
+  // them the lines under bridle pairs; Ozone's diagrams put each pair on one
+  // rib, one tab behind the other, so the Alpina 5's canopy has 23 A tabs on
+  // 15 ribs, and the support is two points a rib rather than more ribs. The
+  // generator has no bridle level, and builds the names' count. A single integer cannot say that — at 2 it undershoots a
   // two-liner by a third, at 1 it overshoots by a quarter.
   //
   // Accepts a count per row: `{ A: 30, B: 14, C: 8 }`.
@@ -7388,7 +7512,7 @@ function hangPointFromAnchors(wing, fractions, calageFraction = null) {
   // This used a load-weighted average of the anchor positions instead, which
   // is a plausible-looking geometric proxy and not the same thing. On the
   // default wing it comes out at 31.0% of chord where the balance on its
-  // polar says 41.9% at 5 degrees — 39.3% with each force where the
+  // polar says 42.3% at 5 degrees — 39.7% with each force where the
   // handbook's rules put it — so the model pitched nose-down against the
   // attitude it would really fly at. (This said 50.6% and 18.7 points, from
   // a balance that counted the pitching moment twice.)
@@ -12068,13 +12192,17 @@ function camberSeries(airfoil, {
   noseCut = 0.01,
 } = {}) {
   // Mean camber line, sampled in theta so the integrals are uniform there.
-  const { upper, lower } = splitByX(airfoil);
-  const z = (x) => camberAt(upper, lower, x);
+  // A generated section carries the line it was built on (airfoil.js), whose
+  // slope is finite at the nose and needs no cut; a section read from
+  // coordinates has only its surfaces.
+  const own = airfoil.meanLine?.at;
+  const { upper, lower } = own ? { upper: null, lower: null } : splitByX(airfoil);
+  const z = own ? (x) => own(x).yc : (x) => camberAt(upper, lower, x);
   // Slope over a fixed step of chord, not between neighbouring theta
   // samples: those are 1e-5 of chord apart at the nose, where a difference
   // of two interpolated ordinates is mostly the interpolation.
   const h = 2e-3;
-  const slopeAtX = (x) => {
+  const slopeAtX = own ? (x) => own(x).dy : (x) => {
     const a = Math.max(noseCut, x - h);
     const b = Math.min(1, Math.max(noseCut, x) + h);
     return (z(b) - z(a)) / ((b - a) || 1e-12);
@@ -31214,7 +31342,7 @@ function rebuild() {
     // An imported design brings its own section and its own anchor rows. A
     // three-line wing has no D row, and inventing one at the slider's 78%
     // put a phantom D on the Swoop2's ribs.
-    let airfoil = (imported && importedAirfoil()) || S.airfoilCustom || naca4(S.airfoilCode);
+    let airfoil = (imported && importedAirfoil()) || S.airfoilCustom || nacaSection(S.airfoilCode);
     // Reflex turns the camber line back up near the trailing edge, trading a
     // little lift for a positive pitching moment. It is applied before
     // anything downstream so the ribs, panels and section theory all see the
@@ -32154,10 +32282,23 @@ function buildControls() {
   liveHint(P, cellWidthNote);
 
   const A = clear('g-airfoil');
-  const naca = selectField(A, 'airfoilCode', 'NACA 4-digit', [
+  const naca = selectField(A, 'airfoilCode', 'NACA section', [
     ['4415', 'NACA 4415'], ['4412', 'NACA 4412'],
     ['2414', 'NACA 2414'], ['4418', 'NACA 4418'], ['0012', 'NACA 0012'],
+    ['23015', 'NACA 23015'], ['23115', 'NACA 23115, reflexed'],
   ]);
+  if (!locked && !S.airfoilCustom) {
+    liveHint(A, () => {
+      const c = S.airfoilCode;
+      if (/^\d{5}$/.test(c)) {
+        return `Five digits: drawn for a lift coefficient of ${(0.15 * Number(c[0])).toFixed(2)}, its camber greatest `
+          + `${5 * Number(c[1])}% of chord back${c[2] === '1'
+            ? ', and reflexed: the mean line turns back up behind, so the section carries almost no moment about its quarter chord' : ''}.`;
+      }
+      return c[0] === '0' ? 'Symmetric: no camber, and no moment.'
+        : `Four digits: ${c[0]}% camber, greatest ${Number(c[1]) * 10}% of chord back.`;
+    });
+  }
   hint(A, 'Or load a coordinate file in Selig or plain "x y" format — the sections linked from the handbook work directly.');
   const imp = el('input'); imp.type = 'file'; imp.accept = '.dat,.txt,.csv';
   imp.style.fontSize = '10px'; imp.style.color = 'var(--text-dim)';

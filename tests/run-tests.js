@@ -36,7 +36,7 @@ import {
   NEUTRAL_LOAD_FRACTION, HOURS_PER_SEASON,
 } from '../src/core/trimdrift.js';
 import { planformFromDesignInputs, analyticPlanform, planformMetrics, flatArea, ribStations, cellWidths, totalCells, planformOutline } from '../src/core/planform.js';
-import { naca4, splitSurfaces, resampleSurface, airfoilMetrics, parseAirfoilText , LIBRARY } from '../src/core/airfoil.js';
+import { naca4, splitSurfaces, resampleSurface, airfoilMetrics, parseAirfoilText , LIBRARY, naca5, nacaSection, naca5MeanLine, NACA5_MEAN_LINES } from '../src/core/airfoil.js';
 import { buildLobe, washinAt, lobeMetrics, radiusForProjectedRatio, minArrowRatio, ellipseForProjectedRatio } from '../src/core/lobe.js';
 import { buildWing, projectedArea , ribLoops, mirrorRib } from '../src/core/wing3d.js';
 import { analyticPlanform as _ap } from '../src/core/planform.js';
@@ -1136,12 +1136,22 @@ section('Aerodynamics');
 
 {
   // Thin-airfoil theory. The standard worked example for NACA 2412 gives
-  // alpha_L0 = -2.07 deg and Cm_c/4 = -0.0531; these come out of the camber
-  // line taken off the generated section, so a little slack covers the
-  // difference between the true camber line and the mean of the surfaces.
+  // alpha_L0 = -2.077 deg and Cm_c/4 = -0.0531. A generated section carries
+  // the mean line it was built on, and the theory is worked on that line:
+  // taken off the mean of its surfaces, as it was, it read -2.115 deg, and
+  // the NACA 4415's -4.275 against its line's -4.154.
   const t2412 = thinAirfoil(naca4('2412'));
-  near('NACA 2412 zero-lift angle', t2412.alphaL0Deg, -2.07, 0.08, ' deg');
-  near('NACA 2412 quarter-chord moment', t2412.cm0, -0.0531, 0.004);
+  near('NACA 2412 zero-lift angle', t2412.alphaL0Deg, -2.077, 0.002, ' deg');
+  near('NACA 2412 quarter-chord moment', t2412.cm0, -0.0531, 0.0002);
+  {
+    // A section read from coordinates has no mean line but its surfaces,
+    // and is worked on them as before.
+    const read = parseAirfoilText(`NACA 2412 as coordinates\n${naca4('2412').points.map((q) => q.join(' ')).join('\n')}`);
+    const tRead = thinAirfoil(read);
+    check('a section read from coordinates is worked on the mean of its surfaces',
+      !read.meanLine && Math.abs(tRead.alphaL0Deg - t2412.alphaL0Deg) < 0.06 && tRead.alphaL0Deg !== t2412.alphaL0Deg,
+      `${tRead.alphaL0Deg.toFixed(3)} deg off its surfaces, ${t2412.alphaL0Deg.toFixed(3)} on its line`);
+  }
 
   const t0012 = thinAirfoil(naca4('0012'));
   near('symmetric section has zero lift at zero alpha', t0012.alphaL0Deg, 0, 1e-6, ' deg');
@@ -1179,6 +1189,69 @@ section('Aerodynamics');
     return Math.hypot(u[0] - l[0], u[1] - l[1]) < 1e-6;
   })());
   check('zero reflex is a no-op', applyReflex(base, { amount: 0 }) === base);
+  {
+    // Reflex on a section that knows its mean line puts the rise on it.
+    const rx = applyReflex(base, { amount: 0.01, start: 0.65 });
+    const tOwn = thinAirfoil(rx);
+    const tSurf = thinAirfoil({ ...rx, meanLine: undefined });
+    check('reflex keeps a section\'s own mean line, with the rise on it',
+      !!rx.meanLine && Math.abs(rx.meanLine.at(1).yc - 0.01) < 1e-12 && Math.abs(rx.meanLine.at(0.5).yc - base.meanLine.at(0.5).yc) < 1e-15
+        && Math.abs(tOwn.cm0 - tSurf.cm0) < 0.0015 && Math.abs(tOwn.alphaL0Deg - tSurf.alphaL0Deg) < 0.1,
+      `Cm0 ${tOwn.cm0.toFixed(5)} on its line, ${tSurf.cm0.toFixed(5)} off its surfaces`);
+  }
+
+  // NACA five-digit sections, LPSTT. Their mean lines are tabulated for an
+  // ideal lift coefficient of 0.3 (NASA TM-4741, after TM X-3284) and drawn
+  // to three conditions, which they are held to here: the maximum camber at
+  // 0.05 P of chord; thin-aerofoil theory's lift at the angle where the
+  // leading edge carries no suction, 0.15 L; and on a reflexed line, no
+  // moment about the quarter chord.
+  const idealCl = (code) => {
+    const line = naca5MeanLine(code);
+    const N = 4000;
+    let a1 = 0;
+    for (let i = 0; i < N; i++) {
+      const t = (Math.PI * (i + 0.5)) / N;
+      a1 += line.at((1 - Math.cos(t)) / 2).dy * Math.cos(t) * (Math.PI / N);
+    }
+    return 2 * a1; // pi * A1, A1 = (2/pi) * integral
+  };
+  const maxCamberAt = (code) => {
+    const line = naca5MeanLine(code);
+    let best = [0, -1];
+    for (let i = 0; i <= 10000; i++) { const x = i / 10000; const y = line.at(x).yc; if (y > best[1]) best = [x, y]; }
+    return best;
+  };
+  const codes5 = [
+    ...Object.keys(NACA5_MEAN_LINES.standard).map((P) => `2${P}012`),
+    ...Object.keys(NACA5_MEAN_LINES.reflexed).map((P) => `2${P}112`),
+  ];
+  check('every five-digit mean line has its maximum camber at 0.05 P of chord',
+    codes5.length === 9 && codes5.every((c) => Math.abs(maxCamberAt(c)[0] - 0.05 * Number(c[1])) < 0.001),
+    codes5.map((c) => `${c.slice(0, 3)} ${maxCamberAt(c)[0].toFixed(4)}`).join(', '));
+  check('and lifts 0.3 at its ideal angle, within the 3% its tabulated k1 carries',
+    codes5.every((c) => Math.abs(idealCl(c) / 0.3 - 1) < 0.03),
+    codes5.map((c) => `${c.slice(0, 3)} ${idealCl(c).toFixed(4)}`).join(', '));
+  const cm5 = Object.fromEntries(codes5.map((c) => [c, thinAirfoil(naca5(c)).cm0]));
+  check('a reflexed line carries no moment about its quarter chord; a standard one a nose-down one',
+    codes5.filter((c) => c[2] === '1').every((c) => Math.abs(cm5[c]) < 0.0015)
+      && codes5.filter((c) => c[2] === '0').every((c) => cm5[c] < -0.003),
+    codes5.map((c) => `${c.slice(0, 3)} ${cm5[c].toFixed(5)}`).join(', '));
+  const n23012 = naca5('23012');
+  const sp23 = splitSurfaces(n23012);
+  check('a five-digit section is its code\'s thickness, on its mean line, closed at the trailing edge',
+    Math.abs(n23012.metrics.maxThickness - 0.12) < 0.001
+      && Math.abs(maxCamberAt('23012')[1] - 0.01839) < 0.00002
+      && Math.hypot(sp23.upper[sp23.upper.length - 1][1] - sp23.lower[sp23.lower.length - 1][1]) < 1e-9,
+    `${(n23012.metrics.maxThickness * 100).toFixed(2)}% thick, camber ${(maxCamberAt('23012')[1] * 100).toFixed(3)}%`);
+  check('its camber scales with its first digit',
+    Math.abs(maxCamberAt('43012')[1] / maxCamberAt('23012')[1] - 2) < 1e-9 && Math.abs(idealCl('43012') / idealCl('23012') - 2) < 1e-9);
+  // A five-digit code was read as four, and '23012' became a section with
+  // no name: 2% camber at 30%. Each reader takes its own now.
+  const refused = (f) => { try { f(); return false; } catch (e) { return true; } };
+  check('the four-digit reader refuses a five-digit code, and each code goes where it belongs',
+    refused(() => naca4('23012')) && nacaSection('23012').name === 'NACA 23012' && nacaSection('4415').name === 'NACA 4415'
+      && refused(() => nacaSection('26012')) && refused(() => nacaSection('21112')) && refused(() => nacaSection('23212')));
 
   // Lifting line against the exact elliptical result: e = 1 exactly, and
   // CL_alpha = a0 / (1 + a0 / (pi AR)).
@@ -6510,6 +6583,11 @@ section('Line plans against real line tables');
   //   Swift 6             A:17 B:17 C:8  D:8   — rear half as dense
   //   Alpina 5 (2-liner)  A:31 B:19 C:12       of 34 ribs
   //   Zeno 2 (2-liner)    A:30 B:14 C:8        of 40 ribs
+  //
+  // Counted by name: on the two-liners eight A lines carry a bridle pair
+  // below the sail, on one rib, one tab behind the other (Ozone's diagrams),
+  // so the Alpina 5's canopy has 23 A tabs on 15 ribs and the Zeno 2's 22 on
+  // 14. The front row's extra support is the pair, not more ribs.
   //
   // Which is what the structure asks for: the leading edge needs support at
   // nearly every cell to hold its shape, the rear carries less of both.
@@ -13496,7 +13574,7 @@ section('Against the certification flight tests');
   // Trimmed from the calage instead (docs/certification.md section 4): no
   // Geo 7's is published, and the three complete designs on file hang theirs
   // at 32.5 to 36%. From 34%, in its arc, all four are above 30 km/h, and
-  // the lightest reaches it from a calage forward of 37.1%.
+  // the lightest reaches it from a calage forward of 37.8%.
   const fromCalage = (size, allUpKg, calageFraction) => {
     const z = geo.find((x) => x.name === size);
     const pf = planformFromDesignInputs({
@@ -13514,11 +13592,11 @@ section('Against the certification flight tests');
   const at34 = cases.map(([sz, m]) => fromCalage(sz, m, 0.34));
   check('trimmed in its arc from a 34% calage, where built wings hang, all four cases are above 30 km/h',
     at34.every((r) => r.speedKMH > 30 && r.cz3D > 0.5 && r.cz3D < 0.52)
-    && Math.abs(at34[0].speedKMH - 31.3) < 0.05 && Math.abs(at34[3].speedKMH - 39.5) < 0.05,
+    && Math.abs(at34[0].speedKMH - 31.61) < 0.05 && Math.abs(at34[3].speedKMH - 39.95) < 0.05,
     at34.map((r) => `${r.speedKMH.toFixed(1)} km/h at CL ${r.cz3D.toFixed(3)}`).join(', '));
-  const xs371 = fromCalage('XS', 55, 0.371);
-  check('and the lightest trims at the certified 30 km/h from a calage of 37.1%',
-    Math.abs(xs371.speedKMH - 30) < 0.05, `${xs371.speedKMH.toFixed(2)} km/h`);
+  const xs378 = fromCalage('XS', 55, 0.378);
+  check('and the lightest trims at the certified 30 km/h from a calage of 37.8%',
+    Math.abs(xs378.speedKMH - 30) < 0.05, `${xs378.speedKMH.toFixed(2)} km/h`);
 }
 
 // ---------------------------------------------------------------------------
@@ -15288,14 +15366,14 @@ section('Every force where it acts');
   check('each where it acts, the moments about the karabiners sum to none, and every force is in them',
     Math.abs(act5.momentResidual) < 1e-9 && act5.mode === 'where-forces-act' && act5.acting.linesByRule
     && ['lift', 'profileDrag', 'inducedDrag', 'wingWeight', 'lineWeight', 'lineDrag', 'pilot'].every((k) => Number.isFinite(act5.moments[k]))
-    && act5.moments.pilot === 0 && act5.speedKMH === rules5.speedKMH,
+    && Math.abs(act5.moments.pilot) < 1e-9 && act5.speedKMH === rules5.speedKMH,
     Object.entries(act5.moments).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', '));
   // This wing's NACA 4415 has a large Cm0, and the rule puts its moment on
   // the root chord: the strips' own chords, smaller outboard, carry less,
   // so here the lift's line is forward of the rule's.
-  check('on a cambered NACA 4415 the lift\'s line is forward of the rule\'s, and the calage with it: 42.3% and 46.4% at 5 degrees, where the rules say 45.1% and 48.6%',
-    Math.abs(act5.acting.liftCrossingFraction - 0.4232) < 0.002 && Math.abs(act5.calageFraction - 0.4635) < 0.002
-    && Math.abs(rules5.xcpFraction - 0.4507) < 0.001 && Math.abs(rules5.calageFraction - 0.4858) < 0.001,
+  check('on a cambered NACA 4415 the lift\'s line is forward of the rule\'s, and the calage with it: 42.7% and 46.8% at 5 degrees, where the rules say 45.5% and 49.2%',
+    Math.abs(act5.acting.liftCrossingFraction - 0.4266) < 0.002 && Math.abs(act5.calageFraction - 0.4679) < 0.002
+    && Math.abs(rules5.xcpFraction - 0.4553) < 0.001 && Math.abs(rules5.calageFraction - 0.4915) < 0.001,
     `lift ${(act5.acting.liftCrossingFraction * 100).toFixed(2)}%, calage ${(act5.calageFraction * 100).toFixed(2)}%`);
   const plumb5 = balanceWhereForcesAct({ polar: polarC, alphaDeg: 5, cm0: thinC.cm0, ...commonC, centresAt: centresC, wingCentre: wingC, pilotHangs: 'plumb' });
   check('held plumb, the pilot\'s drag below the karabiners pitches the wing down, and the calage is further aft',
@@ -15304,9 +15382,9 @@ section('Every force where it acts');
   // Trimmed from the calage on it.
   const tAct = trimOnPolar({ polar: polarC, calageFraction: 0.48, cm0: thinC.cm0, ...commonC, solve: balanceWhereForcesAct, centresAt: centresC, wingCentre: wingC });
   const tRule = trimOnPolar({ polar: polarC, calageFraction: 0.48, cm0: thinC.cm0, ...commonC });
-  check('trimmed from a calage, the wing flies where its balance hangs the pilot there: at 48%, 5.8 degrees where the rules say 4.7',
+  check('trimmed from a calage, the wing flies where its balance hangs the pilot there: at 48%, 5.6 degrees where the rules say 4.3',
     Math.abs(tAct.calageFraction - 0.48) < 1e-4 && tAct.mode === 'where-forces-act'
-    && Math.abs(tAct.onPolar.alphaDeg - 5.80) < 0.05 && Math.abs(tRule.onPolar.alphaDeg - 4.68) < 0.05,
+    && Math.abs(tAct.onPolar.alphaDeg - 5.61) < 0.05 && Math.abs(tRule.onPolar.alphaDeg - 4.30) < 0.05,
     `${tAct.onPolar.alphaDeg.toFixed(3)} degrees, ${tAct.speedKMH.toFixed(2)} km/h; the rules ${tRule.onPolar.alphaDeg.toFixed(3)}`);
   let noCentres = null;
   try { balanceWhereForcesAct({ polar: polarC, alphaDeg: 5, cm0: thinC.cm0, ...commonC, wingCentre: wingC }); } catch (err) { noCentres = err.message; }
@@ -16436,8 +16514,11 @@ section('The cell intake');
     const hi = camberSeries(gnu, { noseCut: 0.03 }).a0Base;
     return Math.abs(lo - hi) < 0.008;      // under half a degree
   })());
+  // On the line a generated section was built on, the A1 is its camber's
+  // own: 0.16299 on the four-digit line at 40%. Off the mean of its
+  // surfaces, held straight over the first 1%, it was 0.150.
   near('while an analytic section keeps the A1 its camber gives it',
-    camberSeries(afI).An[0], 0.150, 0.004);
+    camberSeries(afI).An[0], 0.16299, 0.0002);
 
   // The travel is what the opening must cover, and more speedbar means more
   // of it.

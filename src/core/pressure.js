@@ -54,13 +54,17 @@ export function camberSeries(airfoil, {
   noseCut = 0.01,
 } = {}) {
   // Mean camber line, sampled in theta so the integrals are uniform there.
-  const { upper, lower } = splitByX(airfoil);
-  const z = (x) => camberAt(upper, lower, x);
+  // A generated section carries the line it was built on (airfoil.js), whose
+  // slope is finite at the nose and needs no cut; a section read from
+  // coordinates has only its surfaces.
+  const own = airfoil.meanLine?.at;
+  const { upper, lower } = own ? { upper: null, lower: null } : splitByX(airfoil);
+  const z = own ? (x) => own(x).yc : (x) => camberAt(upper, lower, x);
   // Slope over a fixed step of chord, not between neighbouring theta
   // samples: those are 1e-5 of chord apart at the nose, where a difference
   // of two interpolated ordinates is mostly the interpolation.
   const h = 2e-3;
-  const slopeAtX = (x) => {
+  const slopeAtX = own ? (x) => own(x).dy : (x) => {
     const a = Math.max(noseCut, x - h);
     const b = Math.min(1, Math.max(noseCut, x) + h);
     return (z(b) - z(a)) / ((b - a) || 1e-12);

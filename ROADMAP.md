@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2758-test validation suite and a benchmark with regression budgets
+- [x] 2766-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -366,8 +366,10 @@ validation notes flagged.
       `alphaChangeWithTrim`) are core and suite; the interface reaching them
       is the speed-system item of the round of 10-07 to 10-12, which this
       repeated.
-- [ ] **NACA 5-digit and modified 4-digit sections**, matching the generator
-      this project was cross-checked against.
+- [x] **NACA 5-digit sections** — standard and reflexed (round of 11-17).
+- [ ] **Modified four-digit sections** — `0012-34`, a leading-edge radius and
+      a position of maximum thickness of their own; NASA TM-4741 gives the
+      method, and its d1 table.
 - [x] **The polar fed back into the balance** — `solveEquilibriumFromWing`
       derives Cz from the section lift slope and zero-lift angle, Cm0 from the
       section, and the Oswald factor from lifting line over the real planform.
@@ -715,13 +717,17 @@ validation notes flagged.
       line height, the three-liners come within a tenth of their sheets (Geo
       7 MS +7%, Ultralite 5 19 -8%) and the two-liners a third over (Alpina 5
       ML +32%, Zeno 2 ML +34%). Each Ozone two-liner carries sixteen short
-      bridles a side, A1a to A8b, gathering pairs of A attachments just below
-      the sail: a level the generator does not build. An Ozone two-liner's A
-      row counts the lines under its bridle pairs as anchors, and whether the
-      bridles of neighbouring lines share ribs, no sheet or drawing on file
-      says. (This item said the reverse once — "not a missing fourth level,
-      all five wings run three" — counting levels by their names, which call
-      a bridle an A line.)
+      bridles a side, A1a to A8b, gathering pairs of A tabs just below the
+      sail: a level the generator does not build. Ozone's rigging diagrams
+      of the Alpina 5, the Zeno 2 and the Lyght, supplied by the user, draw
+      each pair on one rib, one tab behind the other along the chord, so
+      the A row is two chordwise points on fifteen ribs of the Alpina 5's
+      half wing — 23 tabs — where its sheet's names count 31 anchors, the
+      eight lines under the pairs among them. Building it means a second A
+      point on each paired rib and its share of the load. (This item said
+      the reverse once — "not a missing fourth level, all five wings run
+      three" — counting levels by their names, which call a bridle an A
+      line.)
 - [x] **Minimum sink was outside the flyable envelope** — the polar is flat
       past CL 1.0, so the search put the minimum at CL 1.37 and 24 km/h.
       `maxUsableCL` caps it; glide is unaffected. Not a profile-drag error:
@@ -1175,7 +1181,8 @@ validation notes flagged.
 - [x] **The trim from the calage against the certificates** — no Geo 7's
       calage is published; from 34%, in its arc, all four certified cases
       trim above 30 km/h, and the lightest only from a calage forward of
-      37.1% (`docs/certification.md` section 4). The handbook's balance on
+      37.8% (`docs/certification.md` section 4; 37.1% until the section's
+      own mean line, round of 11-17). The handbook's balance on
       the gnuC2-23's own coefficients hangs the pilot 0.39% of chord aft of
       the program's, which is what the handbook's rules for where forces act
       come to in the program's moments, +0.42%.
@@ -1305,6 +1312,43 @@ validation notes flagged.
       plate without ends: three or four straps one behind another shield
       each other, and a strap forty times as long as it is wide makes less
       than that. Nothing here measures either.
+
+### Round of 2026-11-17: the section's own mean line, and five digits
+
+- [x] **NACA five-digit sections** — `naca5`, `LPSTT`: the 1930s mean lines
+      with their camber far forward, standard and reflexed, on the
+      four-digit thickness closed at the trailing edge. The constants are
+      NASA TM-4741's (after Ladson and Brooks's TM X-3284), and the suite
+      holds all nine lines to what they were drawn to: the maximum camber at
+      0.05 P, an ideal lift of 0.3 within 3% (the 210's 0.308 and the 221's
+      0.305 are in the tabulated k1, as a 2026 rederivation also finds), and
+      on the reflexed lines no moment about the quarter chord, within
+      0.0014. The interface offers the 23015 and the reflexed 23115.
+- [x] **A five-digit code read as four** — `naca4` took five digits and read
+      them as four: '23012' as 2% camber at 30%, '44150' as 150% thick. It
+      refuses them now, and `nacaSection` sends each code to its reader.
+- [x] **Thin-aerofoil theory on the section's own mean line** — a generated
+      section carries the line it was built on, and the theory, the
+      chordwise loading and reflex are worked on it. Taken off the mean of
+      the surfaces, the NACA 2412 read -2.115° for the worked example's
+      -2.077°, the default 4415 -4.275° and -0.1052 for its line's -4.154°
+      and -0.1062, the error growing with the thickness, and a 23015's
+      moment -0.0096 for -0.0128. The A row's pressure share at 5° goes from
+      36.1% to 35.3%, and the A1 the suite pins was the surfaces' 0.150 for
+      the line's 0.163.
+- [x] **What it changes** — the default wing at 5°: 34.97 → 35.16 km/h,
+      its calage 41.9 → 42.3% (the rules' 39.3 → 39.7%); the 4412 and 4415,
+      on one mean line, now trim alike. The lightest Geo 7 reaches its
+      certified 30 km/h from a calage forward of 37.8% (was 37.1%); the
+      Lynx 2 M's derived trim is 30.3 flat, 34.5 in its arc (30.1 and 34.3).
+      Imported sections are read from their coordinates and do not move.
+- [x] **The two-liners' bridles, from Ozone's own drawings** — the rigging
+      diagrams of the Alpina 5, the Zeno 2 and the Lyght, supplied by the
+      user, draw each bridle pair on one rib, one tab behind the other along
+      the chord. Four documents said neighbouring ribs, or that no drawing
+      was on file; the Alpina 5's sheet counts 31 A anchors by name where
+      its canopy has 23 tabs on 15 ribs. The bridle level stays open, now
+      specified.
 
 ## Phase 3 — construction detail
 

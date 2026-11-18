@@ -1458,7 +1458,11 @@ function buildLinePlanInner({
   //
   // Which is what the structure asks for: the leading edge needs support at
   // nearly every cell to hold its shape, while the rear carries less load and
-  // less shape. A single integer cannot say that — at 2 it undershoots a
+  // less shape. The two-liners' A counts are their sheets' names, eight of
+  // them the lines under bridle pairs; Ozone's diagrams put each pair on one
+  // rib, one tab behind the other, so the Alpina 5's canopy has 23 A tabs on
+  // 15 ribs, and the support is two points a rib rather than more ribs. The
+  // generator has no bridle level, and builds the names' count. A single integer cannot say that — at 2 it undershoots a
   // two-liner by a third, at 1 it overshoots by a quarter.
   //
   // Accepts a count per row: `{ A: 30, B: 14, C: 8 }`.
@@ -2735,7 +2739,7 @@ export function hangPointFromAnchors(wing, fractions, calageFraction = null) {
   // This used a load-weighted average of the anchor positions instead, which
   // is a plausible-looking geometric proxy and not the same thing. On the
   // default wing it comes out at 31.0% of chord where the balance on its
-  // polar says 41.9% at 5 degrees — 39.3% with each force where the
+  // polar says 42.3% at 5 degrees — 39.7% with each force where the
   // handbook's rules put it — so the model pitched nose-down against the
   // attitude it would really fly at. (This said 50.6% and 18.7 points, from
   // a balance that counted the pitching moment twice.)

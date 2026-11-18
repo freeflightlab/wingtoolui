@@ -32,9 +32,9 @@ A paraglider's angle of incidence is set by its line lengths: the wing hangs
 from the maillon and sits at whatever attitude those lengths dictate. Where it
 hangs from decides how it flies, and a load-weighted average of the anchor
 positions is a plausible-looking geometric proxy that knows nothing about
-balance. On the default wing the two differ by 10.9 points of chord: 31.0% at
-the anchors' centre, 41.9% where the balance on its own polar puts the pilot
-at 5° with every force where it acts (`docs/balance.md`), 39.3% on the
+balance. On the default wing the two differ by 11.3 points of chord: 31.0% at
+the anchors' centre, 42.3% where the balance on its own polar puts the pilot
+at 5° with every force where it acts (`docs/balance.md`), 39.7% on the
 handbook's rules for where they act.
 
 Where the calage falls against the centre of pressure is a matter of
@@ -110,15 +110,15 @@ and **stayed there after returning to a parametric wing**. A row the imported
 design does not have now keeps its current value.
 
 With all three fixed, nothing runs to the leading edge. On the default wing as
-the tool opens the karabiner hangs under the calage, 41.9% of the root chord,
+the tool opens the karabiner hangs under the calage, 42.3% of the root chord,
 and each row's main lines start from the top of its own riser — the risers
 lean towards the lines they carry, so those are three points, not one:
 
 | riser | its top | its rows attach at |
 | --- | --- | --- |
-| A | 40.0% of chord | 8.5% |
-| B | 41.5% | 27.5% |
-| C, with D and the brake pulley | 43.0% | 53.0%, 78.5%, and the trailing edge |
+| A | 40.4% of chord | 8.5% |
+| B | 41.8% | 27.5% |
+| C, with D and the brake pulley | 43.3% | 53.0%, 78.5%, and the trailing edge |
 
 No line of the 109 reaches forward of the A row's 8.5% of chord. The brake handle is placed
 0.35 m aft of the karabiner and 0.55 m below the risers' tops, 5 cm under the

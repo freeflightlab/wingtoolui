@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2758 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2766 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -70,7 +70,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2758 unit checks against known geometry and the sources |
+| `npm test` | 2766 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -111,7 +111,8 @@ and nested onto a fabric roll.
 trimmed from the calage, with every force where it acts — the lift on its own
 line in the wing's arc, the wing's and the lines' weight and drag at their own
 centres, the pilot below the karabiners — section and wing polars from
-thin-aerofoil theory and lifting line, the wing flown in its arc by a vortex
+thin-aerofoil theory on each section's own mean line, NACA four- and
+five-digit sections standard or reflexed, and lifting line, the wing flown in its arc by a vortex
 lattice, atmosphere to 20 km, and an accelerated polar across the speedbar
 range.
 
@@ -184,7 +185,7 @@ load-bearing anchors (112 to 150 on every second rib), and its brake 94 to
 src/core/          the maths — 40 modules, pure functions, no DOM, each tested
   num.js           integration, root finding, arc-length helpers
   planform.js      ch.1  elliptical + linear edges, areas, AR, centroid
-  airfoil.js       ch.2  NACA 4-digit, coordinate import, surface splitting
+  airfoil.js       ch.2  NACA 4- and 5-digit, coordinate import, surface splitting
   lobe.js          ch.3  arc types, arc-length parameterisation, washin
   wing3d.js        ch.3.4 + 2021 study: three rotations, flow-alignment angles
   equilibrium.js   ch.4  balance, calage, speed, glide; every force where it acts
@@ -295,7 +296,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2758 checks |
+| unit suite | the maths, 2766 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |

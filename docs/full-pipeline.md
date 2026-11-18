@@ -185,8 +185,9 @@ match, and the middles are two to two and a half times as long.
 
 That is a level the generator does not have. **Each of the three Ozone
 two-liners carries sixteen short bridles a side** — A1a and A1b to A8a and
-A8b on the Alpina 5 ML, 173 to 228 mm — in pairs that gather two neighbouring
-A attachments into one top line just below the sail. The three-liners have
+A8b on the Alpina 5 ML, 173 to 228 mm — in pairs that gather two tabs on one
+rib, one behind the other along the chord, into one top line just below the
+sail, as Ozone's rigging diagrams draw them. The three-liners have
 none. On a two-liner's front row a path from the sail starts with a bridle,
 so it is a line deeper than the three levels the generator builds: what the
 sheet's names call the middle level holds two physical levels, so its mean is
@@ -209,12 +210,12 @@ reported; building the bridle level is the open item.
 **Each wing flies in its arc**, as the interface flies it: the lattice's
 ratios of the wing as built against itself laid flat (`arcFactors`), which
 leave it 0.72 to 0.79 of the flat wing's lift slope. **Minimum sink runs
-0.842 to 1.306 m/s** over the 55, the lowest the Skywalk SAGE 75 (0.842), the
-PHI Allegro light XS (0.846) and the Niviuk Artik R 2 20 (0.862). None is
+0.845 to 1.308 m/s** over the 55, the lowest the Skywalk SAGE 75 (0.845), the
+PHI Allegro light XS (0.848) and the Niviuk Artik R 2 20 (0.865). None is
 under the 0.7 floor. (Flat they ran 0.772 to 1.175; two wings at 0.69 m/s
 were reported here when the polar was not capped at the usable lift
 coefficient.) Trim speed runs 39.2 to 53.8 km/h on the handbook's typed Cz
-of 0.90 at 6°, glide 8.65 to 10.63, and the lightest are the smallest sizes
+of 0.90 at 6°, glide 8.68 to 10.66, and the lightest are the smallest sizes
 of light wings at about 3 kg/m², as they should be.
 
 **Every line of every wing is sized**, from the full catalogue the interface
@@ -237,12 +238,18 @@ root, 0.55 m tip, 1.4 m sweep, 90 kg, 6°):
 
 | section | Cz | Cm0 | trim | glide | calage |
 | --- | --- | --- | --- | --- | --- |
-| NACA 4412 | 1.122 | −0.1055 | 33.6 km/h | 10.19 | 0.444 |
-| NACA 4415 | 1.127 | −0.1052 | 33.6 km/h | 10.19 | 0.443 |
-| NACA 2414 | 0.892 | −0.0526 | 37.7 km/h | 9.77 | 0.415 |
+| NACA 4412 | 1.114 | −0.1062 | 33.8 km/h | 10.18 | 0.445 |
+| NACA 4415 | 1.114 | −0.1062 | 33.8 km/h | 10.18 | 0.445 |
+| NACA 2414 | 0.886 | −0.0531 | 37.8 km/h | 9.75 | 0.416 |
+| NACA 23015 | 0.778 | −0.0128 | 40.4 km/h | 9.31 | 0.370 |
+| NACA 23115 | 0.741 | +0.0011 | 41.4 km/h | 9.11 | 0.350 |
 
 Dropping camber from 4% to 2% moves trim speed by **4 km/h** and the calage
-by three points of chord — which it should, and previously did not. (The
+by three points of chord — which it should, and previously did not. The
+4412 and the 4415 share a mean line, and the theory is worked on it: taken
+off the mean of their surfaces they differed by their thickness, −0.1055
+and −0.1052. The five-digit sections carry their camber far forward and
+little moment, the reflexed 23115 none, and trim faster on it. (The
 table here had Cz 1.079 and Cm0 −0.0948 for the 4412; Cz and Cm0 come from
 the section alone, so those two columns were out whatever wing they were
 made on. Its calages were 0.506 to 0.508 and 0.455 until the balance stopped
@@ -257,14 +264,14 @@ brackets, the calage on the handbook's rules for where they act
 
 | section | in its arc | flat |
 | --- | --- | --- |
-| NACA 4415 | 34.97 km/h, glide 8.10, calage 41.94% (39.31%) | 31.83 km/h, 8.63, 41.74% (37.12%) |
-| NACA 4412 | 35.04 km/h, 8.16, 42.25% (39.70%) | 31.90 km/h, 8.70, 42.07% (37.50%) |
-| NACA 2414 | 38.75 km/h, 8.01, 39.10% (34.85%) | 35.39 km/h, 8.72, 39.93% (34.18%) |
+| NACA 4415 | 35.16 km/h, glide 8.10, calage 42.32% (39.74%) | 32.01 km/h, 8.64, 42.12% (37.52%) |
+| NACA 4412 | 35.16 km/h, 8.16, 42.49% (39.98%) | 32.01 km/h, 8.71, 42.31% (37.75%) |
+| NACA 2414 | 38.86 km/h, 8.00, 39.25% (35.02%) | 35.50 km/h, 8.72, 40.08% (34.34%) |
 | NACA 0012 | 44.03 km/h, 7.46, 32.75% (25.83%) | 40.44 km/h, 8.30, 34.85% (27.29%) |
 
 Where each acts, camber moves the calage two thirds as far as on the
-rules — 9.2 points from the NACA 4415 to the 0012 in the arc, where the
-rules say 13.5 — because the rule carries the section's moment on the
+rules — 9.6 points from the NACA 4415 to the 0012 in the arc, where the
+rules say 13.9 — because the rule carries the section's moment on the
 central chord and the lattice on each strip's own, smaller outboard. On the symmetric section the lift's line is
 3.3 points of chord aft of the quarter chord in the arc and 5.8 flat, where
 the planform's quarter-chord line runs back toward the tips.

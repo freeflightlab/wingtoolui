@@ -798,7 +798,7 @@ function rebuild() {
     // An imported design brings its own section and its own anchor rows. A
     // three-line wing has no D row, and inventing one at the slider's 78%
     // put a phantom D on the Swoop2's ribs.
-    let airfoil = (imported && importedAirfoil()) || S.airfoilCustom || naca4(S.airfoilCode);
+    let airfoil = (imported && importedAirfoil()) || S.airfoilCustom || nacaSection(S.airfoilCode);
     // Reflex turns the camber line back up near the trailing edge, trading a
     // little lift for a positive pitching moment. It is applied before
     // anything downstream so the ribs, panels and section theory all see the
@@ -1738,10 +1738,23 @@ function buildControls() {
   liveHint(P, cellWidthNote);
 
   const A = clear('g-airfoil');
-  const naca = selectField(A, 'airfoilCode', 'NACA 4-digit', [
+  const naca = selectField(A, 'airfoilCode', 'NACA section', [
     ['4415', 'NACA 4415'], ['4412', 'NACA 4412'],
     ['2414', 'NACA 2414'], ['4418', 'NACA 4418'], ['0012', 'NACA 0012'],
+    ['23015', 'NACA 23015'], ['23115', 'NACA 23115, reflexed'],
   ]);
+  if (!locked && !S.airfoilCustom) {
+    liveHint(A, () => {
+      const c = S.airfoilCode;
+      if (/^\d{5}$/.test(c)) {
+        return `Five digits: drawn for a lift coefficient of ${(0.15 * Number(c[0])).toFixed(2)}, its camber greatest `
+          + `${5 * Number(c[1])}% of chord back${c[2] === '1'
+            ? ', and reflexed: the mean line turns back up behind, so the section carries almost no moment about its quarter chord' : ''}.`;
+      }
+      return c[0] === '0' ? 'Symmetric: no camber, and no moment.'
+        : `Four digits: ${c[0]}% camber, greatest ${Number(c[1]) * 10}% of chord back.`;
+    });
+  }
   hint(A, 'Or load a coordinate file in Selig or plain "x y" format — the sections linked from the handbook work directly.');
   const imp = el('input'); imp.type = 'file'; imp.accept = '.dat,.txt,.csv';
   imp.style.fontSize = '10px'; imp.style.color = 'var(--text-dim)';

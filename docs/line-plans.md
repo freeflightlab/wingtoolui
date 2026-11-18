@@ -309,8 +309,8 @@ choice about how much shape the sail holds by itself.
 row hung from the B mains, as a real two-liner has it, the Alpina's plan has
 the wing's own eight suspension mains — and twelve lines fewer than the wing,
 eleven of them at the top: its A row splits each top line into two short
-bridles to neighbouring ribs (`A1a` and `A1b`, 0.17 to 0.23 m), sixteen of
-them, a level the generator does not build. The Zeno comes out 18 lines long, with
+bridles (`A1a` and `A1b`, 0.17 to 0.23 m) to two tabs on one rib, one behind
+the other as Ozone's diagram draws them, a level the generator does not build. The Zeno comes out 18 lines long, with
 five mains a row against its three and four. Both are asserted, so the gap is
 recorded rather than averaged into a pass.
 

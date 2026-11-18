@@ -136,7 +136,7 @@ answer is most sensitive to. Everything needed to replace it already existed:
 `liftModelFromWing` wires them to the speed system, so the chain runs geometry
 in, speed range out — on the flat wing the lifting line solves, or, given the
 lattice's `arcFactors`, on the wing in its arc. On the Lynx 2 M the arc brings
-the derived trim from 30.1 to 34.3 km/h, the glide from 12.2 to 10.8 and the
+the derived trim from 30.3 to 34.5 km/h, the glide from 12.2 to 10.8 and the
 sink from 0.69 to 0.88 m/s, against a published 39, 11 and 1.0
 (`docs/validation.md` §2.7).
 

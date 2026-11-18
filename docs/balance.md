@@ -66,11 +66,11 @@ chord.
 | the Swoop2, at 4.32° | +0.0246 | 17.4% | 23.3% | 0.53 m |
 | the Tuluaq-19, at 7.41° | −0.0084 | 26.5% | 28.7% | 0.39 m |
 | the default wing on a NACA 0012, at 5° | 0 | 25.0% | 28.3% | |
-| the default wing, NACA 4415, at 5° | −0.105 | 39.8% | 39.9% | 0.51 m |
+| the default wing, NACA 4415, at 5° | −0.106 | 40.1% | 40.2% | 0.51 m |
 
 On a section with little camber the sweep wins. On the default wing's NACA
-4415 the sections' moment moves the lift 30 cm along the flow where the
-rule moves it 38, and the two cancel. The lattice's sections are flat plates
+4415 the sections' moment moves the lift 31 cm along the flow where the
+rule moves it 39, and the two cancel. The lattice's sections are flat plates
 at the angle less the section's zero-lift angle, and their moment is the
 section's Cm0, as the rule's is: thin-aerofoil theory's, or a loaded XFOIL
 polar's, its moment and its angle where its lift is zero (along its lift
@@ -124,7 +124,7 @@ gnuC2-23 is flown with the pilot its section 35 balances, 70 kg on a 4 kg
 wing with his own drag; the other two leave section 35 off and are flown
 with this tool's, 80 kg on 5 kg, Cx 0.015.
 
-On the default wing at 5° the calage moves from 39.3% to 41.9%. It flies on
+On the default wing at 5° the calage moves from 39.7% to 42.3%. It flies on
 the handbook's typed line drag, 0.020, unless asked to fly on its plan's,
 and that drag acts where the plan's own does: 3.91 m down with its 12 mm
 risers, 2.93 m without them, where the rule has 2.33. Their weight is at

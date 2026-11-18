@@ -40,18 +40,14 @@ function cosineSpacing(n) {
  * @param {number} n    points per surface
  */
 export function naca4(code, n = 80, { closedTrailingEdge = true } = {}) {
-  if (!/^\d{4,5}$/.test(code)) throw new Error(`Not a NACA 4-digit code: ${code}`);
+  // Four digits only. A five-digit code was let through and read as four:
+  // '23012' came out 2% camber at 30% and 12% thick, a section with no name,
+  // and '44150' 150% thick. Five digits are `naca5`'s, and `nacaSection`
+  // sends either code where it belongs.
+  if (!/^\d{4}$/.test(code)) throw new Error(`Not a NACA 4-digit code: ${code}`);
   const m = parseInt(code[0], 10) / 100;
   const p = parseInt(code[1], 10) / 10;
   const t = parseInt(code.slice(2), 10) / 100;
-
-  // a0..a4. The set is quoted for a 20% section; t/0.2 scales it, which is
-  // the same as the 5*t written below.
-  const a4 = closedTrailingEdge ? 0.1036 : 0.1015;
-
-  const yt = (x) =>
-    5 * t * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x
-      + 0.2843 * x ** 3 - a4 * x ** 4);
 
   const camber = (x) => {
     // A code with a camber digit but zero position (e.g. '4012') is not a
@@ -69,6 +65,20 @@ export function naca4(code, n = 80, { closedTrailingEdge = true } = {}) {
       dy: ((2 * m) / q) * (p - x),
     };
   };
+  return sectionOnMeanLine(`NACA ${code}`, camber, t, n, closedTrailingEdge);
+}
+
+/**
+ * A section built as the NACA families are: the four-digit thickness laid
+ * perpendicular to a mean line. a0..a4 are quoted for a 20% section and
+ * scaled by t/0.2, the 5*t below; the last is 0.1036 for a closed trailing
+ * edge (above).
+ */
+function sectionOnMeanLine(name, camber, t, n, closedTrailingEdge) {
+  const a4 = closedTrailingEdge ? 0.1036 : 0.1015;
+  const yt = (x) =>
+    5 * t * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x
+      + 0.2843 * x ** 3 - a4 * x ** 4);
 
   const xs = cosineSpacing(n);
   const upper = [];
@@ -84,11 +94,99 @@ export function naca4(code, n = 80, { closedTrailingEdge = true } = {}) {
 
   const pts = upper.slice().reverse().concat(lower.slice(1));
   return finalise({
-    name: `NACA ${code}`,
+    name,
     points: pts,
     intake: { start: 0.012, end: 0.055 },
     anchors: { A: 0.085, B: 0.30, C: 0.53, D: 0.78 },
+    // The mean line it was built on, exactly. Thin-aerofoil theory is
+    // written on the mean line, and the mean of the two surfaces at one x is
+    // not it where the thickness is laid perpendicular to a sloping line:
+    // taken off the surfaces, the NACA 4415's zero-lift angle came out
+    // -4.275 deg against its line's -4.154, and a 23015's moment -0.0096
+    // against -0.0128.
+    meanLine: { at: camber, of: name },
   });
+}
+
+/**
+ * The NACA five-digit mean lines, tabulated for a design lift coefficient
+ * of 0.3 (L = 2) and scaled linearly to any other: `r`, where the cubic
+ * forward part meets the straight or reflexed after part, `k1`, and for the
+ * reflexed lines `k2/k1`. Indexed by P, the maximum camber at 0.05 P of
+ * chord. NASA TM-4741 (Ladson, Brooks, Hill and Sproles, 1996) after TM
+ * X-3284 (Ladson and Brooks, 1975); the same in Abbott and von Doenhoff.
+ *
+ * The suite holds them to the conditions they were drawn to: the maximum
+ * camber at 0.05 P, an ideal lift coefficient of 0.3 by thin-aerofoil theory
+ * (within 3%: the 210's is 0.308, the 221's 0.305, which a 2026 rederivation
+ * finds in the tabulated k1 too), and for the reflexed lines no moment about
+ * the quarter chord (within 0.0014).
+ */
+export const NACA5_MEAN_LINES = {
+  standard: {
+    1: { r: 0.0580, k1: 361.40 },
+    2: { r: 0.1260, k1: 51.640 },
+    3: { r: 0.2025, k1: 15.957 },
+    4: { r: 0.2900, k1: 6.643 },
+    5: { r: 0.3910, k1: 3.230 },
+  },
+  reflexed: {
+    2: { r: 0.1300, k1: 51.990, k2k1: 0.000764 },
+    3: { r: 0.2170, k1: 15.793, k2k1: 0.00677 },
+    4: { r: 0.3180, k1: 6.520, k2k1: 0.0303 },
+    5: { r: 0.4410, k1: 3.191, k2k1: 0.1355 },
+  },
+};
+
+/**
+ * The mean line of a five-digit code, `{ yc, dy }` at x, as NASA's program
+ * writes it: forward of r a cubic, aft of it a straight line to the trailing
+ * edge on a standard line, a gentle cubic back up on a reflexed one.
+ */
+export function naca5MeanLine(code) {
+  if (!/^\d{5}$/.test(code)) throw new Error(`Not a NACA 5-digit code: ${code}`);
+  const L = parseInt(code[0], 10);
+  const P = parseInt(code[1], 10);
+  const S = parseInt(code[2], 10);
+  const family = S === 0 ? 'standard' : S === 1 ? 'reflexed' : null;
+  const c = family && NACA5_MEAN_LINES[family][P];
+  if (!c) {
+    throw new Error(`NACA ${code}: there is no ${S === 1 ? 'reflexed ' : ''}five-digit mean line `
+      + `${S > 1 ? `of type ${S}` : `with its maximum camber at ${5 * P}% of chord`}`);
+  }
+  const k1 = (c.k1 * L) / 2;
+  const kk = c.k2k1 ?? 0;
+  const { r } = c;
+  const r3 = r ** 3;
+  const o3 = (1 - r) ** 3;
+  return {
+    r, k1, k2k1: kk, designCl: 0.15 * L, maxCamberAt: 0.05 * P, reflexed: S === 1,
+    at: (x) => (x < r
+      ? { yc: (k1 / 6) * ((x - r) ** 3 - kk * o3 * x - r3 * x + r3), dy: (k1 / 6) * (3 * (x - r) ** 2 - kk * o3 - r3) }
+      : { yc: (k1 / 6) * (kk * (x - r) ** 3 - kk * o3 * x - r3 * x + r3), dy: (k1 / 6) * (3 * kk * (x - r) ** 2 - kk * o3 - r3) }),
+  };
+}
+
+/**
+ * NACA five-digit section, `LPSTT`: a design lift coefficient of 0.15 L,
+ * the maximum camber at 0.05 P of chord, a standard (S = 0) or reflexed
+ * (S = 1) mean line, TT% thick. The 230 lines put their camber far forward,
+ * and the reflexed ones turn back up behind it so the section carries no
+ * moment about its quarter chord: the 23112 against the 23012's -0.013. The
+ * thickness is the four-digit's, closed at the trailing edge as there.
+ */
+export function naca5(code, n = 80, { closedTrailingEdge = true } = {}) {
+  const line = naca5MeanLine(code);
+  const t = parseInt(code.slice(3), 10) / 100;
+  return sectionOnMeanLine(`NACA ${code}`, line.at, t, n, closedTrailingEdge);
+}
+
+/** A NACA section by its code: four digits or five. */
+export function nacaSection(code, n = 80, opts = {}) {
+  const c = String(code).trim();
+  if (/^\d{4}$/.test(c)) return naca4(c, n, opts);
+  if (/^\d{5}$/.test(c)) return naca5(c, n, opts);
+  throw new Error(`Not a NACA 4- or 5-digit code: ${code}`);
 }
 
 /**
@@ -357,10 +455,17 @@ export function applyReflex(af, { amount = 0.012, start = 0.65, exponent = 2.0 }
   }
 
   const pts = up.slice().reverse().concat(lo.slice(1));
+  // A section that knows its mean line keeps knowing it, with the rise on it.
+  const base = af.meanLine?.at;
+  const riseSlope = (x) => (x <= start ? 0
+    : (amount * exponent * Math.pow((x - start) / (1 - start), exponent - 1)) / (1 - start));
   return finalise({
     ...af,
     name: `${af.name} reflex ${(amount * 100).toFixed(1)}%`,
     points: pts,
     reflex: { amount, start, exponent },
+    meanLine: base
+      ? { at: (x) => { const b = base(x); return { yc: b.yc + rise(x), dy: b.dy + riseSlope(x) }; }, of: af.meanLine.of }
+      : undefined,
   });
 }

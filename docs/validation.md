@@ -190,14 +190,14 @@ a quarter more induced drag at the same lift):
 
 | quantity | published | typed lift curve | derived, flat | derived, in its arc |
 | --- | --- | --- | --- | --- |
-| trim speed | 39 km/h | 37.3 | 30.1 | 34.3 |
-| top speed | 58 km/h | 59.6 | 43.0 | 44.8 |
+| trim speed | 39 km/h | 37.3 | 30.3 | 34.5 |
+| top speed | 58 km/h | 59.6 | 43.6 | 45.2 |
 | best glide | 11 | 11.2 | 12.2 | 10.8 |
 | minimum sink | 1.0 m/s | 0.92 | 0.69 | 0.88 |
 
-Flat, the derived curve trims at Cz 0.85 at the assumed 6°, where a real
+Flat, the derived curve trims at Cz 0.84 at the assumed 6°, where a real
 wing trims near 0.55 to 0.65, so it flies slow and sinks too little. In its
-arc it trims at 0.65, and every figure comes nearer: the glide to within 2%,
+arc it trims at 0.64, and every figure comes nearer: the glide to within 2%,
 the sink 12% low, the trim 12% slow. What is left is the assumed angle —
 the trim is not solved from where the risers hang — and the collapse floor
 the top speed depends on (§4.3). The coefficient is the wing's own, flown as

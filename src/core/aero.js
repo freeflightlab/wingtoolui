@@ -44,6 +44,18 @@ export function camberLine(airfoil, n = 200) {
     throw new Error(`camberLine: n is a sample count, not a physical `
       + `quantity (got ${n})`);
   }
+  // A generated section knows its own mean line (`sectionOnMeanLine`,
+  // airfoil.js); a section read from coordinates has only its surfaces.
+  const own = airfoil.meanLine?.at;
+  if (own) {
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = (Math.PI * i) / n;
+      const x = (1 - Math.cos(t)) / 2;
+      pts.push({ t, x, y: own(x).yc });
+    }
+    return pts;
+  }
   const { upper, lower } = splitSurfaces(airfoil);
   const at = (poly, x) => {
     for (let i = 1; i < poly.length; i++) {
@@ -103,7 +115,10 @@ export function thinAirfoil(airfoil, opts = 400) {
   }
   const n = typeof opts === 'object' && opts ? (opts.samples ?? 400) : opts;
   const cl = camberLine(airfoil, n);
-  const slope = (i) => {
+  // The slope of a section's own mean line where it knows it; differenced
+  // off the camber points where it does not.
+  const own = airfoil.meanLine?.at;
+  const slope = own ? (i) => own(cl[i].x).dy : (i) => {
     const a = cl[Math.max(0, i - 1)];
     const b = cl[Math.min(cl.length - 1, i + 1)];
     return (b.y - a.y) / (b.x - a.x || 1e-12);

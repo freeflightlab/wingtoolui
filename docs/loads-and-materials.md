@@ -349,17 +349,17 @@ checking — and the shift is **aft**, not forward:
 
 | alpha | A | B | C | D |
 | --- | --- | --- | --- | --- |
-| 12° (slow) | 43.8% | 23.7% | 18.3% | 14.2% |
-| 6° (trim) | 37.9% | 24.8% | 20.6% | 16.8% |
-| 2° (bar) | 27.6% | 26.6% | 24.5% | 21.3% |
+| 12° (slow) | 43.4% | 24.1% | 18.4% | 14.1% |
+| 6° (trim) | 37.2% | 25.4% | 20.8% | 16.6% |
+| 2° (bar) | 26.2% | 27.6% | 25.0% | 21.2% |
 
 Taking the bar lowers the angle of attack, the centre of pressure moves aft,
-and the rear rows take more. The A row **sheds 27% of its share** between trim
-and full bar while D gains a quarter.
+and the rear rows take more. The A row **sheds 29% of its share** between trim
+and full bar while D gains 27% (37.9% at trim on the surfaces' mean, to 1.8).
 
 That is why rear-riser steering works accelerated and why the C and D lines
 have to be sized for the bar rather than for trim. In anchor loads on the test
-wing: A falls 177 → 129 N while D rises 78 → 99 N.
+wing: A falls 173 → 122 N while D rises 78 → 99 N.
 
 Now asserted, including that the shares sum to one at every angle.
 

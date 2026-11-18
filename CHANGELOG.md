@@ -4,6 +4,51 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.9.0 — 2026-11-17
+
+The section's own mean line, NACA five-digit sections, and the two-liners'
+bridles as Ozone draws them.
+
+**Added**
+
+- NACA five-digit sections, standard and reflexed (`naca5`, `nacaSection`):
+  the 1930s mean lines with the camber far forward, on the four-digit
+  thickness closed at the trailing edge, from NASA TM-4741's constants. The
+  suite holds all nine mean lines to the conditions they were drawn to —
+  the maximum camber at 0.05 P, an ideal lift coefficient of 0.3 within 3%,
+  and no moment about the quarter chord on the reflexed ones, within
+  0.0014. The interface offers the NACA 23015 and the reflexed 23115, and
+  says what each code means.
+
+**Fixed**
+
+- Thin-aerofoil theory was worked on the mean of a section's two surfaces,
+  which is not its mean line where the thickness is laid perpendicular to
+  a sloping one. A section the tool generates carries the line it was built
+  on now, and the theory, the chordwise loading and reflex are worked on
+  it: the NACA 2412 gives the worked example's -2.077° and -0.0531 exactly,
+  where it read -2.115°, and the default 4415 -4.154° and -0.1062, where it
+  read -4.275° and -0.1052 — an error that grew with the thickness. On the
+  default wing at 5° the trim moves from 34.97 to 35.16 km/h and the calage
+  from 41.9% to 42.3%; the A row's pressure share from 36.1% to 35.3%.
+  Imported sections, read from their coordinates, do not move.
+- `naca4` took five-digit codes and read them as four: '23012' came out 2%
+  camber at 30%. It refuses them, and each code goes to its own reader.
+- The two-liners' bridles: Ozone's rigging diagrams of the Alpina 5, the
+  Zeno 2 and the Lyght, supplied by the user, draw each bridle pair on one
+  rib, one tab behind the other along the chord. Four documents said
+  neighbouring ribs, or that no drawing was on file. The sheets' names count
+  the eight lines under the pairs as anchors: the Alpina 5's canopy has 23 A
+  tabs on 15 ribs where the count says 31. Building the bridle level is
+  still open, and now specified.
+
+**Documents**
+
+- The certification trims, the Lynx 2 M's derived figures, the pipeline's
+  55 sizes and the default wing's balance, with the exact mean line;
+  `docs/environment-and-aero.md` §3 on the mean line and §4 on five-digit
+  sections.
+
 ## 1.8.0 — 2026-11-03
 
 The risers' webbing, and its drag.
