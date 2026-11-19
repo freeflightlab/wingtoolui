@@ -51,7 +51,7 @@ trailing edge to look at the calage should not lose it because a slider moved.
 
 ## 3. Tabs
 
-Ten viewports do not fit usefully in one grid, so they are grouped in five
+Twelve viewports do not fit usefully in one grid, so they are grouped in six
 tabs:
 
 | tab | shows |
@@ -61,6 +61,7 @@ tabs:
 | **Lines** | the line plan, from the front, every line at its true position |
 | **Structure** | the diagonals, with the tension across each |
 | **Analysis** | polar, atmosphere |
+| **Slices** | one section in its own flow, and every slice tip to tip, with a slice selector (`docs/slices.md`) |
 
 Only the visible tab is drawn. Hidden grids have no size, so anything drawn
 into one fits to nothing — the redraw happens on the way in, not on the way

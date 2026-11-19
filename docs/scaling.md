@@ -207,12 +207,12 @@ Total line length against span, and mass against projected area:
 | PHI Allegro light | 21.46 | −5.54 | 0.983 | 0.159 | +0.29 | 0.987 |
 | Ozone Geo 7 | 26.54 | −40.93 | 0.991 | 0.127 | +0.96 | 0.974 |
 | Ozone Ultralite 5 | 36.64 | −76.93 | 0.997 | 0.093 | +0.39 | 0.999 |
-| Ozone Zeno 2 | 16.23 | −9.20 | 0.997 | 0.206 | +1.04 | 0.999 |
+| Ozone Zeno 2 | 16.82 | −9.13 | 0.998 | 0.206 | +1.04 | 0.999 |
 | Ozone Alpina 5 | 20.08 | −14.41 | 1.000 | 0.148 | +1.09 | 0.999 |
 | BGD Lynx 2 | 21.96 | −18.02 | 0.999 | 0.173 | +0.33 | 1.000 |
 | Skywalk SAGE | 18.83 | −11.37 | 1.000 | 0.137 | +1.13 | 0.997 |
 
-Every fit is tight, and the slopes differ by a factor of 2.3. They depend on
+Every fit is tight, and the slopes differ by a factor of 2.2. They depend on
 how many lines a wing carries, how deep its cascade runs and how it is built.
 Borrowing one family's laws for another lands 9.7 to 46% out among the first
 three — worse than assuming nothing.
@@ -334,34 +334,35 @@ and follows span (r = −0.98), and the two follow each other (r = +0.91): a
 higher aspect ratio means a longer span at the same area. Five families
 separate them. Geo 7 and Allegro light have mean spans 5% apart; the Allegro's
 aspect ratio is 17% higher and it carries **9% less line per metre of span**.
-Holding span fixed, the slope still follows aspect ratio at r = −0.86.
+Holding span fixed, the slope still follows aspect ratio at r = −0.79.
 
 Normalising by span leaves a quantity that survives leaving its own family:
 
 ```
-line metres per metre of span  =  -5.12 x AR + 50.72        R² = 0.95
+line metres per metre of span  =  -4.91 x AR + 49.62        R² = 0.94
 ```
 
 | wing | AR | risers | actual | fitted |
 | --- | --- | --- | --- | --- |
-| Ozone Ultralite 5 | 4.56 | 3 | 28.2 | 27.4 |
+| Ozone Ultralite 5 | 4.56 | 3 | 28.2 | 27.2 |
 | Ozone Geo 7 | 5.16 | 3 | 23.0 | 24.3 |
-| PHI Allegro light | 6.03 | 3 | 21.0 | 19.8 |
-| Ozone Alpina 5 | 6.07 | 2 | 18.9 | 19.6 |
-| Ozone Zeno 2 | 6.90 | 2 | 15.5 | 15.4 |
+| PHI Allegro light | 6.03 | 3 | 21.0 | 20.0 |
+| Ozone Alpina 5 | 6.07 | 2 | 18.9 | 19.8 |
+| Ozone Zeno 2 | 6.90 | 2 | 16.1 | 15.8 |
 
 ("Actual" is the mean over a family's sizes.) From **aspect ratio and span
 alone**, with nothing fitted to the family, total line length lands within
-**6.2%** at the middle size of each of the five and within **7.4%** at every
-one of their 28 sizes. Two makers — four of the five are Ozone's — two- and
-three-line wings, and more than 2:1 in area.
+**6.2%** at the middle size of each of the five and within **7.8%** at every
+one of their 28 sizes, two makers' two- and three-line wings over more than
+2:1 in area. (It was −5.12 × AR + 50.72 while the Zeno 2's totals missed its
+brake mains, `KRU` and `KRL`, which have no number and were not read.)
 
 ### Out of sample
 
 | family | sizes | the law is |
 | --- | --- | --- |
-| Skywalk SAGE | 5 | within **0.8%** at every size |
-| BGD Lynx 2 | 4 | **6.6 to 7.5% under** at every size |
+| Skywalk SAGE | 5 | **1.5 to 2.2% over** at every size |
+| BGD Lynx 2 | 4 | **5.6 to 6.5% under** at every size |
 
 The Lynx 2 is a 2.5-liner — three rows in the middle, two at the tips — and
 carries more line than the law gives its aspect ratio, by the same amount at
@@ -372,10 +373,9 @@ every size. A level, not a slope.
 Allegro light and Alpina 5 have the same aspect ratio (6.03 and 6.07) and
 span, and the Alpina, a two-liner, carries 10% less line per metre. That
 became a two-liner factor of 0.90. The SAGE is a two-liner at 6.4 that was not
-in the fit: the uncorrected law is within 0.8% of it, and the factor would put
-it 9% low. `twoLinerFactor` is 1; the 0.90 is kept beside it as refuted. Over
-the three two-liners here the mean residual is −1.2%, over the three
-three-liners +1.1%.
+in the fit: the uncorrected law is within 2.2% of it, and the factor would put
+it 8 to 9% low. `twoLinerFactor` is 1; the 0.90 is kept beside it as refuted.
+Mean residual: −2.1% over the three two-liners, +1.2% over the three-liners.
 
 ### Caveats kept with the law
 

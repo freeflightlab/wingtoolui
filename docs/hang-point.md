@@ -101,7 +101,10 @@ risers were *still* projected forward was correct.
 The second is the one that mattered most: the load-bearing lines hung
 correctly under the wing while the brakes still ran forward to a handle under
 the nose. **Two definitions of one position is one too many**, so there is a
-single `hangPointFromAnchors` now and both callers use it.
+single `hangPointFromAnchors` now and both callers use it. (The brake's
+default, for a brake built without a hang point, passed it the anchor count
+where it takes the rows' chord fractions, and so was x = 0 again until
+1.11.0.)
 
 The third was separate and just as visible. Loading a three-row design set the
 D anchor from `design.anchorFractions.D`, which does not exist — `undefined *

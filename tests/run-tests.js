@@ -89,6 +89,7 @@ import {
   anchorLoadPath, reinforcementReach, checkRibStress, predictedTearMargin,
   checkWingRibStress, RIB_CLOTH, panelStress, checkWingPanelStress, SAIL_CLOTH,
   ASSUMED_RIB_DEPTH, radialFan, radialField, lineAngleOnRib, RIB_SEAM_N_PER_M,
+  linePullsByRib,
 } from '../src/core/ribstress.js';
 import {
   lineGeometryCheck, lineStrengthCheck, PMA_GEOMETRY, PMA_STRENGTH,
@@ -140,8 +141,9 @@ import {
   anchorsForLineLength, recoverLevelFractions,
   parseSimpleLineSheet,
   resolveCascadeLevels, resolveCaseLevels, combinedRowShare, summariseCascadeDepths,
-  buildBrakePlan, brakeEngagement, tipFirstSlack, brakeAnchorRibs,
+  buildBrakePlan, brakeEngagement, tipFirstSlack, brakeAnchorRibs, BRAKE_GEOMETRY,
   cutListToCSV, lineAngleFromVerticalDeg, planPaths, planFanAngles,
+  resolveBridleLevels,
 } from '../src/core/lineplan.js';
 import {
   spanLoadDistribution, anchorLoads, lineTensions, selectLines, optimiseLineSet, lineDrag,
@@ -151,6 +153,7 @@ import {
   publishedCascadeLoads, strengthFactors,
   DEFAULT_LOAD_CASE, wakeShielding, lengthChain, LINE_WEIGHT_PER_AREA,
   parseLineStretch, withMeasuredLineData, elongationOf, strengthByLevel, DHV_LINE_CALCULATION, lineCentres,
+  bridleSharesFor,
 } from '../src/core/loads.js';
 import {
   riserSet, handleGeometry, handleAgainstBrake, riserLengths, alphaChange, brakeSlackUnderBar,
@@ -169,6 +172,14 @@ import {
   LOADING_VS_AR, expectedLoading, loadingCheck,
   LINE_LENGTH_PER_SPAN, lineLengthPerSpan, lineConsumptionEstimate, lineLengthExponent,
 } from '../src/core/scaling.js';
+import {
+  mfoilModel, mfoilSolve, mfoilState, mfoilOpenTrailingEdge, mfoilOrientPoints, mfoilNacaPoints, mfoilDistributions,
+} from '../src/core/mfoil.js';
+import {
+  sliceStations, sliceSectionModel, reynoldsLevels, polarGridSteps, polarGridAt, runSteps, coupleSlices,
+  sliceAnalysisSteps, sliceSectionDat, sliceXfoilScript, sliceMfoilScript, sliceSciroccoInput, sliceTable, SLICE_SETTINGS,
+} from '../src/core/slices.js';
+import { latticeSystem } from '../src/core/vlm.js';
 
 const pick = (p) => (p ? { row: p.row, level: p.level, index: p.index } : null);
 
@@ -2606,9 +2617,12 @@ section("The makers' own drawings of their line plans");
   // The Zeno 2's C top lines hang on its B middles, a shape the generator
   // does not build, so its middles are paired and the text says so.
   const zenoOwn = designCascade('Ozone Zeno 2');
+  // Its A row is fourteen ribs, eight of them with a bridle pair: thirty
+  // names on the sheet.
   check("and where the sheet's shape is not the generator's, its middles are left to be paired",
     zenoOwn && zenoOwn.layout === 'A/B+C' && Object.keys(zenoOwn.cascade.middlesPerRow).length === 0
-    && zenoOwn.cascade.anchorsPerRow.A === 30 && zenoOwn.cascade.mainsPerRow.B === 3);
+    && zenoOwn.cascade.anchorsPerRow.A === 14 && zenoOwn.cascade.bridlesPerRow.A === 8
+    && zenoOwn.cascade.mainsPerRow.B === 3);
   // The Lynx 2 has A, B and C mains on all four of its sheets. The aspect-ratio
   // rule alone — two-liner at 6.2 and above — built it as a two-liner.
   check('the BGD Lynx 2 is a three-liner by its own sheets, at the aspect ratio that made it a two-liner',
@@ -2822,21 +2836,47 @@ section('Brake cascades');
 
   const bp = buildBrakePlan({ wing, anchors: 13, levelCounts: [6, 3, 1], lineLengthM: 6.5 });
 
-  // Structure: the Lynx 2's brake cascade is 13 anchors onto 6 middle lines
-  // onto 3 main lines onto 1 shared lower line.
+  // Structure: the Lynx 2's brake cascade is 13 lines at the trailing edge
+  // on 6 middle lines, on 3 more, on one main line — and so is every Ozone
+  // sheet's on file, give or take a line or two at each level.
   check('four levels, matching the reference wing',
     bp.lines.filter((l) => l.level === 'upper').length === 13
-    && bp.lines.filter((l) => l.level === 'middle').length === 6
-    && bp.lines.filter((l) => l.level === 'main' && !l.shared).length === 3
+    && bp.lines.filter((l) => l.level === 'middle' && l.side === 'upper').length === 6
+    && bp.lines.filter((l) => l.level === 'middle' && l.side === 'lower').length === 3
+    && bp.lines.filter((l) => l.level === 'main').length === 1
     && bp.lines.filter((l) => l.shared).length === 1);
 
-  // The shared lower line is what makes a brake unlike a load-bearing row:
-  // one line from the handle to the pulley carries the whole cascade.
-  check('one lower line serves every anchor',
-    bp.sharedLower.anchors.length === 13 && bp.sharedLower.name === 'KL1');
-  check('every generated brake name parses',
-    bp.lines.every((l) => parseLineName(l.name) !== null));
+  // The main line is what makes a brake unlike a load-bearing row: one line
+  // from the handle, up through the pulley, carries the whole cascade.
+  check('one main line serves every anchor',
+    bp.main.anchors.length === 13 && bp.main.name === 'KL1' && bp.main.shared);
+  // And it reaches well up toward the wing. Its junction was AT the pulley,
+  // with three lines a side run down to it where every sheet has this one,
+  // and the brakes came out a third to nine tenths longer than the sheets'.
+  const fromPulley = Math.hypot(...[0, 1, 2].map((k) => bp.junction[k] - bp.pulley[k]));
+  const lowers = bp.lines.filter((l) => l.level === 'middle' && l.side === 'lower');
+  check('the first junction is above the pulley, where the lower middles start',
+    fromPulley > 2 && fromPulley < 3.5 && bp.main.from === bp.pulley && bp.main.to === bp.junction
+      && lowers.every((l) => l.from === bp.junction),
+    `${fromPulley.toFixed(2)} m above the pulley`);
+  // The line runs on below the pulley to the knot at the handle; the line
+  // drawn is the one above it.
+  near('and the main counts the line below the pulley to the handle',
+    bp.main.lengthMM - bp.main.belowPulleyMM,
+    1000 * Math.hypot(...[0, 1, 2].map((k) => bp.junction[k] - bp.pulley[k])), 1, ' mm');
+  near('the handle hangs under the pulley by the fitted drop',
+    bp.main.belowPulleyMM, BRAKE_GEOMETRY.handleDropM * 1000, 1, ' mm');
+  check('every generated brake name parses, at the level it is built on',
+    bp.lines.every((l) => parseLineName(l.name) !== null)
+      && parseLineName('KL1').level === 'main' && parseLineName('k1').level === 'upper');
   check('all lengths are positive', bp.lines.every((l) => l.lengthMM > 0));
+  // No wing on file puts a brake line on its centre rib or its tip. (The
+  // demo wing has 13 ribs a side, so 13 anchors take every one.)
+  const ribsK = brakeAnchorRibs(33, 13);
+  check('the anchors start off the centre and stop short of the tip',
+    ribsK[0] === 2 && ribsK[ribsK.length - 1] === 30
+      && JSON.stringify(bp.anchorRibs) === JSON.stringify(brakeAnchorRibs(wing.ribs.length, 13)),
+    `${ribsK.join(',')} of 33, where the Lynx 2's are its ribs 2 to 31 of 33`);
 
   // Total path length falls outboard, because the arc brings the tip
   // trailing edge nearer the pilot.
@@ -2847,10 +2887,74 @@ section('Brake cascades');
 
   // Every anchor's total must be its own path, not a shortcut.
   const upper = bp.lines.find((l) => l.level === 'upper' && l.index === 1);
-  const mid = bp.lines.find((l) => l.level === 'middle' && l.anchors.includes(1));
-  const ris = bp.lines.find((l) => l.level === 'main' && !l.shared && l.anchors.includes(1));
+  const mid = bp.lines.find((l) => l.level === 'middle' && l.side === 'upper' && l.anchors.includes(1));
+  const low = bp.lines.find((l) => l.level === 'middle' && l.side === 'lower' && l.anchors.includes(1));
   near('a total is the sum of its four segments', bp.totals[1],
-    upper.lengthMM + mid.lengthMM + ris.lengthMM + bp.sharedLower.lengthMM, 1, ' mm');
+    upper.lengthMM + mid.lengthMM + low.lengthMM + bp.main.lengthMM, 1, ' mm');
+  check('and the spec written for it reads back the same counts',
+    /^K {2}13 6 3$/m.test(cascadeSpecFor({ lines: bp.lines })));
+
+  // Against the sheets. Each wing built as the fit was: at its own anchor
+  // and middle counts, with its lines as long as its sheet's centre A path.
+  const famsK = parseSizeFamilies(readFileSync('data/reference/size-families.tsv', 'utf8'));
+  const brakeOnSheet = (family, sizeName, file, counts) => {
+    const size = famsK[family].find((x) => x.name === sizeName);
+    const rec = referenceDesignInputs(size);
+    const pf = planformFromDesignInputs(rec.inputs);
+    const w = buildWing({ planform: pf, lobe: buildLobe(rec.lobe, pf.halfSpan), airfoil: naca4('4415'),
+      cells: Math.round(size.cells / 2), pointsPerSurface: 24, zRotation: 'auto', alphaDeg: 6 });
+    const own = designCascade(family);
+    const af = naca4('4415');
+    af.anchors = { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+    const c = own.cascade;
+    const body = readFileSync(`data/reference/${file}`, 'utf8');
+    const bgd = /^bgd-/.test(file);
+    const t = bgd ? bgdCascadeTotals(parseBgdLineTable(body)) : null;
+    const sheet = bgd ? null : parseLineTable(body);
+    const col = (r) => (sheet ? sheet.totalsColumns.indexOf(r) : -1);
+    const realA1 = bgd ? t.find((x) => x.row === 'A').totalMM : sheet.totals[0].lengths[col('A')];
+    const realK = bgd ? t.filter((x) => x.row === 'K').map((x) => x.totalMM)
+      : sheet.totals.map((r) => r.lengths[col('K')]).filter(Number.isFinite);
+    let h = 6.5;
+    let plan;
+    for (let i = 0; i < 4; i++) {
+      plan = buildLinePlan({
+        wing: w, airfoil: af, layout: own.layoutDef, lineLengthM: h,
+        anchorsPerRow: c.anchorsPerRow, middlesPerRow: c.middlesPerRow, mainsPerRow: c.mainsPerRow,
+        tipAnchorsPerRow: c.tipsPerRow, stabilo: true, stabiloRiser: c.stabiloRiser ?? null,
+        brakes: { anchors: counts[0], levelCounts: [counts[1], counts[2], 1] },
+      });
+      h *= realA1 / (plan.totals[1].A - (bgd ? plan.riserLengthMM : 0));
+    }
+    // A side's brake on the sheet, its main to the knot at the handle:
+    // Ozone mark it on the KRL, 250 mm from its end.
+    const K = referenceLines(file, body).lines.filter((l) => l.row === 'K');
+    const perSide = (l) => l.lengthMM * (l.quantity ?? 2) / 2;
+    const mark = body.match(/mark at (\d+)/);
+    const krl = K.find((l) => l.level === 'main' && l.side === 'lower');
+    const real = K.reduce((a, l) => a + perSide(l), 0) - (krl && mark ? krl.lengthMM - Number(mark[1]) : 0);
+    const built = plan.lines.filter((l) => l.row === 'K');
+    const genK = Object.keys(plan.brakePlan.totals).map(Number).sort((a, b) => a - b).map((k) => plan.brakePlan.totals[k]);
+    const err = realK.map((v, i) => genK[i] / v - 1);
+    return {
+      side: built.reduce((a, l) => a + l.lengthMM, 0) / real - 1,
+      meanK: err.reduce((a, b) => a + b, 0) / err.length,
+      worstK: Math.max(...err.map(Math.abs)),
+      main: plan.brakePlan.main.lengthMM,
+    };
+  };
+  const geoK = brakeOnSheet('Ozone Geo 7', 'MS', 'geo7-MS.tsv', [11, 4, 3]);
+  const lynxK = brakeOnSheet('BGD Lynx 2', 'M', 'bgd-lynx2-M.tsv', [13, 6, 3]);
+  check('a side\'s brake comes within 10% of its sheet\'s on the Geo 7 MS and the Lynx 2 M',
+    Math.abs(geoK.side) < 0.10 && Math.abs(lynxK.side) < 0.10,
+    `Geo 7 ${(geoK.side * 100).toFixed(1)}%, Lynx 2 ${(lynxK.side * 100).toFixed(1)}%`);
+  check('the path to the handle at each anchor within 7%, and within 2% on the mean',
+    geoK.worstK < 0.07 && lynxK.worstK < 0.07 && Math.abs(geoK.meanK) < 0.02 && Math.abs(lynxK.meanK) < 0.02,
+    `Geo 7 ${(geoK.meanK * 100).toFixed(1)}% (worst ${(geoK.worstK * 100).toFixed(1)}), `
+      + `Lynx 2 ${(lynxK.meanK * 100).toFixed(1)}% (worst ${(lynxK.worstK * 100).toFixed(1)})`);
+  check('and the main within 10% of theirs: 1756 + 1150 mm to the Geo 7\'s handle mark, 2926 the Lynx 2\'s KL1',
+    Math.abs(geoK.main / 2906 - 1) < 0.10 && Math.abs(lynxK.main / 2926 - 1) < 0.10,
+    `${geoK.main} and ${lynxK.main} mm`);
 
   // Engagement. Free travel is the slack the designer adds, not something
   // geometry supplies — cutting every line taut engages the whole trailing
@@ -4074,13 +4178,15 @@ section('Size families and scaling');
         / families[name].length,
     }));
     const col = (key) => famStat.map((x) => x[key]);
-    near('the slope follows aspect ratio', correlate(col('slope'), col('ar')), -0.963, 0.002);
-    near('and follows span', correlate(col('slope'), col('span')), -0.980, 0.002);
+    near('the slope follows aspect ratio', correlate(col('slope'), col('ar')), -0.957, 0.002);
+    near('and follows span', correlate(col('slope'), col('span')), -0.982, 0.002);
     near('and aspect ratio and span follow each other', correlate(col('ar'), col('span')), 0.912, 0.002);
+    // -0.857 and -0.926 while the Zeno 2's totals were short by its brake
+    // mains (`KRL` and `KRU`, which the reader passed over).
     near('with span held, aspect ratio still tells',
-      partialCorrelate(col('slope'), col('ar'), col('span')), -0.857, 0.002);
+      partialCorrelate(col('slope'), col('ar'), col('span')), -0.789, 0.002);
     near('and with aspect ratio held, span does',
-      partialCorrelate(col('slope'), col('span'), col('ar')), -0.926, 0.002);
+      partialCorrelate(col('slope'), col('span'), col('ar')), -0.914, 0.002);
 
     // The two comparisons that separated them.
     const statOf = (name) => famStat[FITTED.indexOf(name)];
@@ -4152,8 +4258,10 @@ section('Size families and scaling');
       sageWorst = Math.max(sageWorst,
         Math.abs(est.totalLineLengthM - sz.published) / sz.published);
     }
-    check('the law predicts a fourth manufacturer within 1%',
-      sageWorst < 0.01, `worst ${(sageWorst * 100).toFixed(1)}%`);
+    // Within 1% while the Zeno 2's totals were short by its brake mains:
+    // the law fitted to them sat 2% lower at the SAGE's aspect ratio.
+    check('the law predicts a fourth manufacturer within 2.5%',
+      sageWorst < 0.025, `worst ${(sageWorst * 100).toFixed(1)}%`);
     check('which is better than its worst error inside the fitted families',
       sageWorst * 100 < LINE_LENGTH_PER_SPAN.worstFamilyErrorPct);
     // The three spans above are in the table too, and must be the same wing.
@@ -4166,9 +4274,9 @@ section('Size families and scaling');
     // was collinear with aspect ratio in the original sample. The SAGE breaks
     // that collinearity and rejects it: applying 0.90 makes every size 9% low.
     const refuted = LINE_LENGTH_PER_SPAN.twoLinerFactorRefuted;
-    const withFactor = 17.95 * refuted * 11.34;
+    const withFactor = lineLengthPerSpan(6.4) * refuted * 11.34;
     check('applying the old two-liner factor makes the prediction far worse',
-      Math.abs(withFactor - 202) / 202 > 0.08,
+      Math.abs(withFactor - 202) / 202 > 0.07 && Math.abs(withFactor - 202) / 202 > 3 * sageWorst,
       `${withFactor.toFixed(0)} m vs 202 m published`);
     near('so the factor is now inert', LINE_LENGTH_PER_SPAN.twoLinerFactor, 1, 1e-12);
     check('but the contradiction is recorded rather than deleted',
@@ -4460,8 +4568,9 @@ section('Size families and scaling');
     // a second exponent was added to every estimate to mend it.
     const lynx = families['BGD Lynx 2'].filter((z) => z.totalLineLength);
     const lynxErr = lynx.map((z) => (lineLengthPerSpan(z.flatAR) * z.flatSpan / z.totalLineLength - 1) * 100);
-    check('against its sheets the law is under by the same at every size',
-      lynxErr.every((e) => e < -6 && e > -8),
+    // -6.6 to -7.5% before the Zeno 2's brake mains were read into the fit.
+    check('against its sheets the law is under by about the same at every size',
+      lynxErr.every((e) => e < -5 && e > -7) && Math.max(...lynxErr) - Math.min(...lynxErr) < 1.5,
       lynxErr.map((e) => `${e.toFixed(1)}%`).join(', '));
     const pubErr = pubLynx.map((z) => (lineLengthPerSpan(z.flatAR ?? 6.2) * z.flatSpan / z.totalLineLength - 1) * 100);
     check('and against the published row it ran from 1% to 16%',
@@ -6460,6 +6569,196 @@ section('Every reference file, swept');
 }
 
 // ---------------------------------------------------------------------------
+section('Bridle pairs: a two-liner\'s front row');
+
+{
+  // Read from a sheet. `A1a` and `A1b` hang from `A1`, on one rib: the pair
+  // are the canopy lines and A1 is a middle line. A pair is only a pair with
+  // its stem on the sheet, and both of it there; UP's `sa1` is a stabilo
+  // line named for its row.
+  const named = (n) => ({ ...parseLineName(n), lengthMM: 500, quantity: 2 });
+  const read = resolveBridleLevels(['A1', 'A1a', 'A1b', 'A2', 'A3a', 'B1', 'sa1'].map(named));
+  const by = (n) => read.find((l) => l.name === n);
+  check('a bridle pair is read as two canopy lines on one middle line',
+    by('A1').level === 'middle' && by('A1').bridled && by('A1a').bridle && by('A1b').bridle
+      && by('A1a').level === 'upper' && by('A1b').variant === 'b',
+    read.map((l) => `${l.name}:${l.level}${l.bridle ? ' bridle' : ''}${l.bridled ? ' bridled' : ''}`).join(' '));
+  check('and nothing else is: a line without a pair, half a pair, another row, a stabilo line',
+    by('A2').level === 'upper' && !by('A3a').bridle && by('B1').level === 'upper'
+      && by('sa1').level === 'upper' && !by('sa1').bridle);
+
+  // Written. "bridle n" on a row: how many of its anchors, from the centre
+  // out, carry a pair.
+  const lay = RISER_LAYOUTS['A/B+C'];
+  const spec = parseCascadeSpec('A 15 3 bridle 8\nB 19 3\nC 12 4', { layout: lay });
+  check('"bridle 8" is read as the row\'s bridled anchors', spec.ok
+    && JSON.stringify(spec.bridlesPerRow) === '{"A":8}' && spec.anchorsPerRow.A === 15,
+    JSON.stringify(spec.bridlesPerRow));
+  const refused = (t) => parseCascadeSpec(t, { layout: lay }).problems[0] ?? '';
+  check('more bridled anchors than a row has besides its tip lines, or a bridle on the brake, are refused',
+    /not 11 bridled/.test(refused('A 10 3 bridle 11\nB 8 3\nC 5'))
+      && /not 9 bridled/.test(refused('A 10 3 tip 2 bridle 9\nB 8 3\nC 5'))
+      && /no bridles/.test(refused('A 10 3\nB 8 3\nC 5\nK 13 6 3 bridle 2')),
+    refused('A 10 3 tip 2 bridle 9\nB 8 3\nC 5'));
+
+  // Built. The demo wing has 31 ribs to a side.
+  const wingBr = demoWingDense();
+  const afBr = naca4('4415');
+  afBr.anchors = { A: 0.09, B: 0.38, C: 0.60 };
+  const opts = {
+    wing: wingBr, airfoil: afBr, layout: lay, lineLengthM: 6.5,
+    anchorsPerRow: { A: 15, B: 15, C: 9 }, mainsPerRow: { A: 3, B: 3 },
+  };
+  const plain = buildLinePlan(opts);
+  const bridled = buildLinePlan({ ...opts, bridlesPerRow: { A: 8 } });
+  const pairs = bridled.lines.filter((l) => l.bridle);
+  const stems = bridled.lines.filter((l) => l.bridled);
+  check('eight pairs on the eight inner A ribs, each stem a middle line ending at its pair',
+    pairs.length === 16 && stems.length === 8 && stems.every((st) => st.level === 'middle'
+      && pairs.filter((b) => b.from === st.to && b.index === st.index && b.ribIndex === st.ribIndex).length === 2)
+      && Math.max(...stems.map((st) => st.ribIndex))
+        < Math.min(...bridled.lines.filter((l) => l.row === 'A' && l.level === 'upper' && !l.bridle).map((l) => l.ribIndex)),
+    `${pairs.length} bridles on ${stems.length} stems`);
+  const plainA1 = plain.lines.find((l) => l.name === 'A1');
+  const stemA1 = bridled.lines.find((l) => l.name === 'A1');
+  check('the rest of the cascade is untouched: each stem starts where its top line did',
+    stems.every((st) => {
+      const was = plain.lines.find((l) => l.name === st.name);
+      return was && was.from === undefined ? false : JSON.stringify(was.from) === JSON.stringify(st.from);
+    }) && plain.lines.filter((l) => !l.bridle && l.row !== 'A').every((l) => {
+      const now = bridled.lines.find((x) => x.name === l.name);
+      return now && now.lengthMM === l.lengthMM;
+    }));
+  const meanLen = (st) => {
+    const two = pairs.filter((b) => b.from === st.to);
+    return (two[0].lengthMM + two[1].lengthMM) / 2;
+  };
+  check('the pair is 0.087 of its rib\'s chord, on the mean of the two',
+    stems.every((st) => Math.abs(meanLen(st) / (0.087 * wingBr.ribs[st.ribIndex].chord * 1000) - 1) < 0.01),
+    stems.map((st) => `${meanLen(st).toFixed(0)}/${(0.087 * wingBr.ribs[st.ribIndex].chord * 1000).toFixed(0)}`).join(' '));
+  check('its tabs 8% of chord apart, either side of the row\'s station',
+    pairs.every((b) => Math.abs(b.chordFraction - (b.variant === 'a' ? 0.05 : 0.13)) < 1e-12));
+  check('and its stem shorter by about the pair, so the path is the same length within a few centimetres',
+    Math.abs((stemA1.lengthMM + meanLen(stemA1)) - plainA1.lengthMM) < 60,
+    `${plainA1.lengthMM} mm a line; ${stemA1.lengthMM} + ${meanLen(stemA1).toFixed(0)} with the pair`);
+  check('which adds a little line: two short lines where one stood, a third of a metre a side or so',
+    bridled.totalLengthM > plain.totalLengthM && bridled.totalLengthM - plain.totalLengthM < 2 * 2.5,
+    `${plain.totalLengthM.toFixed(1)} -> ${bridled.totalLengthM.toFixed(1)} m, both sides`);
+
+  // Paths and totals. Each tab is an attachment point: its path starts with
+  // its bridle, a line deeper than the ribs' unbridled ones.
+  const pathsBr = planPaths(bridled);
+  const pathOf = (n) => pathsBr.find((x) => x.name === n);
+  const single = bridled.lines.find((l) => l.row === 'A' && l.level === 'upper' && !l.bridle && !l.direct);
+  check('each tab has its path, a line deeper where it is bridled',
+    pathsBr.filter((x) => x.variant).length === 16
+      && pathOf('A1a').names.length === pathOf(single.name).names.length + 1
+      && pathOf('A1a').names[1] === 'A1' && pathOf('A1b').names[1] === 'A1',
+    `${pathOf('A1a').names.join(' > ')} | ${pathOf(single.name).names.join(' > ')}`);
+  check('and the totals give the pair under A and Ab, as Ozone\'s two-liner sheets do in two columns',
+    bridled.totals[1].A != null && bridled.totals[1].Ab != null && bridled.totals[9].Ab == null
+      && bridled.totals[1].A - bridled.totals[1].Ab
+        === pathOf('A1a').lengthMM - pathOf('A1b').lengthMM,
+    JSON.stringify(bridled.totals[1]));
+  // Written back out, it reads in again the same.
+  const out = cascadeSpecFor(bridled);
+  const back = parseCascadeSpec(out, { layout: lay });
+  check('a bridled plan writes its bridles out, and the spec reads back to the same counts',
+    /^A\s+15 .*bridle 8$/m.test(out) && back.ok && back.bridlesPerRow.A === 8 && back.anchorsPerRow.A === 15,
+    out.split('\n').filter((l) => /^A/.test(l)).join(''));
+
+  // Loaded. The pair share their rib's A load; the stem carries both.
+  const loadBr = (plan, extra = {}) => analyseLoads({
+    plan, planform: wingBr.planform, stations: wingBr.stations,
+    totalMassKg: 95, alphaDeg: 6, airfoil: afBr, anchors: afBr.anchors, ...extra,
+  });
+  const lb = loadBr(bridled);
+  const lp = loadBr(plain);
+  const tOf = (a, n) => a.tensions.lines.find((l) => l.name === n).tensionN;
+  check('the loads close with the pairs in, as without',
+    lb.closureError < 0.001 && Math.abs(lb.closureN - lp.closureN) < 1e-6,
+    `${(lb.closureError * 100).toFixed(3)}%`);
+  check('each stem carries its pair, and as much as its line did without them',
+    stems.every((st) => Math.abs(tOf(lb, st.name) - tOf(lb, `${st.name}a`) - tOf(lb, `${st.name}b`)) < 1e-9
+      && Math.abs(tOf(lb, st.name) - tOf(lp, st.name)) < 1e-9),
+    `A1 ${tOf(lb, 'A1').toFixed(1)} N = ${tOf(lb, 'A1a').toFixed(1)} + ${tOf(lb, 'A1b').toFixed(1)}`);
+  check('under the convention the pair share halves: it has no figure for the split',
+    JSON.stringify(lb.bridleShares) === '{"A":{"a":0.5,"b":0.5}}');
+  const press = loadBr(bridled, { rowShareMode: 'pressure', alphaDeg: 9 });
+  const pressLow = loadBr(bridled, { rowShareMode: 'pressure', alphaDeg: 3 });
+  check('from the pressure, the forward tab takes more the higher the angle',
+    press.bridleShares.A.a > 0.5 && pressLow.bridleShares.A.a < press.bridleShares.A.a
+      && Math.abs(press.bridleShares.A.a + press.bridleShares.A.b - 1) < 1e-12,
+    `forward tab ${(pressLow.bridleShares.A.a * 100).toFixed(0)}% at 3 degrees, `
+    + `${(press.bridleShares.A.a * 100).toFixed(0)}% at 9`);
+  check('and a plan without bridles has no split to give',
+    bridleSharesFor({ plan: plain }) === null && lp.bridleShares === null);
+
+  // Where the pair's two loads go on the rib and the sail: each at its own tab.
+  const tabsBr = buildTabs({ plan: bridled, tensions: lb.tensions, airfoil: afBr });
+  const tabOf = (n) => tabsBr.tabs.find((t) => t.name === n);
+  check('each tab at its own chord station, its own load',
+    Math.abs(tabOf('A2a').chordFraction - 0.05) < 1e-12 && Math.abs(tabOf('A2b').chordFraction - 0.13) < 1e-12
+      && tabOf(single.name).chordFraction === 0.09 && Math.abs(tabOf('A2a').tensionDaN - tOf(lb, 'A2a') / 10) < 1e-9
+      && Math.abs(tabOf('A2b').tensionDaN - tOf(lb, 'A2b') / 10) < 1e-9,
+    `A2a at ${tabOf('A2a').chordFraction}, A2b at ${tabOf('A2b').chordFraction}`);
+  const ribBr = checkWingRibStress({
+    wing: wingBr, anchorLoads: lb.anchorLoads, airfoil: afBr, plan: bridled,
+  });
+  const rib0 = ribBr.ribs.find((r) => r.ribIndex === 0) ?? ribBr.ribs[0];
+  const fr = (rib0?.paths ?? []).filter((a) => /^A1[ab]$/.test(a.name)).map((a) => a.chordFraction);
+  check('and the rib is loaded at both of them, not twice at the forward one',
+    fr.length === 2 && Math.abs(fr[0] - fr[1]) > 0.05,
+    fr.map((f) => f.toFixed(3)).join(' and '));
+  // And the openings keep both tabs' rays clear. Aimed by the row's one
+  // pull, the aft tab's ray — leaning aft where the forward one leans
+  // forward — ran into the first hole on every bridled rib.
+  const pullsBr = linePullsByRib(wingBr, bridled);
+  const tabs0 = pullsBr[0].tabs?.A ?? [];
+  const holesWith = buildRibHoles(wingBr.ribs[0], afBr, {}, { pulls: pullsBr[0] });
+  const holesRow = buildRibHoles(wingBr.ribs[0], afBr, {}, { pulls: { A: pullsBr[0].A, B: pullsBr[0].B, C: pullsBr[0].C } });
+  const clearFor = (holes, tab) => {
+    const ribPlan = { ...bridled, lines: bridled.lines.filter((l) => l.ribIndex === 0) };
+    const loadsHere = lb.anchorLoads.filter((a) => a.ribIndex === 0);
+    const r = checkWingRibStress({
+      wing: wingBr, anchorLoads: loadsHere, airfoil: afBr, plan: ribPlan,
+      openingsFor: () => holes.holes,
+    }).ribs[0];
+    const p = r.paths.find((x) => x.name === tab);
+    return p && p.path.wedge && Number.isFinite(p.path.wedge.clearFromDeg);
+  };
+  check('the openings keep each tab of a pair clear, its own station and its own pull',
+    tabs0.length === 2 && tabs0[0].pullDeg < 0 && tabs0[1].pullDeg > 0
+      && Math.abs(tabs0[0].fraction - 0.05) < 0.005 && Math.abs(tabs0[1].fraction - 0.13) < 0.005
+      && holesWith.fans.filter((f) => f.row === 'A').length === 2 && clearFor(holesWith, 'A1b'),
+    `tabs at ${tabs0.map((t) => `${(t.fraction * 100).toFixed(1)}% pulling ${t.pullDeg.toFixed(0)} degrees`).join(' and ')}`);
+  check('where aimed by the row alone the aft tab had no clear ray',
+    !clearFor(holesRow, 'A1b') && holesRow.fans.filter((f) => f.row === 'A').length === 1);
+  const recBr = exchangeRecord({ manufacturer: 'x', model: 'y', size: 'z', plan: bridled, riserLengthMM: 500 });
+  const pts = recBr.totalLineLengths.map((t) => t.attachmentPoint);
+  check('the inspection record lists both tabs as attachment points, each once',
+    pts.includes('A1a') && pts.includes('A1b') && !pts.includes('A1') && new Set(pts).size === pts.length,
+    pts.filter((x) => /^A/.test(x)).join(' '));
+
+  // Suggested, on the layout whose designs have them; and solved with them.
+  const sug = suggestAnchorsPerRow({ rows: ['A', 'B', 'C'], ribCount: 33, risers: 2, frontFraction: 15 / 33 });
+  const sug3 = suggestAnchorsPerRow({ rows: ['A', 'B', 'C', 'D'], ribCount: 25, risers: 3 });
+  check('a two-liner on three rows is suggested stepped, with the share of its front row the three bridle',
+    sug.shape === 'step' && sug.anchorsPerRow.A === sug.anchorsPerRow.B && sug.anchorsPerRow.C < sug.anchorsPerRow.B
+      && sug.bridlesPerRow?.A === Math.round(15 * (8 / 15 + 8 / 13 + 8 / 14) / 3) && /bridled/.test(sug.source),
+    `${JSON.stringify(sug.anchorsPerRow)} bridles ${JSON.stringify(sug.bridlesPerRow)}: ${sug.source}`);
+  check('and no other layout is given any', sug3.bridlesPerRow === null);
+  const solvedBr = anchorsForLineLength({
+    wing: wingBr, airfoil: afBr, rows: ['A', 'B', 'C'], targetMetres: 190, layout: lay,
+    lineLengthM: 6.5, risers: 2, mainsPerRow: 3,
+  });
+  check('solved to a length, a two-liner\'s plan carries its bridles and still lands on it',
+    solvedBr.plan.lines.some((l) => l.bridle) && solvedBr.bridlesPerRow?.A > 0 && solvedBr.withinTolerance,
+    `${solvedBr.totalMetres.toFixed(1)} m against 190, ${JSON.stringify(solvedBr.anchorsPerRow)} `
+    + `bridles ${JSON.stringify(solvedBr.bridlesPerRow)}`);
+}
+
+// ---------------------------------------------------------------------------
 section('Line plans against real line tables');
 
 {
@@ -6576,50 +6875,48 @@ section('Line plans against real line tables');
   })());
 
   // ---------------------------------------------------------------------
-  // Attachment density is per row, and the front row is far denser than the
-  // rear — the more so the fewer risers the wing has. Measured:
+  // Attachment density is per row. Measured by rib:
   //
   //   Geo 7 (3-liner)     A:14 B:14 C:15 D:14  of 25 ribs — near uniform
   //   Swift 6             A:17 B:17 C:8  D:8   — rear half as dense
-  //   Alpina 5 (2-liner)  A:31 B:19 C:12       of 34 ribs
-  //   Zeno 2 (2-liner)    A:30 B:14 C:8        of 40 ribs
+  //   Alpina 5 (2-liner)  A:15 B:19 C:12       of 33 ribs, 8 A ribs bridled
+  //   Zeno 2 (2-liner)    A:14 B:14 C:8        of 40 ribs, 8 A ribs bridled
   //
-  // Counted by name: on the two-liners eight A lines carry a bridle pair
-  // below the sail, on one rib, one tab behind the other (Ozone's diagrams),
-  // so the Alpina 5's canopy has 23 A tabs on 15 ribs and the Zeno 2's 22 on
-  // 14. The front row's extra support is the pair, not more ribs.
-  //
-  // Which is what the structure asks for: the leading edge needs support at
-  // nearly every cell to hold its shape, the rear carries less of both.
+  // This said the front row was far denser than the rear, the more so the
+  // fewer risers, from A:31 and A:30: the two-liners' sheets name sixteen
+  // bridles in the A row, two tabs on each of eight ribs one behind the
+  // other (Ozone's diagrams), on a line that is the rib's own. By rib the
+  // two-liners keep A and B alike and attach C less, as most three-liners
+  // attach D less; their front row's extra support is the pairs.
   const densities = {};
+  const tabsOf = {};
   for (const f of ['geo7-MS', 'swift6-MS', 'alpina5-ML', 'zeno2-ML']) {
     const t3 = parseLineTable(readFileSync(`data/reference/${f}.tsv`, 'utf8'));
     const byRow = {};
-    for (const l of t3.lines.filter((x) => x.level === 'upper' && x.row !== 'K')) {
+    for (const l of t3.lines.filter((x) => ((x.level === 'upper' && !x.bridle) || x.bridled) && x.row !== 'K')) {
       byRow[l.row] = (byRow[l.row] || 0) + 1;
     }
     densities[f] = byRow;
+    tabsOf[f] = t3.lines.filter((x) => x.level === 'upper' && x.row === 'A').length;
   }
-  // Not "A is always densest" — the Geo 7 has C:15 against A:14, because a
-  // three-liner spreads its rows nearly uniformly. The pattern is about
-  // *riser count*: the fewer risers, the more the front row must carry the
-  // shape on its own.
   const twoLiner = ['alpina5-ML', 'zeno2-ML'];
   const threeLiner = ['geo7-MS', 'swift6-MS'];
-  check('on a two-liner the front row is much the densest',
-    twoLiner.every((f) => densities[f].A > Math.max(
-      ...Object.entries(densities[f]).filter(([r]) => r !== 'A').map(([, n]) => n)) * 1.5),
+  check('a two-liner\'s front row is no denser by rib than its second',
+    twoLiner.every((f) => densities[f].A <= densities[f].B),
     twoLiner.map((f) => `${f} ${JSON.stringify(densities[f])}`).join('  '));
+  check('its extra support is the bridle pairs: half as many tabs again on the A row',
+    twoLiner.every((f) => tabsOf[f] === densities[f].A + 8),
+    twoLiner.map((f) => `${f} ${tabsOf[f]} A tabs on ${densities[f].A} ribs`).join(', '));
   check('while a three-liner is close to uniform',
     threeLiner.every((f) => {
       const v = Object.values(densities[f]);
       return Math.max(...v) / Math.min(...v) < 2.5;
     }), threeLiner.map((f) => `${f} ${JSON.stringify(densities[f])}`).join('  '));
-  check('and two-liners thin out toward the rear far more than three-liners',
-    (densities['zeno2-ML'].A / densities['zeno2-ML'].C)
-      > (densities['geo7-MS'].A / densities['geo7-MS'].C) * 2,
-    `Zeno ${(densities['zeno2-ML'].A / densities['zeno2-ML'].C).toFixed(1)}x vs `
-    + `Geo 7 ${(densities['geo7-MS'].A / densities['geo7-MS'].C).toFixed(1)}x`);
+  check('and the two-liners thin toward the rear no more than a three-liner does',
+    twoLiner.every((f) => densities[f].A / densities[f].C <= densities['swift6-MS'].A / densities['swift6-MS'].C),
+    `Zeno ${(densities['zeno2-ML'].A / densities['zeno2-ML'].C).toFixed(2)}x, Alpina `
+    + `${(densities['alpina5-ML'].A / densities['alpina5-ML'].C).toFixed(2)}x vs Swift 6 `
+    + `${(densities['swift6-MS'].A / densities['swift6-MS'].C).toFixed(2)}x`);
 
   // Given the real per-row counts, the generator reproduces the real line
   // tables. Worst error across four wings falls from 37% to 6%.
@@ -6629,12 +6926,12 @@ section('Line plans against real line tables');
     ['swift6-MS', 'A/B/C+D', { A: 0.085, B: 0.30, C: 0.53, D: 0.78 },
       11.5, 2.75, 52, 3, { A: 17, B: 17, C: 8, D: 8 }, 13, null],
     ['alpina5-ML', 'A/B+C', { A: 0.09, B: 0.32, C: 0.58 },
-      12.16, 2.53, 65, 4, { A: 31, B: 19, C: 12 }, 13, [['B', 'C']]],
+      12.16, 2.53, 65, 4, { A: 15, B: 19, C: 12 }, 13, [['B', 'C']], { A: 8 }],
     ['zeno2-ML', 'A/B+C', { A: 0.09, B: 0.38, C: 0.60 },
-      12.90, 2.30, 78, 3, { A: 30, B: 14, C: 8 }, 12, [['B', 'C']]],
+      12.90, 2.30, 78, 3, { A: 14, B: 14, C: 8 }, 12, [['B', 'C']], { A: 8 }],
   ];
   let worstErr = 0;
-  for (const [f, layout, anchors, span, root, cells, mpr, apr, bk, merge] of modelled) {
+  for (const [f, layout, anchors, span, root, cells, mpr, apr, bk, merge, bridled] of modelled) {
     const t4 = parseLineTable(readFileSync(`data/reference/${f}.tsv`, 'utf8'));
     const pf7 = planformFromDesignInputs({
       span, rootChord: root, tipChord: root * 0.23, tipSweep: root * 0.55,
@@ -6649,7 +6946,7 @@ section('Line plans against real line tables');
     const p7 = buildLinePlan({
       wing: w7, airfoil: af7, layout: RISER_LAYOUTS[layout], lineLengthM: 7.0,
       brakes: { anchors: bk, levelCounts: [6, 3, 1] },
-      mainsPerRow: mpr, anchorsPerRow: apr, mergeRows: merge,
+      mainsPerRow: mpr, anchorsPerRow: apr, mergeRows: merge, bridlesPerRow: bridled ?? null,
     });
     worstErr = Math.max(worstErr,
       Math.abs(p7.lines.length - t4.lines.length) / t4.lines.length);
@@ -6730,17 +7027,15 @@ section('Line plans against real line tables');
 
   // The front-to-rear ratio by layout — risers, then rows. It was keyed by a
   // riser count taken as one fewer than the rows, and three of the four-row
-  // wings are two-liners (the Torre, the Meru 2, the Artik R 2). What tapers
-  // hard is a two-liner with three rows; the ranges nearly touch — 2.50
-  // against 2.58 — so it separates the classes without settling a marginal
-  // case.
+  // wings are two-liners (the Torre, the Meru 2, the Artik R 2). Then a
+  // two-liner on three rows was said to taper much harder than any
+  // three-liner, 2.58 to 3.75 against 1.00 to 2.50: its A row counted with
+  // its bridles. By rib it sits inside the three-liners' range.
   const LAY = ANCHOR_DENSITY.ratioByLayout;
-  check('a two-liner on three rows tapers much harder than a three-liner',
-    LAY['2/3'].min > LAY['3/4'].max,
-    `${LAY['2/3'].min} against ${LAY['3/4'].max}`);
-  check('but only just, and the sample size is carried with it',
-    LAY['2/3'].min - LAY['3/4'].max < 0.6 && LAY['2/3'].n === 3);
-  check('and a two-liner on four rows does not: it pairs its rows on each riser',
+  check('a two-liner on three rows tapers no harder than a three-liner: inside their range',
+    LAY['2/3'].min >= LAY['3/4'].min && LAY['2/3'].max <= LAY['3/4'].max && LAY['2/3'].n === 3,
+    `${LAY['2/3'].min}-${LAY['2/3'].max} against ${LAY['3/4'].min}-${LAY['3/4'].max}`);
+  check('and a two-liner on four rows pairs its rows on each riser, below a three-liner\'s mean',
     LAY['2/4'].n === 3 && LAY['2/4'].max < LAY['3/4'].mean,
     `${LAY['2/4'].min}-${LAY['2/4'].max} against a three-liner's mean of ${LAY['3/4'].mean}`);
   check('so a two-riser layout on four rows is suggested from those, not from the Ozone two-liners',
@@ -6807,18 +7102,27 @@ section('Line plans against real line tables');
 
   // Front-row density, measured on all twenty: the range the anchor search
   // keeps to. It was "0.56 to 0.91", from six Ozone wings.
-  check('front-row density runs from under a third to nearly every rib',
-    FRONT_DENSITY.n === 20 && FRONT_DENSITY.min < 0.3 && FRONT_DENSITY.max > 0.9
+  check('front-row density runs from under a third to nine ribs in ten',
+    FRONT_DENSITY.n === 20 && FRONT_DENSITY.min < 0.3 && FRONT_DENSITY.max >= 0.9
       && Object.keys(FRONT_DENSITY.designs).length === FRONT_DENSITY.n,
     `${FRONT_DENSITY.min} to ${FRONT_DENSITY.max}, median ${FRONT_DENSITY.median}, n ${FRONT_DENSITY.n}`);
   check('and each design in it has a published cell count',
     Object.keys(FRONT_DENSITY.designs).every((k) => cellsOf.has(k)));
-  // Not an artefact of the six Ozone wings the old range came from: eight
-  // of the twenty are below 0.5, and none of them is an Ozone.
-  const sparseDesigns = Object.entries(FRONT_DENSITY.designs).filter(([, v]) => v < 0.5);
-  check('the sparse designs are from other makers',
-    sparseDesigns.length === 8 && sparseDesigns.every(([k]) => !/^Ozone/.test(k)),
-    sparseDesigns.map(([k, v]) => `${k} ${v}`).join(', '));
+  // The two-liners by rib: 0.75 to 0.94 when their bridles were counted as
+  // anchors, 0.35 to 0.45 now.
+  check('the Ozone two-liners attach under half their ribs, their bridles not counted as ribs',
+    ['Ozone Alpina 5', 'Ozone Lyght', 'Ozone Zeno 2'].every((k) => FRONT_DENSITY.designs[k] < 0.5),
+    ['Ozone Alpina 5', 'Ozone Lyght', 'Ozone Zeno 2'].map((k) => `${k} ${FRONT_DENSITY.designs[k]}`).join(', '));
+  // And with them in their place the density falls with aspect ratio, which
+  // it had seemed not to follow.
+  const arPts = Object.entries(FRONT_DENSITY.designs).map(([k, v]) => [cellsOf.get(k).ar, v]);
+  const mA = arPts.reduce((t, p) => t + p[0], 0) / arPts.length;
+  const mD = arPts.reduce((t, p) => t + p[1], 0) / arPts.length;
+  const sAD = arPts.reduce((t, p) => t + (p[0] - mA) * (p[1] - mD), 0);
+  const rAD = sAD / Math.sqrt(arPts.reduce((t, p) => t + (p[0] - mA) ** 2, 0) * arPts.reduce((t, p) => t + (p[1] - mD) ** 2, 0));
+  check('and it falls with aspect ratio: more cells to a line, the higher the aspect ratio',
+    rAD < -0.7 && Math.abs(rAD - FRONT_DENSITY.againstAspectRatio.r) < 0.005,
+    `r = ${rAD.toFixed(3)}`);
   // And the default is their median, not the middle of the old range.
   check('the default front density is the median of the designs',
     suggestAnchorsPerRow({ rows: ['A', 'B', 'C', 'D'], ribCount: 25 }).frontFraction
@@ -6849,31 +7153,52 @@ section('Line plans against real line tables');
     [taper, flat, step].every((x) => x.source && /\d+ designs on \d risers and \d rows|Swift/.test(x.source)),
     [taper, flat, step].map((x) => x.source).join(' | '));
 
-  // Two-liners do not. With the C row hung from the B mains, as a real
-  // two-liner has it, the Alpina's plan has the wing's own suspension mains
-  // — and is short at the TOP of the cascade: its A row splits each top
-  // line into two short bridles to neighbouring ribs, a level the generator
-  // does not build.
+  // A two-liner's top level. With the C row hung from the B mains, as a real
+  // two-liner has it, the Alpina's plan has the wing's own suspension mains;
+  // and its A row is fifteen ribs, eight of them carrying a bridle pair —
+  // A1a and A1b to A8a and A8b, 173 to 228 mm on the ML. Built with its own
+  // counts the plan has the same level.
   //
-  // This asserted the model "long on main lines": it was, by the brake's
-  // four against the sheet's two.
+  // This said the generator lacked it, and before that that the pairs went
+  // to neighbouring ribs: Ozone's diagrams put each pair on one rib.
   const alpina = mk(12.16, 2.53, 65, { A: 0.09, B: 0.32, C: 0.58 }, 'A/B+C', 13);
   const alpinaReal = parseLineTable(readFileSync('data/reference/alpina5-ML.tsv', 'utf8'));
   const suspensionMains = (lines) => lines.filter((l) => l.level === 'main' && l.row !== 'K').length;
-  const bridles = alpinaReal.lines.filter((l) => /^A\d+[ab]$/.test(l.name));
-  check('a two-liner is short on total lines',
-    alpina.lines.length < alpinaReal.lines.length,
-    `${alpina.lines.length} against ${alpinaReal.lines.length}`);
+  const bridles = alpinaReal.lines.filter((l) => l.bridle);
   check('with the wing\'s own suspension mains, and the C row on the B mains',
     suspensionMains(alpina.lines) === suspensionMains(alpinaReal.lines)
       && !alpina.lines.some((l) => l.row === 'C' && l.level === 'main'),
     `${suspensionMains(alpina.lines)} against ${suspensionMains(alpinaReal.lines)}`);
-  check('the lines it lacks are at the top, where the wing has a level of bridles',
-    bridles.length === 16 && bridles.every((l) => l.lengthMM < 250)
-      && alpinaReal.lines.filter((l) => l.level === 'upper' && l.row !== 'K').length
-        - alpina.lines.filter((l) => l.level === 'upper' && l.row !== 'K').length >= 10,
+  check('the sheet reads its bridles as a level of their own: sixteen canopy lines on eight A lines',
+    bridles.length === 16 && bridles.every((l) => l.lengthMM < 250 && /^A[1-8][ab]$/.test(l.name))
+      && alpinaReal.lines.filter((l) => l.bridled).map((l) => l.name).sort().join() === 'A1,A2,A3,A4,A5,A6,A7,A8'
+      && alpinaReal.lines.filter((l) => l.bridled).every((l) => l.level === 'middle'),
     `${bridles.length} bridles of ${Math.min(...bridles.map((l) => l.lengthMM))} to `
     + `${Math.max(...bridles.map((l) => l.lengthMM))} mm on the A row`);
+  const alpinaOwn = mk(12.16, 2.53, 65, { A: 0.09, B: 0.32, C: 0.58 }, 'A/B+C', 13, {
+    anchorsPerRow: { A: 15, B: 19, C: 12 }, mainsPerRow: { A: 3, B: 3 }, bridlesPerRow: { A: 8 },
+  });
+  const built = alpinaOwn.lines.filter((l) => l.bridle);
+  const meanMM = (v) => v.reduce((a, l) => a + l.lengthMM, 0) / v.length;
+  check('and built with its own counts, so does the plan: eight pairs on the inner eight A ribs',
+    built.length === 16 && alpinaOwn.lines.filter((l) => l.bridled).length === 8
+      && alpinaOwn.lines.filter((l) => l.row === 'A' && ((l.level === 'upper' && !l.bridle) || l.bridled)).length === 15
+      && Math.max(...alpinaOwn.lines.filter((l) => l.bridled).map((l) => l.ribIndex))
+        < Math.min(...alpinaOwn.lines.filter((l) => l.row === 'A' && l.level === 'upper' && !l.bridle).map((l) => l.ribIndex)));
+  check('as long as the sheet\'s, to a tenth',
+    Math.abs(meanMM(built) / meanMM(bridles) - 1) < 0.10,
+    `${meanMM(built).toFixed(0)} mm against ${meanMM(bridles).toFixed(0)}`);
+  const pairs = [...new Set(built.map((l) => l.index))].map((k) => [
+    built.find((l) => l.index === k && l.variant === 'a'), built.find((l) => l.index === k && l.variant === 'b')]);
+  const realPairs = [...new Set(bridles.map((l) => l.index))].map((k) => [
+    bridles.find((l) => l.index === k && l.variant === 'a'), bridles.find((l) => l.index === k && l.variant === 'b')]);
+  check('the forward one of each pair the longer, on the sheet and in the plan',
+    realPairs.every(([a, b]) => a.lengthMM >= b.lengthMM) && pairs.every(([a, b]) => a.lengthMM > b.lengthMM),
+    `sheet ${realPairs.map(([a, b]) => `${a.lengthMM}/${b.lengthMM}`).join(' ')}; `
+    + `plan ${pairs.map(([a, b]) => `${a.lengthMM}/${b.lengthMM}`).join(' ')}`);
+  check('both of a pair on one rib, one behind the other along the chord',
+    pairs.every(([a, b]) => a.ribIndex === b.ribIndex && a.from === b.from
+      && b.chordFraction - a.chordFraction > 0.05));
 
   // Brakes are optional and must not change anything when absent.
   const noBrakes = buildLinePlan({
@@ -6887,7 +7212,7 @@ section('Line plans against real line tables');
     everyNthRib: 2, lineLengthM: 6.5, brakes: true,
   });
   check('and asking for them adds a complete brake cascade',
-    withBrakes.brakePlan && withBrakes.brakePlan.sharedLower
+    withBrakes.brakePlan && withBrakes.brakePlan.main
     && withBrakes.lines.length > noBrakes.lines.length);
   check('which lengthens the plan rather than replacing part of it',
     withBrakes.totalLengthM > noBrakes.totalLengthM,
@@ -12823,7 +13148,10 @@ section('Writing a cascade down');
     for (const l of lines) {
       if (l.shared || !rows.test(l.row)) continue;
       const r = (by[l.row] ||= { upper: 0, middle: 0, main: 0 });
-      if (l.level in r) r[l.level] += 1;
+      // A brake's lower middles go where a row's mains do, as the spec
+      // writes them: "K 14 7 3" is 14 anchors on 7 middles on 3.
+      if (l.row === 'K' && l.level === 'middle' && l.side === 'lower') r.main += 1;
+      else if (l.level in r) r[l.level] += 1;
     }
     return Object.keys(by).sort().map((r) => `${r} ${by[r].upper} ${by[r].middle} ${by[r].main}`).join(' | ');
   };
@@ -12983,9 +13311,23 @@ section('Where a row ends, and the stabilo');
     vibeStab ? vibeStab.names.join('+') : 'none');
   check('and nothing on a sheet whose tip path is no one main (the Ultralite 5, the Swift 6)',
     stabMain('ultralite5-19') === null && stabMain('swift6-MS') === null);
-  check('the designs\' own cascades carry them, on the eight designs whose sheets show them',
+  // The Lyght's totals are columns along the chord, not rows: on its bridled
+  // ribs A is the forward tab's path, B the aft tab's, C the B row and D the
+  // C row — 14 mm apart on the MS, as A1a and A1b are to a millimetre. Read
+  // as rows, its B column was its A row's and nothing matched; read by
+  // position, its A13 and B13 share one path, as the Geo 7's tip lines do.
+  const lyghtBody = readFileSync('data/reference/lyght-MS.tsv', 'utf8');
+  const lyghtSet = parseLineTable(lyghtBody);
+  const lyghtTot = referenceTotals(lyghtSet);
+  const lyght = tipLinesFromTotals(lyghtSet.lines, lyghtTot);
+  check('a two-liner\'s totals are read along the chord: the Lyght\'s A13 and B13 on one path',
+    lyght.tips.A === 1 && lyght.tips.B === 1 && lyght.tips.C === 0
+      && lyghtTot[1].Ab != null && Math.abs((lyghtTot[1].A - lyghtTot[1].Ab)
+        - (lyghtSet.lines.find((l) => l.name === 'A1a').lengthMM - lyghtSet.lines.find((l) => l.name === 'A1b').lengthMM)) <= 2,
+    `${JSON.stringify(lyght.tips)}; anchor 1 ${JSON.stringify(lyghtTot[1])}`);
+  check('the designs\' own cascades carry them, on the nine designs whose sheets show them',
     Object.entries(DESIGN_LINES).filter(([, v]) => /\btip\b/.test(v.spec)).map(([k]) => k).sort().join(', ')
-    === 'BGD Lynx 2, Niviuk Artik R 2, Niviuk Hook 6, Niviuk Skin 4 P, Ozone Geo 7, Ozone Swift 6, Ozone Ultralite 5, Ozone Vibe GT'
+    === 'BGD Lynx 2, Niviuk Artik R 2, Niviuk Hook 6, Niviuk Skin 4 P, Ozone Geo 7, Ozone Lyght, Ozone Swift 6, Ozone Ultralite 5, Ozone Vibe GT'
     && designCascade('Ozone Geo 7').cascade.tipsPerRow.C === 1
     && withTipCounts('A 14 6 3\nD 14 6', { A: 2, D: 0 }) === 'A 14 6 3 tip 2\nD 14 6 tip 0');
 
@@ -18259,6 +18601,211 @@ function demoWing() {
   const wing = buildWing({ planform, lobe, airfoil, cells: 12, pointsPerSurface: 40 });
   wing.planform = planform;
   return wing;
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* The section solver: mfoil, ported (src/core/mfoil.js)                      */
+/* ------------------------------------------------------------------------- */
+{
+  console.log('\nmfoil port — against mfoil.py, the code it ports');
+  // mfoil.py's own results (data/reference/mfoil-sections.tsv), solved again
+  // here with its settings. The port follows mfoil step for step; the one
+  // difference is how each Newton step's linear system is solved, so the
+  // answers agree to the rounding of the arithmetic, not to a tolerance.
+  const tsv = readFileSync('data/reference/mfoil-sections.tsv', 'utf8').split('\n')
+    .filter((l) => l && !l.startsWith('#'));
+  const head = tsv[0].split('\t');
+  const refs = tsv.slice(1).map((l) => Object.fromEntries(l.split('\t').map((v, k) => [head[k], v])));
+  const toolPoints = (() => {
+    const af = nacaSection('4415');
+    const o = mfoilOrientPoints(af.points.map((q) => q[0]), af.points.map((q) => q[1]));
+    return mfoilOpenTrailingEdge(o.x, o.z, 1e-4);
+  })();
+  const modelFor = (r) => (r.section === 'tool 4415'
+    ? mfoilModel({ x: toolPoints.x, z: toolPoints.z, npanel: +r.npanel })
+    : mfoilModel({ naca: r.section.replace('NACA ', ''), npanel: +r.npanel }));
+  const run = ['naca2412-a2', 'naca0012-a10', 'naca4412-re2e5', 'naca2412-ma03', 'tool4415-a3', 'tool4415-n120'];
+  let worst = 0;
+  for (const name of run) {
+    const r = refs.find((q) => q.case === name);
+    const M = modelFor(r);
+    const res = mfoilSolve(M, { alpha: +r.alpha, Re: +r.Re, Ma: +r.Ma, ncrit: +r.ncrit, rtol: 1e-12 });
+    const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(b), 1e-3);
+    const w = Math.max(rel(res.cl, +r.cl), rel(res.cd, +r.cd), rel(res.cdf, +r.cdf), rel(res.cm, +r.cm),
+      Math.abs(res.xtrLower - +r.xtr_lower), Math.abs(res.xtrUpper - +r.xtr_upper));
+    worst = Math.max(worst, w);
+    check(`mfoil ${name}: cl ${res.cl.toFixed(5)} cd ${res.cd.toFixed(6)} as mfoil.py's, converged`,
+      res.converged && w < 1e-9, `worst relative difference ${w.toExponential(2)}`);
+  }
+  // A warm start: mfoil's own way along a polar, from the last boundary layer.
+  {
+    const r8 = refs.find((q) => q.case === 'naca4415-warm-a8');
+    const r10 = refs.find((q) => q.case === 'naca4415-warm-a10');
+    const M = mfoilModel({ naca: '4415', npanel: 160 });
+    const a = mfoilSolve(M, { alpha: 8, Re: 1e6, rtol: 1e-12 });
+    const st = mfoilState(M);
+    const b = mfoilSolve(M, { alpha: 10, Re: 1e6, rtol: 1e-12, warm: st });
+    check('mfoil warm start: 8 then 10 degrees from its boundary layer, as mfoil.py',
+      Math.abs(a.cl - +r8.cl) < 1e-9 && Math.abs(b.cl - +r10.cl) < 1e-9 && Math.abs(b.cd - +r10.cd) < 1e-11 && b.converged,
+      `cl ${b.cl.toFixed(9)} against ${(+r10.cl).toFixed(9)}`);
+    // and a cold solve at 10 lands on the same answer: Newton's solution, not its path
+    const c = mfoilSolve(M, { alpha: 10, Re: 1e6, rtol: 1e-12 });
+    check('mfoil: cold and warm solves at 10 degrees agree', !c.converged || Math.abs(c.cl - b.cl) < 1e-9,
+      `cold ${c.cl.toFixed(6)} converged ${c.converged}`);
+  }
+  // Where mfoil.py fails, the port fails too, and says so.
+  {
+    const r = refs.find((q) => q.case === 'naca4415-a12-cold');
+    const M = mfoilModel({ naca: '4415', npanel: 160 });
+    const res = mfoilSolve(M, { alpha: 12, Re: 1e6, rtol: 1e-12 });
+    check('mfoil: NACA 4415 at 12 degrees from cold does not converge, in mfoil.py or here',
+      r.converged === 'no' && !res.converged, `${res.iterations} iterations`);
+  }
+  // The two linear solvers give the same Newton steps.
+  {
+    const M1 = mfoilModel({ naca: '2412', npanel: 60 });
+    const M2 = mfoilModel({ naca: '2412', npanel: 60 });
+    const a = mfoilSolve(M1, { alpha: 3, Re: 5e5 });
+    const b = mfoilSolve(M2, { alpha: 3, Re: 5e5, denseSolve: true });
+    check('mfoil: the Schur-complement solve and the dense solve of the whole system agree',
+      a.converged && b.converged && Math.abs(a.cl - b.cl) < 1e-10 && Math.abs(a.cd - b.cd) < 1e-12,
+      `cl ${a.cl} against ${b.cl}`);
+    check('mfoil: at a converged solution the edge-speed equations are met too',
+      a.ueResidual < 1e-12, `largest residual ${a.ueResidual.toExponential(2)}`);
+    const d = mfoilDistributions(M1);
+    // NACA 2412 at 3 degrees and Re 500 000: the upper surface goes
+    // turbulent part way back, the lower stays laminar to the trailing edge
+    // (no transition is reported as 0).
+    check('mfoil distributions: a value per node, airfoil then wake; transition on the upper surface, none on the lower',
+      d.cp.length === d.x.length && d.theta.length === d.x.length && d.N + d.Nw === d.x.length
+      && d.xtr[1] > 0.3 && d.xtr[1] < 0.7 && d.xtr[0] === 0 && d.turb.slice(0, d.N).some((v) => v),
+      `upper ${d.xtr[1].toFixed(3)}, lower ${d.xtr[0].toFixed(3)}`);
+  }
+  // A sewn trailing edge is opened for the solver, and only one that needs it.
+  {
+    const af = nacaSection('4415');
+    const o = mfoilOrientPoints(af.points.map((q) => q[0]), af.points.map((q) => q[1]));
+    const t = mfoilOpenTrailingEdge(o.x, o.z, 1e-4);
+    const n = t.z.length - 1;
+    const chord = Math.max(t.x[0], t.x[n]) - Math.min(...t.x);
+    near('mfoil: a closed trailing edge is opened to 1e-4 of the chord', (t.z[n] - t.z[0]) / chord, 1e-4, 1e-12);
+    const nc = mfoilNacaPoints('4415');
+    const u = mfoilOpenTrailingEdge(nc.x, nc.z, 1e-4);
+    check('mfoil: an open trailing edge is left as it is', u.added === 0 && u.z.every((v, k) => v === nc.z[k]));
+  }
+  console.log(`  mfoil port: worst relative difference from mfoil.py ${worst.toExponential(2)}`);
+}
+
+{
+  console.log('\nmfoil port — against the Ohio State tunnel (data/reference/naca4415-osu.tsv)');
+  // NACA 4415, clean, Re 1.5 million: a tunnel whose walls were not
+  // corrected for. In the attached range the lift is within 0.07 of it and
+  // the moment within 0.016; the slope is a fifth steeper than the tunnel's,
+  // as a panel method's is against an uncorrected tunnel.
+  const rows = readFileSync('data/reference/naca4415-osu.tsv', 'utf8').split('\n')
+    .filter((l) => l && !l.startsWith('#') && !l.startsWith('Re')).map((l) => l.split('\t').map(Number))
+    .filter(([Re, a]) => Re === 1500000 && a >= -0.5 && a <= 6.5);
+  const M = mfoilModel({ naca: '4415', npanel: 160 });
+  let st = false; let dcl = 0; let dcm = 0;
+  const got = [];
+  for (const [Re, a, cl, , cm] of rows) {
+    const r = mfoilSolve(M, { alpha: a, Re, warm: st });
+    st = r.converged ? mfoilState(M) : false;
+    got.push([a, r.cl, cl]);
+    dcl = Math.max(dcl, Math.abs(r.cl - cl)); dcm = Math.max(dcm, Math.abs(r.cm - cm));
+  }
+  check('NACA 4415 at Re 1.5 million, 0 to 6 degrees: lift within 0.07 of the tunnel\'s', dcl < 0.07, `worst ${dcl.toFixed(3)}`);
+  check('NACA 4415 at Re 1.5 million, 0 to 6 degrees: moment within 0.02 of the tunnel\'s', dcm < 0.02, `worst ${dcm.toFixed(4)}`);
+  const slope = (got[got.length - 1][1] - got[0][1]) / (got[got.length - 1][0] - got[0][0]);
+  const tunnel = (got[got.length - 1][2] - got[0][2]) / (got[got.length - 1][0] - got[0][0]);
+  check('NACA 4415: the lift slope is within a quarter of the uncorrected tunnel\'s',
+    slope > tunnel && slope < 1.25 * tunnel, `${slope.toFixed(4)} against ${tunnel.toFixed(4)} a degree`);
+}
+
+/* ------------------------------------------------------------------------- */
+/* The slices: tip to tip, put back together on the lattice (src/core/slices.js) */
+/* ------------------------------------------------------------------------- */
+{
+  console.log('\nslices — the wing as its sections');
+  const wing = demoWing();
+  const st = sliceStations(wing);
+  check('slices: one for each lattice strip, from the left tip to the right',
+    st.length === wingStrips(wing).length && st.every((s, i) => i === 0 || s.y > st[i - 1].y),
+    `${st.length} slices`);
+  check('slices: each has its mirror, with the same chord', st.every((s) => st[s.mirror].mirror === s.index
+    && Math.abs(st[s.mirror].chord - s.chord) < 1e-9 && Math.abs(st[s.mirror].y + s.y) < 1e-9));
+  check('slices: the arc tilts them, the tips most', Math.abs(st[0].arcDeg) > 30 && Math.abs(st[st.length >> 1].arcDeg) < 5,
+    `tip ${st[0].arcDeg.toFixed(1)}°, centre ${st[st.length >> 1].arcDeg.toFixed(1)}°`);
+  const lv = reynoldsLevels(5e5, 1.9e6, 2);
+  check('slices: Reynolds levels cover the range with steps of no more than the ratio asked',
+    lv[0] === 5e5 && Math.abs(lv[lv.length - 1] - 1.9e6) < 1 && lv.every((v, k) => k === 0 || v / lv[k - 1] <= 2 + 1e-9),
+    lv.map((v) => v.toExponential(2)).join(' '));
+  // On flat-plate sections the coupling has nothing to correct: the lattice
+  // as it stands.
+  const sys = latticeSystem(st.map((s) => s.strip), { alphaDeg: 6 });
+  const plate = coupleSlices({ slices: st, alphaDeg: 6, system: sys, sectionAt: (i, a) => ({ cl: 2 * Math.PI * a * Math.PI / 180, cd: 0, cm: 0 }) });
+  const vl = vortexLattice({ strips: st.map((s) => s.strip), alphaDeg: 6 });
+  const dg = Math.max(...plate.gamma.map((g, i) => Math.abs(g - vl.gamma[i])));
+  check('slices: on flat plates the coupled lattice is the lattice', plate.converged && plate.iterations === 0 && dg < 1e-12,
+    `largest difference in circulation ${dg.toExponential(2)}`);
+  // A cambered section that lifts at no angle: the correction takes it up.
+  const camb = coupleSlices({ slices: st, alphaDeg: 6, system: sys, zeroLiftDeg: -4,
+    sectionAt: (i, a) => ({ cl: 0.1 * (a + 4), cd: 0.01, cm: -0.09 }) });
+  const fit = Math.max(...camb.alphaEffDeg.map((a, i) => Math.abs(0.1 * (a + 4) - camb.clLattice[i])));
+  check('slices: each strip\'s lattice lift is its section\'s lift at the angle it meets', camb.converged && fit < 1e-4,
+    `largest difference ${fit.toExponential(2)} after ${camb.iterations} iterations`);
+  check('slices: the induced drag is positive', camb.inducedOverQ > 0);
+}
+
+{
+  console.log('\nslices — the whole analysis, on the demonstration wing');
+  const wing = demoWing();
+  const atm = atmosphere(1000);
+  const area = 22.34;
+  const A = runSteps(sliceAnalysisSteps({
+    wing, airfoil: naca4('4415'), atm, alphaDeg: 6, massKg: 85.4, areaM2: area,
+    settings: { npanel: 80, ncrit: 7, alphaStepDeg: 1.5, correctionRounds: 2 },
+  }));
+  const t = A.totals;
+  near('slices: lift equals the weight at the speed found', t.liftN, 85.4 * atm.gravity, 1e-3 * 85.4 * atm.gravity, ' N');
+  check('slices: every section solved converged, none read outside the grid',
+    A.check.convergedSlices === A.check.solvedSlices && A.check.outsideGrid === 0,
+    `${A.check.convergedSlices} of ${A.check.solvedSlices}`);
+  // Within the tolerance the corrections stop at (SLICE_SETTINGS.sliceTol),
+  // and closer than before them: the grid alone was a hundredth out.
+  const r0 = A.coupling.rounds[0].mismatch;
+  check('slices: the lattice\'s lift and each slice\'s own agree after the corrections',
+    A.check.liftMismatch < SLICE_SETTINGS.sliceTol && A.check.liftMismatch < r0 / 3,
+    `${A.check.liftMismatch.toExponential(2)}, from ${r0.toExponential(2)} on the grid alone, in ${A.coupling.rounds.length - 1} corrections`);
+  check('slices: the mirror halves are the same', A.slices.every((p) => Math.abs(p.cl - A.slices[st0(A, p)].cl) < 1e-6));
+  check('slices: induced drag at least the elliptical wing\'s on the flat span',
+    t.CDi >= t.CL * t.CL / (Math.PI * (wing.ribs[wing.ribs.length - 1].station * 2) ** 2 / area) * 0.999,
+    `CDi ${t.CDi.toFixed(5)}, CL ${t.CL.toFixed(4)}`);
+  check('slices: profile drag of a smooth section, 0.005 to 0.012', t.CDp > 0.005 && t.CDp < 0.012, `CDp ${t.CDp.toFixed(5)}`);
+  const mid = A.slices[A.slices.length >> 1];
+  check('slices: the centre works harder than the tip', mid.cl > A.slices[0].cl && mid.alphaEffDeg > A.slices[0].alphaEffDeg,
+    `centre ${mid.cl.toFixed(3)} at ${mid.alphaEffDeg.toFixed(2)}°, tip ${A.slices[0].cl.toFixed(3)} at ${A.slices[0].alphaEffDeg.toFixed(2)}°`);
+  // The exports a slice offers.
+  const sl = A.slices[mid.index];
+  const dat = sliceSectionDat(naca4('4415'), { name: 'demo' });
+  const datRows = dat.trim().split('\n').slice(1).map((l) => l.split(' ').map(Number));
+  check('slices export: the section as XFOIL reads it, upper surface first, opened at the trailing edge',
+    datRows[0][0] > 0.99 && datRows[1][1] > datRows[datRows.length - 2][1] && datRows[0][1] - datRows[datRows.length - 1][1] > 0.9e-4,
+    `${datRows.length} points`);
+  const xs = sliceXfoilScript(sl, { ncrit: 7 });
+  check('slices export: an XFOIL run at the slice\'s own Reynolds number and angle',
+    xs.includes(`VISC ${sl.reynolds.toFixed(0)}`) && xs.includes(`ALFA ${sl.alphaEffDeg.toFixed(4)}`) && xs.includes('N 7.00'));
+  const py = sliceMfoilScript(sl, naca4('4415'), { name: 'demo', ncrit: 7 });
+  check('slices export: an mfoil script with the slice\'s points, angle and Reynolds number',
+    py.includes('import mfoil as mf') && py.includes(`alpha=${sl.alphaEffDeg.toFixed(6)}`) && py.includes('M.param.ncrit = 7'));
+  const sc = sliceSciroccoInput(sl, naca4('4415'));
+  check('slices export: Scirocco\'s inputs, x then z, its angle in degrees',
+    sc.inputs.x.length === 2 * sc.options.coordinates.x.length && sc.inputs.alpha === Number(sl.alphaEffDeg.toFixed(6))
+    && sc.inputs.Ma === 0 && sc.outputs.join() === 'cl,cd,cm');
+  const tab = sliceTable(A).trim().split('\n');
+  check('slices export: a row for every slice', tab.length === A.slices.length + 2);
+  function st0(an, p) { return an.stations[p.index].mirror; }
 }
 
 console.log(`\n${'='.repeat(60)}`);

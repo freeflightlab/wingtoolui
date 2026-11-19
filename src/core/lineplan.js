@@ -306,10 +306,42 @@ export function parseLineName(name, { convention = null } = {}) {
     }
   }
 
+  // A riser line in two parts named without a number, one a side: the Zeno
+  // 2's and the Lyght's brake mains, `KRU` and `KRL`. Read as no name at all
+  // they went missing from both wings' line sets, 3.9 m a side on the Zeno 2
+  // ML — and from its family's totals, which are summed from the sheets.
+  // And the part written after an underscore, as the Magnum 4 writes its
+  // third A riser line `AR3_U` and `AR3_L`.
+  const bare = raw.match(/^([A-Z])R(U|L)$/) || raw.match(/^([A-Z])R(\d+)_(U|L)$/);
+  if (bare) {
+    const row = bare[1];
+    const sd = bare[bare.length - 1];
+    if (!ROWS.includes(row) && row !== BRAKE) return null;
+    return {
+      name: raw,
+      row,
+      level: 'main',
+      side: sd === 'U' ? 'upper' : 'lower',
+      index: bare.length === 4 ? parseInt(bare[2], 10) : 1,
+      variant: null,
+      isBrake: row === BRAKE,
+      isCollapse: false,
+    };
+  }
+
   const m = raw.match(/^([A-Za-z])(R|M)?(U|L)?(\d+)([a-z])?$/);
   if (!m) return null;
   const [, rawRow, levelCode, side, idx, variant] = m;
   const row = rawRow.toUpperCase();
+  // BGD's brake runs k, KM, KR and then KL: `KL1` is the main line, from the
+  // handle up through the pulley. Read as a K line's lower piece with no
+  // level, it was an upper line — a canopy line 2.9 m long.
+  if (row === BRAKE && !levelCode && side === 'L' && rawRow === 'K') {
+    return {
+      name: raw, row, level: 'main', side: null, index: parseInt(idx, 10),
+      variant: null, isBrake: true, isCollapse: false,
+    };
+  }
   // A lowercase row letter always denotes a canopy line: the level suffixes
   // only ever appear with an uppercase row.
   const level = levelCode === 'R' ? 'main' : levelCode === 'M' ? 'middle' : 'upper';
@@ -430,6 +462,45 @@ export function resolveCaseLevels(lines) {
 }
 
 /**
+ * Resolve a two-liner's bridles.
+ *
+ * Ozone's two-liners gather two tabs on one rib, one behind the other along
+ * the chord, onto one line a hand's width below the sail: `A1a` and `A1b`
+ * hang from `A1`. Named that way, all three read as canopy lines, and the
+ * Alpina 5's A row counted 31 anchors on a half wing of 33 ribs. Its
+ * canopy has 23 A tabs on 15 ribs: Ozone's rigging diagrams of the Alpina 5,
+ * the Lyght and the Enzo 3 draw each pair on one rib, and the Lyght's own
+ * totals list the pair's two paths in two columns of one attachment row.
+ *
+ * The pair are the canopy lines (`bridle`; `variant` says which, `a` the
+ * forward tab and `b` the aft). The line they hang from is a middle line,
+ * `bridled`, standing on its rib like any canopy line's would.
+ *
+ * Only a pair whose stem is on the sheet: UP's `sa1` is a stabilo line named
+ * for the row it sits outboard of, not a bridle.
+ */
+export function resolveBridleLevels(lines) {
+  const key = (l) => `${l.row}|${l.index}`;
+  const isLoad = (l) => !!l && l.level === 'upper' && /^[A-I]$/.test(l.row) && !(l.rows?.length > 1);
+  const stems = new Set();
+  const variants = new Map();
+  for (const l of lines) {
+    if (!isLoad(l)) continue;
+    if (!l.variant) stems.add(key(l));
+    else if ((l.variant === 'a' || l.variant === 'b') && /^[A-I]\d+[ab]$/.test(l.name)) {
+      if (!variants.has(key(l))) variants.set(key(l), new Set());
+      variants.get(key(l)).add(l.variant);
+    }
+  }
+  const pairs = new Set([...variants].filter(([k, v]) => stems.has(k) && v.size === 2).map(([k]) => k));
+  if (!pairs.size) return lines;
+  return lines.map((l) => {
+    if (!isLoad(l) || !pairs.has(key(l))) return l;
+    return l.variant ? { ...l, bridle: true } : { ...l, level: 'middle', bridled: true };
+  });
+}
+
+/**
  * A plain line sheet, for data collected by hand.
  *
  * The production readers each follow one manufacturer's spreadsheet layout —
@@ -512,7 +583,7 @@ export function parseSimpleLineSheet(text) {
     // three levels and a middle one on a wing of four. Niviuk's sheets came
     // back with every line below the canopy at a level called `cascade-2`,
     // `cascade-3` or `cascade-4`, which nothing downstream knows.
-    lines: resolveCascadeLevels(resolveCaseLevels(lines)),
+    lines: resolveBridleLevels(resolveCascadeLevels(resolveCaseLevels(lines))),
     header,
     skipped,
     convention,
@@ -578,9 +649,24 @@ export function parseLineTable(text) {
     }
   }
 
+  // What the totals' columns are, where the sheet heads them: the Geo 7's
+  // `A B C D K`, the Swift 6's and the Lyght's `A B C D E K`. Read as the
+  // first five letters and K, the Swift 6's brake was taken from its empty
+  // E column and never read.
+  let totalsColumns = null;
+
   for (const r of rows) {
     const first = (r[0] || '').trim();
     if (!first && !r.some(Boolean)) continue;
+
+    if (!totalsColumns) {
+      const at = r.findIndex((c, i) => i > 5 && /^[A-K]$/.test(c));
+      if (at > 0) {
+        const run = [];
+        for (let i = at; i < r.length && /^[A-K]$/.test(r[i]); i++) run.push(r[i]);
+        if (run.length >= 3 && run[0] === 'A') totalsColumns = run;
+      }
+    }
 
     // The totals columns share physical rows with the material and column
     // headers of the inventory beside them, so they must be read before
@@ -664,7 +750,14 @@ export function parseLineTable(text) {
     }
   }
 
-  return { lines, totals, skipped: [...new Set(skipped)] };
+  return {
+    // A two-liner's bridle pairs are settled on the whole sheet, as a prefix
+    // level is: `A1` is a canopy line unless `A1a` and `A1b` hang from it.
+    lines: resolveBridleLevels(lines),
+    totals,
+    totalsColumns,
+    skipped: [...new Set(skipped)],
+  };
 }
 
 /** Group a parsed line set by row and level. */
@@ -1447,25 +1540,20 @@ function buildLinePlanInner({
   // Attachment density, per row.
   //
   // `everyNthRib` is one integer applied to every row, and real wings do not
-  // work that way. Measured across the reference tables, the front row is
-  // attached far more densely than the rear, and the more so the fewer risers
-  // the wing has:
+  // work that way. Measured across the reference tables, by rib:
   //
   //   Geo 7 (3-liner)    A:14 B:14 C:15 D:14   of 25 ribs — near uniform
   //   Swift 6            A:17 B:17 C:8  D:8    — rear half as dense
-  //   Alpina 5 (2-liner) A:31 B:19 C:12        of 34 ribs
-  //   Zeno 2 (2-liner)   A:30 B:14 C:8         of 40 ribs
+  //   Alpina 5 (2-liner) A:15 B:19 C:12        of 33 ribs, 8 A ribs bridled
+  //   Zeno 2 (2-liner)   A:14 B:14 C:8         of 40 ribs, 8 A ribs bridled
   //
-  // Which is what the structure asks for: the leading edge needs support at
-  // nearly every cell to hold its shape, while the rear carries less load and
-  // less shape. The two-liners' A counts are their sheets' names, eight of
-  // them the lines under bridle pairs; Ozone's diagrams put each pair on one
-  // rib, one tab behind the other, so the Alpina 5's canopy has 23 A tabs on
-  // 15 ribs, and the support is two points a rib rather than more ribs. The
-  // generator has no bridle level, and builds the names' count. A single integer cannot say that — at 2 it undershoots a
-  // two-liner by a third, at 1 it overshoots by a quarter.
+  // The rear carries less load and less shape, and most wings attach it
+  // less. The two-liners' sheets name 31 and 30 A lines: sixteen are bridles,
+  // two tabs on each of eight ribs (`bridlesPerRow`), so the leading edge's
+  // extra support is two points a rib, not more ribs. A single integer cannot
+  // say any of it.
   //
-  // Accepts a count per row: `{ A: 30, B: 14, C: 8 }`.
+  // Accepts a count per row: `{ A: 14, B: 14, C: 8 }`.
   anchorsPerRow = null,
   // Rows that share their cascade below the top level, as Advance's TAU DLS
   // does with AB and CD. Each entry is a group of row letters.
@@ -1479,6 +1567,21 @@ function buildLinePlanInner({
   // plan without it cannot be compared with one, and its totals understate
   // the wing by about a fifth.
   brakes = null,
+  // Bridle pairs: how many of a row's anchors, from the centre out, gather
+  // two tabs on their rib onto one line a hand's width below the sail —
+  // `{ A: 8 }`, as on all three of Ozone's two-liners on file, whose A rows
+  // have 15, 13 and 14 ribs (`resolveBridleLevels`). The rib's top line ends
+  // at the pair's junction and becomes a middle line; the pair are the
+  // canopy lines, `A1a` forward and `A1b` aft.
+  bridlesPerRow = null,
+  // The pair's tabs, as a fraction of chord between them, either side of the
+  // row's own station: 0.057 on the Alpina 5's rigging diagram, 0.095 on the
+  // Lyght's and 0.10 on the Enzo 3's, measured rib by rib.
+  bridleSpacing = 0.08,
+  // A bridle's length, as a fraction of its rib's chord: 0.087 at the centre
+  // of the Alpina 5 ML (228 and 213 mm on 2.53 m), 0.085 on the Zeno 2 ML
+  // (205 and 187 on 2.30), 0.089 at the Alpina's eighth pair.
+  bridleLengthRatio = 0.087,
 } = {}) {
   if (layout === LAYOUT_OMITTED) layout = RISER_LAYOUTS['A/B/C+D'];
 
@@ -1899,10 +2002,17 @@ function buildLinePlanInner({
   // Merging rebuilds part of the line list, so everything after it reads
   // `plan.lines` rather than the local array it started from.
   if (mergeRows) mergeCascades(plan, mergeRows, levelFractions, junction);
+  // The bridles go on last, on the top lines as built: a pair takes the end
+  // of its rib's line, wherever the cascade put the line's lower end.
+  if (bridlesPerRow) {
+    addBridles(plan, wing, fractions, bridlesPerRow, {
+      spacing: bridleSpacing, lengthRatio: bridleLengthRatio, shortfalls,
+    });
+  }
 
   // The brake cascade is built separately because it is a different shape —
-  // four levels, one shared lower line, uneven anchors — but it belongs in
-  // the same plan.
+  // four levels, one main line through a pulley, uneven anchors — but it
+  // belongs in the same plan.
   if (brakes) {
     const bp = buildBrakePlan({
       wing,
@@ -1931,7 +2041,7 @@ function buildLinePlanInner({
     // overwriting the first with the second broke a test that reads
     // `plan.risers[2].rows`.
     plan.riserWebbing = [];
-    // The brake has no riser. Its lower line runs from the handle through a
+    // The brake has no riser. Its main line runs from the handle through a
     // pulley on the rear riser, and is marked `riser: 'K'` only to say which
     // cascade it belongs to. Counted here it became a fourth strap, drawn
     // over the A riser, and a third more webbing in the bill of materials:
@@ -2065,6 +2175,77 @@ function mergeCascades(plan, groups, levelFractions, junction = lerp3) {
 }
 
 /**
+ * Bridle pairs on the inner anchors of the rows given (`bridlesPerRow`).
+ *
+ * Each rib's top line ends at a junction a bridle's length below the sail,
+ * and two bridles go on from there to two tabs on the same rib, `spacing`
+ * of chord apart either side of the row's station. The junction stands on
+ * the line from the top line's lower end through the tabs' centre, as every
+ * junction of the cascade stands on the line to the centre it serves: so the
+ * line below runs on in its own direction, and the forward bridle comes out
+ * the longer, as on every pair of the three wings' sheets (A1a 228 mm and
+ * A1b 213 on the Alpina 5 ML; 205 and 187 on the Zeno 2 ML).
+ *
+ * How deep is set by the bridles' length, `lengthRatio` of the rib's chord
+ * on the mean of the pair.
+ */
+function addBridles(plan, wing, fractions, perRow, { spacing = 0.08, lengthRatio = 0.087, shortfalls = [] } = {}) {
+  const want = typeof perRow === 'number'
+    ? { [Object.keys(fractions).sort()[0]]: perRow } : perRow;
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  for (const [row, count] of Object.entries(want)) {
+    if (!(count > 0) || fractions[row] == null) continue;
+    const tops = plan.lines
+      .filter((l) => l.row === row && l.level === 'upper' && !l.direct && !l.stabiloTip
+        && !l.bridle && Number.isInteger(l.ribIndex))
+      .sort((a, b) => a.ribIndex - b.ribIndex || a.index - b.index);
+    const n = Math.min(count, tops.length);
+    if (n < count) shortfalls.push({ row, level: 'bridle', asked: count, got: n });
+    const f = fractions[row];
+    const fa = Math.max(0.01, f - spacing / 2);
+    const fb = Math.min(0.95, f + spacing / 2);
+    for (const top of tops.slice(0, n)) {
+      const rib = wing.ribs[top.ribIndex];
+      const P = top.from;
+      const ta = ribSurfacePoint(rib, 'lower', fa);
+      const tb = ribSurfacePoint(rib, 'lower', fb);
+      const c = [0, 1, 2].map((k) => (ta[k] + tb[k]) / 2);
+      const run = dist(P, c);
+      const u = [0, 1, 2].map((k) => (c[k] - P[k]) / (run || 1));
+      const at = (d) => [0, 1, 2].map((k) => c[k] - u[k] * d);
+      const meanOf = (d) => { const j = at(d); return (dist(j, ta) + dist(j, tb)) / 2; };
+      // The mean length grows with depth, from half the tabs' spacing at the
+      // sail; within 5 cm of the line's lower end there is no junction left
+      // to make, and the pair is as long as that allows.
+      const target = lengthRatio * rib.chord;
+      const deepest = Math.max(0, run - 0.05);
+      let depth = deepest;
+      if (meanOf(deepest) > target) {
+        let lo = 0;
+        let hi = deepest;
+        for (let i = 0; i < 60; i++) {
+          const mid = (lo + hi) / 2;
+          if (meanOf(mid) < target) lo = mid; else hi = mid;
+        }
+        depth = (lo + hi) / 2;
+      }
+      const J = at(depth);
+      top.to = J;
+      top.lengthMM = mm(P, J);
+      top.level = 'middle';
+      top.bridled = true;
+      for (const [variant, point, fraction] of [['a', ta, fa], ['b', tb, fb]]) {
+        plan.lines.push({
+          row, level: 'upper', index: top.index, variant, name: `${row}${top.index}${variant}`,
+          riser: top.riser, ribIndex: top.ribIndex, bridle: true, chordFraction: fraction,
+          from: J, to: point, lengthMM: mm(J, point), anchors: [top.index],
+        });
+      }
+    }
+  }
+}
+
+/**
  * Every attachment point's path down the cascade: the lines between the sail
  * and the riser, top line first.
  *
@@ -2098,11 +2279,12 @@ export function planPaths(plan) {
     for (let guard = 0; guard < 12 && node; guard++) {
       const parent = byNode.get(nodeKey(node));
       if (!parent || lines.includes(parent)) break;
-      // A suspension line ends at its riser, and the brake's lower line ends
-      // at the pulley on the rear riser — the same point. Walking on through
-      // it put the brake's handle-to-pulley line under every C and D
-      // attachment: 0.6 m on each of their totals, for as long as plans have
-      // had brakes.
+      // A suspension line ends at its riser, and the brake leaves the rear
+      // riser at a pulley at its top — the same point. When the brake's lower
+      // line ended there, walking on through it put the handle-to-pulley line
+      // under every C and D attachment: 0.6 m on each of their totals, for as
+      // long as plans had brakes. No brake line ends there now, and the walk
+      // still does not cross from one cascade into the other.
       if ((parent.row === 'K' || !!parent.isBrake) !== isBrake) break;
       lines.push(parent);
       node = parent.from;
@@ -2111,6 +2293,8 @@ export function planPaths(plan) {
       name: l.name,
       row: l.row,
       index: l.index,
+      // A bridle pair's tab, `a` forward or `b` aft: two paths to one anchor.
+      variant: l.bridle ? (l.variant ?? null) : null,
       ribIndex: l.ribIndex ?? null,
       isBrake,
       isStabilo: l.row === 'S' || !!l.isStabilo,
@@ -2161,11 +2345,15 @@ export function planFanAngles(plan) {
  * The brake's is from the sail to its handle. It had the riser added to it
  * like the rest — 500 mm on every brake total — and a brake does not run
  * through a riser's length: it leaves the riser at the pulley.
+ *
+ * A bridled anchor has two: its forward tab's under the row, and its aft
+ * tab's under the row and `b` (`Ab`), as Ozone's two-liner sheets give the
+ * pair in two columns of one attachment row.
  */
 function planTotals(plan) {
   const totals = {};
   for (const p of planPaths(plan)) {
-    (totals[p.index] ||= {})[p.row] = Math.round(p.lengthMM + p.riserMM);
+    (totals[p.index] ||= {})[p.variant === 'b' ? `${p.row}b` : p.row] = Math.round(p.lengthMM + p.riserMM);
   }
   return totals;
 }
@@ -2204,12 +2392,29 @@ export function comparePlans(planTotals, reference) {
   };
 }
 
-/** Reference totals from a parsed production table, keyed as comparePlans wants. */
-export function referenceTotals(lineSet, rowOrder = ['A', 'B', 'C', 'D', 'K']) {
+/**
+ * Reference totals from a parsed production table, keyed as comparePlans wants.
+ *
+ * The columns are the ones the sheet heads its totals with, where it does.
+ * On a two-liner they are attachment points along the chord rather than
+ * rows: the Lyght heads its totals `A B C D E K`, and on its bridled ribs
+ * column A is the forward tab's path, B the aft tab's, C the B row and D the
+ * C row — 16 mm between its first two, as between A1a and A1b. The aft tab
+ * is keyed `Ab`, as `planTotals` keys it.
+ */
+export function referenceTotals(lineSet, rowOrder = null) {
+  let order = rowOrder ?? lineSet.totalsColumns ?? ['A', 'B', 'C', 'D', 'K'];
+  const bridled = new Set((lineSet.lines ?? []).filter((l) => l.bridle).map((l) => l.row));
+  if (!rowOrder && bridled.size) {
+    const rows = [...new Set((lineSet.lines ?? [])
+      .filter((l) => /^[A-I]$/.test(l.row) && (l.level === 'upper' || l.bridled)).map((l) => l.row))].sort();
+    const positions = rows.flatMap((r) => (bridled.has(r) ? [r, `${r}b`] : [r]));
+    order = order.map((c) => (/^[A-I]$/.test(c) ? positions[c.charCodeAt(0) - 65] ?? null : c));
+  }
   const out = {};
   for (const t of lineSet.totals) {
     const rows = {};
-    t.lengths.forEach((v, i) => { if (v != null && rowOrder[i]) rows[rowOrder[i]] = v; });
+    t.lengths.forEach((v, i) => { if (v != null && order[i]) rows[order[i]] = v; });
     if (Object.keys(rows).length) out[t.anchor] = rows;
   }
   return out;
@@ -2642,7 +2847,20 @@ export function parseBgdLineTable(text) {
     });
   }
 
+  // The level each line is on, from the paths that name it: a brake's four
+  // are its canopy lines, its upper and lower middles and its main — k, KM,
+  // KR and KL1 — where the names alone read KR as a main.
   const byName = new Map(lines.map((l) => [l.name, l]));
+  for (const l of lines) {
+    if (!l.reachesCanopy || !l.statedPath || l.row !== BRAKE) continue;
+    const depth = l.statedPath.length;
+    l.statedPath.forEach((name, i) => {
+      const x = byName.get(name);
+      if (!x || i === 0) return;
+      x.level = i === depth - 1 ? 'main' : 'middle';
+      x.side = depth === 4 && i === 1 ? 'upper' : depth === 4 && i === 2 ? 'lower' : null;
+    });
+  }
   return { lines, byName, meta };
 }
 
@@ -2695,23 +2913,30 @@ export function bgdStatedTopology(table, row) {
  * Every generated row so far runs three levels from a riser maillon to the
  * canopy. Brakes differ in four ways, all visible in the production data:
  *
- *   1. **Four levels, not three.** BGD's Lynx 2 runs k -> KM -> KR -> KL, and
- *      Ozone splits its riser level into KRU and KRL around the pulley.
- *   2. **A single shared lower line.** KL1 appears in all thirteen paths at
- *      the same 2926 mm: one line from the handle up to the pulley, carrying
- *      the whole cascade. Nothing in the load-bearing rows behaves like that.
+ *   1. **Four levels, not three.** BGD's Lynx 2 runs k -> KM -> KR -> KL1:
+ *      13 lines at the trailing edge, 6 under them, 3 under those and one
+ *      main line. Ozone's sheets have the same four levels as K, KMU, KML
+ *      (the Geo 7's KM) and a main in two pieces, KRU over KRL, and so do
+ *      Ozone's Alpina 5, Geo 7, Lyght, Swift 6, Ultralite 5, Vibe GT and
+ *      Zeno 2: 11 to 14 lines, 4 to 7, then 3, then 1.
+ *   2. **One main line, from the handle up through the pulley and on to the
+ *      first junction.** KL1 is in all thirteen of the Lynx 2's paths at
+ *      2926 mm on the M; on the Geo 7 MS the main is KRU1, 1756 mm, over
+ *      KRL1, marked for the handle at 1150 — 2906 mm from handle to
+ *      junction. Nothing in the load-bearing rows behaves like that.
  *   3. **Anchors are deliberately uneven.** The Lynx 2 attaches at ribs
  *      2, 4, 8, 10, 13, 15, 18, 20, 23, 25, 27, 29, 31 — gaps of 2 to 4
  *      inboard closing to a steady 2 outboard. Braking is meant to bite at
  *      the tip first.
  *   4. **Total length falls outboard**, from 7913 mm at rib 2 to 6813 mm at
- *      rib 31, because the arc brings the tip trailing edge nearer the pilot.
+ *      rib 31 on the M, because the arc brings the tip trailing edge nearer
+ *      the pilot.
  *
- * The handle hangs below and behind the maillon, and the line runs up through
- * a pulley on the riser. Slack between handle and trailing edge is what gives
- * a brake its free travel, and it is a design quantity rather than a
- * by-product: too little and the wing flies braked, too much and the range
- * runs out before the stall.
+ * The line runs up through a pulley on the rear riser, with the handle tied
+ * below it. Slack between handle and trailing edge is what gives a brake its
+ * free travel, and it is a design quantity rather than a by-product: too
+ * little and the wing flies braked, too much and the range runs out before
+ * the stall.
  */
 
 /**
@@ -2821,34 +3046,101 @@ function hangPointFromAnchorCentroid(wing, fractions) {
 }
 
 /**
- * Trailing-edge attachment ribs for the brake, by rib number, set closer
- * together toward the tip.
- * @param {number} ribCount   ribs in the half wing
+ * The brake cascade's shape, as the sheets on file give it.
+ *
+ * Where the anchors go: from `firstFraction` of the way out to the tip,
+ * counted in ribs, to `lastFraction`, a little closer together outboard
+ * (`tipBias`). The five wings whose brake anchors are on file by rib start 4
+ * to 12% of the way out and stop at 82 to 97%: the Lynx 2 at its ribs 2 and
+ * 31 of 33, the Geo 7 (its rigging diagram) 2 and 22 of 24, LEparagliding's
+ * gnuC2, Swoop2 and Tuluaq at 3.5 and 30 of 31, 2 and 24 of 26, 3 and 15 of
+ * 18. None puts a brake line on the centre rib or the tip. Gaps outboard are three
+ * quarters of those inboard on the Lynx 2 and the gnuC2, and all one on the
+ * other three. Fitted to all five, they start at 6.5% and stop at 92.5%,
+ * the outboard gaps four fifths of the inboard.
+ *
+ * `levelFractions`: each junction a fraction of the way from the one below
+ * it to the centroid of the trailing-edge anchors it serves — the main
+ * line's from the pulley, the lower middles' from it, the upper middles'
+ * from theirs. `handleDropM`: the line below the pulley, to the knot at the
+ * handle, with the free travel in it.
+ *
+ * Both fitted to the brakes of 26 sizes of five wings — the Geo 7, Ultralite
+ * 5, Alpina 5, Zeno 2 and Lynx 2 — each built at its own anchor and middle
+ * counts, with its lines as long as its sheets' centre A path: the main
+ * (Ozone's KRU and KRL to the handle mark, BGD's KL1), the mean line of each
+ * level, and the path to the handle at every anchor where a sheet gives it.
+ * By design the upper lines come out 14% short to 27% long, the upper
+ * middles 24% short to 30% long, the lower middles within 9%, the main
+ * within 12%, the paths to the handle within 2% on the mean of each size
+ * and 6% at any of 205 anchors, and each side's brake 9% short to 12% long.
+ * The fractions fitted to one design alone run 0.36 to 0.52, 0.58 to 0.70
+ * and 0.66 to 0.76; the drop 0.10 m on the Lynx 2 and 0.31 to 0.32 on the
+ * Geo 7 and Ultralite 5, whose sheets mark the handle. Fitted without one
+ * design at a time they move by 0.02, and the one left out comes within 11%
+ * under to 14% over a side.
+ *
+ * The sheets cut the inboard paths a few tenths of a metre longer than the
+ * outboard ones beyond what the geometry asks: free travel, more of it
+ * inboard, so the tip bites first. This builds the lines taut and leaves
+ * that to `brakeEngagement`.
+ */
+export const BRAKE_GEOMETRY = Object.freeze({
+  firstFraction: 0.065,
+  lastFraction: 0.925,
+  tipBias: 0.11,
+  levelFractions: Object.freeze([0.42, 0.64, 0.72]),
+  handleDropM: 0.26,
+  source: 'the brake lines of 26 line sheets: Ozone Geo 7, Ultralite 5, Alpina 5 and Zeno 2, BGD Lynx 2; '
+    + 'the anchors\' ribs of the Lynx 2, the Geo 7\'s rigging diagram and LEparagliding\'s gnuC2, Swoop2 and Tuluaq',
+});
+
+/**
+ * Trailing-edge attachment ribs for the brake, by rib number from the
+ * centre, set closer together toward the tip.
+ * @param {number} ribCount   ribs in the half wing, the centre's first
  * @param {number} anchors    attachment points wanted
  * @param {number} tipBias    0 = even, 1 = strongly bunched outboard
+ *
+ * They ran from the centre rib to the tip rib, which no wing on file does,
+ * and closed to a third of their inboard spacing at the tip, where the two
+ * wings on file that close at all close to four fifths of it.
  */
-export function brakeAnchorRibs(ribCount, anchors, tipBias = 0.55) {
+export function brakeAnchorRibs(ribCount, anchors, tipBias = BRAKE_GEOMETRY.tipBias, {
+  firstFraction = BRAKE_GEOMETRY.firstFraction,
+  lastFraction = BRAKE_GEOMETRY.lastFraction,
+} = {}) {
   // More anchors than ribs cannot be placed. The monotonic repair below
   // clamps at the tip, so asking for too many silently returned the outermost
   // rib twice — two brake lines onto one attachment point, which is not a
   // wing. Cap the request instead.
   const wanted = Math.max(1, Math.min(anchors, ribCount));
+  const tip = ribCount - 1;
+  // The ribs they span, widened toward the tip and then the centre where
+  // there are more anchors than ribs between.
+  let lo = Math.max(0, Math.min(tip, Math.round(firstFraction * tip)));
+  let hi = Math.max(lo, Math.min(tip, Math.round(lastFraction * tip)));
+  while (hi - lo + 1 < wanted) {
+    if (hi < tip) hi += 1;
+    else if (lo > 0) lo -= 1;
+    else break;
+  }
   const out = [];
   for (let i = 0; i < wanted; i++) {
     const u = wanted === 1 ? 0 : i / (wanted - 1);
     // Blend a linear sweep with one biased outboard; the exponent pulls
     // stations toward the tip without ever reversing their order.
     const t = (1 - tipBias) * u + tipBias * (1 - (1 - u) ** 1.7);
-    out.push(Math.min(ribCount - 1, Math.max(0, Math.round(t * (ribCount - 1)))));
+    out.push(Math.min(hi, Math.max(lo, Math.round(lo + t * (hi - lo)))));
   }
   // Never place two anchors on one rib. Repair upward, then sweep back down
-  // from the tip so a run that hit the ceiling is pushed inboard rather than
-  // collapsing onto the last rib.
+  // from the outermost so a run that hit the ceiling is pushed inboard rather
+  // than collapsing onto one rib.
   for (let i = 1; i < out.length; i++) {
     if (out[i] <= out[i - 1]) out[i] = out[i - 1] + 1;
   }
-  if (out[out.length - 1] > ribCount - 1) {
-    out[out.length - 1] = ribCount - 1;
+  if (out[out.length - 1] > hi) {
+    out[out.length - 1] = hi;
     for (let i = out.length - 2; i >= 0; i--) {
       if (out[i] >= out[i + 1]) out[i] = out[i + 1] - 1;
     }
@@ -2859,9 +3151,18 @@ export function brakeAnchorRibs(ribCount, anchors, tipBias = 0.55) {
 /**
  * Build the brake cascade.
  *
- * `levelCounts` gives the number of lines at each cascade level below the
- * anchors, outermost first — [6, 3, 1] reproduces the Lynx 2's structure of
- * six middle lines onto three riser lines onto one shared lower line.
+ * Four levels, as every sheet on file has them: one main line from the
+ * handle up through the pulley to the first junction, `levelCounts[1]`
+ * lines from there, `levelCounts[0]` under those, and one line to each
+ * trailing-edge anchor — [6, 3, 1] is the Lynx 2's k -> KM -> KR -> KL1, and
+ * the names are BGD's.
+ *
+ * The first junction was AT the pulley: the three KR lines ran from it, and
+ * KL1 only from the handle up to it. Three lines a side ran the length a
+ * real wing's one main does, the cascade over them started two and a half
+ * metres too low, and the brakes came out a third to nine tenths longer than
+ * the sheets' — the "brake line from the handle to the pulley" this read
+ * BGD's KL1 as is 2926 mm long on the Lynx 2 M.
  */
 export function buildBrakePlan({
   // Where the risers hang along the chord. Defaults to the same load-weighted
@@ -2869,16 +3170,23 @@ export function buildBrakePlan({
   // actually balances rather than from its nose.
   hangPointX = null,
   wing,
+  // The rows' chord fractions, for that hang point when none is given.
+  fractions = null,
   handlePoint = null,
   pulleyPoint = null,
   anchors = 13,
-  tipBias = 0.55,
+  tipBias = BRAKE_GEOMETRY.tipBias,
+  // Where the anchors start and stop, as fractions of the way out from the
+  // centre rib to the tip, counted in ribs.
+  firstFraction = BRAKE_GEOMETRY.firstFraction,
+  lastFraction = BRAKE_GEOMETRY.lastFraction,
   levelCounts = [6, 3, 1],
   lineLengthM = 6.5,
-  handleDropM = 0.55,
-  handleAftM = 0.35,
+  // How much line runs on below the pulley to the knot at the handle, the
+  // free travel in it (`BRAKE_GEOMETRY`).
+  handleDropM = BRAKE_GEOMETRY.handleDropM,
   karabinerSeparationM = 0.42,
-  levelFractions = [0.64, 0.78],
+  levelFractions = BRAKE_GEOMETRY.levelFractions,
 } = {}) {
   const ribs = wing.ribs;
   // The SAME hang point the main cascade uses.
@@ -2890,17 +3198,23 @@ export function buildBrakePlan({
   // forward" that was reported after the first fix.
   //
   // Two copies of a position is one too many. It is passed in now, and
-  // defaults to the same load-weighted hang point rather than to zero.
+  // defaults to the same load-weighted hang point rather than to zero. (The
+  // default was asked of the anchor COUNT, which has no rows, and so was
+  // zero after all: the leading edge, for any plan built without one.)
   const maillon = [
-    hangPointX ?? hangPointFromAnchors(wing, anchors),
+    hangPointX ?? hangPointFromAnchors(wing, fractions
+      ?? wing.airfoil?.anchors ?? { A: 0.085, B: 0.30, C: 0.53, D: 0.78 }),
     karabinerSeparationM / 2,
     -lineLengthM,
   ];
   const pulley = pulleyPoint || maillon;
-  const handle = handlePoint
-    || [maillon[0] + handleAftM, maillon[1], maillon[2] - handleDropM];
+  // The handle hangs under the pulley. The line on below the pulley is
+  // counted in the main line's length; the line drawn is the one above it,
+  // from the pulley to the first junction.
+  const handle = handlePoint || [pulley[0], pulley[1], pulley[2] - handleDropM];
+  const belowPulleyMM = mmDist(handle, pulley);
 
-  const anchorRibs = brakeAnchorRibs(ribs.length, anchors, tipBias);
+  const anchorRibs = brakeAnchorRibs(ribs.length, anchors, tipBias, { firstFraction, lastFraction });
   const points = anchorRibs.map((ri, i) => ({
     anchor: i + 1,
     ribIndex: ri,
@@ -2910,77 +3224,84 @@ export function buildBrakePlan({
   }));
 
   const lines = [];
+  const [f0, f1, f2] = levelFractions;
 
-  // Work down from the pulley: split the anchors into riser groups, then
-  // middle groups, then run the upper lines out to the trailing edge.
-  const [nMid, nRiser] = levelCounts;
-  const riserGroups = chunkInto(points, nRiser);
-  let midIndex = 0;
+  // Work up from the pulley: the main line's junction, toward the centroid
+  // of every anchor; the lower middles' groups from it, then the upper
+  // middles' within each, then the lines out to the trailing edge.
+  const j0 = lerpPt(pulley, centroidPts(points.map((p) => p.point)), f0);
+  const [nUpper, nLower] = levelCounts;
+  const lowerGroups = chunkInto(points, Math.max(1, Math.min(nLower ?? 3, points.length)));
+  let upperIndex = 0;
 
-  riserGroups.forEach((rg, r) => {
-    const rNode = lerpPt(pulley, centroidPts(rg.map((p) => p.point)), levelFractions[0]);
+  lowerGroups.forEach((lg, r) => {
+    const j1 = lerpPt(j0, centroidPts(lg.map((p) => p.point)), f1);
     lines.push({
-      row: 'K', level: 'main', index: r + 1, name: `KR${r + 1}`,
-      riser: 'K', from: pulley, to: rNode,
-      lengthMM: mmDist(pulley, rNode),
-      anchors: rg.map((p) => p.anchor),
+      row: 'K', level: 'middle', side: 'lower', index: r + 1, name: `KR${r + 1}`,
+      riser: 'K', from: j0, to: j1,
+      lengthMM: mmDist(j0, j1),
+      anchors: lg.map((p) => p.anchor),
     });
 
-    // The middle lines shared out over the risers so that there are as many
-    // as asked: it was round(nMid / nRiser) on each, and 5 over 2 made 6.
-    const perRiser = Math.max(1, Math.floor(nMid / riserGroups.length)
-      + (r < nMid % riserGroups.length ? 1 : 0));
-    const midGroups = chunkInto(rg, perRiser);
-    midGroups.forEach((mg) => {
-      midIndex += 1;
-      const mNode = lerpPt(rNode, centroidPts(mg.map((p) => p.point)), levelFractions[1]);
+    // The upper middles shared out over the lower ones so that there are as
+    // many as asked: it was round(nMid / nRiser) on each, and 5 over 2 made 6.
+    const perGroup = Math.max(1, Math.floor(nUpper / lowerGroups.length)
+      + (r < nUpper % lowerGroups.length ? 1 : 0));
+    const upperGroups = chunkInto(lg, Math.min(perGroup, lg.length));
+    upperGroups.forEach((ug) => {
+      upperIndex += 1;
+      const j2 = lerpPt(j1, centroidPts(ug.map((p) => p.point)), f2);
       lines.push({
-        row: 'K', level: 'middle', index: midIndex, name: `KM${midIndex}`,
-        riser: 'K', from: rNode, to: mNode,
-        lengthMM: mmDist(rNode, mNode),
-        anchors: mg.map((p) => p.anchor),
+        row: 'K', level: 'middle', side: 'upper', index: upperIndex, name: `KM${upperIndex}`,
+        riser: 'K', from: j1, to: j2,
+        lengthMM: mmDist(j1, j2),
+        anchors: ug.map((p) => p.anchor),
       });
-      mg.forEach((p) => {
+      ug.forEach((p) => {
         lines.push({
           row: 'K', level: 'upper', index: p.anchor, name: `k${p.anchor}`,
           riser: 'K', ribIndex: p.ribIndex,
-          from: mNode, to: p.point,
-          lengthMM: mmDist(mNode, p.point),
+          from: j2, to: p.point,
+          lengthMM: mmDist(j2, p.point),
           anchors: [p.anchor],
         });
       });
     });
   });
 
-  // The shared lower line: handle to pulley, carrying the whole cascade.
-  const lower = {
-    row: 'K', level: 'main', side: 'lower', index: 1, name: 'KL1',
-    riser: 'K', from: handle, to: pulley,
-    lengthMM: mmDist(handle, pulley),
+  // The main line: from the handle, up through the pulley, to the first
+  // junction. It carries the whole cascade.
+  const main = {
+    row: 'K', level: 'main', side: null, index: 1, name: 'KL1',
+    riser: 'K', from: pulley, to: j0,
+    lengthMM: mmDist(pulley, j0) + belowPulleyMM,
+    belowPulleyMM,
+    handle,
     anchors: points.map((p) => p.anchor),
     shared: true,
   };
-  lines.push(lower);
+  lines.push(main);
 
-  // Totals from the handle to each trailing-edge point.
+  // Totals from the handle to each trailing-edge point: every line on the
+  // anchor's own path.
   const totals = {};
-  for (const l of lines) {
-    if (l.level !== 'upper') continue;
-    const mid = lines.find((x) => x.level === 'middle' && x.anchors.includes(l.index));
-    const ris = lines.find((x) => x.level === 'main' && !x.shared && x.anchors.includes(l.index));
-    totals[l.index] = Math.round(
-      l.lengthMM + (mid?.lengthMM ?? 0) + (ris?.lengthMM ?? 0) + lower.lengthMM,
-    );
+  for (const p of points) {
+    totals[p.anchor] = Math.round(lines
+      .filter((l) => l.anchors.includes(p.anchor))
+      .reduce((a, l) => a + l.lengthMM, 0));
   }
 
   return {
     lines,
     handle,
     pulley,
+    junction: j0,
     anchorRibs,
     totals,
-    sharedLower: lower,
-    totalLengthMM: lines.reduce((a, l) => a + l.lengthMM * 2, 0) - lower.lengthMM,
+    main,
+    // Both sides: each has its own main line. This took one away, as though
+    // the two handles shared one.
+    totalLengthMM: lines.reduce((a, l) => a + l.lengthMM * 2, 0),
   };
 }
 
@@ -3319,53 +3640,41 @@ export function summariseCascadeDepths(lines) {
  * How densely each row is attached, from the reference designs.
  *
  * ---------------------------------------------------------------------------
- * The sample is six designs, not thirty-three
+ * A design is one observation, not one per size
  * ---------------------------------------------------------------------------
- * There are 33 size sheets in the reference set, and it is tempting to treat
- * them as 33 observations. They are not. **The line topology is identical
- * across every size in a family** — the Alpina 5 runs A:31 B:19 C:12 in XS
- * through XL, the Geo 7 A:14 B:14 C:15 D:14 in all five sizes, the Ultralite
- * 5 A:16 B:16 C:16 D:16 in all seven. Only the lengths scale; the plan does
- * not. So the evidence here is six designs, and the numbers below are stated
- * as grouped ranges rather than a fitted line, because six points do not
- * support a two-parameter fit.
+ * **The line topology is identical across every size in a family** — the
+ * Alpina 5 runs A:15 B:19 C:12 in XS through XL, the Geo 7 A:14 B:14 C:15
+ * D:14 in all five sizes, the Ultralite 5 A:16 B:16 C:16 D:16 in all seven.
+ * Only the lengths scale; the plan does not. So the evidence is one design a
+ * family, and the numbers below are grouped ranges rather than a fitted line.
  *
  * ---------------------------------------------------------------------------
- * What the six show
+ * The two-liners do not taper
  * ---------------------------------------------------------------------------
- * The front-to-rear ratio separates cleanly by riser count:
+ * This said they did, and that the front-to-rear ratio separated the riser
+ * counts cleanly — two risers 2.6 to 3.8, three 1.0 to 2.1 — from the six
+ * Ozone designs first measured:
  *
- *   two risers    Alpina 5 2.58   Lyght 3.63   Zeno 2 3.75    range 2.6-3.8
- *   three risers  Geo 7 1.00      Ultralite 5 1.00   Swift 6 2.13   range 1.0-2.1
+ *   Alpina 5    31 19 12    "roughly halving each row"
+ *   Zeno 2      30 14  8
  *
- * The fewer risers, the more the front row carries the wing's shape on its
- * own, and the more sharply the attachment thins toward the trailing edge.
- * The ranges do not overlap, but they nearly touch at 2.13 against 2.58, so
- * this separates the two classes and would not distinguish a marginal case.
+ * Those A counts were the sheets' names, and sixteen of each were bridles:
+ * A1a and A1b to A8a and A8b, pairs of tabs on one rib gathered onto one
+ * line (`resolveBridleLevels`). Counted by rib, as the generator attaches
+ * them, the three Ozone two-liners are
  *
- * Absolute density does not follow riser count at all: the Ultralite 5 is a
- * three-liner attaching 89% of its ribs on every row, while the Geo 7 is a
- * three-liner attaching 56%. That is a design choice about how much shape the
- * sail holds by itself, and nothing here predicts it.
+ *   Alpina 5    15 19 12    1.25
+ *   Lyght       13 13  8    1.63
+ *   Zeno 2      14 14  8    1.75
  *
- * ---------------------------------------------------------------------------
- * The *shape* differs too, not just the ratio
- * ---------------------------------------------------------------------------
- * A single ratio was the first attempt and it fitted the two-liners at 6-8%
- * while missing the three-liners by up to 24%, because they are not tapered
- * at all:
+ * the front two rows alike and the rear row sparser, which is what seven of
+ * the nine three-riser designs do (1.25 to 2.50), and inside their range.
+ * What a two-liner's front row has that a three-liner's does not is the
+ * bridles: eight of its ribs carry two tabs. The density that holds the
+ * nose is in the pairs, not in more ribs.
  *
- *   Alpina 5    31 19 12    two-liner, roughly halving each row
- *   Zeno 2      30 14  8    the same
- *   Geo 7       14 14 15 14 flat
- *   Ultralite 5 16 16 16 16 flat
- *   Swift 6     17 17  8  8 a step at the midpoint
- *
- * So the distribution has two forms. A two-liner **tapers**: the A row holds
- * the shape and each row behind carries less. A three-liner is **flat**, or
- * steps once — its C row still reaches the riser, so it does not need the
- * front to do the work. Forcing one curve through both is the kind of fit
- * that looks reasonable and is wrong on half the sample.
+ * Absolute density is a design choice: the Ultralite 5 attaches 89% of its
+ * ribs on every row, the Geo 7 56% (`FRONT_DENSITY`).
  */
 export const ANCHOR_DENSITY = {
   // `ribs` is the ribs of a half-wing, floor(cells / 2) + 1, from the cell
@@ -3374,9 +3683,11 @@ export const ANCHOR_DENSITY = {
   // — and nothing noticed, because the shape fit divides the front row by the
   // rib count and multiplies it back.
   designs: [
-    { name: 'Ozone Alpina 5', risers: 2, rows: { A: 31, B: 19, C: 12 }, ribs: 33 },
-    { name: 'Ozone Lyght', risers: 2, rows: { A: 29, B: 13, C: 8 }, ribs: 36 },
-    { name: 'Ozone Zeno 2', risers: 2, rows: { A: 30, B: 14, C: 8 }, ribs: 40 },
+    // The two-liners' A rows by rib, each with eight bridle pairs besides:
+    // their sheets' names count 31, 29 and 30.
+    { name: 'Ozone Alpina 5', risers: 2, rows: { A: 15, B: 19, C: 12 }, ribs: 33, bridles: { A: 8 } },
+    { name: 'Ozone Lyght', risers: 2, rows: { A: 13, B: 13, C: 8 }, ribs: 36, bridles: { A: 8 } },
+    { name: 'Ozone Zeno 2', risers: 2, rows: { A: 14, B: 14, C: 8 }, ribs: 40, bridles: { A: 8 } },
     { name: 'Ozone Geo 7', risers: 3, rows: { A: 14, B: 14, C: 15, D: 14 }, ribs: 25 },
     { name: 'Ozone Swift 6', risers: 3, rows: { A: 17, B: 17, C: 8, D: 8 }, ribs: 32 },
     { name: 'Ozone Ultralite 5', risers: 3, rows: { A: 16, B: 16, C: 16, D: 16 }, ribs: 18 },
@@ -3395,8 +3706,9 @@ export const ANCHOR_DENSITY = {
   // A mains, c and d the C mains, and there is no B or D main — and Niviuk's
   // Artik R 2 has A and C mains and no others. All three sat in the
   // three-riser group, and the "two-liners taper much harder" that the table
-  // was quoted for is true only of the two-liners with three rows. The four-
-  // row ones pair their rows instead, and taper less than most three-liners.
+  // was quoted for held for none of the six two-liners in the end: the
+  // four-row ones pair their rows, and the three-row ones' A rows were
+  // counted with their bridles (above).
   //
   // The risers are counted from each design's own main lines now, and the
   // drawings settle two more things the names could not: the Summit X's a13
@@ -3408,7 +3720,7 @@ export const ANCHOR_DENSITY = {
   // counted a file as a design whenever its name did not end in a size, and
   // read the Torre's and the Artik R 2's middle lines as canopy lines.
   ratioByLayout: {
-    '2/3': { mean: 3.32, min: 2.58, max: 3.75, n: 3 },
+    '2/3': { mean: 1.54, min: 1.25, max: 1.75, n: 3 },
     '2/4': { mean: 1.37, min: 1.20, max: 1.50, n: 3 },
     '3/4': { mean: 1.67, min: 1.00, max: 2.50, n: 9 },
     '4/5': { mean: 1.65, min: 1.33, max: 1.82, n: 3 },
@@ -3443,11 +3755,10 @@ export function suggestAnchorsPerRow({
       .sort((a, b) => Math.abs(rowsOf(a) - rows.length) - Math.abs(rowsOf(b) - rows.length))[0] ?? '3/4');
   const group = layouts[layoutKey];
 
-  // Front density: real designs run 0.28 to 0.94 of their ribs
-  // (`FRONT_DENSITY`) and it does not track riser count or aspect ratio, so
-  // it is a parameter, defaulting to the median of the designs measured. (The
-  // default was 0.75, the middle of a range taken from six Ozone wings; 14 of
-  // the 20 designs on file are below it.)
+  // Front density: real designs run 0.28 to 0.90 of their ribs
+  // (`FRONT_DENSITY`), a parameter defaulting to the median of the designs
+  // measured. (The default was 0.75, the middle of a range taken from six
+  // Ozone wings; 18 of the 20 designs on file are below it.)
   const front = frontFraction ?? FRONT_DENSITY.median;
   const ratio = group.mean;
 
@@ -3461,7 +3772,12 @@ export function suggestAnchorsPerRow({
   // group's ratio: 57 anchors out against 59 on their totals, and 59 against
   // 73 row by row, summed over the nine. So the default stands, and `shape`
   // takes the others.
-  const form = shape ?? (n <= 2 ? 'taper' : 'flat');
+  //
+  // A two-liner on three rows steps: all three on file keep A and B alike,
+  // or B the denser (15 19 12, 13 13 8, 14 14 8), and attach C less. This
+  // was a taper, from A counts that included the bridles (31 19 12), and it
+  // gave such a wing's B row four or five anchors fewer than its A.
+  const form = shape ?? (n <= 2 ? (rows.length === 3 ? 'step' : 'taper') : 'flat');
 
   rows.forEach((row, i) => {
     let factor;
@@ -3469,7 +3785,7 @@ export function suggestAnchorsPerRow({
       // Front half dense, rear half sparse, as the Swift 6 does: 17 17 8 8.
       factor = i < rows.length / 2 ? 1 : 1 / ratio;
     } else if (form === 'taper') {
-      // Two-liner: geometric, reaching `ratio` at the last row.
+      // Geometric, reaching `ratio` at the last row.
       const t = rows.length > 1 ? i / (rows.length - 1) : 0;
       factor = ratio > 0 ? Math.pow(1 / ratio, t) : 1;
     } else {
@@ -3479,9 +3795,23 @@ export function suggestAnchorsPerRow({
     out[row] = Math.max(2, Math.round(ribCount * front * factor));
   });
 
+  // The bridles, on a layout whose designs carry them: the front row's
+  // inner ribs, in the share of them the designs bridle — 8 of 15, 13 and 14
+  // on the three two-liners on three rows.
+  const withBridles = ANCHOR_DENSITY.designs.filter((d) => d.bridles
+    && `${d.risers}/${Object.keys(d.rows).length}` === layoutKey);
+  const bridleShare = withBridles.length
+    ? withBridles.reduce((t, d) => t + d.bridles[Object.keys(d.rows)[0]] / d.rows[Object.keys(d.rows)[0]], 0)
+      / withBridles.length
+    : 0;
+  const bridlesPerRow = bridleShare > 0
+    ? { [rows[0]]: Math.round(out[rows[0]] * bridleShare) } : null;
+
   const [lr, lrows] = layoutKey.split('/');
   return {
     anchorsPerRow: out,
+    bridlesPerRow,
+    bridleShare,
     risers: n,
     shape: form,
     ratio: form === 'flat' ? 1 : ratio,
@@ -3489,7 +3819,13 @@ export function suggestAnchorsPerRow({
     layout: layoutKey,
     source: form === 'taper'
       ? `${group.n} designs on ${lr} risers and ${lrows} rows, ratio ${group.min}-${group.max}`
-      : (form === 'step' ? 'the Swift 6, the one stepped design'
+      : (form === 'step'
+        ? (n <= 2 && rows.length === 3
+          ? `${group.n} designs on ${lr} risers and ${lrows} rows, ratio ${group.min}-${group.max}: `
+            + 'the front two rows alike and the rear one sparser'
+            + (bridlesPerRow ? `, ${(bridleShare * 100).toFixed(0)}% of the front row's ribs bridled, as on the `
+              + `${withBridles.map((d) => d.name.replace(/^Ozone /, '')).join(', ').replace(/, ([^,]*)$/, ' and $1')}` : '')
+          : 'the Swift 6, the one stepped design')
         : `${group.n} designs on ${lr} risers and ${lrows} rows, ratio `
           + `${group.min}-${group.max}; flat, as two of them are (the Geo 7 and `
           + 'the Ultralite 5) — the others attach their rear row less'),
@@ -3509,28 +3845,37 @@ export function suggestAnchorsPerRow({
  * by the corpus stage of the check, so nothing here is hand-entered.
  *
  * This was "0.56 to 0.91", from six Ozone designs, and three of those six
- * had the wrong rib count. Twenty designs from five makers run 0.28 to 0.94.
- * It does not follow aspect ratio across the twenty or riser count; it goes
- * with the maker more than anything. Ozone's run 0.50 to 0.94, UP's 0.28 to
- * 0.62 and PHI's Allegro attaches one rib in three.
+ * had the wrong rib count. Twenty designs from five makers run 0.28 to 0.90.
+ *
+ * Until the bridles were read (`resolveBridleLevels`), the three Ozone
+ * two-liners stood at 0.75 to 0.94, their A rows counted with sixteen
+ * bridles each; by rib they are 0.35 to 0.45. With them in their place the
+ * density falls with aspect ratio, r = -0.78 over the twenty (-0.66 without
+ * the two light wings below an aspect ratio of 5), where it had seemed to
+ * follow nothing but the maker: the higher the aspect ratio, the more cells
+ * to a line. The default stays the median, a parameter; a fit to aspect
+ * ratio is a step this table supports and the generator does not take yet.
  */
 export const FRONT_DENSITY = {
   designs: {
-    'UP Meru 2': 0.28, 'PHI Allegro light': 0.32, 'UP Torre': 0.35,
+    'UP Meru 2': 0.28, 'PHI Allegro light': 0.32,
+    // The two-liners by rib, their bridle pairs not counted as ribs.
+    'Ozone Zeno 2': 0.35, 'UP Torre': 0.35, 'Ozone Lyght': 0.36,
     'Niviuk Artik R 2': 0.40, 'Niviuk Hook 6': 0.42, 'UP Makalu 5': 0.42,
     // 12 A lines, not 15: UP's line map hangs a13 to a15 from the stabilo
     // line, and the sheets' names alone counted them in the A row.
     'UP Summit X': 0.43,
-    'Niviuk Ikuma 3': 0.44, 'Ozone Vibe GT': 0.50, 'BGD Lynx 2': 0.52,
+    'Niviuk Ikuma 3': 0.44, 'Ozone Alpina 5': 0.45, 'Ozone Vibe GT': 0.50, 'BGD Lynx 2': 0.52,
     'Ozone Swift 6': 0.53, 'Ozone Geo 7': 0.56,
     'Niviuk Takoo 6': 0.57, 'UP K2 5': 0.62, 'Ozone Magnum 4': 0.71,
-    'Ozone Zeno 2': 0.75, 'Ozone Lyght': 0.81, 'Ozone Ultralite 5': 0.89,
-    'Niviuk Skin 4 P': 0.90, 'Ozone Alpina 5': 0.94,
+    'Ozone Ultralite 5': 0.89, 'Niviuk Skin 4 P': 0.90,
   },
   n: 20,
   min: 0.28,
-  median: 0.53,
-  max: 0.94,
+  median: 0.45,
+  max: 0.90,
+  // Against flat aspect ratio, over the twenty: density = 1.72 - 0.211 AR.
+  againstAspectRatio: { r: -0.78, slope: -0.211, intercept: 1.72 },
   source: 'front-row anchors from the line sheets in data/reference, ribs '
     + 'from the cell counts in data/reference/published-cells.tsv',
 };
@@ -3569,14 +3914,14 @@ export const DESIGN_LINES = {
   'Niviuk Ikuma 3': { layout: 'A/B/C+D', spec: 'A 14 6 3\nB 14 6 3\nC 13 2\nD 8', sheets: 1 },
   'Niviuk Skin 4 P': { layout: 'A+B/C+D+E/F+G/H+I', spec: 'A 18 3 tip 1\nB 16 tip 1\nC 6 3 tip 0\nD 6 tip 0\nE 6 tip 0\nF 6 3 tip 0\nG 6 tip 0\nH 6 3 tip 0\nI 6 tip 0', sheets: 1 },
   'Niviuk Takoo 6': { layout: 'A/B/C/D+E', spec: 'A 16 8 3\nB 16 3\nC 16 2\nD 14 3\nE 12', sheets: 1 },
-  'Ozone Alpina 5': { layout: 'A/B+C', spec: 'A 31 3\nB 19 3\nC 12 4', sheets: 6 },
+  'Ozone Alpina 5': { layout: 'A/B+C', spec: 'A 15 3 bridle 8\nB 19 3\nC 12 4', sheets: 6 },
   'Ozone Geo 7': { layout: 'A/B/C+D', spec: 'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C', sheets: 5 },
-  'Ozone Lyght': { layout: 'A/B+C', spec: 'A 29 3\nB 13 3\nC 8', sheets: 5 },
-  'Ozone Magnum 4': { layout: 'A/B/C/D+E', spec: 'A 20 6 2\nB 20 6 3\nC 20 6 4\nD 20 2\nE 11', sheets: 3 },
+  'Ozone Lyght': { layout: 'A/B+C', spec: 'A 13 3 bridle 8 tip 1\nB 13 3 tip 1\nC 8 tip 0', sheets: 5 },
+  'Ozone Magnum 4': { layout: 'A/B/C/D+E', spec: 'A 20 6 3\nB 20 6 3\nC 20 6 4\nD 20 2\nE 11', sheets: 3 },
   'Ozone Swift 6': { layout: 'A/B/C+D', spec: 'A 17 3 tip 1\nB 17 2 tip 1\nC 8 4 tip 0\nD 8 tip 0', sheets: 6 },
   'Ozone Ultralite 5': { layout: 'A/B/C+D', spec: 'A 16 7 3 tip 2\nB 16 6 3 tip 2\nC 16 4 tip 2\nD 16 tip 2', sheets: 7 },
   'Ozone Vibe GT': { layout: 'A/B/C+D', spec: 'A 14 6 3 tip 2\nB 14 6 3 tip 2\nC 12 3 tip 0\nD 8 tip 0\nS B', sheets: 6 },
-  'Ozone Zeno 2': { layout: 'A/B+C', spec: 'A 30 3\nB 14 3\nC 8', sheets: 4 },
+  'Ozone Zeno 2': { layout: 'A/B+C', spec: 'A 14 3 bridle 8\nB 14 3\nC 8', sheets: 4 },
   'UP K2 5': { layout: 'A/B/C/D+E', spec: 'A 18 6 3\nB 18 6 3\nC 18 6 3\nD 12 3\nE 10', sheets: 3 },
   'UP Makalu 5': { layout: 'A/B/C+D', spec: 'A 10 3\nB 10 3\nC 10 3\nD 8', sheets: 4 },
   'UP Meru 2': { layout: 'A+B/C+D', spec: 'A 12 3\nB 9\nC 12 3\nD 8', sheets: 4 },
@@ -3777,7 +4122,7 @@ export function addStabilo(plan, wing, {
  * `everyNthRib` drives the anchor count off the **cell count**, and that is
  * backwards. Across the seven published families, line consumption per metre
  * of span correlates with aspect ratio at **r = -0.977**: a high-aspect wing
- * has more cells and *less* line. The Zeno 2 has 78 cells and 15.5 m of line
+ * has more cells and *less* line. The Zeno 2 has 78 cells and 16.1 m of line
  * per metre of span; the Ultralite 5 has 34 cells and 26.7.
  *
  * A generator working from cell count therefore gets the relationship exactly
@@ -3796,6 +4141,9 @@ export function anchorsForLineLength({
   // The plan's stabilo, built in every plan tried, so what is solved to the
   // target is the whole lineset.
   stabilo = false,
+  // Bridle pairs where the layout's designs have them (`suggestAnchorsPerRow`):
+  // the front row of a two-liner on three rows.
+  bridles = true,
   tolerance = 0.02, maxIterations = 24,
 }) {
   const ribCount = wing.ribs.length;
@@ -3803,14 +4151,16 @@ export function anchorsForLineLength({
   //
   // Total line length alone is under-determined: the same metres can be made
   // of many short lines or few long ones, and the search took the second.
-  // On a Zeno 2 it produced 7 A-anchors where the real wing has 30 — the
-  // right length, the wrong wing, and each main then carrying four times its
-  // proper share until it exceeded the strongest line in the table.
+  // On a Zeno 2 it produced 7 A-anchors where the real wing has 14 A ribs
+  // and 22 tabs — the right length, the wrong wing, and each main then
+  // carrying several times its proper share until it exceeded the strongest
+  // line in the table.
   //
-  // Real designs attach between 0.28 and 0.94 of their ribs on the front row
+  // Real designs attach between 0.28 and 0.90 of their ribs on the front row
   // (`FRONT_DENSITY`, twenty designs). Searching outside that buys a closer
   // length by leaving the space of real wings. (This said 0.56 to 0.91 and
-  // searched from 0.50, which left out seven of the twenty.)
+  // searched from 0.50, which left out seven of the twenty; then 0.28 to
+  // 0.94, with the two-liners' bridles counted as ribs.)
   const ribCountOk = ribCount >= 6;
   // The range searched, kept: the bisection below closes `lo` and `hi` on
   // each other, and the "reachable range" was then read from what was left
@@ -3824,11 +4174,16 @@ export function anchorsForLineLength({
 
   const build = (frontFraction) => {
     const s = suggestAnchorsPerRow({ rows, ribCount, risers, frontFraction, shape });
+    // The bridles the layout's designs carry, in every plan tried: they are
+    // line, and the length solved for is the whole lineset's.
+    const bridlesPerRow = bridles ? s.bridlesPerRow : null;
     const plan = buildLinePlan({
       wing, airfoil, layout, lineLengthM,
-      anchorsPerRow: s.anchorsPerRow, mainsPerRow, brakes, stabilo,
+      anchorsPerRow: s.anchorsPerRow, mainsPerRow, brakes, stabilo, bridlesPerRow,
     });
-    return { plan, anchorsPerRow: s.anchorsPerRow, frontFraction, shape: s.shape };
+    return {
+      plan, anchorsPerRow: s.anchorsPerRow, bridlesPerRow, frontFraction, shape: s.shape,
+    };
   };
 
   // Monotonic in the front fraction, so bisect.
@@ -3861,25 +4216,26 @@ export function anchorsForLineLength({
     saturated,
     reachableRange: [floor.plan.totalLengthM, ceiling.plan.totalLengthM],
     densityRange: [loDensity, hiDensity],
-    // A warning worth reading: on a two-liner, hitting a published length
-    // and matching the wing's topology are incompatible.
+    // A warning worth reading: hitting a published length and matching the
+    // wing's topology can be incompatible, and density is the constraint
+    // kept — it sets the loads — with the length reported rather than
+    // forced. Solved to length alone, a Zeno 2 once came out with 7 A
+    // anchors against its 14 ribs: the right metres, the wrong wing, and
+    // each main carrying several times its share.
     //
-    // A two-liner's front row is built in FOUR levels — a main, a middle, a
-    // top line a metre long and a pair of short bridles to two neighbouring
-    // ribs. The generator builds three, so for the same anchor count it has
-    // more line, and it reaches such a wing's published total only by using
-    // far fewer anchors than the wing has — 7 A-anchors against the Zeno 2's
-    // 30. That gives the right metres, the wrong wing, and each main
-    // carrying four times its proper share.
-    //
-    // Density is therefore the constraint kept, and the length is reported
-    // rather than forced. Given a real wing's own anchor counts and line
-    // height, the cascade comes to 8% over on the Geo 7 and 8% under on the
-    // Ultralite 5, which are built in three levels, and 31 and 34% over on
-    // the Alpina 5 and the Zeno 2, which are not.
+    // Given a real wing's own anchor counts and line height, the suspension
+    // lines come within -8 to +5% of the Geo 7's and Ultralite 5's sheets,
+    // and +10 to +12% of the Alpina 5's and Zeno 2's, now that a two-liner's
+    // A row is built with its bridle pairs (`bridlesPerRow`). Without them
+    // the two-liners were built with their bridles as ribs, A:31 and A:30
+    // where they have 15 and 14, and came out a third over. The brake
+    // cascade, the generator's own on every wing, was most of what remained
+    // over on a whole lineset — 29 to 58% over the sheets' brakes — until
+    // its main line was built as the sheets have it (`buildBrakePlan`); it
+    // comes within 7% of them now, the Zeno 2's 14% over.
     //
     // (It ran 10 to 85% over on all of them, and this said the whole of it
-    // was the missing level. Most of it was three lines a side from the rear
+    // was a missing level. Most of it was three lines a side from the rear
     // row to the riser that no wing has, and a limit on line angle measured
     // from vertical that doubled the outboard top lines.)
     lengthOvershoot: best.error,
@@ -3930,9 +4286,15 @@ export function anchorsForLineLength({
  * not work — the mean upper and the mean main belong to different branches.
  */
 export function recoverLevelFractions(lineTable, { firstJunction = 0.64 } = {}) {
+  // The levels the generator builds: a two-liner's bridle pairs are a level
+  // above its upper lines, and the line a pair hangs from is the rest of the
+  // rib's upper line (`addBridles`), whatever level the sheet's reading
+  // gives it. Read as middle lines, the Alpina 5's eight cut its middles'
+  // mean by an eighth and moved its junction from 0.925 to 0.890.
+  const levelOf = (l) => (l.bridle ? 'bridle' : (l.bridled ? 'upper' : l.level));
   const mean = (level) => {
     const v = lineTable.lines
-      .filter((l) => l.row !== 'K' && l.level === level && l.lengthMM)
+      .filter((l) => l.row !== 'K' && levelOf(l) === level && l.lengthMM)
       .map((l) => l.lengthMM);
     return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
   };
@@ -4159,7 +4521,7 @@ export function multiSizeSheetToTSV(split, size, {
  *     B  14 6 3
  *     C  15 6 4      the fourth main in two parts, CRL4 and CRU4, is one
  *     D  14 6        a row on the C riser: anchors, middle lines on the C mains
- *     K  14 7 3      the brake: anchors, middle lines, lines to the pulley
+ *     K  14 7 3      the brake: anchors, upper and lower middle lines
  *
  * The four rows are the Ozone Geo 7 MS, line for line, counted the way every
  * manufacturer sheet in this project counts; the brake is the Vibe GT's as
@@ -4167,6 +4529,8 @@ export function multiSizeSheetToTSV(split, size, {
  * Its fourth C main is its stabilo's line, and its own cascade is written
  * "C 15 6 3 tip 1" with "S C" (`DESIGN_LINES`): "tip n" says how many of a
  * row's anchors are tip lines, and "S C" which riser the stabilo hangs on.
+ * "bridle n" says how many of a row's anchors, from the centre out, carry a
+ * bridle pair: the Zeno 2 is "A 14 3 bridle 8", fourteen A ribs and 22 tabs.
  * Two numbers on a row with a riser of its own give the mains and leave the
  * middles in pairs, as the derived plan makes them; one number gives only
  * the anchors.
@@ -4176,9 +4540,9 @@ export function multiSizeSheetToTSV(split, size, {
  * lines; a count of mains for a row hanging from another row's mains was
  * ignored the same way, and so was a K row. The example here said "the
  * Ozone Zeno 2, from its own plan: A 30 14 3, B 14 6 4, C 8 3 2", and only
- * its anchors and its A and B mains were the Zeno 2's: its sheet has nine A
- * middles, thirteen B middles carrying the C row's top lines too, and no C
- * main at all.
+ * its A and B mains were the Zeno 2's: its A row is fourteen ribs, eight of
+ * them bridled — thirty names — its sheet has nine A middles, thirteen B
+ * middles carrying the C row's top lines too, and no C main at all.
  *
  * Given the riser layout, a row that hangs from the row ahead on its riser
  * (the D row on A/B/C+D) is held to anchors and middles, and a row on none of
@@ -4267,6 +4631,24 @@ export function parseCascadeSpec(text, { layout = null } = {}) {
       tip = v;
       parts.splice(tipAt, 2);
     }
+    // "bridle 8": how many of the row's anchors, from the centre out, gather
+    // two tabs on one rib onto a bridle pair, as Ozone's two-liners do
+    // (`resolveBridleLevels`). Unwritten, none.
+    let bridles = null;
+    const bridleAt = parts.findIndex((t, i) => i > 0 && /^bridles?$/i.test(t));
+    if (bridleAt > 0) {
+      const v = Number(parts[bridleAt + 1]);
+      if (row === 'K' || row === 'S' || row === 'Z') {
+        problems.push(`line ${lineNo}: row ${row} has no bridles to count`);
+        continue;
+      }
+      if (!Number.isInteger(v) || v < 0) {
+        problems.push(`line ${lineNo}: "bridle" takes a whole count, got "${parts[bridleAt + 1] ?? ''}"`);
+        continue;
+      }
+      bridles = v;
+      parts.splice(bridleAt, 2);
+    }
 
     const counts = parts.slice(1).map(Number);
     if (!counts.length || counts.some((n) => !Number.isInteger(n) || n < 1)) {
@@ -4294,10 +4676,10 @@ export function parseCascadeSpec(text, { layout = null } = {}) {
     }
     const levels = counts.slice(1);
     if (row === 'K') {
-      // anchors, middles, lines to the pulley, and the one shared lower line
+      // anchors, upper middles, lower middles, and the one main line
       if (levels.length > 3 || (levels.length === 3 && levels[2] !== 1)) {
-        problems.push(`line ${lineNo}: the brake is built as anchors, middle lines, lines `
-          + 'to the pulley and one shared lower line, so K takes at most "13 6 3 1"');
+        problems.push(`line ${lineNo}: the brake is built as anchors, upper middle lines, lower `
+          + 'middle lines and one main line to the handle, so K takes at most "13 6 3 1"');
         continue;
       }
       rows.K = { row: 'K', anchors: counts[0], levels, depth: counts.length, brake: true };
@@ -4323,10 +4705,16 @@ export function parseCascadeSpec(text, { layout = null } = {}) {
       problems.push(`line ${lineNo}: row ${row} has ${counts[0]} anchors, so not ${tip} tip lines`);
       continue;
     }
+    if (bridles != null && bridles > counts[0] - (tip ?? 0)) {
+      problems.push(`line ${lineNo}: row ${row} has ${counts[0] - (tip ?? 0)} anchors that are not `
+        + `tip lines, so not ${bridles} bridled ones`);
+      continue;
+    }
     rows[row] = {
       row,
       anchors: counts[0],
       tip,
+      bridles,
       levels,
       depth: counts.length,
       hangsFrom,
@@ -4370,6 +4758,8 @@ export function parseCascadeSpec(text, { layout = null } = {}) {
     mainsPerRow: pick('mains'),
     // Only the tip counts written; a row without one has the default.
     tipsPerRow: pick('tip'),
+    // The anchors that carry a bridle pair, where a row says.
+    bridlesPerRow: Object.fromEntries(Object.entries(pick('bridles')).filter(([, n]) => n > 0)),
     stabiloRiser,
     brakes: K ? {
       anchors: K.anchors,
@@ -4400,7 +4790,7 @@ export function parseCascadeSpec(text, { layout = null } = {}) {
 export function cascadeCountsOf(lines) {
   const rows = {};
   const rowOf = (r) => (rows[r] ||= {
-    anchors: 0, middles: new Set(), depths: new Set(), mains: new Set(), shared: false, deep: false,
+    anchors: 0, bridles: 0, middles: new Set(), depths: new Set(), mains: new Set(), shared: false, deep: false,
   });
   for (const l of lines) {
     const own = l.rows || [l.row];
@@ -4408,7 +4798,10 @@ export function cascadeCountsOf(lines) {
     own.forEach(rowOf);
     if (own.length > 1) { for (const r of own) rows[r].shared = true; continue; }
     const R = rows[own[0]];
-    if (l.level === 'upper') R.anchors += 1;
+    // An anchor is a rib's attachment: a canopy line, or the line a bridle
+    // pair hangs from (`resolveBridleLevels`). The pair are its bridles.
+    if (l.bridle) continue;
+    if (l.bridled) { R.anchors += 1; R.bridles += 1; } else if (l.level === 'upper') R.anchors += 1;
     else if (l.level === 'middle') {
       R.middles.add(l.name);
       R.depths.add(`${l.cascadeDepth ?? ''}${l.side ?? ''}`);
@@ -4417,6 +4810,7 @@ export function cascadeCountsOf(lines) {
   }
   return Object.fromEntries(Object.entries(rows).sort().map(([r, v]) => [r, {
     anchors: v.anchors,
+    bridles: v.bridles,
     middles: v.middles.size,
     mains: v.mains.size,
     simple: !v.shared && !v.deep && v.depths.size <= 1,
@@ -4456,16 +4850,19 @@ export function cascadeSpecFromSheet(lines, { stabiloMain = null } = {}) {
   // ten anchors because eight of them hang from its mains directly.
   const ownMiddles = (r) => c[r].simple && c[r].middles > 0
     && (c[r].anchors - 2) / c[r].middles <= 3;
+  // "bridle n": how many of a row's anchors gather two tabs on one bridle
+  // pair (`resolveBridleLevels`).
+  const bridleOf = (r) => (c[r].bridles ? ` bridle ${c[r].bridles}` : '');
   for (const [host, ...deps] of groups) {
     // A host's middles are its own only if every row hanging from it brings
     // middles of its own; otherwise they carry the other row's top lines too.
     const hostMiddles = ownMiddles(host) && deps.every(ownMiddles);
     if (!hostMiddles) derivedMiddles.push(host);
     out.push(`${host} ${c[host].anchors}${hostMiddles ? ` ${c[host].middles}` : ''}`
-      + `${c[host].mains ? ` ${c[host].mains}` : ''}`);
+      + `${c[host].mains ? ` ${c[host].mains}` : ''}${bridleOf(host)}`);
     for (const d of deps) {
       if (!ownMiddles(d)) derivedMiddles.push(d);
-      out.push(`${d} ${c[d].anchors}${ownMiddles(d) ? ` ${c[d].middles}` : ''}`);
+      out.push(`${d} ${c[d].anchors}${ownMiddles(d) ? ` ${c[d].middles}` : ''}${bridleOf(d)}`);
     }
   }
   const stabiloRiser = stabiloMain ? (groups.find((g) => g.includes(stabiloMain.row))?.[0] ?? null) : null;
@@ -4510,6 +4907,8 @@ export function tipLinesFromTotals(lines, totals, { toleranceMM = 3, reachesTip 
   const tops = {};
   for (const l of lines) {
     if (l.level !== 'upper' || !/^[A-I]$/.test(l.row)) continue;
+    // A bridle pair's aft tab is a column of its own (`Ab`), not its row's.
+    if (l.bridle && l.variant === 'b') continue;
     (tops[l.row] ||= []).push(l);
   }
   const anchorsIn = Object.keys(totals).map(Number).sort((a, b) => a - b);
@@ -4596,7 +4995,10 @@ export function withTipCounts(spec, tips) {
 export function stabiloMainFromTotals(lines, totals, tips, { toleranceMM = 15 } = {}) {
   if (!tips?.groups?.length) return null;
   const L = new Map(lines.map((l) => [l.name, l.lengthMM]));
-  const riserVia = (r) => totals[1]?.[r] - (L.get(`${r}1`) ?? NaN) - (L.get(`${r}M1`) ?? NaN) - (L.get(`${r}R1`) ?? NaN);
+  // On a bridled first anchor the column is the forward tab's path, which
+  // starts with its bridle.
+  const riserVia = (r) => totals[1]?.[r] - (L.get(`${r}1a`) ?? 0) - (L.get(`${r}1`) ?? NaN)
+    - (L.get(`${r}M1`) ?? NaN) - (L.get(`${r}R1`) ?? NaN);
   const [ra, rb] = [riserVia('A'), riserVia('B')];
   if (!Number.isFinite(ra) || !Number.isFinite(rb) || Math.abs(ra - rb) > 20) return null;
   const riser = (ra + rb) / 2;
@@ -4617,25 +5019,33 @@ export function stabiloMainFromTotals(lines, totals, tips, { toleranceMM = 15 } 
  *
  * A row with mains of its own is written as anchors, middles, mains; a row
  * hanging from another row's mains as anchors and middles; the brake as
- * anchors, middles and the lines to the pulley, without the one shared lower
- * line every brake has. Read back, it builds the same counts.
+ * anchors, upper middles and lower middles, without the one main line every
+ * brake has. Read back, it builds the same counts.
  */
 export function cascadeSpecFor(plan) {
   const byRow = {};
   for (const l of plan.lines) {
     if (l.row === 'S' || l.row === 'Z') continue;
-    const r = (byRow[l.row] ||= { upper: 0, middle: 0, main: 0, tip: 0 });
+    const r = (byRow[l.row] ||= { upper: 0, middle: 0, main: 0, tip: 0, bridle: 0 });
     if (l.shared) continue;
+    // The brake's lower middles are written where a row's mains go: "K 13 6
+    // 3" is 13 anchors on 6 middles on 3, on the main line every brake has.
+    if (l.row === 'K' && l.level === 'middle' && l.side === 'lower') { r.main += 1; continue; }
+    // A bridled rib is one anchor, whose line ends at the pair's junction.
+    if (l.bridle) continue;
+    if (l.bridled) { r.upper += 1; r.bridle += 1; continue; }
     if (l.level in r) r[l.level] += 1;
     if (l.level === 'upper' && l.direct) r.tip += 1;
   }
   const out = ['# row  anchors  middles  mains   (a row on another\'s mains: anchors, middles)',
-    '#   then "tip n": how many of its anchors are tip lines, on the tip ribs'];
+    '#   then "tip n": how many of its anchors are tip lines, on the tip ribs,',
+    '#   and "bridle n": how many, from the centre out, carry a bridle pair'];
   for (const row of Object.keys(byRow).sort((a, b) => (a === 'K') - (b === 'K') || a.localeCompare(b))) {
     const c = byRow[row];
     if (!c.upper) continue;
     const counts = [c.upper, c.middle, c.main].filter((n, i) => i === 0 || n > 0);
-    out.push(`${row}  ${counts.join(' ')}${row === 'K' ? '' : `  tip ${c.tip}`}`);
+    out.push(`${row}  ${counts.join(' ')}${row === 'K' ? '' : `  tip ${c.tip}`}`
+      + `${c.bridle ? `  bridle ${c.bridle}` : ''}`);
   }
   if (plan.stabilo?.fromRows && plan.stabilo.riser) out.push(`S  ${plan.stabilo.riser}`);
   return `${out.join('\n')}\n`;

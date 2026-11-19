@@ -188,7 +188,48 @@ export function rowSharesFor({
   };
 }
 
-export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}) {  const byAnchor = new Map();
+/**
+ * How the two tabs of a bridle pair share their row's load at a rib.
+ *
+ * From the pressure, as the rows' own shares are when they come from it:
+ * each tab carries the load between the midpoints to its neighbours along
+ * the chord (`rowSharesFromPressure`, with the pair's tabs in the row's
+ * place). On a NACA 4415 with its rows at 9, 38 and 60% and the pair's tabs
+ * at 5 and 13%, the forward tab takes 45% at 3 degrees, 51% at 6 and 54% at
+ * 9: near halves at trim, and more forward the higher the angle. The
+ * convention has no figure for it, being a split between rows, and gives
+ * halves.
+ *
+ * Null where the plan has no bridles.
+ */
+export function bridleSharesFor({
+  plan, mode = 'convention', airfoil = null, anchors = null, alphaDeg = 6,
+} = {}) {
+  const tabs = {};
+  for (const l of plan?.lines ?? []) {
+    if (!l.bridle || !Number.isFinite(l.chordFraction)) continue;
+    (tabs[l.row] ||= {})[l.variant] = l.chordFraction;
+  }
+  const rows = Object.keys(tabs).filter((r) => tabs[r].a != null && tabs[r].b != null);
+  if (!rows.length) return null;
+  const halves = { a: 0.5, b: 0.5 };
+  if (mode !== 'pressure' || !airfoil) return Object.fromEntries(rows.map((r) => [r, { ...halves }]));
+  const base = anchors || airfoil.anchors || { A: 0.085, B: 0.30, C: 0.53, D: 0.78 };
+  const out = {};
+  for (const r of rows) {
+    const at = { ...base };
+    delete at[r];
+    at[`${r}:a`] = tabs[r].a;
+    at[`${r}:b`] = tabs[r].b;
+    const s = rowSharesFromPressure(airfoil, at, alphaDeg).shares;
+    const sum = s[`${r}:a`] + s[`${r}:b`];
+    out[r] = sum > 0 ? { a: s[`${r}:a`] / sum, b: s[`${r}:b`] / sum } : { ...halves };
+  }
+  return out;
+}
+
+export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES, bridleShares = null } = {}) {
+  const byAnchor = new Map();
   for (const l of plan.lines) {
     if (l.level !== 'upper') continue;
     // Brakes carry pilot input, not lift. Once the brake cascade joined the
@@ -196,8 +237,10 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
     // alongside A/B/C/D, and the closure check went from 0.02% to 19.7% —
     // which is exactly what that check is for.
     if (l.isBrake || l.row === 'K' || l.row === 'S' || l.row === 'Z') continue;
-    const key = `${l.row}${l.index}`;
-    byAnchor.set(key, l);
+    // By name: a bridle pair is two canopy lines of one row and one number,
+    // `A1a` and `A1b`, and keyed by row and number the second replaced the
+    // first and the pair's rib lost half its A load.
+    byAnchor.set(l.name ?? `${l.row}${l.index}`, l);
   }
 
   // Which rows exist at each anchor index.
@@ -255,13 +298,20 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
     // anchor count. On a wing with A:19 B:11 C:6 thirteen top lines then
     // found no load under their own name, and an eighth of the weight never
     // reached the risers.
-    const present = rows.reduce((s, r) => s + (rowShares[r] ?? 0), 0) || 1;
+    //
+    // A row counts once at its rib, however many tabs it has there: a bridle
+    // pair's two take its row's share between them (`bridleShares`, by the
+    // chordwise load between them where the shares come from the pressure;
+    // halves otherwise, the convention being a split between rows).
+    const present = [...new Set(rows)].reduce((s, r) => s + (rowShares[r] ?? 0), 0) || 1;
     for (const l of group.lines) {
-      const frac = (rowShares[l.row] ?? 0) / present;
+      const split = l.bridle ? (bridleShares?.[l.row]?.[l.variant] ?? 0.5) : 1;
+      const frac = ((rowShares[l.row] ?? 0) / present) * split;
       loads.push({
         row: l.row,
         anchor: l.index ?? ribIndex,
         name: l.name,
+        ...(l.bridle ? { variant: l.variant, bridleShare: split } : {}),
         ribIndex,
         station: rib?.station ?? 0,
         loadN: share * frac,
@@ -302,7 +352,9 @@ export function anchorLoads(plan, spanLoad, { rowShares = LOAD_ROW_SHARES } = {}
 export function lineTensions(plan, loads) {
   const loadOf = new Map();
   for (const l of loads) {
-    loadOf.set(`${l.row}${l.anchor}`, l.loadN);
+    // An anchor's load is everything at it: both tabs of a bridle pair.
+    const k = `${l.row}${l.anchor}`;
+    loadOf.set(k, (loadOf.get(k) ?? 0) + l.loadN);
     if (l.name != null) loadOf.set(`name:${l.name}`, l.loadN);
   }
 
@@ -1375,7 +1427,10 @@ export function analyseLoads({
   const span = spanLoadDistribution({
     planform, stations, totalLoadN, twistAt, alphaDeg,
   });
-  const loads = anchorLoads(plan, span, { rowShares: shareInfo.shares });
+  const bridleShares = bridleSharesFor({
+    plan, mode: rowShares ? 'given' : rowShareMode, airfoil, anchors, alphaDeg,
+  });
+  const loads = anchorLoads(plan, span, { rowShares: shareInfo.shares, bridleShares });
   const tensions = lineTensions(plan, loads);
   const selection = selectLines(tensions, { table, loadCase, strengthBasis });
   const stretch = stretchCorrection(selection);
@@ -1388,6 +1443,7 @@ export function analyseLoads({
     totalLoadN,
     spanLoad: span,
     rowShares: shareInfo,
+    bridleShares,
     anchorLoads: loads,
     loadByRow: byRow,
     tensions,

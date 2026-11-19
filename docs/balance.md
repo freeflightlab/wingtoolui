@@ -126,9 +126,9 @@ with this tool's, 80 kg on 5 kg, Cx 0.015.
 
 On the default wing at 5° the calage moves from 39.7% to 42.3%. It flies on
 the handbook's typed line drag, 0.020, unless asked to fly on its plan's,
-and that drag acts where the plan's own does: 3.91 m down with its 12 mm
-risers, 2.93 m without them, where the rule has 2.33. Their weight is at
-6.17 m with the risers' webbing, and the pilot hangs 1.3° behind plumb.
+and that drag acts where the plan's own does: 3.88 m down with its 12 mm
+risers, 2.85 m without them, where the rule has 2.33. Their weight is at
+6.18 m with the risers' webbing, and the pilot hangs 1.3° behind plumb.
 
 The gnuC2-23's section 17 asks for the calage at 9.45°, the angle its
 designer typed beside the centre of pressure. In the program's own

@@ -796,7 +796,8 @@ export function buildTabs({ plan, tensions = null, airfoil, spec = {} } = {}) {
       ribIndex: a.ribIndex ?? null,
       // How many of this tab the whole wing has.
       copies: centre ? 1 : 2,
-      chordFraction: (airfoil.anchors && airfoil.anchors[a.row]) ?? null,
+      // A bridle pair's tabs stand either side of their row's station.
+      chordFraction: a.chordFraction ?? (airfoil.anchors && airfoil.anchors[a.row]) ?? null,
       tensionDaN,
       designDaN,
       widthM,

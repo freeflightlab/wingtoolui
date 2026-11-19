@@ -79,6 +79,8 @@ MODULES = [
     "trimdrift.js",
     "fabric.js",
     "vlm.js",
+    "mfoil.js",
+    "slices.js",
     "freebody.js",
     "bom.js",
     "loads.js",
@@ -94,7 +96,7 @@ MODULES = [
 CORE, UI, LAYOUT = _layout(MODULES)
 
 IMPORT_RE = re.compile(r"^\s*import\s+.*?;\s*$", re.MULTILINE | re.DOTALL)
-EXPORT_DECL_RE = re.compile(r"^\s*export\s+(?=(?:default\s+)?(?:function|const|let|var|class))", re.MULTILINE)
+EXPORT_DECL_RE = re.compile(r"^\s*export\s+(?=(?:default\s+)?(?:async\s+)?(?:function|const|let|var|class))", re.MULTILINE)
 EXPORT_LIST_RE = re.compile(r"^\s*export\s*\{[^}]*\}\s*;?\s*$", re.MULTILINE)
 
 TOP_LEVEL_RE = re.compile(

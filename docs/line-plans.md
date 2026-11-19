@@ -171,11 +171,11 @@ A main in two parts is one main — a short piece at the riser and the rest
 above it, as the Geo 7's CRL4 (970 mm) and CRU4. Counted as lines, these read
 C 5, A 4 and B 4 here until 2026-10-21.
 
-The brake has four main-level lines on every plan — three to the cascade and
-the shared lower line — where the sheets list two, one line in two parts. The
-level split of the Geo 7 is 65 upper / 30 middle / 13 main against a real
-68 / 31 / 13. The two-liners do not match, and the rest of this section is
-why.
+The brake has one main line on every plan, from the handle up past the
+pulley, which Ozone's sheets list in two parts (`docs/brakes.md`). The level
+split of the Geo 7 is 65 upper / 33 middle / 10 main against a real 68 / 31 /
+13. The two-liners did not match until their own counts and bridle pairs were
+built, and the rest of this section is why.
 
 **This table used to agree better than the wings did.** It counted main lines
 as one number, brakes in, and the Geo 7's came to 13 on both sides, while the
@@ -197,31 +197,33 @@ a written cascade is for (section 7).
 It defaults to null, keeping the old behaviour, because a design that has not
 said how many mains it wants should not silently be given three.
 
-### What is still wrong: attachment density
+### Attachment density, by rib
 
-With the mains fixed, the two-liners' remaining error is in the **upper**
-lines, and measuring the real wings says why:
+With the mains fixed, what is left is how many ribs each row is attached to.
+Counted by rib — a canopy line, or the line a bridle pair hangs from:
 
-| wing | ribs per half | uppers per row | spacing |
+| wing | ribs per half | anchors per row | spacing |
 | --- | --- | --- | --- |
 | Geo 7 MS | 25 | 14.3 | every 1.75 ribs |
-| Swift 6 MS | 27 | 12.5 | every 2.16 ribs |
-| Alpina 5 ML | 34 | 20.7 | every 1.65 ribs |
-| Zeno 2 ML | 40 | 17.3 | every 2.31 ribs |
+| Swift 6 MS | 32 | 12.5 | every 2.56 ribs |
+| Alpina 5 ML | 33 | 15.3 | every 2.15 ribs |
+| Zeno 2 ML | 40 | 12.0 | every 3.33 ribs |
 
-Broken down per row, the pattern is not "the front row is densest" — the
-Geo 7 has C:15 against A:14. It is about **riser count**:
-
-| wing | risers | per-row uppers | front-to-rear ratio |
+| wing | risers | per-row anchors | front-to-rear ratio |
 | --- | --- | --- | --- |
-| Geo 7 MS | 3 | A:14 B:14 C:15 D:14 | 0.9 |
-| Swift 6 MS | 3 | A:17 B:17 C:8 D:8 | 2.1 |
-| Alpina 5 ML | 2 | A:31 B:19 C:12 | 2.6 |
-| Zeno 2 ML | 2 | A:30 B:14 C:8 | 3.8 |
+| Geo 7 MS | 3 | A:14 B:14 C:15 D:14 | 1.00 |
+| Swift 6 MS | 3 | A:17 B:17 C:8 D:8 | 2.13 |
+| Alpina 5 ML | 2 | A:15 B:19 C:12, 8 A ribs bridled | 1.25 |
+| Zeno 2 ML | 2 | A:14 B:14 C:8, 8 A ribs bridled | 1.75 |
 
-**A two-liner on three rows carries the shape on its front row**, thinning
-sharply toward the trailing edge. On four rows it pairs them instead, A with B
-and C with D (`docs/drawn-line-plans.md`), and tapers less than a three-liner.
+**A two-liner does not hold its nose on more ribs.** This said it did — A:31
+and A:30, ratios of 2.6 and 3.8 — counting by name, and sixteen of each A
+row's names are bridles: `A1a` and `A1b` to `A8a` and `A8b`, two tabs on one
+rib, one behind the other along the chord, on one line just below the sail
+(Ozone's rigging diagrams of the Alpina 5, the Lyght and the Enzo 3 draw
+them so). By rib a two-liner keeps A and B alike and attaches C less, as most
+three-liners attach D less; its front row's extra support is two points a
+rib. `bridlesPerRow` builds the pairs (section 7 writes them, `bridle 8`).
 
 `anchorsPerRow` takes a count per row, which reaches the fractional spacings
 an integer stride cannot. The rows' own lines stop at the rib 84% of the way
@@ -232,13 +234,13 @@ fewer anchors takes the front row's ribs from the centre out
 | wing | real | modelled | error |
 | --- | --- | --- | --- |
 | Geo 7 MS | 112 | **112** | 0% |
-| Swift 6 MS | 114 | 104 | −9% |
-| Alpina 5 ML | 118 | 122 | +3% |
-| Zeno 2 ML | 102 | 105 | +3% |
+| Swift 6 MS | 114 | 106 | −7% |
+| Alpina 5 ML | 118 | 111 | −6% |
+| Zeno 2 ML | 102 | 94 | −8% |
 
-**Worst error across four wings: 9%.** (The two-liners are built here with
-their B and C rows merged, the brakes at each wing's own anchor count, and
-the Alpina's four mains a row.)
+**Worst error across four wings: 8%.** (The two-liners are built here with
+their B and C rows merged, their bridle pairs, the brakes at each wing's own
+anchor count, and the Alpina's four mains a row.)
 
 `everyNthRib` still works and is still the default, because a design that has
 not specified per-row densities should not be given someone else's.
@@ -247,24 +249,25 @@ not specified per-row densities should not be given someone else's.
 
 The reference set has 88 line sheets that state a wing's rows, and treating
 them as 88 observations would be wrong. **The line topology is identical
-across every size in a family** — the Alpina 5 runs A:31 B:19 C:12 in XS
+across every size in a family** — the Alpina 5 runs A:15 B:19 C:12 in XS
 through XL, the Ultralite 5 A:16 B:16 C:16 D:16 in all seven sizes. Only the
 lengths scale.
 
 So the evidence is **19 designs**, from four makers, and it is carried as
-grouped ranges rather than a fit:
+grouped ranges rather than a fit, by risers — counted from each design's own
+main lines — and load-bearing rows:
 
-| load-bearing rows | risers | designs | front-to-rear ratio | mean |
+| rows | risers | designs | front-to-rear ratio | mean |
 | --- | --- | --- | --- | --- |
-| 3 | 2 | 3 — Alpina 5, Lyght, Zeno 2 | 2.58 – 3.75 | 3.32 |
-| 4 | 3 | 12 — Geo 7, Swift 6, Ultralite 5, Vibe GT, Lynx 2, four UP, three Niviuk | 1.00 – 2.50 | 1.62 |
-| 5 | — | 3 — Magnum 4, Takoo 6, K2 5 | 1.33 – 1.82 | 1.65 |
-| 9 | — | 1 — Skin 4 P, single-surface | 3.00 | |
+| 3 | 2 | 3 — Alpina 5, Lyght, Zeno 2 | 1.25 – 1.75 | 1.54 |
+| 4 | 2 | 3 — Torre, Meru 2, Artik R 2 | 1.20 – 1.50 | 1.37 |
+| 4 | 3 | 9 — Geo 7, Swift 6, Ultralite 5, Vibe GT, Lynx 2, Makalu 5, Summit X, Hook 6, Ikuma 3 | 1.00 – 2.50 | 1.67 |
+| 5 | 4 | 3 — Magnum 4, Takoo 6, K2 5 | 1.33 – 1.82 | 1.65 |
+| 9 | 4 | 1 — Skin 4 P, single-surface | 3.00 | |
 
-The ranges do not overlap, but they nearly touch at 2.50 against 2.58 — so
-this separates the two classes and would not settle a marginal case. The
-riser count is taken as one fewer than the rows, which is what the first two
-groups do; nobody counted the others'.
+The two-liners sit inside the three-liners' range. This table said they
+tapered much harder — 2.58 to 3.75 against at most 2.50 — with their A rows
+counted with their bridles.
 
 `tools/corpus-learnings.mjs` measures the table from the sheets, and the
 check holds `ANCHOR_DENSITY` to it figure for figure.
@@ -283,40 +286,38 @@ and they are read as stabilo lines now.
 
 ### Three shapes, because the designs show three
 
-A single ratio was the first attempt. It fitted the two-liners at 6–8% and
-missed the three-liners by a fifth and more, because they are not tapered at
-all:
+A single ratio was the first attempt, and it missed the three-liners by a
+fifth and more, because they are not tapered at all:
 
 ```
-Alpina 5     31 19 12      taper — each row carries less
-Zeno 2       30 14  8      taper
+Alpina 5     15 19 12      step — A and B alike, C less; 8 A ribs bridled
+Zeno 2       14 14  8      step; 8 A ribs bridled
 Geo 7        14 14 15 14   flat
 Ultralite 5  16 16 16 16   flat
 Swift 6      17 17  8  8   step at the midpoint
 ```
 
-A two-liner **tapers**: the A row holds the shape and each row behind carries
-less. A three-liner is **flat**, or **steps** once — its C row still reaches
-the riser, so the front does not have to do the work. Forcing one curve
-through all three is the kind of fit that looks reasonable and is wrong on
-half the sample. With the right shape, every one of the six lands within 8%.
+A three-liner is **flat**, or **steps** once, and so does a two-liner on three
+rows. It was called a **taper**, each row carrying less, while its A row was
+counted with its bridles; the taper is kept for the two-liners on four rows,
+which pair their rows. With the right shape every one of the six lands within
+13%, the Alpina 5 the furthest: its B row has more ribs than its A. A two-liner
+on three rows is suggested with the share of its front row's ribs the three
+bridle, 57% (`suggestAnchorsPerRow`).
 
 **Absolute density is an input, not a prediction.** Two three-liners in the
-sample attach 56% and 89% of their ribs. Nothing here predicts that; it is a
-choice about how much shape the sail holds by itself.
+sample attach 56% and 89% of their ribs. Across the twenty designs with a cell
+count, though, it falls with aspect ratio, r = −0.78 (`FRONT_DENSITY`): the
+two-liners had hidden it, standing at 0.75 to 0.94 with their bridles counted
+as ribs, where they are 0.35 to 0.45.
 
-**Two-liners do not match, and the top of the cascade says why.** With the C
-row hung from the B mains, as a real two-liner has it, the Alpina's plan has
-the wing's own eight suspension mains — and twelve lines fewer than the wing,
-eleven of them at the top: its A row splits each top line into two short
-bridles (`A1a` and `A1b`, 0.17 to 0.23 m) to two tabs on one rib, one behind
-the other as Ozone's diagram draws them, a level the generator does not build. The Zeno comes out 18 lines long, with
-five mains a row against its three and four. Both are asserted, so the gap is
-recorded rather than averaged into a pass.
-
-(This said the reason was "in the main count": "10 against 12 on the
-Alpina". The two were the brake's, and the suspension mains — when the C row
-had three of its own to the riser — were 8 and 11.)
+**A two-liner's top level.** With the C row hung from the B mains, as a real
+two-liner has it, the Alpina's plan has the wing's own suspension mains; with
+its own counts it has its bridles too — sixteen, 205 mm on the mean against
+the sheet's 192, the forward of each pair the longer as on every pair of the
+sheet. Without them it was built with A:31, a rib for every bridle, and came
+out a third over its sheet; with them the suspension lines come within 11%
+(`docs/full-pipeline.md`).
 
 ### A regression it caused
 
@@ -439,8 +440,6 @@ own, carrying handling load and not lift.
 
 ---
 
----
-
 ## 6. Reading real line sheets
 
 Recovering topology, riser length and junction positions from a
@@ -456,9 +455,10 @@ designer copying a real wing, or specifying one for a builder, knows the shape
 they want and could not say it.
 
 The format is how every manufacturer sheet in this project counts: row,
-anchors, middle lines, main lines, and how many of the anchors are tip lines.
-A row hanging from another row's mains gives anchors and middles; K is the
-brake; S says which riser the stabilo hangs on.
+anchors, middle lines, main lines, how many of the anchors are tip lines, and
+how many carry a bridle pair — the Zeno 2's A row is `A 14 3 bridle 8`. A row
+hanging from another row's mains gives anchors and middles; K is the brake;
+S says which riser the stabilo hangs on.
 
 ```
 # the Ozone Geo 7 MS, counted from its sheet and its totals

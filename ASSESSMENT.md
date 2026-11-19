@@ -10,12 +10,12 @@ openings, diagonals and rods, panel development, nesting, and DXF or printed
 patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
-One offline HTML file, 1.6 MB, no build step and no network. That constraint
-drove the architecture: 40 core modules bundled into a single scope, with the
+One offline HTML file, 1.8 MB, no build step and no network. That constraint
+drove the architecture: 42 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 75,700 lines**: 29,800 core, 6,800 interface, 19,300 tests, 6,400
-tools, 13,300 documentation.
+**About 81,500 lines**: 33,800 core, 7,200 interface, 19,900 tests, 6,500
+tools, 14,100 documentation.
 
 ## 2. What is genuinely validated
 
@@ -36,7 +36,7 @@ by tests. One design read exactly was evidence about that design; two are
 evidence about the reader.
 
 **Against 21 wings' line sheets from five manufacturers, and 55 published
-sizes**, in 144 reference tables, six of them the makers' own line-plan
+sizes**, in 146 reference tables, six of them the makers' own line-plan
 drawings transcribed line by line. Every line sheet is held to five physical
 invariants, not merely parsed. The anchor-density tables the generator works
 from are **measured from the corpus**, not hand-entered — the row ratios on 19
@@ -54,6 +54,14 @@ worst against a 118 mm limit. That is a tolerance this project had taken on
 the standard's word for many rounds.
 
 **All 55 published sizes run the full pipeline with zero failures.**
+
+**The section solver, against its own code.** The slices solve every cell's
+section with a JavaScript port of mfoil, the method Scirocco implements. On
+six sections it agrees with mfoil.py, as Scirocco carries it, to 1e-12, and
+it fails where mfoil.py does; against the Ohio State tunnel's NACA 4415 its
+lift is within 0.06 and its moment within 0.016 in the attached range. What
+the slices put together is consistent with the lattice it stands on: on flat
+plates it is the lattice, to 1e-12.
 
 **Against the DHV's line calculation for EN 926-1.** Each level of the line
 set, both sides, after bending, at least 1400 daN and 14 times the weight;
@@ -107,18 +115,25 @@ centre of pressure, where a wing gliding nose down hangs: the three complete
 designs' files do. Counted once, a pilot with nothing below the wing but
 weight hangs plumb under its centre of pressure, to the micrometre.
 
-**Generated linesets are long on two-liners.** Built with their own counts,
-the three-liners land from 3% under to 12% over their published totals and
-the two-liners, and the Lynx 2, a third over: each Ozone two-liner has sixteen
-short bridles a side at the top of its front row, a level the generator does
-not build — each pair on one rib, one tab behind the other, as Ozone's own
-rigging diagrams draw it, so the front row's support is two points a rib,
-not the extra ribs its sheet's names count. Across the 55 published sizes the pipeline runs +15% (−21% to
-+46%). A wing from the picker hangs from its own cascade where its sheets are
-on file and from anchors solved to its published total where they are not. In
-shape the rows that carry the wing are 88 mm from the 28 sheets with
-per-anchor totals on average; the brake is 91 to 197 mm from them, and is not
-yet understood.
+**Generated linesets come within a tenth on the Ozone families.** Built with
+their own counts, the three-liners land from 8% under to 5% over their
+published totals, the Ozone two-liners 7 to 11% over, and the Lynx 2 and Artik
+R 2 a quarter. Each Ozone two-liner has sixteen short bridles a side at the
+top of its front row, each pair on one rib, one tab behind the other, as
+Ozone's rigging diagrams draw it; read and built as such since 1.10.0, its A
+row is fifteen ribs, not the 31 its sheet's names count. Until 1.11.0 the
+brake cascade, the generator's own on every wing, had its first junction at
+the pulley — three lines a side run down to it, where every sheet has one
+main line from the handle up past the pulley — and came out a fifth to a half
+over the sheets' brakes. Built as they have it and fitted to 26 of them,
+each side's brake comes within 9% under to 12% over, the path to the handle
+within 2% on the mean, and a design left out of the fit within 14%. Across
+the 55 published sizes the pipeline runs +4% (−26% to +31%). A wing from the
+picker hangs from its own cascade where its sheets are on file and from
+anchors solved to its published total where they are not. In shape the rows
+that carry the wing are 88 mm from the 28 sheets with per-anchor totals on
+average; the brake 63 to 168 mm from the 16 sizes it was fitted on, part of
+it the makers' own free travel, longer inboard.
 
 **An imported design is cut as its program cuts it.**
 Every piece of the three complete designs' cutting files was measured. Their
@@ -164,11 +179,21 @@ file does (`docs/balance.md`).
 
 ## 5. What is missing
 
-**45 open items in the roadmap.** The substantial ones:
+**53 open items in the roadmap.** The substantial ones:
 
+- The Lynx 2's and the Artik R 2's linesets, a quarter over their totals:
+  the Lynx 2's suspension 27% over its sheets, its middles carrying two
+  rows' top lines, which the generator pairs. And the brake's counts, 13 on
+  6 and 3 on every wing, where the sheets' are each design's own.
+- The rows' chord stations: Ozone's diagrams put a two-liner's B and C rows
+  at 0.56 to 0.71 of chord, where its wings are built at 0.38 and 0.60.
 - The balance's last approximations: one Cm0 at every angle, each riser
   strap's drag counted alone, as if no other were in front of it, and the
   wing's rods and reinforcement spread like its cloth.
+- The polar's lift and induced drag: on the default wing at trim, 10% and
+  20% above the slices' and the lattice's — Prandtl's lifting line at an
+  aspect ratio of 4.7. The balance, speed bar and glide still fly the polar.
+- The flight simulation: the brakes, left, right and both, in time.
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
 - Collapse (Z) lines: three reference wings carry them; the model does not.
@@ -194,10 +219,11 @@ file does (`docs/balance.md`).
 3. **The `options` and `interface` stages.** Four defects came from calls that
    look right, run clean and do nothing — including a bill of materials built
    with no line data. Both stages exist because unit tests could not see them.
-4. **The two-liner surplus and the sink residual.** One is a level the
-   generator lacks; the other is where the trim comes from: a calage no
-   Geo 7 publishes, a section lift curve from thin-aerofoil theory. Both are
-   explained and neither is closed.
+4. **The brake fit and the sink residual.** One is the brake cascade, fitted
+   to the sheets it is measured against — the leave-one-out check in
+   `docs/brakes.md` is what says it holds beyond them; the other is where the
+   trim comes from: a calage no Geo 7 publishes, a section lift curve from
+   thin-aerofoil theory. Both are measured and the second is not closed.
 
 ## 7. Honest summary
 

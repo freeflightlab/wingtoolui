@@ -47,7 +47,10 @@ for (const f of files) {
   catch { continue; }
   if (!read || read.lines.length < 8) continue;
 
-  const uppers = read.lines.filter((l) => l.level === 'upper');
+  // A rib's attachment: a canopy line, or the line a bridle pair hangs from
+  // (`resolveBridleLevels`). Counted by their names, the bridles made the
+  // Alpina 5's A row 31 anchors on 33 ribs, where its sail has 15 A ribs.
+  const uppers = read.lines.filter((l) => (l.level === 'upper' && !l.bridle) || l.bridled);
   if (uppers.length < 6) continue;
 
   const rows = {};
@@ -260,7 +263,15 @@ const [ma, md] = [mean(ars), mean(dens)];
 const cov = ars.reduce((s, a, i) => s + (a - ma) * (dens[i] - md), 0);
 const rAR = cov / Math.sqrt(ars.reduce((s, a) => s + (a - ma) ** 2, 0)
   * dens.reduce((s, x) => s + (x - md) ** 2, 0));
-console.log(`  against flat aspect ratio: r = ${rAR.toFixed(2)}`);
+const slopeAR = cov / ars.reduce((s, a) => s + (a - ma) ** 2, 0);
+const interceptAR = md - slopeAR * ma;
+const claimedAR = FRONT_DENSITY.againstAspectRatio;
+const arAgrees = !!claimedAR && claimedAR.r === r2(rAR)
+  && claimedAR.slope === Math.round(slopeAR * 1000) / 1000 && claimedAR.intercept === r2(interceptAR);
+if (!arAgrees) mismatches++;
+console.log(`  against flat aspect ratio: r = ${rAR.toFixed(2)}, density = ${interceptAR.toFixed(2)} `
+  + `${slopeAR < 0 ? '-' : '+'} ${Math.abs(slopeAR).toFixed(3)} AR  ${arAgrees ? 'agrees' : 'DISAGREES'} with `
+  + `FRONT_DENSITY (${claimedAR ? `r ${claimedAR.r}, ${claimedAR.intercept} ${claimedAR.slope} AR` : 'nothing'})`);
 /* Each design's own cascade, as `DESIGN_LINES` holds it for the pipeline and
  * the wing picker: the layout and the counts, from every component sheet of
  * the design, which must agree with each other and with the table. */

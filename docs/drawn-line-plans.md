@@ -95,15 +95,17 @@ main lines now, and the table is keyed by layout:
 
 | risers / rows | designs | front row ÷ rear row |
 | --- | --- | --- |
-| 2 / 3 | Alpina 5, Lyght, Zeno 2 | 2.58 – 3.75 |
+| 2 / 3 | Alpina 5, Lyght, Zeno 2 | 1.25 – 1.75 |
 | 2 / 4 | Torre, Meru 2, Artik R 2 | 1.20 – 1.50 |
 | 3 / 4 | nine | 1.00 – 2.50 |
 | 4 / 5 | K2 5, Magnum 4, Takoo 6 | 1.33 – 1.82 |
 | 4 / 9 | Skin 4 P | 3.00 |
 
-It is the two-liners on **three** rows that taper. The four-row ones pair their
-rows on each riser and taper less than most three-liners. The tool has the
-layout now, `A+B/C+D`.
+None of them tapers harder than a three-liner. The four-row ones pair their
+rows on each riser; the three-row ones keep A and B alike and attach C less.
+This said the three-row ones tapered, 2.58 to 3.75, with sixteen bridles in
+each A row counted as anchors (section 6). The tool has the layout now,
+`A+B/C+D`.
 
 ### A main in two parts is one main
 
@@ -145,8 +147,8 @@ paired whatever the text said, so the K2 5's "A 18 6 3" built eight middle
 lines. A count of mains for a row hanging from another row's mains was ignored
 the same way, and so was a K row. And the example in the panel, "the Zeno 2,
 from its own plan: A 30 14 3, B 14 6 4, C 8 3 2", was not: the Zeno 2's sheet
-has nine A middles, thirteen B middles that carry the C row's top lines too,
-and no C main.
+has fourteen A ribs, eight of them bridled, nine A middles, thirteen B middles
+that carry the C row's top lines too, and no C main.
 
 Every count is built or refused now (`parseCascadeSpec` against the riser
 layout, `middlesPerRow`): a row on another row's riser gives anchors and
@@ -188,13 +190,17 @@ What the real counts give, against the published line totals:
 | Hook 6 | 6 | its own counts | +1 to +2% |
 | Ultralite 5 | 7 | its own counts | −3 to +7% |
 | Geo 7 | 5 | its own counts | +9 to +12% |
-| Alpina 5 | 6 | its own counts | +30 to +31% |
+| Alpina 5 | 6 | its own counts and bridles | +15 to +16% |
+| Zeno 2 | 4 | its own counts and bridles | +25% |
 | Lynx 2 | 5 | its own counts | +30 to +40% |
 | Artik R 2 | 6 | its own counts | +36% |
-| Zeno 2 | 4 | its own counts | +46% |
-| sixteen others | 16 | anchors solved to the total | −21 to +9% |
+| sixteen others | 16 | anchors solved to the total | −22 to +9% |
 
-The count is kept because it sets the loads, and the length is reported.
+The count is kept because it sets the loads, and the length is reported. The
+Alpina 5 and the Zeno 2 were +30% and +46%, built with A:31 and A:30, a rib
+for every bridle. On the Ozone families most of what is left is the brake
+cascade, the generator's own on every wing: the suspension lines alone come
+within −8 to +12% of the sheets (`docs/full-pipeline.md`).
 
 ---
 
@@ -290,10 +296,11 @@ against 112 on the circle the generator had been fitted on and 205 on a circle
 through its own projected span. The rows stopped at 0.84 had looked best on
 the circle because they made up for its tip.
 
-**The Hook 6 in the picker** comes to 87 to 112 mm on its 33 load-bearing
+**The Hook 6 in the picker** comes to 87 to 113 mm on its 33 load-bearing
 anchors, against 112 to 150 on every second rib. Its brake is compared by
-itself — 94 to 112 mm, after an offset of 376 to 492 — because makers measure
-a brake to different points: the Hook 6's is 144 mm longer than its A at the
+itself — 93 to 117 mm, after an offset of 101 to 206 (327 to 454 before
+1.11.0 built its main line as the sheets have it) — because makers measure a
+brake to different points: the Hook 6's is 144 mm longer than its A at the
 centre, the Ultralite 5's 570, and under one offset with the other rows the
 difference was read as their shape.
 
@@ -301,22 +308,30 @@ difference was read as their shape.
 
 ## 6. What is still open
 
-- **The two-liners' bridles.** An Ozone two-liner's A row carries sixteen short
-  bridles, `A1a` to `A8b`, on eight lines `A1` to `A8` that do not reach the
-  canopy. Ozone's rigging diagrams of the Alpina 5, the Zeno 2 and the Lyght,
-  supplied by the user, draw each pair on one rib, one tab behind the other
-  along the chord: not two neighbouring ribs. The corpus counts all of them as
-  anchors — 31 on the Alpina 5, where the canopy has 23 A tabs on 15 ribs, and
-  30 on the Zeno 2 for its 22 on 14.
+- **The two-liners' bridles — read and built since 1.10.0.** An Ozone
+  two-liner's A row carries sixteen short bridles, `A1a` to `A8b`, on eight
+  lines `A1` to `A8` that do not reach the canopy; Ozone's rigging diagrams
+  of the Alpina 5, the Lyght and the Enzo 3, supplied by the user, draw each
+  pair on one rib, one tab behind the other along the chord, 6 to 10% of
+  chord apart. The sheets are read so (`resolveBridleLevels`), the corpus
+  counts ribs — 15 on the Alpina 5, where its names count 31 — the cascades
+  write them (`A 15 3 bridle 8`), and the generator builds them
+  (`bridlesPerRow`). The Lyght's totals turned out to be columns along the
+  chord, the pair's two paths in two of them; read so, its stabilo's lines
+  are found as well.
 - **Middle lines the generator cannot shape** are paired: the Zeno 2's C top
   lines hang on its B middles, UP's Torre and Meru 2 have a level between their
   middles and their mains, Niviuk's Hook 6 shares middles between its C and D
   rows. The cascade text says which rows.
-- **The brake's shape**, 91 to 197 mm from the real ones across the 28 sizes,
-  on either plan.
+- **The brake's shape**, 91 to 197 mm from the real ones across the 28 sizes
+  on either plan before 1.11.0 built its main line as the sheets have it; on
+  the 16 sizes of the Geo 7, Ultralite 5 and Lynx 2 with per-anchor totals,
+  each at its own counts and line height, 109 to 199 mm then and 63 to 168
+  now. Part of it is the makers' free travel, longer inboard
+  (`docs/brakes.md`).
 - **Tip lines the sheets cannot show.** UP name the stabilo as a row of its
-  own, and the Alpina 5, Zeno 2, Lyght and Magnum 4 publish no per-anchor
-  totals: those designs take the default, two on each row that reaches the tip.
+  own, and the Alpina 5, Zeno 2 and Magnum 4 publish no per-anchor totals:
+  those designs take the default, two on each row that reaches the tip.
   Where the stabilo's own line is not one main, as on the Ultralite 5 and the
   Swift 6, it is not found, and the stabilo goes to the riser that carries B.
 - **The stabilo's riser on a two-riser wing** is the rear one by assumption:

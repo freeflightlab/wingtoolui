@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2766 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2841 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -33,6 +33,12 @@ Bird's Tuluaq-19 — whose area, span, chords, cells, ribs and every line (93,
 them, and whose cutting files it matches piece by piece: panels, ribs and
 their holes, diagonals, V-rib strips, straps, rod pockets and trailing-edge
 mini-ribs.
+
+It also analyses the wing as its sections: step along the span from tip to
+tip and each cell's section is solved in its own flow with a viscous panel
+method — a JavaScript port of mfoil, the method Scirocco implements, held to
+mfoil's own code to 1e-12 — and the slices are put back together into the
+wing on the vortex lattice (`docs/slices.md`).
 
 What it is not: certified, tested, or flown. See **Safety** below.
 
@@ -70,7 +76,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2766 unit checks against known geometry and the sources |
+| `npm test` | 2841 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -116,13 +122,14 @@ five-digit sections standard or reflexed, and lifting line, the wing flown in it
 lattice, atmosphere to 20 km, and an accelerated polar across the speedbar
 range.
 
-**Lines.** Riser-based cascades with industry naming and optional merged rows, brakes with their own
-four-level cascade, load from lift distribution through to line tension, line
-selection from measured materials sized across the speedbar range and level
-by level to the DHV's line calculation for EN 926-1, elastic stretch on
-measured curves where a line has one, gust load factors, asymmetric and
-collapse load cases, and each line's drag — its Cd from its Reynolds number,
-sin³ of its angle to the flow, its loops — and its risers' straps, at a
+**Lines.** Riser-based cascades with industry naming, optional merged rows and
+a two-liner's bridle pairs, brakes with their own four-level cascade on one
+main line, fitted to 26 makers' sheets, load from lift distribution through to
+line tension, line selection from measured materials sized across the speedbar
+range and level by level to the DHV's line calculation for EN 926-1, elastic
+stretch on measured curves where a line has one, gust load factors, asymmetric
+and collapse load cases, and each line's drag — its Cd from its Reynolds
+number, sin³ of its angle to the flow, its loops — and its risers' straps, at a
 webbing width from the makers' bills of materials, fed back into the balance
 where it acts.
 
@@ -175,14 +182,14 @@ which is the spread once that offset is removed and is what actually differs.
 The rows that carry the wing and the brake are compared each against its own
 offset, because makers measure a brake to different points. A Hook 6 loaded
 from the picker — its own counts and tip lines, on the ellipse its published
-figures give — comes out 87 to 112 mm from its own sheet in shape on its 33
-load-bearing anchors (112 to 150 on every second rib), and its brake 94 to
-112 mm.
+figures give — comes out 87 to 113 mm from its own sheet in shape on its 33
+load-bearing anchors (112 to 150 on every second rib), and its brake 93 to
+117 mm, 101 to 206 mm long overall.
 
 ## Architecture
 
 ```
-src/core/          the maths — 40 modules, pure functions, no DOM, each tested
+src/core/          the maths — 42 modules, pure functions, no DOM, each tested
   num.js           integration, root finding, arc-length helpers
   planform.js      ch.1  elliptical + linear edges, areas, AR, centroid
   airfoil.js       ch.2  NACA 4- and 5-digit, coordinate import, surface splitting
@@ -203,6 +210,8 @@ src/core/          the maths — 40 modules, pure functions, no DOM, each tested
   atmosphere.js    US Standard Atmosphere 1976 to 86 km; Re, Mach, Kn
   aero.js          section polar, lifting line, wing polar
   vlm.js           a vortex lattice over the arced wing
+  mfoil.js         a viscous section solver: mfoil, ported from its Python
+  slices.js        the wing as its sections, put together on the lattice
   pressure.js      chordwise loading, row load shares from the section
   intake.js        cell openings, placed against the stagnation point
   inflated.js      the flying shape against the built one
@@ -231,15 +240,16 @@ tests/             the unit suite, the Phase 1 audit, the full pipeline, the
                    reference sweep, the benchmark
 tools/             the other check stages, the interface harness, figures,
                    importers, and readers for legacy sheets
-docs/              forty-six notes; see below
-data/reference/    144 tables: line sheets of 21 wings from five makers, six
+docs/              forty-seven notes; see below
+data/reference/    146 tables: line sheets of 21 wings from five makers, six
                    of their line-plan drawings transcribed line by line, 55
                    published sizes and the makers' own specifications to check
                    them against, cell counts, the suppliers' line data, PHI's
                    measured 78-line materials table, OpenGlider's 56 line
                    types with their stretch measured, inspection records, a
-                   published riser geometry, fabric schedules and
-                   certification reports; and in lep/ the own files of three
+                   published riser geometry, fabric schedules,
+                   certification reports, mfoil's own results and a wind
+                   tunnel's NACA 4415; and in lep/ the own files of three
                    complete designs, the Swoop2, the Tuluaq-19 and the
                    gnuC2-23
 build.py           bundler
@@ -252,6 +262,7 @@ design inputs
    -> planform -> lobe -> wing3d
    |-> flatdev -> ovalization -> seam allowance -> nesting -> DXF/SVG
    |-> aero -> equilibrium -> risers -> accelerated polar
+   |-> vlm + mfoil -> slices (on demand: the wing as its sections)
    \-> lineplan -> loads -> line schedule -> line drag --> back into equilibrium
 ```
 
@@ -296,7 +307,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2766 checks |
+| unit suite | the maths, 2841 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -337,6 +348,7 @@ cascade: its riser layout, its counts, its tip lines and its stabilo's line.
 | `docs/departures.md` | every place the code differs from the handbook, and why |
 | `docs/line-sheets.md` | what can be recovered from a maker's published numbers |
 | `docs/environment-and-aero.md` | atmosphere, Reynolds number, and the wing polar |
+| `docs/slices.md` | the wing as its sections: mfoil ported and held to its own code, put together on the lattice |
 | `docs/validation.md` | every discrepancy found in the sources, and why |
 | `docs/load-cases.md` | what sizes a line — the speed bar, a collapse, a gust — and a real lineset against this tool's loads |
 | `docs/source-map.md` | handbook chapter to implementation |

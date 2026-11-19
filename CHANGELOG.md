@@ -4,6 +4,183 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.12.0 — 2026-11-18
+
+The wing as its sections: step along the span from tip to tip, each slice's
+section solved in its own flow with a viscous panel method, and the slices
+put back together into the wing.
+
+**Added**
+
+- **The Slices tab.** Each cell's section in its own flow — the free stream
+  across the page, the section turned to the angle the whole wing leaves it
+  at, its pressure above it, its displacement thickness laid on it and
+  carried into the wake, transition marked — and every slice tip to tip:
+  lift, drag and the angle each meets. A slider and arrows step from the
+  left tip to the right. Hands up, at the balance's angle, or on full bar.
+  `docs/slices.md`.
+- **mfoil, in JavaScript** (`mfoil.js`): the method Scirocco implements,
+  Krzysztof J. Fidkowski's mfoil (MIT licence, its notice kept), ported from
+  the Python Scirocco keeps for its own checks — a linear-vortex panel
+  method coupled by Newton's method to an integral boundary layer and wake,
+  with Drela's closures and e^N transition. It agrees with mfoil.py to 1e-12
+  on six sections from Re 200 000 to 1.5 million and Mach 0.3, and fails
+  where it fails (`data/reference/mfoil-sections.tsv`). Each Newton step
+  solves for the edge speeds alone, the boundary layer eliminated first by
+  substitution, checked against the whole system: ten times mfoil.py's
+  speed.
+- **The slices put together** (`slices.js`): polars at a few Reynolds
+  numbers, swept in angle from each other's boundary layers; the alpha
+  method on the lattice, at the speed whose lift is the weight; each slice
+  solved at its own angle and Reynolds number and fed back until the
+  lattice's lift and the slices' agree within 0.003. `latticeSystem` (vlm.js)
+  is the lattice without its solve, which `vortexLattice` now calls.
+- **Exports for each slice**: the section as solved (.dat), an XFOIL run,
+  an mfoil script, the input Scirocco's analysis server takes, and every
+  slice in a table.
+- **The Ohio State tunnel's NACA 4415** at Re 1.0 and 1.5 million
+  (`data/reference/naca4415-osu.tsv`, NREL/TP-442-6472): mfoil's lift
+  within 0.06 of it and its moment within 0.016 from 0° to 6°.
+
+**Found**
+
+- The polar the balance flies has 10% more lift and 20% more induced drag
+  than the slices on the default wing at trim, and the lattice alone agrees
+  with the slices: Prandtl's lifting line at an aspect ratio of 4.7. Not
+  changed here; the roadmap carries it.
+- mfoil cannot take a sewn trailing edge — its wake is aimed along the gap's
+  normal — so the slices open the section to 1e-4 of the chord, which costs
+  0.003 of lift against a sharp edge's, measured on gaps from 4e-3 to 1e-5.
+- mfoil judges convergence on the boundary layer's residual alone; the port
+  also checks the edge-speed equations, after a warm start that kept the old
+  edge speed settled at cl 0.75 where the answer is 0.47. Scirocco's copy of
+  mfoil.py tightens Newton's tolerance to 1e-12, the rounding floor, and its
+  `set_coords` does not run.
+
+**Fixed**
+
+- The bundler (build.py) left `export` on an `async` function, which the
+  page refused, and took a line of a script template that began with
+  `import` for a module import.
+- A tab's tools could push the page wider than the window; they wrap now.
+
+## 1.11.0 — 2026-11-18
+
+The brake's main line, as every sheet has it, and its cascade fitted to 26
+of them.
+
+**Fixed**
+
+- The brake cascade's first junction was at the pulley: three lines a side
+  ran down to it from the cascade, and one short line from the pulley to the
+  handle. Every sheet on file has one main line instead, from the handle up
+  through the pulley to a junction well above it — BGD's `KL1`, 2926 mm on
+  the Lynx 2 M, which `docs/brakes.md` read as "a line from the handle up to
+  the pulley", and Ozone's `KRU` over `KRL`, 2906 mm from the Geo 7 MS's
+  handle mark. Built so, each side's brake came out a fifth to a half over
+  its sheet's. `buildBrakePlan` builds the main line from the handle past the
+  pulley to its junction, and the three lower middle lines from there; on
+  the pipeline's 13 anchors on 6 and 3 middles the Geo 7, Ultralite 5,
+  Alpina 5 and Lynx 2 come within 7% of their sheets' brakes, the Zeno 2 14%
+  over, where they were 29 to 58% over, and the 55 published sizes run +4%
+  (−26 to +31%), where they ran +11% (−22 to +40%).
+- The brake's anchors ran from the centre rib to the tip rib, closing
+  outboard to a third of their inboard spacing. No wing on file has a brake
+  line on either: fitted to the five whose brake ribs are known — the Lynx
+  2's sheet, the Geo 7's rigging diagram and the three LEparagliding designs
+  — they run from 6.5% of the way out to the tip, counted in ribs, to
+  92.5%, the outboard gaps four fifths of the inboard.
+- The sheets' brake mains named without a number — the Zeno 2's and the
+  Lyght's `KRU` and `KRL`, the Magnum 4's `AR3_U` and `AR3_L` — were passed
+  over. Read, the Zeno 2 family's totals are 7.2 to 8.1 m longer (208 pieces,
+  not 204), and the line-length law, refitted on them, is 49.62 − 4.91 AR m
+  per metre of span (r² 0.944): within 6.2% of every family's own, 7.8% of
+  every size, and out of sample 2.2% over the SAGE and 6.5% under the Lynx 2.
+  The Magnum 4's written cascade has the three A mains its sheets give, not
+  two.
+- BGD's `KL1` was read as an upper line 2.9 m long and the `KR` lines as
+  mains. A brake's levels come from the paths the sheet states, and `KL` on
+  a brake is its main.
+- `buildBrakePlan` without a hang point hung from the leading edge — its
+  default asked the anchor count for rows — and its `totalLengthMM` took one
+  main line away, as though the two handles shared one.
+- The controls stage probed "Diagonal reach" on a written cascade the parser
+  refuses, so on the plan derived instead, where the reach changes nothing; it
+  passed only because an export's anchor solve left gaps, and failed once the
+  brakes no longer pushed it to. It probes a cascade that builds now.
+
+**Added**
+
+- `BRAKE_GEOMETRY`: where the brake's junctions go and how much line runs
+  under the pulley, fitted to the Geo 7, Ultralite 5, Alpina 5, Zeno 2 and
+  Lynx 2 at their own counts and line heights — each side's brake within 9%
+  under to 12% over its sheet's, the path to the handle within 2% on each
+  size's mean and 6% at any of 205 anchors, and a design left out of the fit
+  within 11% under to 14% over. The unit suite builds the Geo 7 MS and the
+  Lynx 2 M so and holds them to their sheets.
+
+**Documents**
+
+- `docs/brakes.md` says what the brake is and how it was fitted; the
+  pipeline's line totals, the line plans' level split, the Hook 6's brake in
+  the picker, and the brake's per-anchor shape (63 to 168 mm from the 16
+  sizes it was fitted on, 109 to 199 before) are measured again.
+
+## 1.10.0 — 2026-11-17
+
+The two-liners' bridles, read from the sheets and built.
+
+**Added**
+
+- Bridle pairs (`bridlesPerRow`, and `bridle 8` in a written cascade): a
+  row's inner anchors each gather two tabs on their rib, 8% of chord apart
+  either side of the row's station, onto one line a bridle's length below
+  the sail — 0.087 of the rib's chord, as on the Alpina 5 ML and the Zeno 2
+  ML. The junction stands on the line from the rib's top line down through
+  the tabs' centre, so the forward bridle comes out the longer, as on every
+  pair of the three sheets. The three Ozone two-liners are built with
+  theirs, in the pipeline and from the wing picker, and the anchor solve
+  builds them on a two-liner with three rows.
+- A pair shares its rib's row load: halves under the convention, by the
+  chordwise pressure between the tabs otherwise (`bridleSharesFor`). Each
+  tab is an attachment point of its own in the totals (`Ab` for the aft
+  one), the inspection record and forecast, the tabs, the rib stress and the
+  rib drawing, and the openings keep both tabs' rays clear.
+
+**Fixed**
+
+- The sheets' bridle pairs were read as canopy lines, and the line they
+  hang from as one more. So the Alpina 5's A row counted 31 anchors where
+  its sail has 23 tabs on 15 ribs, the two-liners were built with a rib for
+  every bridle, and their linesets came out a third over their sheets. Read
+  by line (`resolveBridleLevels`), and built with their own fifteen and
+  fourteen A ribs and eight pairs, the Alpina 5 ML's suspension lines come
+  to +11% of its sheet's and the Zeno 2 ML's to +10%; across the 55
+  published sizes the pipeline runs +11%, where it ran +15%.
+- What the corpus said of two-liners followed from the same count, and was
+  wrong: they do not taper much harder than three-liners. By rib their
+  front-to-rear ratio is 1.25 to 1.75, inside the three-liners' 1.00 to
+  2.50, where it read 2.58 to 3.75, and a two-liner on three rows is
+  suggested with its front two rows alike, as all three measured are, and
+  57% of its front row bridled. Front density on the twenty designs is 0.28
+  to 0.90 of the ribs, median 0.45 (0.94 and 0.53), and falls with aspect
+  ratio, r = -0.78, which the bridles had hidden.
+- Anchor loads were keyed by row and number, so the second tab of a pair
+  replaced the first and its rib lost half its A load. They are keyed by the
+  line's name, and a row counts once at its rib.
+- The sheets' totals columns are read by their headings. The Swift 6's
+  brake totals had been taken from its empty E column and never read; on a
+  two-liner the columns are attachment points along the chord, and read so
+  the Lyght's stabilo lines are found, A13 and B13 on one path.
+
+**Documents**
+
+- The pipeline's line totals and the level-by-level comparison, the
+  anchor-density tables, and where the remaining surplus is: the brake
+  cascade, the generator's own on every wing, three to nine tenths over the
+  sheets' brakes. The rigging diagrams of 1.9.0's note are the Alpina 5's,
+  the Lyght's and the Enzo 3's; it named the Zeno 2's, which is not on file.
+
 ## 1.9.0 — 2026-11-17
 
 The section's own mean line, NACA five-digit sections, and the two-liners'
@@ -35,7 +212,7 @@ bridles as Ozone draws them.
 - `naca4` took five-digit codes and read them as four: '23012' came out 2%
   camber at 30%. It refuses them, and each code goes to its own reader.
 - The two-liners' bridles: Ozone's rigging diagrams of the Alpina 5, the
-  Zeno 2 and the Lyght, supplied by the user, draw each bridle pair on one
+  Lyght and the Enzo 3, supplied by the user, draw each bridle pair on one
   rib, one tab behind the other along the chord. Four documents said
   neighbouring ribs, or that no drawing was on file. The sheets' names count
   the eight lines under the pairs as anchors: the Alpina 5's canopy has 23 A

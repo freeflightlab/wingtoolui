@@ -62,7 +62,7 @@ ordered** at 64% used. A bill quoting panel area understates the order by half
 as much again.
 
 **Line is bought by cut length.** The loop allowance is real material and
-fixed per line: 316 m of line finished is 345 m to cut on the default wing. A
+fixed per line: 276 m of line finished is 304 m to cut on the default wing. A
 bill supplied without it says so rather than quietly omitting it.
 
 **Rib cloth is not negligible** — the third fabric item after the two sail
@@ -74,25 +74,25 @@ each item left out here):
 ```
 FABRIC
   Sail cloth              60.1 m of 1.4 m roll (64% used)   53.50 m2   1674 g
-  Rib cloth               49 pieces, 31.5 m of roll (57%)   15.92 m2    637 g
+  Rib cloth               49 pieces, 31.5 m of roll (57%)   15.94 m2    637 g
                           31% of 23.03 m2 removed as openings
   Diagonal cloth          192 pieces, 24.0 m of roll (36%)  12.22 m2    489 g
-  Dacron at the anchors   129 pieces                         0.39 m2     47 g
+  Dacron at the anchors   126 pieces                         0.38 m2     46 g
   Trailing edge tape      10.3 m                             0.21 m2     11 g
-  Attachment tabs         129 pieces                         0.17 m2     20 g
+  Attachment tabs         126 pieces                         0.16 m2     19 g
 LINE
-  DC40      294.5 m   210 pieces   0.50 mm   53 g
-  DC 161     16.8 m     4 pieces   0.83 mm    8 g
-  9200-70    16.7 m     4 pieces   0.65 mm    5 g
+  DC40      214.1 m   196 pieces   0.50 mm   39 g
+  DC60       26.1 m     6 pieces   0.60 mm    7 g
+  9200-70    24.8 m     6 pieces   0.65 mm    7 g
+  DC 161     22.9 m     6 pieces   0.83 mm   11 g
   DC100      16.5 m     4 pieces   0.80 mm    7 g
 RODS AND WEBBING
   Nylon rods      49 pieces   39.8 m   80 g
   Riser webbing    6 pieces    3.0 m   not weighed
     the straps from the karabiner to the lines; a speed system's own webbing is not in it
 TOTALS
-  cloth, film and tape 2878 g + line 74 g + rods 80 g = 3.032 kg
+  cloth, film and tape 2877 g + line 71 g + rods 80 g = 3.028 kg
   roll to order: 115.6 m (sail cloth 60.1, rib cloth 31.5, diagonal cloth 24.0)
-    as this tool lays the pieces out: a production nest is tighter
   that is 56% of the 5.40 kg the wing is set to weigh
 NOT WEIGHED
   rod pockets; riser webbing and its hardware; thread; the seam allowance on
@@ -359,9 +359,9 @@ learned anything.
 The SAGE's 215 m and 112 lines a side include brakes and stabilo; the plan
 compared had no brakes, came to 194 m, and was called close. Like with like,
 every second rib gives 283 m (+32%) and 86 lines a side, and anchors solved to
-the total give 216 m with **61 lines a side, about half the real 112**. The
-SAGE's sheets are not on file to say where the rest are; on the Ozone
-two-liners they are bridles atop the front row (`docs/full-pipeline.md`).
+the total give 215 m with **81 lines a side, three quarters of the real 112**,
+twelve of them bridles as the Ozone two-liners carry them (61 before they were
+built). The SAGE's sheets are not on file to say where the rest are.
 
 ---
 

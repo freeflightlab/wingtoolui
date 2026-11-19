@@ -40,7 +40,7 @@ handbook's ellipse now, 1.0% out on average against the circle's 2.0, −2.0 to
 Across the seven published families, line consumption per metre of span
 correlates with aspect ratio at **r = −0.966** (the first size of each family
 that publishes a total). A high-aspect wing has *more* cells and *less* line:
-the Zeno 2 has 78 cells and 15.5 m per metre of span, the Ultralite 5 has 34
+the Zeno 2 has 78 cells and 16.1 m per metre of span, the Ultralite 5 has 34
 cells and 26.7. (This said −0.977, which is what the same calculation gives
 with the Lynx 2 at BGD's published 209 m; the reference table now holds the
 sum of BGD's own line sheets.)
@@ -59,20 +59,20 @@ ways: a design whose line sheets are on file with its own cascade
 (`DESIGN_LINES`: riser layout, anchors, mains, and middles where the generator
 can build them); any other with `anchorsForLineLength`, which solves the
 anchor density to the published line total inside the densities real wings
-use (0.28 to 0.94 of the ribs on the front row, measured on twenty designs).
-The relationship holds: 0.00902 of line drag for the three lowest aspect
-ratios against 0.00804 for the three highest.
+use (0.28 to 0.90 of the ribs on the front row, measured on twenty designs).
+The relationship holds: 0.00886 of line drag for the three lowest aspect
+ratios against 0.00720 for the three highest.
 
 **The interface was not part of that fix.** Its derived plan attaches every
 second rib: on its own default wing a real wing's density — 13 anchors on 25
-ribs, against a measured median of 0.53 — and nothing like one on a published
+ribs, against a measured median of 0.45 — and nothing like one on a published
 wing, where a Zeno 2 S came out with 425 m of line against its published 186.
 A wing from the picker now hangs from its own cascade where its sheets are on
 file, and from anchors solved to its published total where they are not
 (`docs/drawn-line-plans.md`). **Solve anchors to the line length**, in the
 Lines panel, runs the same solve on any wing and writes the plan it built out
-as a cascade: on a Geo 7 MS 259 m against 263.5, on an Alpina 5 ML on two
-risers 231 against 229.7. Under a three-riser layout a two-liner's total is
+as a cascade: on a Geo 7 MS 258 m against 263.5, on an Alpina 5 ML on two
+risers 226 against 229.7. Under a three-riser layout a two-liner's total is
 below anything a real density gives, and the solve says so and names the
 layout as the cause rather than the ribs.
 
@@ -111,24 +111,33 @@ neither a default nor a sentinel can tell an omission from an explicit
 
 | | wings | mean | range |
 | --- | --- | --- | --- |
-| all | 55 | +15% | −21 to +46% |
-| own cascade, three risers | 23 | +10% | −3 to +40% |
-| own cascade, two risers | 16 | +36% | +30 to +46% |
-| density solved, three risers | 11 | −1% | −21 to +9% |
-| density solved, two risers | 5 | −1% | −1 to −1% |
+| all | 55 | +4% | −26 to +31% |
+| own cascade, three risers | 23 | +3% | −8 to +31% |
+| own cascade, two risers | 16 | +15% | +7 to +27% |
+| density solved, three risers | 11 | −7% | −26 to +2% |
+| density solved, two risers | 5 | 0% | 0 to +1% |
 
-By family, from their own cascades: Hook 6 +1 to +2%, Ultralite 5 −3 to +7%,
-Geo 7 +9 to +12%, Alpina 5 +30 to +31%, Lynx 2 +30 to +40%, Artik R 2 +36%,
-Zeno 2 +46%. Every line set here has its stabilo in it, as the published
-totals do: each row's tip lines on one line, to the riser its sheets say — the
-Geo 7's "fourth C main" is its stabilo's line, so its C row has three — or to
-the B (`docs/drawn-line-plans.md`, section 5). The Lynx 2 and the Artik R 2 were density-solved until
-2026-10-21, the Lynx 2 on two risers it does not have; built as themselves
-they carry a third more line than their sheets. Six of the 16 density-solved
-wings are still over at the sparsest a real wing is — the Allegro light, on
-the three risers its aspect ratio gives — and five under at the densest:
-Niviuk's single-skins, the Skin 4 P and the Bi Skin 2 P, built here as four
-rows where the real wings have nine.
+By family, from their own cascades: Hook 6 −6%, Ultralite 5 −8 to +1%, Geo 7
++3 to +5%, Alpina 5 +7 to +8%, Zeno 2 +11%, Lynx 2 +23 to +31%, Artik R 2 +26
+to +27%. Until 1.11.0 every one of them carried the brake cascade with its
+first junction at the pulley, a fifth to a half more brake than its sheets
+(below), and the whole set ran +11% (−22 to +40%). The two Ozone two-liners
+were +30% and +46% until their A rows were built as they are, fifteen and
+fourteen ribs with eight bridle pairs, rather than a rib for every bridle.
+Every line set here has its stabilo in it, as the published totals do: each
+row's tip lines on one line, to the riser its sheets say — the Geo 7's
+"fourth C main" is its stabilo's line, so its C row has three — or to the B
+(`docs/drawn-line-plans.md`, section 5). The Lynx 2 and the Artik R 2 were
+density-solved until 2026-10-21, the Lynx 2 on two risers it does not have;
+built as themselves they carry a quarter more line than their sheets.
+
+The density-solved wings went the other way. They are solved to the published
+total at no sparser and no denser than a real wing: one of the 16, an
+Allegro light size on the three risers its aspect ratio gives, is still over
+at the sparsest (all six were, with the brakes as they were), and five under
+at the densest — Niviuk's single-skins, the Skin 4 P and the Bi Skin 2 P,
+built here as four rows where the real wings have nine, −14% and −26% now
+that the brakes no longer make up for them.
 
 What got it there, each measured:
 
@@ -168,44 +177,54 @@ What got it there, each measured:
 
 ### Level by level
 
-Built with its own anchors and line height, against its own sheet, per side
-and without the brakes:
+Built as the pipeline builds it — its own cascade, at the line height the
+published heights' law gives — against its own sheet, per side and without
+the brakes (mean lengths):
 
-| | total | uppers | middles | mains |
-| --- | --- | --- | --- | --- |
-| Geo 7 MS | 118.0 / 110.0 m (+7%) | 617 / 482 mm | 1936 / 1663 mm | 3817 / 3874 mm |
-| Ultralite 5 19 | 102.6 / 111.7 m (−8%) | 471 / 848 | 1592 / 827 | 3099 / 3270 |
-| Alpina 5 ML | 117.6 / 89.1 m (+32%) | 550 / 573 | 2036 / 1277 | 4078 / 2867 |
-| Zeno 2 ML | 109.2 / 81.6 m (+34%) | 658 / 672 | 2128 / 886 | 4333 / 3876 |
+| | total | bridles | uppers | middles | mains |
+| --- | --- | --- | --- | --- | --- |
+| Geo 7 MS | 115.3 / 110.0 m (+5%) | — | 484 / 482 mm | 1977 / 1663 | 4025 / 3874 |
+| Ultralite 5 19 | 106.6 / 111.7 m (−5%) | — | 414 / 848 | 1621 / 827 | 3303 / 3270 |
+| Alpina 5 ML | 99.0 / 89.1 m (+11%) | 202 / 192 mm | 566 / 716 | 1560 / 1122 | 4364 / 2867 |
+| Zeno 2 ML | 89.6 / 81.6 m (+10%) | 184 / 178 | 568 / 800 | 1601 / 973 | 4621 / 3876 |
 
-The three-liners are within a tenth, with their surplus and deficit in
-different places — the Ultralite's real junctions sit lower than any default.
-The two-liners are a third over, and the table says where: the top lines
-match, and the middles are two to two and a half times as long.
+**Each of the three Ozone two-liners carries sixteen short bridles a side** —
+`A1a` and `A1b` to `A8a` and `A8b`, 173 to 228 mm on the Alpina 5 ML — in
+pairs that gather two tabs on one rib, one behind the other along the chord,
+into one line just below the sail, as Ozone's rigging diagrams draw them.
+The three-liners have none. Read by name, a pair and the line it hangs from
+were all canopy lines, and the two-liners were built with A:31 and A:30 — a
+rib for every bridle, where they have 15 and 14 — and came out a third over:
+117.6 and 109.2 m a side. The sheets are read by line now
+(`resolveBridleLevels`) and the generator builds the pairs (`bridlesPerRow`):
+a junction deep enough for the pair to be 0.087 of the rib's chord long on
+their mean, on the line from the top line's lower end through the tabs'
+centre, so the forward bridle comes out the longer, as on every pair of the
+sheets.
 
-That is a level the generator does not have. **Each of the three Ozone
-two-liners carries sixteen short bridles a side** — A1a and A1b to A8a and
-A8b on the Alpina 5 ML, 173 to 228 mm — in pairs that gather two tabs on one
-rib, one behind the other along the chord, into one top line just below the
-sail, as Ozone's rigging diagrams draw them. The three-liners have
-none. On a two-liner's front row a path from the sail starts with a bridle,
-so it is a line deeper than the three levels the generator builds: what the
-sheet's names call the middle level holds two physical levels, so its mean is
-short, and the generator spans the same height with one line.
+Built with fifteen A ribs and no bridles the Alpina comes to +9%; the
+bridles add 1.8 m a side, net of the shorter lines they hang from. What is
+left is not one level: the two-liners' real mains are shorter and their
+middles more, and the Ultralite's real junctions sit lower than any default.
 
-This section used to say the opposite twice. First that real wings run a
-fourth level the generator lacks; then, counting the levels by their names,
-that all five reference wings run exactly three and the generator is not
-missing anything. The names count three because a bridle pair and the line
-it hangs from are both A lines. Reading the sheets by line, the first claim
-was right for the two-liners and wrong for the three-liners.
+**The brakes.** Built as the pipeline builds them — 13 anchors on 6 and 3
+middles on one main line, on every wing, at the law's line height — they come
+within 7% of the sheets' on the Geo 7 (+3 to +5%), Ultralite 5 (−6 to +1%),
+Alpina 5 (−7 to −6%) and Lynx 2 (+6%), and 14% over on the Zeno 2. They ran
+29 to 58% over (Geo 7 +41 to +44%, Ultralite 5 +30 to +39%, Alpina 5 +29 to
++30%, Lynx 2 +46 to +47%, Zeno 2 +58% against its sheet as now read) with the
+first junction at the pulley and three lines a side run down to it, where
+every sheet has one main line from the handle up past the pulley
+(`docs/brakes.md`). What an Ozone family carries over its published total now
+is its suspension: within 8% on the three-liners, 10 to 12% over on the
+two-liners. The Lynx 2's suspension is 27% over its sheets: its middles carry
+top lines of two rows, and B and C split a level, which the generator pairs.
 
 **Density is the constraint kept**, because density sets the loads and the
-loads size the lines. Solved to the published length instead, a two-liner on
-two risers lands within 2% — by using fewer anchors than the real wing (the
-Zeno 2: A11 on the interface's solve against its 30). Right metres, a sparser
-wing, and each line carrying more of the load. The length follows and is
-reported; building the bridle level is the open item.
+loads size the lines. Solved to the published length instead, a two-liner
+lands on it, by using fewer anchors than the real wing has. Right metres, a
+sparser wing, and each line carrying more of the load. The length follows
+and is reported.
 
 **Each wing flies in its arc**, as the interface flies it: the lattice's
 ratios of the wing as built against itself laid flat (`arcFactors`), which

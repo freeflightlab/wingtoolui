@@ -222,7 +222,8 @@ Specific open questions, so collection can be aimed rather than broad:
 | Why the Alpina 5 and Allegro light differ by 9.7% in line length at the same aspect ratio | more two-liners and three-liners at matched AR, with cell counts |
 | Why the Lynx 2 carries 7% more line than its aspect ratio suggests, at every size | another 2.5-liner, with its line sheets |
 | Whether a maker's published total line length is its lineset | the line sheets beside the specification, for any family — BGD's table goes with area and its sheets with span |
-| Whether the front-to-rear anchor density ratio really tracks riser count | any wing with per-row line counts — **19 designs** now, three of them with three load-bearing rows, and that range (2.58 to 3.75) nearly touches the four-row one (1.00 to 2.50) |
+| Whether front-row density follows aspect ratio, as twenty designs say (r = −0.78), or the maker | any wing with per-row line counts and its cell count — counted by rib, a bridle pair as one (the two-liners' ratio, 2.58 to 3.75 by name, is 1.25 to 1.75 by rib) |
+| Whether other makers' two-liners carry bridle pairs | any two-liner's line sheet or rigging diagram: the three on file are Ozone's |
 | Whether riser count affects line consumption at all | a **low-aspect two-liner** or a **high-aspect three-liner** — the two are still partly confounded |
 | What a line carries in flight, row by row | measured riser or line loads on any wing: every strength factor here rests on a modelled split |
 | The real collapse dynamic factor | any published collapse or shock-load test data |

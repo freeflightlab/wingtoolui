@@ -251,6 +251,19 @@ declares, where the file hangs it at 33% and the rules at 25.5%; its lines'
 weight is centred within 1.4 mm of where the program centres it, and their
 drag within 3 mm.
 
+### 2.10 The section solver, against its own code and a tunnel
+
+The slices (`docs/slices.md`) solve every cell's section with a JavaScript
+port of mfoil, the method Scirocco implements. Held to mfoil.py itself, as
+Scirocco's repository carries it, on six sections from Re 200 000 to 1.5
+million and Mach 0.3 (`data/reference/mfoil-sections.tsv`), it agrees to
+1e-12 in lift, drag and moment and 1e-14 of the chord in transition — the
+port follows mfoil step for step, so the answers agree to the rounding, not
+to a tolerance — and it fails where mfoil.py fails. Against the Ohio State
+tunnel's clean NACA 4415 at Re 1.5 million (`naca4415-osu.tsv`), from 0° to
+6° the lift is within 0.06 and the moment within 0.016; the slope is 0.110 a
+degree against the tunnel's 0.095, whose walls were not corrected for.
+
 ---
 
 ## 3. Where sources disagree with each other
@@ -258,16 +271,16 @@ drag within 3 mm.
 ### 3.1 Scaling coefficients do not transfer between families
 
 Total line length against span fits a straight line in every family measured
-(R² 0.98 to 1.00), but the slope varies by a factor of 2.3 across the seven:
-16.2 for the Zeno 2, 21.5 for the Allegro light, 36.6 for the Ultralite 5.
+(R² 0.98 to 1.00), but the slope varies by a factor of 2.2 across the seven:
+16.8 for the Zeno 2, 21.5 for the Allegro light, 36.6 for the Ultralite 5.
 Applying one family's fit to another lands 9.7 to 46% out among the first three
 — worse than assuming nothing — so scaling is isometric unless the module is
 handed laws fitted to the family in question.
 
-Normalising by span *does* transfer: `line m per m span = −5.12·AR + 50.72`
-gives the total of the five families it was fitted to within **7.4%** at any
+Normalising by span *does* transfer: `line m per m span = −4.91·AR + 49.62`
+gives the total of the five families it was fitted to within **7.8%** at any
 size, and of the two that were not — Skywalk's SAGE and BGD's Lynx 2 — within
-0.8% and 7.5%.
+2.2% and 6.5%.
 
 ### 3.2 A published total that was not the lineset
 
@@ -395,7 +408,7 @@ Not validated, because there is nothing to validate against.
   predicted. Predicting it needs internal pressure and rib support modelling.
 - **The rear-row disagreement** (§3.3). Reconciling thin-aerofoil theory with
   the handbook convention needs measured riser loads.
-- **Why the Lynx 2 carries 7% more line than its aspect ratio suggests**
+- **Why the Lynx 2 carries 6 to 7% more line than its aspect ratio suggests**
   (§3.1). It is the only 2.5-liner in the set; whether that is the cause is
   untested.
 - **3D shaping of the leading edge.** `shaping3d.js` implements the darts of

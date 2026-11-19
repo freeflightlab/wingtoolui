@@ -54,7 +54,7 @@ const gather = (n, out = []) => {
   return out;
 };
 const VIEWS = ['vp-plan', 'vp-front', 'vp-iso', 'vp-section', 'vp-rib', 'vp-diag',
-  'vp-lineplan', 'vp-polar', 'vp-atmos', 'readout', 'balanceTable', 'envTable',
+  'vp-lineplan', 'vp-polar', 'vp-atmos', 'vp-slice', 'vp-span', 'readout', 'balanceTable', 'envTable',
   'cascadeTable'];
 const hash = (parts) => crypto.createHash('md5').update(parts.join('\n')).digest('hex');
 
@@ -147,9 +147,15 @@ const NEEDS = {
   // How far a diagonal reaches only matters where the lines are sparse: on
   // the default plan every free rib has a lined one beside it. Two free ribs
   // between, as a written cascade can ask for and the Swoop2 has.
+  // A written cascade sparse enough to leave gaps a longer diagonal fills.
+  // This one gave D mains of its own, which the parser refuses on A/B/C+D:
+  // the probe ran on the derived plan, every second rib, where the reach
+  // changes nothing, and stayed alive only through an export — the anchor
+  // solve's plan happened to leave gaps, until the brake cascade was fixed
+  // and it no longer did.
   vribReach: {
     vribs: true, useCascadeSpec: true,
-    cascadeSpec: 'A 9 4 2\nB 9 4 2\nC 9 4 2\nD 9 4 2',
+    cascadeSpec: 'A 9 4 2\nB 9 4 2\nC 9 4 2\nD 9 4',
   },
   ovalAmount: { applyOval: true }, ovalFromPressure: { applyOval: true },
   sailTension: { applyOval: true, ovalFromPressure: true },

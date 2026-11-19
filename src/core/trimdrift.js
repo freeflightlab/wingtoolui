@@ -332,6 +332,8 @@ export function trimDrift({
       name: p.name,
       row: p.row,
       index: p.index,
+      // A bridle pair's tab, `a` or `b`: two attachment points of one anchor.
+      variant: p.variant ?? null,
       isBrake: !!p.isBrake,
       isStabilo: !!p.isStabilo,
       lengthMM: parts.reduce((a, x) => a + x.line.referenceLengthMM, 0),

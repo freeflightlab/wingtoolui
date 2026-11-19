@@ -771,21 +771,23 @@ export function loadingCheck(sizes) {
  * Normalising by span removes the dominant size effect and leaves a quantity
  * that does transfer:
  *
- *     line metres per metre of span  =  -5.12 * AR + 50.72        R^2 = 0.95
+ *     line metres per metre of span  =  -4.91 * AR + 49.62        R^2 = 0.94
  *
  *   wing              AR    actual   fitted
- *   Ozone Ultralite 5 4.56   28.2     27.4
+ *   Ozone Ultralite 5 4.56   28.2     27.2
  *   Ozone Geo 7       5.16   23.0     24.3
- *   PHI Allegro light 6.03   21.0     19.8
- *   Ozone Alpina 5    6.07   18.9     19.6
- *   Ozone Zeno 2      6.90   15.5     15.4
+ *   PHI Allegro light 6.03   21.0     20.0
+ *   Ozone Alpina 5    6.07   18.9     19.8
+ *   Ozone Zeno 2      6.90   16.1     15.8
  *
  * ("actual" is the mean over a family's sizes; the line is fitted to those
- * five means.)
+ * five means.) It was -5.12 * AR + 50.72 until 2026-11-18, with the Zeno 2
+ * at 15.5: its totals, summed from its sheets, were short by its brake mains,
+ * `KRL` and `KRU`, which are named without a number and were not read.
  *
  * Predicting a family's total line length from aspect ratio and span alone
  * lands within **6.2%** at the middle size of each of the five and within
- * **7.4%** at every size of them — two- and three-line wings over a range of
+ * **7.8%** at every size of them — two- and three-line wings over a range of
  * more than 2:1 in area. That is the first line-length estimate in this
  * project that survives leaving the family it was fitted to.
  *
@@ -794,13 +796,14 @@ export function loadingCheck(sizes) {
  * ---------------------------------------------------------------------------
  * Two families were not in the fit, from two more makers.
  *
- *   Skywalk SAGE   five sizes   within 0.8% at every one
- *   BGD Lynx 2     four sizes   6.6 to 7.5% under at every one
+ *   Skywalk SAGE   five sizes   1.5 to 2.2% over at every one
+ *   BGD Lynx 2     four sizes   5.6 to 6.5% under at every one
  *
  * The Lynx 2 is a 2.5-liner — three rows in the middle and two at the tips —
  * and it carries more line than the law gives a wing of its aspect ratio, by
- * about the same at every size. So the law has now been 7.4% out inside its
- * own sample and 7.5% out of it.
+ * about the same at every size. So the law has now been 7.8% out inside its
+ * own sample and 6.5% out of it. (The SAGE was within 0.8% of the law fitted
+ * to the Zeno 2's short totals.)
  *
  * ---------------------------------------------------------------------------
  * A limit that was not one
@@ -847,18 +850,19 @@ export function loadingCheck(sizes) {
  * Two further caveats. Five families is a small sample for a two-parameter
  * fit, and four of the five are one maker's. And the riser-count correction
  * is withdrawn: Skywalk's SAGE, a two-liner at AR 6.4 that was not in the
- * fit, lands within 0.8% of the uncorrected line at every size, where a
- * factor of 0.90 would put it 9% low. Over the three two-liners now in the
- * file the mean residual is -1.2%, and over the three three-liners +1.1%.
+ * fit, lands within 2.2% of the uncorrected line at every size, where a
+ * factor of 0.90 would put it 8 to 9% low. Over the three two-liners now in
+ * the file the mean residual is -2.1%, and over the three three-liners
+ * +1.2%.
  */
 export const LINE_LENGTH_PER_SPAN = {
-  slope: -5.120,
-  intercept: 50.72,
-  r2: 0.951,
+  slope: -4.908,
+  intercept: 49.62,
+  r2: 0.944,
   // Inside the five fitted families: the worst at a family's middle size, and
   // the worst at any size (the largest Ultralite 5).
   worstFamilyErrorPct: 6.2,
-  worstSizeErrorPct: 7.4,
+  worstSizeErrorPct: 7.8,
   sampleFamilies: 5,
   // Ozone, four families, and PHI, one.
   sampleManufacturers: 2,
@@ -866,10 +870,10 @@ export const LINE_LENGTH_PER_SPAN = {
   // The families that were not in the fit, and the worst the law does on any
   // size of each.
   outOfSample: [
-    { family: 'Skywalk SAGE', sizes: 5, worstErrorPct: 0.8 },
-    { family: 'BGD Lynx 2', sizes: 4, worstErrorPct: 7.5 },
+    { family: 'Skywalk SAGE', sizes: 5, worstErrorPct: 2.2 },
+    { family: 'BGD Lynx 2', sizes: 4, worstErrorPct: 6.5 },
   ],
-  worstOutOfSampleErrorPct: 7.5,
+  worstOutOfSampleErrorPct: 6.5,
   // Every family measured scales its lineset with span, near enough: the
   // exponent runs from 1.02 to 1.30.
   assumesSpanScaling: true,

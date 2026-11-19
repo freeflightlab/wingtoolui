@@ -1,0 +1,44 @@
+# NACA 4415, clean, in a wind tunnel: lift, pressure drag and moment against angle
+# Source: R. L. Reuss Ramsay, M. J. Hoffmann and G. M. Gregorek, "Effects of Surface
+#   Roughness and Vortex Generators on the NACA 4415 Airfoil", NREL/TP-442-6472, December
+#   1995, Appendix B, Tables B1 (Re 1.0 million) and B2 (Re 1.5 million); measured in the
+#   Ohio State University AARL 7x10 subsonic tunnel; nrel.gov/docs/libraries/wind-images/n4415-7x10.pdf
+# Retrieved: 2026-11-18
+# measure: as-published, from surface pressures
+#
+# Not corrected for the tunnel's walls ("The data were not corrected for any tunnel wall
+# effects"; tunnel height 6.7 chords). The drag is the PRESSURE (form) drag integrated over
+# the model, without the skin friction, and goes slightly negative at low angles: it is not
+# a section drag coefficient and is kept for completeness only. Re is the nominal value of
+# each table; the runs' own were within 2% of it. Rows from -6 to 16 degrees.
+Re	alpha	cl	cdp	cm
+1000000	-5.9	-0.01	-0.0072	-0.1004
+1000000	-4.1	0.17	-0.0094	-0.0999
+1000000	-1.9	0.39	-0.0089	-0.0985
+1000000	0.1	0.57	-0.0085	-0.0967
+1000000	2.2	0.74	-0.0018	-0.0931
+1000000	4.0	0.95	0.0005	-0.0930
+1000000	6.0	1.11	0.0059	-0.0844
+1000000	8.3	1.25	0.0185	-0.0709
+1000000	10.1	1.31	0.0227	-0.0542
+1000000	11.1	1.36	0.0371	-0.0530
+1000000	12.1	1.40	0.0562	-0.0561
+1000000	13.0	1.43	0.0719	-0.0591
+1000000	14.0	1.47	0.0974	-0.0683
+1000000	15.0	1.46	0.1207	-0.0716
+1000000	16.1	1.45	0.1430	-0.0716
+1500000	-5.9	-0.06	-0.0080	-0.0977
+1500000	-4.0	0.13	-0.0083	-0.0986
+1500000	-2.0	0.32	-0.0063	-0.0970
+1500000	0.0	0.51	-0.0033	-0.0957
+1500000	2.1	0.70	0.0007	-0.0936
+1500000	4.2	0.89	0.0079	-0.0899
+1500000	6.0	1.08	0.0097	-0.0833
+1500000	8.1	1.22	0.0196	-0.0722
+1500000	10.1	1.30	0.0328	-0.0590
+1500000	11.1	1.36	0.0401	-0.0549
+1500000	12.2	1.38	0.0561	-0.0542
+1500000	12.9	1.39	0.0750	-0.0656
+1500000	14.0	1.45	0.0988	-0.0680
+1500000	15.0	1.45	0.1242	-0.0719
+1500000	16.0	1.45	0.1445	-0.0740

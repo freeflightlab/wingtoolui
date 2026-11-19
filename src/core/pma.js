@@ -399,7 +399,8 @@ export function exchangeRecord({
       : p.lengthMM;
     const riser = p.isBrake ? 0 : riserLengthMM;
     totals.push({
-      attachmentPoint: `${p.row}${p.index}`,
+      // A bridle pair's two tabs are two attachment points of one anchor.
+      attachmentPoint: `${p.row}${p.index}${p.variant ?? ''}`,
       topLine: p.name,
       row: p.row,
       index: p.index,
@@ -475,7 +476,10 @@ export function inspectionForecast({ record, drift }) {
     throw new Error('inspectionForecast needs a record with total line lengths');
   }
   if (!drift?.points) throw new Error('inspectionForecast needs the drift of each attachment point');
-  const moved = new Map(drift.points.map((p) => [`${p.row}${p.index}`, p]));
+  // Keyed as the record names its attachment points: a bridle pair's two
+  // tabs by their own letter, or the second replaced the first and neither
+  // was found under the record's `A1a` and `A1b`.
+  const moved = new Map(drift.points.map((p) => [`${p.row}${p.index}${p.variant ?? ''}`, p]));
   const lines = [];
   const notForecast = [];
   for (const t of record.totalLineLengths) {

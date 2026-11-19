@@ -116,6 +116,9 @@ const S = {
   balanceForces: 'acting', pilotBelow: 0.2, pilotHangs: 'free',
   // panels
   ribIndex: 0, tab: 'wing', ribHoles: true, marks: true,
+  // Which slice is on show, and the flight the slices are analysed in, set
+  // by the Slices tab's own tools as the rib on show is by the Rib tab's.
+  sliceIndex: 0, sliceState: 'trim',
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', dimensions: true,
   isoAz: 35, isoEl: 12, isoLines: true, riserLayout: 'A/B/C+D', splitFrom: 62,
@@ -1094,6 +1097,8 @@ function rebuild() {
           mainsPerRow: written.mainsPerRow,
           tipAnchorsPerRow: written.tipsPerRow,
           ...(written.stabiloRiser ? { stabiloRiser: written.stabiloRiser } : {}),
+          // A two-liner's bridle pairs, where the cascade writes them.
+          ...(Object.keys(written.bridlesPerRow ?? {}).length ? { bridlesPerRow: written.bridlesPerRow } : {}),
         }
         : {}),
       // The rows' tip lines on one stabilo line to the riser that carries B,
@@ -2036,9 +2041,12 @@ function buildControls() {
       + 'anchors and middles (D 14 6). Without a middle count they come in pairs. '
       + '"tip 2" says how many of the row\u2019s anchors are tip lines, the '
       + 'stabilo\u2019s, on the outermost ribs; without it a row that reaches the '
-      + 'tip has two and a shorter row none. "S C" hangs the stabilo on the C '
-      + 'riser (the riser that carries B without it). K is the brake (K 13 6 3). '
-      + 'Lines starting # are comments.');
+      + 'tip has two and a shorter row none. "bridle 8" gives the row\u2019s first '
+      + 'eight anchors a bridle pair each, two tabs on the rib on one short line, '
+      + 'as Ozone\u2019s two-liners have (A 14 3 bridle 8). "S C" hangs the stabilo '
+      + 'on the C riser (the riser that carries B without it). K is the brake: '
+      + 'anchors, upper and lower middle lines, on the one main line from the '
+      + 'handle (K 13 6 3). Lines starting # are comments.');
     liveHint(LN, () => {
       const w = M.writtenCascade;
       if (!w) return '';
@@ -2054,7 +2062,7 @@ function buildControls() {
     });
   }
   // The derived plan attaches every second rib: a real wing's density on the
-  // default wing (13 of 25 ribs; real wings run 0.28 to 0.94, median 0.53).
+  // default wing (13 of 25 ribs; real wings run 0.28 to 0.90, median 0.45).
   button(LN, 'Solve anchors to the line length', () => solveAnchorsToLineLength(), 'btn');
   numberField(LN, 'karabinerSep', 'Karabiner separation (cm)', 20, 70, 1);
   }
@@ -3111,6 +3119,7 @@ function draw() {
   refreshHints();
   if (S.tab === 'rib') { drawRib(); return; }
   if (S.tab === 'analysis') { drawPolar(); drawAtmosphere(); return; }
+  if (S.tab === 'slices') { drawSliceView(); drawSpanView(); return; }
   if (S.tab === 'lines') { drawLinePlan(); return; }
   if (S.tab === 'structure') { drawDiagonals(); return; }
   drawPlan();
@@ -3366,6 +3375,352 @@ function drawAtmosphere() {
     `density, log scale — ${decades} decades over ${(top / 1000).toFixed(0)} km`
     + `  ·  here ${(M.atm.densityRatio * 100).toFixed(2)}% of sea level`
     + `  ·  V for trim CL ${(speedForLift({ mass, area: M.metrics.area, cl: CL, atm: M.atm }) * 3.6).toFixed(0)} km/h`;
+}
+
+/* -------------------------------------------------------------- slices -- */
+
+/**
+ * The wing as its sections (slices.js): every cell's section solved with
+ * the viscous panel method mfoil — the method Scirocco implements — at the
+ * angle and Reynolds number the whole wing leaves it, and put back together
+ * on the vortex lattice.
+ *
+ * Run on demand: it solves a hundred sections and takes seconds, where the
+ * rest of the tool redraws in a frame. The run is kept with the design and
+ * the flight it was made for, and said to be stale once either moves on;
+ * nothing else in the tool reads it.
+ */
+let SLICE_RUN = null;
+
+/** The flight the slices are analysed in: hands up at the balance's own
+ * angle, or the speed bar's last position the lift curve supports. */
+function sliceFlight() {
+  const massKg = S.pilotMass + S.wingMass + S.lineMass;
+  const sb = M.speedBar && !M.speedBar.error && M.speedBar.rows?.length ? M.speedBar : null;
+  const alpha = M.alphaFlown ?? S.alphaDeg;
+  const speed = M.balance?.speedMS ?? 10;
+  if (S.sliceState === 'accelerated' && sb) {
+    const ok = sb.rows.filter((r) => r.inRange);
+    const rows = ok.length ? ok : sb.rows;
+    const r = rows[rows.length - 1];
+    return {
+      state: 'accelerated', alphaDeg: r.alphaDeg, speed: r.speedKMH / 3.6, massKg,
+      label: `accelerated, ${r.barMM.toFixed(0)} mm of bar`, inRange: !!r.inRange,
+    };
+  }
+  return { state: 'trim', alphaDeg: alpha, speed, massKg, label: 'hands up (trim)', inRange: true };
+}
+
+/** What a slice run depends on, as a short digest: the ribs where they are,
+ * the section, the air, the flight and the transition setting. */
+function sliceKey(fl) {
+  const ribs = M.wing.ribs.map((r) => [r.station, r.chord, r.frame?.origin, r.frame?.u, r.frame?.v]);
+  const text = JSON.stringify([ribs, M.airfoil.points, M.atm.density, M.atm.dynamicViscosity,
+    fl.state, fl.alphaDeg, fl.massKg, M.metrics.area, S.nCrit]);
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(16);
+}
+
+function sliceProgressText(run) {
+  const p = run.progress;
+  if (!p) return 'Starting…';
+  const what = p.phase === 'grid'
+    ? `section polars ${p.done} of ${p.total}${p.Re ? ` (Re ${(p.Re / 1e6).toFixed(2)} million, ${p.alphaDeg}°)` : ''}`
+    : p.phase === 'couple' ? `the lattice, ${p.speed ? `${(p.speed * 3.6).toFixed(1)} km/h` : ''}`
+      : `slice by slice ${p.done} of ${p.total}${p.round ? `, correction ${p.round}` : ''}`;
+  return `Solving ${run.flight.label}: ${what} · ${((Date.now() - run.started) / 1000).toFixed(0)} s`;
+}
+
+/**
+ * Run the slices for the flight chosen. Resolves to the run; one at a time,
+ * and a newer request (another flight) takes over from an older one.
+ */
+async function runSliceAnalysis(overrides = {}) {
+  if (!M || !M.wing || M.error) return null;
+  if (SLICE_RUN && SLICE_RUN.running && SLICE_RUN.key === sliceKey(sliceFlight())) return SLICE_RUN;
+  const fl = sliceFlight();
+  const run = {
+    key: sliceKey(fl), flight: fl, running: true, progress: null, analysis: null, error: null, started: Date.now(),
+  };
+  SLICE_RUN = run;
+  if (S.tab === 'slices') { buildTabTools(); draw(); }
+  try {
+    const gen = sliceAnalysisSteps({
+      wing: M.wing, airfoil: M.airfoil, atm: M.atm, alphaDeg: fl.alphaDeg, massKg: fl.massKg,
+      areaM2: M.metrics.area, speed: fl.speed, settings: { ncrit: S.nCrit, ...overrides }, label: fl.label,
+    });
+    run.analysis = await runStepsAsync(gen, {
+      onProgress: (p) => {
+        run.progress = p;
+        if (S.tab === 'slices' && SLICE_RUN === run) {
+          const n = document.getElementById('note-span');
+          if (n) n.textContent = sliceProgressText(run);
+        }
+      },
+      isCancelled: () => SLICE_RUN !== run,
+    });
+  } catch (e) {
+    run.error = e.message;
+  }
+  run.running = false;
+  run.ms = Date.now() - run.started;
+  if (SLICE_RUN === run) {
+    if (S.tab === 'slices') { buildTabTools(); draw(); }
+    if (run.error && !/cancelled/.test(run.error)) setStatus(`Slices: ${run.error}`);
+    else if (!run.error) setStatus(null, `Slices: ${run.analysis.slices.length} sections, ${(run.ms / 1000).toFixed(1)} s`);
+  }
+  return run;
+}
+
+/** The run on show, and whether the design or the flight has moved on. */
+function sliceRunShown() {
+  const run = SLICE_RUN;
+  if (!run || !run.analysis || !M?.wing || M.error) return { run, A: null, stale: false };
+  return { run, A: run.analysis, stale: run.key !== sliceKey(sliceFlight()) };
+}
+
+/**
+ * One slice, in its own flow: the free stream across the page, the section
+ * turned to the angle the wing leaves it at, its displacement thickness laid
+ * on it (magnified) and carried into the wake, transition marked, and its
+ * pressure coefficient above, against x/c — viscous solid, inviscid dashed.
+ */
+function drawSliceView() {
+  const note = document.getElementById('note-slice');
+  const { run, A, stale } = sliceRunShown();
+  if (!A) {
+    const pts = M.airfoil.points;
+    const c = canvas('vp-slice', pts.concat([[0, -0.2], [1, 0.3]]));
+    c.path([[0, 0], [1, 0]], '#4e6270', 0.8, { dash: '5 4' });
+    c.path(pts, '#35d6e8', 1.4, { close: true });
+    c.text('the section every slice shares; press "Analyse the slices" to solve them', [0, 0.22], '#8a9aa6', 9);
+    c.fit();
+    note.textContent = run?.running ? sliceProgressText(run)
+      : run?.error ? `Not analysed: ${run.error}` : 'Not analysed yet.';
+    return;
+  }
+  const n = A.slices.length;
+  const i = Math.max(0, Math.min(n - 1, S.sliceIndex | 0));
+  const sl = A.slices[i];
+  const res = A.results[i];
+  const d = res?.distributions;
+  if (!d) {
+    canvas('vp-slice', [[0, 0], [1, 0.3]]);
+    note.textContent = `Slice ${i}: not solved${res?.error ? ` (${res.error})` : ''}.`;
+    return;
+  }
+  const a = (sl.alphaEffDeg * Math.PI) / 180;
+  const ca = Math.cos(a); const sa = Math.sin(a);
+  // turned so the free stream runs across the page
+  const turn = (x, z) => [x * ca + z * sa, -x * sa + z * ca];
+  const N = d.N;
+  const foil = [];
+  for (let k = 0; k < N; k++) foil.push(turn(d.x[k], d.z[k]));
+  // displacement thickness, magnified, off the surface along its normal
+  const mag = 5;
+  const body = [];
+  for (let k = 0; k < N; k++) {
+    const p = d.x; const q = d.z;
+    const k0 = Math.max(0, k - 1); const k1 = Math.min(N - 1, k + 1);
+    let tx = p[k1] - p[k0]; let tz = q[k1] - q[k0];
+    const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
+    // the nodes run from the trailing edge along the lower surface, round
+    // the nose and back along the upper: outward is the tangent turned a
+    // quarter anticlockwise
+    const nx = -tz; const nz = tx;
+    body.push(turn(p[k] + mag * d.dstar[k] * nx, q[k] + mag * d.dstar[k] * nz));
+  }
+  const wakeMid = []; const wakeUp = []; const wakeLo = [];
+  for (let k = N; k < d.x.length; k++) {
+    const m = turn(d.x[k], d.z[k]);
+    if (m[0] > 1.6) break;
+    const h = 0.5 * mag * d.dstar[k];
+    wakeMid.push(m); wakeUp.push([m[0], m[1] + h]); wakeLo.push([m[0], m[1] - h]);
+  }
+  // pressure, above the section: -Cp up
+  const cps = d.cp.slice(0, N);
+  const cpMin = Math.min(...cps); const cpMax = Math.max(...cps);
+  const top = 0.18 + Math.max(...foil.map((q) => q[1]), 0);
+  const k = 0.55 / Math.max(1, cpMax - cpMin);
+  const cpY = (cp) => top + k * (-cp - (-cpMax));
+  const cpLine = (from, to, arr) => {
+    const out = [];
+    for (let j = from; j !== to; j += from < to ? 1 : -1) out.push([d.x[j], cpY(arr[j])]);
+    return out;
+  };
+  const all = foil.concat(body, wakeUp, wakeLo, [[0, top], [1, cpY(cpMin)], [1.6, 0]]);
+  const c = canvas('vp-slice', all);
+  // Cp axes: zero line and the free stream's 1
+  c.path([[0, cpY(0)], [1, cpY(0)]], '#4e6270', 0.8, { dash: '3 3' });
+  c.text('Cp 0', [1.02, cpY(0)], '#8a9aa6', 8, 'start', [0, 3]);
+  c.text(`−Cp, ${(-cpMin).toFixed(2)} at its peak`, [0, cpY(cpMin)], '#8a9aa6', 8, 'start', [0, -6]);
+  // stagnation near the nose: the airfoil's lowest-x node splits the surfaces
+  let ile = 0;
+  for (let j = 1; j < N; j++) if (d.x[j] < d.x[ile]) ile = j;
+  c.path(cpLine(0, ile + 1, d.cpi), '#6f8591', 0.8, { dash: '4 3' });
+  c.path(cpLine(N - 1, ile - 1, d.cpi), '#6f8591', 0.8, { dash: '4 3' });
+  c.path(cpLine(0, ile + 1, d.cp), '#e85bc4', 1.3);
+  c.path(cpLine(N - 1, ile - 1, d.cp), '#35d6e8', 1.3);
+  // the section, its displacement body and its wake
+  c.path(foil, '#cccccc', 1.2, { close: true });
+  c.path(body, '#e8c547', 0.9);
+  if (wakeMid.length > 1) {
+    c.path(wakeUp, '#e8c547', 0.8);
+    c.path(wakeLo, '#e8c547', 0.8);
+    c.path(wakeMid, '#4e6270', 0.6, { dash: '2 3' });
+  }
+  // separated: skin friction reversed
+  for (let j = 0; j < N - 1; j++) {
+    if (d.cf[j] < 0 && d.cf[j + 1] < 0) c.path([foil[j], foil[j + 1]], '#ff5a5a', 2.4);
+  }
+  // transition on each surface, at its x along that surface
+  const mark = (xt, upper) => {
+    if (!(xt > 0)) return;
+    let best = -1;
+    for (let j = 0; j < N; j++) {
+      if (upper ? j < ile : j > ile) continue;
+      if (best < 0 || Math.abs(d.x[j] - xt) < Math.abs(d.x[best] - xt)) best = j;
+    }
+    if (best >= 0) {
+      c.dot(foil[best], '#5fd97a', 3);
+      c.text(`transition ${(xt * 100).toFixed(0)}%`, foil[best], '#5fd97a', 8, upper ? 'start' : 'end', upper ? [4, -6] : [-4, 12]);
+    }
+  };
+  mark(d.xtr[1], true); mark(d.xtr[0], false);
+  // the free stream
+  c.path([[-0.18, -0.02], [-0.06, -0.02]], '#8a9aa6', 1);
+  c.text('flow', [-0.18, -0.02], '#8a9aa6', 8, 'start', [0, -4]);
+  c.fit();
+  const conv = !res.converged ? ' · NOT CONVERGED'
+    : res.bracketDeg ? ` · it cycles at this angle: solved ${res.bracketDeg}° either side and read between` : '';
+  note.textContent = `${stale ? 'STALE — the design or flight has changed; analyse again · ' : ''}`
+    + `slice ${i} of ${n - 1} (${sl.side}${res.mirroredFrom != null ? `, the mirror of ${res.mirroredFrom}` : ''})`
+    + ` · y ${sl.y.toFixed(2)} m · chord ${sl.chord.toFixed(3)} m · Re ${(sl.reynolds / 1e6).toFixed(2)} million`
+    + ` · arc ${Math.abs(sl.arcDeg).toFixed(1)}° · sees ${sl.alphaEffDeg.toFixed(2)}°`
+    + ` · cl ${(Number.isFinite(sl.clSlice) ? sl.clSlice : sl.cl).toFixed(3)} · cd ${sl.cd.toFixed(5)} · cm ${sl.cm.toFixed(3)}`
+    + ` · transition upper ${d.xtr[1] > 0 ? `${(d.xtr[1] * 100).toFixed(0)}%` : 'none'}, lower ${d.xtr[0] > 0 ? `${(d.xtr[0] * 100).toFixed(0)}%` : 'none'}`
+    + `${conv} · cyan upper, magenta lower, dashed inviscid · yellow: displacement thickness ×${mag}`;
+}
+
+/** Every slice, tip to tip: lift, drag and the angle each meets. */
+function drawSpanView() {
+  const note = document.getElementById('note-span');
+  const { run, A, stale } = sliceRunShown();
+  if (!A) {
+    const c = canvas('vp-span', [[0, 0], [1, 1]], 0.1, { chart: true });
+    c.text(run?.running ? 'solving the sections…' : 'no slices analysed yet', [0.5, 0.5], '#8a9aa6', 10, 'middle');
+    note.textContent = run?.running ? sliceProgressText(run)
+      : run?.error ? `Not analysed: ${run.error}`
+        : 'Analyse the slices: each cell\'s section is solved with a viscous panel method (mfoil, the method '
+          + 'Scirocco implements) at the angle and Reynolds number the whole wing leaves it, and the wing is put '
+          + 'back together from them. Some seconds.';
+    return;
+  }
+  const P = A.slices;
+  const cl = P.map((p) => [p.y, p.cl]);
+  const cd = P.map((p) => [p.y, p.cd * 10]);
+  const al = P.map((p) => [p.y, p.alphaEffDeg / 10]);
+  const ys = P.map((p) => p.y);
+  const lo = Math.min(0, ...cl.map((q) => q[1]), ...al.map((q) => q[1]));
+  const hi = Math.max(...cl.map((q) => q[1]), ...cd.map((q) => q[1]), ...al.map((q) => q[1]));
+  const c = canvas('vp-span', [[Math.min(...ys), lo], [Math.max(...ys), hi * 1.08]], 0.1, { chart: true });
+  c.grid(1, 0.1);
+  c.axes({ xStep: 1, yStep: 0.2, xTitle: 'across the span, m (left tip to right)', yTitle: 'cl · cd ×10 · angle ÷10, °' });
+  c.path(cl, '#35d6e8', 1.6);
+  c.path(cd, '#e85bc4', 1.2);
+  c.path(al, '#e8c547', 1.0, { dash: '4 3' });
+  for (const p of P) if (!p.converged) c.dot([p.y, p.cl], '#ff5a5a', 3);
+  const i = Math.max(0, Math.min(P.length - 1, S.sliceIndex | 0));
+  c.path([[P[i].y, lo], [P[i].y, hi * 1.04]], '#5fd97a', 1, { dash: '2 2' });
+  c.dot([P[i].y, P[i].cl], '#5fd97a', 3.5);
+  c.fit();
+  const t = A.totals;
+  const tool = polarAt(M.polar, t.alphaDeg);
+  note.textContent = `${stale ? 'STALE — analyse again · ' : ''}${A.label}, ${t.alphaDeg.toFixed(2)}°, `
+    + `${(t.speed * 3.6).toFixed(1)} km/h: CL ${t.CL.toFixed(3)} · CDi ${t.CDi.toFixed(4)} · CDp ${t.CDp.toFixed(5)}`
+    + ` · Cm ${t.Cm.toFixed(3)} about the central quarter chord · the wing alone L/D ${t.wingLD.toFixed(1)}`
+    + (tool ? ` · the tool's polar at this angle: CL ${tool.CL.toFixed(3)}, CDi ${tool.CDi.toFixed(4)}, CDp ${tool.CDprofile.toFixed(5)}` : '')
+    + ` · ${A.check.convergedSlices} of ${A.check.solvedSlices} sections converged (the other half mirrored)`
+    + (A.check.bracketedSlices ? `, ${A.check.bracketedSlices} of them read between solves either side` : '')
+    + ` · lattice and slices agree to ${A.check.liftMismatch.toExponential(1)} in cl`
+    + ` · cyan cl, magenta cd ×10, yellow the angle each meets ÷10`;
+}
+
+function sliceFileBase(i) { return `${S.name}-slice${String(i).padStart(2, '0')}`; }
+
+/** The slices' own controls, beside the tabs. */
+function buildSliceTools(host) {
+  const { run, A, stale } = sliceRunShown();
+  const busy = !!run?.running;
+  const go = el('button', 'btn', busy ? 'Analysing…' : (A && !stale ? 'Analyse again' : 'Analyse the slices'));
+  go.style.padding = '4px 8px';
+  go.addEventListener('click', () => { runSliceAnalysis(); });
+  const state = el('select');
+  for (const [v, t] of [['trim', 'hands up'], ['accelerated', 'accelerated']]) {
+    const o = el('option', null, t); o.value = v; if (S.sliceState === v) o.selected = true; state.append(o);
+  }
+  state.value = S.sliceState;
+  state.setAttribute('aria-label', 'Flight the slices are analysed in');
+  state.addEventListener('change', () => { S.sliceState = state.value; buildTabTools(); draw(); });
+  host.append(go, state);
+  if (!A) return;
+  const last = A.slices.length - 1;
+  if (S.sliceIndex > last) S.sliceIndex = last;
+  const lab = el('label', null, 'Slice');
+  const slider2 = el('input');
+  slider2.type = 'range';
+  slider2.min = 0; slider2.max = last; slider2.step = 1; slider2.value = S.sliceIndex;
+  slider2.setAttribute('aria-label', 'Slice to display, left tip to right tip');
+  const out = el('label', null, `${S.sliceIndex} / ${last}`);
+  out.style.color = 'var(--aci-yellow)';
+  const show = (i) => {
+    S.sliceIndex = Math.max(0, Math.min(last, i));
+    slider2.value = S.sliceIndex;
+    out.textContent = `${S.sliceIndex} / ${last}`;
+    drawSliceView(); drawSpanView();
+  };
+  slider2.addEventListener('input', () => show(parseInt(slider2.value, 10)));
+  const step = (txt, d, aria) => {
+    const b = el('button', 'btn', txt);
+    b.style.padding = '4px 8px';
+    b.setAttribute('aria-label', aria);
+    b.addEventListener('click', () => show(S.sliceIndex + d));
+    return b;
+  };
+  host.append(lab, step('◀', -1, 'Previous slice'), slider2, step('▶', 1, 'Next slice'), out, el('label', null, 'Save'));
+  const exp = (txt, fn) => {
+    const b = el('button', 'btn', txt);
+    b.style.padding = '4px 8px';
+    b.addEventListener('click', fn);
+    host.append(b);
+  };
+  exp('.dat', () => sliceExport('dat'));
+  exp('XFOIL', () => sliceExport('xfoil'));
+  exp('mfoil', () => sliceExport('mfoil'));
+  exp('Scirocco', () => sliceExport('scirocco'));
+  exp('All slices', () => sliceExport('table'));
+}
+
+/** What the slice export buttons write: the section as the slices solve it,
+ * an XFOIL run or an mfoil script for the slice on show, Scirocco's inputs
+ * for it, or every slice in a table. */
+function sliceExportText(kind, i = S.sliceIndex) {
+  const { A } = sliceRunShown();
+  if (!A) return null;
+  const sl = A.slices[Math.max(0, Math.min(A.slices.length - 1, i))];
+  const ncrit = A.settings.ncrit; const npanel = A.settings.npanel;
+  if (kind === 'dat') return [`${S.name}-section.dat`, sliceSectionDat(M.airfoil, { name: `${S.name} section` })];
+  if (kind === 'xfoil') return [`${sliceFileBase(sl.index)}-xfoil.txt`, sliceXfoilScript(sl, { datFile: `${S.name}-section.dat`, ncrit, npanel })];
+  if (kind === 'mfoil') return [`${sliceFileBase(sl.index)}-mfoil.py`, sliceMfoilScript(sl, M.airfoil, { name: `${S.name} slice ${sl.index}`, ncrit, npanel })];
+  if (kind === 'scirocco') return [`${sliceFileBase(sl.index)}-scirocco.json`, `${JSON.stringify(sliceSciroccoInput(sl, M.airfoil, { npanel }), null, 1)}\n`];
+  if (kind === 'table') return [`${S.name}-slices.tsv`, sliceTable(A)];
+  return null;
+}
+
+function sliceExport(kind) {
+  const out = sliceExportText(kind);
+  if (out) save(out[0], out[1]);
 }
 
 /**
@@ -5332,7 +5687,8 @@ function ribFeatures(rib) {
     const key = `${row}:${point[0].toFixed(4)}`;
     if (seen.has(key)) continue;          // the two halves' lines to a centre rib
     seen.add(key);
-    anchors.push({ row, name: l.name, fraction: point[0] / rib.chord, point });
+    // A bridle pair's two tabs, each labelled with its own letter.
+    anchors.push({ row, name: l.name, variant: l.bridle ? l.variant : null, fraction: point[0] / rib.chord, point });
   }
   anchors.sort((a, b) => a.point[0] - b.point[0]);
   // With no plan at all, the stations the section gives.
@@ -5416,17 +5772,23 @@ function ribFeatures(rib) {
   // checks, through the openings this rib really has.
   const loadPaths = [];
   if (M.loads && M.linePlan) {
-    const loadOf = new Map(M.loads.anchorLoads
-      .filter((a) => a.ribIndex === rib.index).map((a) => [a.row, a.loadN]));
+    // Each tab's own load and line, by the line's name: a bridle pair is two
+    // tabs of one row on this rib, and by row both took the forward one's.
+    const here = M.loads.anchorLoads.filter((a) => a.ribIndex === rib.index);
+    const loadOf = new Map(here.map((a) => [a.name ?? a.row, a.loadN]));
+    for (const a of here) if (!loadOf.has(a.row)) loadOf.set(a.row, a.loadN);
     const cap = (RIB_CLOTH[S.clothRib] ?? RIB_CLOTH['Porcher Skytex 27 hard']).lineLoadNPerM;
     for (const a of anchors) {
-      if (!loadOf.has(a.row)) continue;     // a brake, or a line the loads do not carry
+      const key = loadOf.has(a.name) ? a.name : a.row;
+      if (!loadOf.has(key)) continue;     // a brake, or a line the loads do not carry
       const line = M.linePlan.lines.find((l) => l.level === 'upper' && l.ribIndex === rib.index
-        && (l.anchorRow ?? l.row) === a.row && Array.isArray(l.to));
+        && l.name === a.name && Array.isArray(l.to))
+        ?? M.linePlan.lines.find((l) => l.level === 'upper' && l.ribIndex === rib.index
+          && (l.anchorRow ?? l.row) === a.row && Array.isArray(l.to));
       const pull = line ? lineAngleOnRib(rib, line) : null;
       try {
         const path = anchorLoadPath({
-          anchorChordFraction: a.fraction, loadN: RIB_DESIGN_FACTOR * loadOf.get(a.row),
+          anchorChordFraction: a.fraction, loadN: RIB_DESIGN_FACTOR * loadOf.get(key),
           chordM: rib.chord, upper, lower, anchorPointM: a.point, holes,
           lineAngleDeg: pull?.lineAngleDeg ?? null, clothLineLoadNPerM: cap, stepDeg: 1,
         });
@@ -5518,7 +5880,7 @@ function drawRib() {
         c.path([[x, yAnchors - tick], [x, yAnchors + tick]], '#ff9f5e', 0.8, { opacity: 0.85 });
       }
       for (const a of F.anchors) {
-        c.text(`${a.row} ${(a.point[0] * 1000).toFixed(0)}`, [a.point[0], yAnchors],
+        c.text(`${a.row}${a.variant ?? ''} ${(a.point[0] * 1000).toFixed(0)}`, [a.point[0], yAnchors],
           '#ff9f5e', 8, 'middle', [0, 16]);
       }
     }
@@ -5908,6 +6270,7 @@ function addViewportSavers() {
     ['vp-plan', 'plan'], ['vp-front', 'front'], ['vp-iso', 'isometric'], ['vp-section', 'section'],
     ['vp-cut', 'cut'], ['vp-rib', 'rib'], ['vp-diag', 'structure'],
     ['vp-lineplan', 'lines'], ['vp-polar', 'polar'], ['vp-atmos', 'atmosphere'],
+    ['vp-slice', 'slice'], ['vp-span', 'slices'],
   ];
   for (const [id, what] of views) {
     const svg = document.getElementById(id);
@@ -6026,6 +6389,7 @@ function buildTabTools() {
   const host = document.getElementById('tabTools');
   if (!host) return;
   host.innerHTML = '';
+  if (S.tab === 'slices' && M.wing && !M.error) { buildSliceTools(host); return; }
   if (S.tab !== 'rib' || !M.wing) return;
 
   const last = M.wing.ribs.length - 1;

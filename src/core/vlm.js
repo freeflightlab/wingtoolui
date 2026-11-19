@@ -178,17 +178,16 @@ export function trefftzSegments(trace, gamma, rho = 1.225) {
 }
 
 /**
- * Solve the wing as a vortex lattice.
- *
- * `strips` describe the wing geometry directly: each is a spanwise slice with
- * its leading and trailing edge at both ends. That keeps this module free of
- * any assumption about how the wing was generated — an imported design and a
- * parametric one both reduce to the same thing.
+ * The lattice's geometry and influence, without solving it: each strip's
+ * horseshoe (bound segment on the quarter-chord line, control point at three
+ * quarters, the strip's own upward normal), every horseshoe's velocity at
+ * every control point for a unit circulation (VX, VY, VZ), the normal parts
+ * of those (A) and the free stream's (rhs). `vortexLattice` solves this as
+ * it stands; the slices (slices.js) solve it with each strip's boundary
+ * condition turned to match its section's own lift.
  */
-export function vortexLattice({
-  strips, alphaDeg = 6, freestream = 1, farWake = 200,
-}) {
-  if (!strips?.length) throw new Error('vortexLattice needs strips');
+export function latticeSystem(strips, { alphaDeg = 6, freestream = 1, farWake = 200 } = {}) {
+  if (!strips?.length) throw new Error('latticeSystem needs strips');
 
   const alpha = (alphaDeg * Math.PI) / 180;
   const U = [freestream * Math.cos(alpha), 0, freestream * Math.sin(alpha)];
@@ -267,6 +266,23 @@ export function vortexLattice({
     A.push(row);
     rhs.push(-vDot(U, panels[i].normal));
   }
+
+  return { panels, n, VX, VY, VZ, A, rhs, U, alpha, wake, horseshoe };
+}
+
+/**
+ * Solve the wing as a vortex lattice.
+ *
+ * `strips` describe the wing geometry directly: each is a spanwise slice with
+ * its leading and trailing edge at both ends. That keeps this module free of
+ * any assumption about how the wing was generated — an imported design and a
+ * parametric one both reduce to the same thing.
+ */
+export function vortexLattice({
+  strips, alphaDeg = 6, freestream = 1, farWake = 200,
+}) {
+  if (!strips?.length) throw new Error('vortexLattice needs strips');
+  const { panels, n, VX, VY, VZ, A, rhs, U, alpha } = latticeSystem(strips, { alphaDeg, freestream, farWake });
 
   const gamma = solveDense(A, rhs);
 

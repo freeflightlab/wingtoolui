@@ -439,12 +439,14 @@ input[type=range]::-moz-range-thumb {
 
 .vptabs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
   padding: 0 8px;
   background: var(--panel);
   border-bottom: 1px solid var(--rule);
   flex: none;
+  min-width: 0;
 }
 
 .vptab {
@@ -465,10 +467,14 @@ input[type=range]::-moz-range-thumb {
 .vptab-tools {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
-  gap: 8px;
-  padding-right: 4px;
+  gap: 6px 8px;
+  padding: 3px 4px 3px 0;
+  min-width: 0;
 }
+.vptab-tools label { white-space: nowrap; }
 .vptab-tools label {
   font-family: var(--mono);
   font-size: 10px;

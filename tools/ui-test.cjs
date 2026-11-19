@@ -509,7 +509,11 @@ if (!errors.length) {
     for (const l of m.linePlan.lines) {
       if (l.shared || l.row === 'S') continue;
       const r = (by[l.row] ||= { upper: 0, middle: 0, main: 0 });
-      r[l.level] += 1;
+      // The brake's lower middles go where a row's mains do, as its spec
+      // writes them: "K 11 5 2" is 11 anchors on 5 middles on 2, on the one
+      // main line every brake has.
+      if (l.row === 'K' && l.level === 'middle' && l.side === 'lower') r.main += 1;
+      else r[l.level] += 1;
     }
     return by;
   };
@@ -545,7 +549,8 @@ if (!errors.length) {
     S2.reference = ref; globalThis.__rebuild(); globalThis.__controls(); globalThis.__rebuild();
     const m = globalThis.__getM();
     got[ref] = { layout: S2.riserLayout, spec: S2.useCascadeSpec ? S2.cascadeSpec : '', ok: m.writtenCascade?.ok,
-      built: m.linePlan.levelShortfalls.length === 0, line: m.linePlan.totalLengthM, note: S2._referenceNote };
+      built: m.linePlan.levelShortfalls.length === 0, line: m.linePlan.totalLengthM, note: S2._referenceNote,
+      bridles: m.linePlan.lines.filter((l) => l.bridle).length };
   }
   const g = got;
   // Its tip lines too, as its totals show them: the last two A and B lines
@@ -553,7 +558,9 @@ if (!errors.length) {
   const own = g['Ozone Geo 7 MS'].layout === 'A/B/C+D'
     && /\nA 14 6 3 tip 2\nB 14 6 3 tip 2\nC 15 6 3 tip 1\nD 14 6 tip 0\nS C$/.test(g['Ozone Geo 7 MS'].spec)
     && g['Ozone Geo 7 MS'].ok && g['Ozone Geo 7 MS'].built
-    && g['Ozone Zeno 2 S'].layout === 'A/B+C' && /A 30 3\nB 14 3\nC 8$/.test(g['Ozone Zeno 2 S'].spec)
+    // Its A row is fourteen ribs, eight with a bridle pair, built as such.
+    && g['Ozone Zeno 2 S'].layout === 'A/B+C' && /A 14 3 bridle 8\nB 14 3\nC 8$/.test(g['Ozone Zeno 2 S'].spec)
+    && g['Ozone Zeno 2 S'].bridles === 16 && g['Ozone Geo 7 MS'].bridles === 0
     // A three-liner at an aspect ratio of 6.2, which the rule alone made a two-liner.
     && g['BGD Lynx 2 M'].layout === 'A/B/C+D' && g['Niviuk Artik R 2 23'].layout === 'A+B/C+D'
     && /its own riser layout/.test(g['Ozone Geo 7 MS'].note);
@@ -566,7 +573,8 @@ if (!errors.length) {
       + JSON.stringify(Object.fromEntries(Object.entries(g).map(([k, v]) => [k, `${v.layout} ${v.spec.split('\n').filter((x) => !x.startsWith('#')).join(' / ')}`]))));
   }
   console.log(`  ${own && solvedSage && skin ? 'ok  ' : 'FAIL'} the picker gives a wing its own suspension where its sheets are on file `
-    + `(Geo 7 ${g['Ozone Geo 7 MS'].layout}, Lynx 2 ${g['BGD Lynx 2 M'].layout}, Artik R 2 ${g['Niviuk Artik R 2 23'].layout}), `
+    + `(Geo 7 ${g['Ozone Geo 7 MS'].layout}, Lynx 2 ${g['BGD Lynx 2 M'].layout}, Artik R 2 ${g['Niviuk Artik R 2 23'].layout}, `
+    + `Zeno 2 with its ${g['Ozone Zeno 2 S'].bridles} bridles), `
     + `and anchors solved to the line length where they are not (SAGE 95 ${g['Skywalk SAGE 95'].line.toFixed(0)} m against 215)`);
 }
 // A change read against the design before it: `compareDesigns` was in the
@@ -1700,16 +1708,23 @@ try {
     }
     let anchorsChecked = 0;
     for (const [row, frac] of Object.entries(m.airfoil.anchors ?? {})) {
-      const want = Math.round(frac * rib0.chord * 1000);
-      const hit = ribLabels.find((t) => t.startsWith(`${row} `));
-      if (!hit) continue;
-      const shown = Number(hit.slice(row.length + 1));
-      if (Math.abs(shown - want) > 1) {
-        console.log(`  FAIL anchor ${row} is drawn at ${shown} mm, model says `
-          + `${want} mm`);
-        process.exit(1);
+      // A bridled row is two tabs on the rib, each at its own station and
+      // labelled with its own letter, `Aa` and `Ab`.
+      const tabs = (m.linePlan?.lines ?? []).filter((l) => l.bridle && l.row === row && l.ribIndex === rib0.index);
+      const expect = tabs.length
+        ? tabs.map((l) => [`${row}${l.variant}`, Math.round(l.chordFraction * rib0.chord * 1000)])
+        : [[row, Math.round(frac * rib0.chord * 1000)]];
+      for (const [label, want] of expect) {
+        const hit = ribLabels.find((t) => t.startsWith(`${label} `));
+        if (!hit) continue;
+        const shown = Number(hit.slice(label.length + 1));
+        if (Math.abs(shown - want) > 1) {
+          console.log(`  FAIL anchor ${label} is drawn at ${shown} mm, model says `
+            + `${want} mm`);
+          process.exit(1);
+        }
+        anchorsChecked++;
       }
-      anchorsChecked++;
     }
     if (anchorsChecked < 3) {
       console.log(`  FAIL only ${anchorsChecked} anchor dimensions found`);
@@ -2733,6 +2748,15 @@ try {
     process.exit(1);
   }
   internalOnly.push('theme');
+  // The slice on show and the flight the slices are run for are set by the
+  // Slices tab's own tools, as the rib on show is by the Rib tab's slider.
+  // Asserted to be there, not merely excused.
+  if (!/function buildSliceTools/.test(src) || !/'Flight the slices are analysed in'/.test(src)
+    || !/'Slice to display, left tip to right tip'/.test(src)) {
+    console.log('  FAIL sliceIndex and sliceState have no control in the Slices tab');
+    process.exit(1);
+  }
+  internalOnly.push('sliceIndex', 'sliceState');
   const unreachable = declared.filter(
     (k) => !boundKeys.includes(k) && !internalOnly.includes(k));
   if (unreachable.length) {
@@ -2778,4 +2802,65 @@ try {
   }
 } catch(e){ console.log('  FAIL exports: '+e.message); process.exit(1); }
 
-console.log('\nall UI paths OK');
+// The slices (slices.js): run on demand, so they are driven here and not by
+// a control. A reduced run — fewer panels, a coarser grid, no corrections —
+// keeps the stage quick; the unit suite runs the full method.
+(async () => {
+  try {
+    const sl = globalThis.__slices;
+    globalThis.__tab('slices');
+    const before = document.getElementById('note-span')._text;
+    if (!/Analyse the slices/.test(before)) throw new Error(`slices tab before a run says: ${before.slice(0, 80)}`);
+    const t0 = Date.now();
+    const run = await sl.run({ npanel: 60, alphaStepDeg: 2, correctionRounds: 0 });
+    if (!run || run.error || !run.analysis) throw new Error(`slice run failed: ${run && run.error}`);
+    const A = run.analysis;
+    const M0 = globalThis.__getM();
+    if (A.slices.length !== wingStripsCount(M0)) throw new Error(`${A.slices.length} slices for ${wingStripsCount(M0)} strips`);
+    const W = (globalThis.__S.pilotMass + globalThis.__S.wingMass + globalThis.__S.lineMass) * M0.atm.gravity;
+    if (Math.abs(A.totals.liftN - W) > 1e-3 * W) throw new Error(`slices lift ${A.totals.liftN} against the weight ${W}`);
+    console.log(`  ok   slices: ${A.slices.length} sections, CL ${A.totals.CL.toFixed(3)} at ${A.totals.alphaDeg.toFixed(2)} deg, `
+      + `lift equal to the weight, ${A.check.convergedSlices} of ${A.check.solvedSlices} converged, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    // step tip to tip: every slice draws, with its own numbers
+    const seen = new Set();
+    for (const i of [0, A.slices.length >> 1, A.slices.length - 1]) {
+      sl.show(i);
+      const n = document.getElementById('note-slice')._text;
+      if (!n.startsWith(`slice ${i} of`)) throw new Error(`slice ${i} note: ${n.slice(0, 60)}`);
+      if (document.getElementById('vp-slice').children.length < 8) throw new Error(`slice ${i} drew nothing`);
+      seen.add(n);
+    }
+    if (seen.size !== 3) throw new Error('the tip, centre and tip slices read the same');
+    console.log('  ok   slices: the left tip, the centre and the right tip each drawn with their own figures');
+    const tools = sl.tools();
+    const kids = tools.children.map((c) => c._text || c.tagName);
+    for (const want of ['Analyse again', '◀', '▶', '.dat', 'XFOIL', 'mfoil', 'Scirocco', 'All slices']) {
+      if (!kids.includes(want)) throw new Error(`slices tools have no ${want}: ${kids.join('|')}`);
+    }
+    for (const k of ['dat', 'xfoil', 'mfoil', 'scirocco', 'table']) {
+      const out = sl.text(k, 3);
+      if (!out || !out[1] || out[1].length < 50) throw new Error(`slice export ${k} is empty`);
+    }
+    const sc = JSON.parse(sl.text('scirocco', 3)[1]);
+    if (sc.inputs.x.length !== 2 * sc.options.coordinates.x.length) throw new Error('Scirocco input x is not x then z');
+    console.log('  ok   slices: the tools bar steps and exports; .dat, XFOIL, mfoil, Scirocco and the table all written');
+    // a change of flight marks the run stale rather than passing it off
+    globalThis.__S.sliceState = 'accelerated';
+    sl.show(3);
+    if (!/^STALE/.test(document.getElementById('note-span')._text)) throw new Error('a run for another flight is not marked stale');
+    globalThis.__S.sliceState = 'trim';
+    sl.show(3);
+    if (/^STALE/.test(document.getElementById('note-span')._text)) throw new Error('the run is marked stale for its own flight');
+    console.log('  ok   slices: a run is marked stale for another flight, and current for its own');
+    globalThis.__tab('wing');
+  } catch (e) {
+    console.log('  FAIL slices: ' + e.message);
+    process.exit(1);
+  }
+  console.log('\nall UI paths OK');
+})();
+
+function wingStripsCount(M0) {
+  const ribs = M0.wing.ribs;
+  return 2 * (ribs.length - 1) + (Math.abs(ribs[0].station) > 1e-3 ? 1 : 0);
+}

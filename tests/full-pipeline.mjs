@@ -156,6 +156,8 @@ for (const [family, sizes] of Object.entries(fams)) {
           anchorsPerRow: own.cascade.anchorsPerRow, middlesPerRow: own.cascade.middlesPerRow,
           mainsPerRow: own.cascade.mainsPerRow, tipAnchorsPerRow: own.cascade.tipsPerRow,
           brakes, stabilo: true, stabiloRiser: own.cascade.stabiloRiser ?? null,
+          // A two-liner's bridle pairs, as its sheets have them.
+          bridlesPerRow: Object.keys(own.cascade.bridlesPerRow).length ? own.cascade.bridlesPerRow : null,
         });
         if (plan0.levelShortfalls.length) {
           flag(id, 'lines', 'its own cascade could not be built as written',
@@ -334,10 +336,13 @@ if (overshoot.length) {
   console.log(`  density solved, and still over at the sparsest a real wing is: `
     + `${overSparse.length} of ${overshoot.filter((o) => !o.own).length} (${familiesOf(overSparse)}); `
     + `still under at the densest: ${underDense.length} (${familiesOf(underDense)})`);
-  console.log('  A two-liner\'s front row starts with pairs of short bridles (sixteen a side');
-  console.log('  on each Ozone two-liner), a level the generator does not build, so it has');
-  console.log('  more line for the same anchors. Density is kept because it sets the loads;');
-  console.log('  the length follows and is reported.\n');
+  console.log('  A two-liner\'s A row is built with its bridle pairs, eight a side on each');
+  console.log('  Ozone two-liner, and the brake (13 anchors on 6 and 3 middles on every wing)');
+  console.log('  with one main line from the handle up past the pulley, as the sheets have');
+  console.log('  it: within 7% of theirs, the Zeno 2 14% over. What is left is the');
+  console.log('  suspension: the Ozone families\' within -8 to +12%, the Lynx 2\'s 27% over.');
+  console.log('  Density is kept because it sets the loads; the length follows and is');
+  console.log('  reported.\n');
 }
 
 if (problems.length) {

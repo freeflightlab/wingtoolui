@@ -26,11 +26,11 @@ panel says why.)
 
 ```
   cells                           48         64   +33.3%
-- glide ratio                  10.20       9.97    -2.2%
-- sink rate                     1.02       1.05    +2.2%  m/s
-- line drag                  0.00784    0.00919   +17.2%
-- line length                  315.5      379.0   +20.1%  m
-- line count                     222        276   +24.3%
+- glide ratio                   8.94       8.75    -2.2%
+- sink rate                     1.09       1.11    +2.1%  m/s
+- line drag                  0.01190    0.01362   +14.5%
+- line length                  276.3      340.5   +23.3%  m
+- line count                     218        272   +24.8%
 - cloth ordered                 60.1       64.0    +6.4%  m
 - nesting                      0.635      0.613    -3.5%
 
@@ -38,7 +38,7 @@ now is worse on glide ratio, sink rate, line drag, line length, line count,
 cloth ordered, nesting with nothing measurably better.
 ```
 
-A third more cells costs 2.2% of glide, through 17% more line drag, because
+A third more cells costs 2.2% of glide, through 15% more line drag, because
 the derived plan attaches every second rib and so a third more anchors. That
 is visible in one line here and buried in two reports otherwise. (A wing whose
 anchors are solved to its line length, or written out, does not pay it that
@@ -47,10 +47,11 @@ way; the comparison is of the two plans the tool built.)
 **Merging rows A+B and C+D** shares each pair's cascade below the top lines:
 
 ```
-+ glide ratio                  10.20      10.48    +2.8%
-+ line drag                  0.00784    0.00623   -20.6%
-+ line length                  315.5      244.4   -22.5%  m
-+ line count                     222        200    -9.9%
++ glide ratio                   8.94       9.13    +2.2%
++ sink rate                     1.09       1.06    -2.1%  m/s
++ line drag                  0.01190    0.01023   -14.0%
++ line length                  276.3      212.5   -23.1%  m
++ line count                     218        188   -13.8%
   cloth ordered                 60.1       60.1           m
 ```
 
@@ -60,7 +61,11 @@ wing behaves when one row is pulled without the other is not a number here.
 
 (This page showed glide 9.48 against 9.24, 294.1 m against 375.2 and cloth
 69.0 against 77.4. Those were figures typed into the suite to test the
-comparison's arithmetic, and no wing built by the tool gave them.)
+comparison's arithmetic, and no wing built by the tool gave them. The figures
+above are the tool's as of 1.11.0. They had not been run again since the
+lines' drag came to take each line's Reynolds number and each riser's strap
+— the default wing glided 10.20 here and 8.90 in 1.10.0 — and the brake is
+now the one the sheets have, 18 m less line than 1.10.0's on this wing.)
 
 ## What it deliberately does not do
 

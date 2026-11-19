@@ -883,13 +883,25 @@ export function lineAngleOnRib(rib, line) {
  */
 export function linePullsByRib(wing, plan) {
   const known = new Map();
+  // A bridle pair's two tabs, where a row's rib has them: each its own
+  // station and its own pull, the forward one leaning forward and the aft
+  // one aft, 60 to 70 degrees apart. Aimed by the row's one pull, the
+  // openings left the aft tab's rays running into the first hole.
+  const knownTabs = new Map();
   for (const l of plan?.lines ?? []) {
     if (l.level !== 'upper' || !Number.isFinite(l.ribIndex)) continue;
-    const pull = lineAngleOnRib(wing.ribs[l.ribIndex], l);
+    const rib = wing.ribs[l.ribIndex];
+    const pull = lineAngleOnRib(rib, l);
     if (!pull) continue;
     if (!known.has(l.row)) known.set(l.row, new Map());
     const m = known.get(l.row);
     if (!m.has(l.ribIndex)) m.set(l.ribIndex, pull.lineAngleDeg);
+    if (l.bridle && Array.isArray(l.to)) {
+      if (!knownTabs.has(l.row)) knownTabs.set(l.row, new Map());
+      const t = knownTabs.get(l.row);
+      if (!t.has(l.ribIndex)) t.set(l.ribIndex, []);
+      t.get(l.ribIndex).push({ fraction: toRibPlane(rib, l.to)[0] / rib.chord, pullDeg: pull.lineAngleDeg });
+    }
   }
   const out = wing.ribs.map(() => ({}));
   for (const [row, m] of known) {
@@ -898,6 +910,8 @@ export function linePullsByRib(wing, plan) {
       let best = at[0];
       for (const k of at) if (Math.abs(k - i) < Math.abs(best - i)) best = k;
       out[i][row] = m.get(best);
+      const tabs = knownTabs.get(row)?.get(best);
+      if (tabs) (out[i].tabs ||= {})[row] = tabs.slice().sort((a, b) => a.fraction - b.fraction);
     }
   }
   return out;
@@ -924,21 +938,24 @@ export function checkWingRibStress({
     const rib = wing.ribs[l.ribIndex];
     if (!rib) continue;
     const key = `${l.row}|${l.ribIndex}`;
-    if (where.has(key)) continue;
     const pull = lineAngleOnRib(rib, l);
-    where.set(key, {
+    const at = {
       chordFraction: toRibPlane(rib, l.to)[0] / rib.chord,
       pointM: pull?.pointM ?? null,
       lineAngleDeg: pull?.lineAngleDeg ?? null,
       outOfPlane: pull?.outOfPlane ?? null,
-    });
+    };
+    // By the line's name as well: a bridle pair puts two tabs of one row on
+    // one rib, and by row they were both taken at the forward one.
+    if (l.name != null) where.set(`name:${l.name}`, at);
+    if (!where.has(key)) where.set(key, at);
   }
 
   const byRib = new Map();
   for (const a of anchorLoads) {
     if (!Number.isFinite(a.ribIndex)) continue;
     if (!byRib.has(a.ribIndex)) byRib.set(a.ribIndex, []);
-    const w = where.get(`${a.row}|${a.ribIndex}`);
+    const w = (a.name != null ? where.get(`name:${a.name}`) : null) ?? where.get(`${a.row}|${a.ribIndex}`);
     byRib.get(a.ribIndex).push({
       name: a.name ?? `${a.row}${a.anchor}`,
       chordFraction: w?.chordFraction ?? airfoil?.anchors?.[a.row] ?? 0.1,

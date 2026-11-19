@@ -101,6 +101,7 @@
         <button class="vptab" data-tab="lines" role="tab">Lines</button>
         <button class="vptab" data-tab="structure" role="tab">Structure</button>
         <button class="vptab" data-tab="analysis" role="tab">Analysis</button>
+        <button class="vptab" data-tab="slices" role="tab">Slices</button>
         <div class="vptab-tools" id="tabTools"></div>
       </div>
 
@@ -139,6 +140,11 @@
       <div class="viewports two" data-tab="analysis" hidden>
         <div class="vp"><div class="vp-label">Polar</div><svg id="vp-polar"></svg><div class="vp-note" id="note-polar"></div></div>
         <div class="vp"><div class="vp-label">Atmosphere</div><svg id="vp-atmos"></svg><div class="vp-note" id="note-atmos"></div></div>
+      </div>
+
+      <div class="viewports two" data-tab="slices" hidden>
+        <div class="vp"><div class="vp-label">Slice — its section in its own flow</div><svg id="vp-slice"></svg><div class="vp-note" id="note-slice"></div></div>
+        <div class="vp"><div class="vp-label">Slices — tip to tip</div><svg id="vp-span"></svg><div class="vp-note" id="note-span"></div></div>
       </div>
 
       <div class="statusbar">

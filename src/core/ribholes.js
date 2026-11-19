@@ -92,20 +92,30 @@ export function buildRibHoles(rib, airfoil, rules = {}, { rods = null, pulls = n
 
   // Each anchor's fan: from the tab, round the way its line pulls (`pulls`,
   // degrees from the rib's own up, positive aft, by row); square to the
-  // chord where nothing says.
-  const fans = Object.entries(airfoil.anchors || {})
+  // chord where nothing says. A row whose rib carries a bridle pair has two
+  // tabs (`pulls.tabs`, from `linePullsByRib`), each with its own station
+  // and its own pull, and each is kept clear.
+  const stations = Object.entries(airfoil.anchors || {})
     .filter(([, f]) => Number.isFinite(f))
-    .map(([row, f]) => ({
-      row,
-      point: [f * chord, prof.at(f).lo * chord],
-      pullDeg: Number.isFinite(pulls?.[row]) ? pulls[row] : 0,
-      halfAngleDeg: R.fanHalfAngleDeg,
-      clearanceM: R.fanClearanceM,
-    }));
+    .flatMap(([row, f]) => {
+      const tabs = pulls?.tabs?.[row];
+      if (Array.isArray(tabs) && tabs.length) {
+        return tabs.filter((t) => Number.isFinite(t.fraction))
+          .map((t) => ({ row, f: t.fraction, pullDeg: Number.isFinite(t.pullDeg) ? t.pullDeg : 0 }));
+      }
+      return [{ row, f, pullDeg: Number.isFinite(pulls?.[row]) ? pulls[row] : 0 }];
+    });
+  const fans = stations.map(({ row, f, pullDeg }) => ({
+    row,
+    point: [f * chord, prof.at(f).lo * chord],
+    pullDeg,
+    halfAngleDeg: R.fanHalfAngleDeg,
+    clearanceM: R.fanClearanceM,
+  }));
 
   // Chordwise positions that must be kept clear: the anchors, plus the
   // intake, which is a cut-out already.
-  const anchors = Object.values(airfoil.anchors || {}).sort((a, b) => a - b);
+  const anchors = stations.map((s) => s.f).sort((a, b) => a - b);
   const blocked = anchors.map((f) => [f - R.anchorClearance, f + R.anchorClearance]);
   if (airfoil.intake) {
     blocked.push([airfoil.intake.start - R.anchorClearance,
