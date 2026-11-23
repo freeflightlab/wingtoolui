@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2841-test validation suite and a benchmark with regression budgets
+- [x] 2884-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -1733,10 +1733,47 @@ describing geometry and starts predicting behaviour.
 - [ ] **Scirocco's own servers** — the slice's export for its analysis server
       follows the server's source (its options, x then z, the angle in
       degrees); it has not been sent to a running container.
-- [ ] **The flight simulation** — left, right and both brakes to 65 cm,
-      hands up and on full bar, pulled in 3, 1 and 0.5 s; the wing's motion
-      in time, drawn in 3D and recorded to video. The slices' coupling is
-      what the strips' forces will come from.
+- [x] **The flight simulation** — left, right and both brakes to 65 cm,
+      hands up and on the bar, pulled in 3, 1 and 0.5 s, held and released;
+      six degrees of freedom with Barrows' apparent mass, every strip on the
+      slices' lattice with its braked section (`flight.js`); played in 3D
+      and recorded to video (WebM, or MP4 where a browser records only
+      that); all eighteen in about seven seconds. Symmetric
+      to 1e-9, mirrored to 1e-8, a trim left alone holds to 1e-4 m/s.
+      `docs/flight.md`.
+- [x] **The braked section** — the chord behind 65% bent into an arc of its
+      own length, mfoil on bends to 40°, its increments fitted beyond, the
+      stall at 0.3 of the linear slope (15° on the NACA 4415; the tunnel's
+      14°) and earlier with the bend, Viterna past it; the library's four
+      sections solved ahead (`brakesection.js`,
+      `data/reference/brake-sections.tsv`).
+- [x] **What flying it turned up** — the model trims the default wing at
+      7.4° on the balance's hang point, chosen for 5°; on the bar it keeps 90
+      of 150 mm above the collapse floor; its symmetric stall travel is 52 cm
+      (EN class C at 80 to 100 kg) and follows the free travel cm for cm; it
+      passes the EN trim-speed spin test; braking on the bar takes the
+      canopy to −2.6°, as the manuals warn. Viterna's form divides by the
+      plate's angle, which a bent chord swings through zero: one strip read
+      a lift of 198 and broke the flight's symmetry.
+- [ ] **The turn's bank** — before departing, a one-sided input yaws and
+      skids this rigid arched wing more than it banks it (roll due to yaw
+      rate −95 Nm per rad/s, from the outer side's lift pointing outward).
+      Nine degrees of freedom, the pilot rolling under the canopy, may be
+      what a real wing banks with; no measured turn rate against brake
+      travel was found to check either.
+- [ ] **The circulation's lag** — the strips' lift follows a brake at once;
+      a real wing's lags about 0.3 s at trim (Wagner, Jones's correction),
+      which matters on the half-second pull.
+- [ ] **A canopy that deforms** — folding, spinning and recovering are what
+      a real wing does past where this model departs; a rigid model stops
+      there.
+- [ ] **The braked trailing edge, measured** — where the bend starts (65%),
+      its shape (an arc) and its cap (90°) are reasoned, not measured; the
+      stall's shift with the bend is XFLR5's trend on another section.
+- [ ] **The flight's trim against the balance's** — the balance chooses the
+      hang point on the polar's lift and the thin-aerofoil moment; the
+      model, on the lattice and mfoil's moment, trims 2.4° higher on it. One
+      of them should set the hang point.
 
 Phase 5 items should be treated as research, not as features. Anything here
 that produces a number a person might trust needs validation against measured

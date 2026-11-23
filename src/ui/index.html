@@ -102,6 +102,7 @@
         <button class="vptab" data-tab="structure" role="tab">Structure</button>
         <button class="vptab" data-tab="analysis" role="tab">Analysis</button>
         <button class="vptab" data-tab="slices" role="tab">Slices</button>
+        <button class="vptab" data-tab="flight" role="tab">Flight</button>
         <div class="vptab-tools" id="tabTools"></div>
       </div>
 
@@ -145,6 +146,11 @@
       <div class="viewports two" data-tab="slices" hidden>
         <div class="vp"><div class="vp-label">Slice — its section in its own flow</div><svg id="vp-slice"></svg><div class="vp-note" id="note-slice"></div></div>
         <div class="vp"><div class="vp-label">Slices — tip to tip</div><svg id="vp-span"></svg><div class="vp-note" id="note-span"></div></div>
+      </div>
+
+      <div class="viewports two" data-tab="flight" hidden>
+        <div class="vp"><div class="vp-label">Flight — the glider, its brakes pulled</div><canvas id="vp-flight"></canvas><div class="vp-note" id="note-flight"></div></div>
+        <div class="vp"><div class="vp-label">Flight — over time</div><svg id="vp-flightchart"></svg><div class="vp-note" id="note-flightchart"></div></div>
       </div>
 
       <div class="statusbar">

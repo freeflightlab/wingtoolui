@@ -10,12 +10,12 @@ openings, diagonals and rods, panel development, nesting, and DXF or printed
 patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
-One offline HTML file, 1.8 MB, no build step and no network. That constraint
-drove the architecture: 42 core modules bundled into a single scope, with the
+One offline HTML file, 1.9 MB, no build step and no network. That constraint
+drove the architecture: 44 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 81,500 lines**: 33,800 core, 7,200 interface, 19,900 tests, 6,500
-tools, 14,100 documentation.
+**About 84,300 lines**: 35,200 core, 8,000 interface, 20,100 tests, 6,600
+tools, 14,400 documentation.
 
 ## 2. What is genuinely validated
 
@@ -36,7 +36,7 @@ by tests. One design read exactly was evidence about that design; two are
 evidence about the reader.
 
 **Against 21 wings' line sheets from five manufacturers, and 55 published
-sizes**, in 146 reference tables, six of them the makers' own line-plan
+sizes**, in 147 reference tables, six of them the makers' own line-plan
 drawings transcribed line by line. Every line sheet is held to five physical
 invariants, not merely parsed. The anchor-density tables the generator works
 from are **measured from the corpus**, not hand-entered — the row ratios on 19
@@ -85,6 +85,15 @@ lines stretch on their own measured curves, from OpenGlider's line types.
   diverges by 16% at a paraglider's — with Pratt-Walker the conservative one.
 - **The 3D shaping requirement.** Not derived. `shapingForWing` refuses to run
   without a figure rather than invent one.
+- **The braked trailing edge.** Where the bend starts, its shape and its cap
+  are reasoned; the section is mfoil's only to a 40° bend, the fitted
+  increments' beyond it, and its stall's shift with the bend is XFLR5's trend
+  on another section. The flight says how many strips flew on mfoil's own
+  numbers at every frame. Its checks are physics' (symmetric to 1e-9,
+  mirrored to 1e-8, a trim that holds) and EN 926-2's procedures, which a
+  real wing's certificate reports only as classes: on the default free
+  travel it stalls symmetrically at 52 cm, class C for its weight, and does
+  not spin at trim speed (`docs/flight.md`).
 
 ## 4. What is wrong, or unexplained
 
@@ -179,7 +188,7 @@ file does (`docs/balance.md`).
 
 ## 5. What is missing
 
-**53 open items in the roadmap.** The substantial ones:
+**57 open items in the roadmap.** The substantial ones:
 
 - The Lynx 2's and the Artik R 2's linesets, a quarter over their totals:
   the Lynx 2's suspension 27% over its sheets, its middles carrying two
@@ -193,7 +202,10 @@ file does (`docs/balance.md`).
 - The polar's lift and induced drag: on the default wing at trim, 10% and
   20% above the slices' and the lattice's — Prandtl's lifting line at an
   aspect ratio of 4.7. The balance, speed bar and glide still fly the polar.
-- The flight simulation: the brakes, left, right and both, in time.
+- The flight model's turn and trim: before it departs, the rigid arched
+  wing yaws and skids more than it banks, with no measured turn to check
+  against; it trims 2.4° above the balance on the balance's own hang point;
+  its circulation follows the brakes at once; and nothing in it folds.
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
 - Collapse (Z) lines: three reference wings carry them; the model does not.

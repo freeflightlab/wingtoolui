@@ -4,6 +4,63 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.13.0 — 2026-11-23
+
+The glider flown through its brakes: either brake or both, pulled to 65 cm
+over 3, 1 or half a second, from hands up or on the bar; played in 3D and
+recorded to video.
+
+**Added**
+
+- **The Flight tab.** A start (hands up, on the bar), a brake (left, right,
+  both), a rate (3 s, 1 s, 0.5 s), the travel, how long it is held and
+  whether it is released; **Fly**, or **All 18**. The flight plays in 3D
+  behind, beside, in front of or below the glider — the canopy coloured by
+  each strip's state, the pulled brake lines drawn, the handles' travel and
+  the figures on screen — beside a chart of it over time, or a table of all
+  eighteen. **Record video** plays it in real time into a 1280 × 720 video, WebM or
+  (where the browser records only that) MP4;
+  **.tsv** saves it frame by frame. `docs/flight.md`.
+- **The flight model** (`flight.js`): the whole glider as one rigid body
+  with six degrees of freedom, hung from the riser midpoint; the slices'
+  lattice factorised once, every strip on it meeting its own air (the
+  glider's velocity and rotation) with the alpha method turning it to its
+  braked section's lift; the air inside the canopy in the inertia but not
+  the weight; Barrows' apparent mass for an arched canopy, assembled as
+  Heatwole's glidersim does, the steady Munk moment taken out; pilot and
+  line drag where the balance has them; fourth-order Runge–Kutta at 0.01 s.
+  Its own trim by Newton's method; the bar pushed out a row at a time until
+  the trim's lift would fall below the collapse floor.
+- **The brake as built**: each anchor's free travel first (tip first, 180
+  and 60 mm by default, set in the tab), then the pull toward the pulley,
+  the drop square to the chord by the cosine between line and section.
+- **The braked section** (`brakesection.js`): the chord behind 65% bent
+  into an arc of its own length; mfoil on bends of 0 to 40°; the bend's
+  increments fitted as sin 2θ and sin³θ beyond; the stall where the lift
+  slope falls to 0.3 of its linear value, 0.09° earlier a degree of bend;
+  Viterna and a flat plate past it. The library's four NACA sections come
+  solved with the tool (`data/reference/brake-sections.tsv`); any other is
+  solved in about two minutes.
+- **Departure**: a quarter of the span deep in its stall, or the air past
+  30° to the canopy, or 30° of sideslip, ends the flight two seconds later,
+  with what it did up to then; or, if asked, flies on, labelled.
+
+**Found**
+
+- The model trims the default wing at 32.9 km/h with its canopy at 7.4°,
+  where the balance assumed 5° and found 35.2 km/h: the hang point was
+  chosen on the polar, whose lift is the lattice's plus 10%.
+- On the bar it keeps only 90 of 150 mm above the collapse floor; at 120 mm
+  its trim's lift would be 0.32. The NACA 4415's centre of pressure runs aft
+  as its lift falls, and the swept, washed-in tips carry more of the lift at
+  low angles.
+- Its symmetric stall travel, both brakes over 5 s as EN 926-2 flies it, is
+  52 cm on the default free travel: class C for 80 to 100 kg. It passes the
+  trim-speed spin test. Every one of the eighteen departs at 65 cm.
+- Viterna's form divides by the plate's angle, which a bent chord swings
+  through zero at negative angles: a tip strip read a lift of 198 and broke
+  the flight's symmetry. The plate's bounded shape is used there instead.
+
 ## 1.12.0 — 2026-11-18
 
 The wing as its sections: step along the span from tip to tip, each slice's

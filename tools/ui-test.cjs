@@ -2757,6 +2757,22 @@ try {
     process.exit(1);
   }
   internalOnly.push('sliceIndex', 'sliceState');
+  // The flight's scenario and the brakes' free travel are set by the Flight
+  // tab's own tools; asserted to be there, as the slices' are.
+  const flightKeys = {
+    flightStart: 'Flight starts from', flightInput: 'Brake pulled', flightRate: 'How fast the brake is pulled',
+    flightTravelMM: 'Brake travel in millimetres', flightHoldS: 'Seconds the brake is held',
+    flightRelease: 'Release the brake after the hold', flightPastDeparture: 'What happens after a departure',
+    flightCamera: 'Camera', flightChart: 'Chart shows',
+    brakeSlackCentreMM: 'Brake free travel at the centre, mm', brakeSlackTipMM: 'Brake free travel at the tip, mm',
+  };
+  for (const [k, aria] of Object.entries(flightKeys)) {
+    if (!src.includes(`'${aria}'`) || !/function buildFlightTools/.test(src)) {
+      console.log(`  FAIL ${k} has no control in the Flight tab`);
+      process.exit(1);
+    }
+  }
+  internalOnly.push(...Object.keys(flightKeys));
   const unreachable = declared.filter(
     (k) => !boundKeys.includes(k) && !internalOnly.includes(k));
   if (unreachable.length) {
@@ -2855,6 +2871,57 @@ try {
     globalThis.__tab('wing');
   } catch (e) {
     console.log('  FAIL slices: ' + e.message);
+    process.exit(1);
+  }
+  // The flight (flight.js): prepared from the sections shipped with the
+  // tool, one scenario flown and drawn, then all eighteen.
+  try {
+    const fl = globalThis.__flight;
+    globalThis.__tab('flight');
+    const before = document.getElementById('note-flight')._text;
+    if (!/flown through its brakes/.test(before)) throw new Error(`flight tab before a run says: ${before.slice(0, 80)}`);
+    const run = await fl.prepare();
+    if (!run || run.error || !run.prep) throw new Error(`flight not prepared: ${run && run.error}`);
+    if (!/solved with the tool/.test(run.tableSource)) throw new Error(`the default wing did not use the shipped section: ${run.tableSource}`);
+    const tr = run.prep.trim.trim;
+    if (!tr.converged || !(tr.speed > 6 && tr.speed < 14)) throw new Error(`trim ${tr.speed} m/s`);
+    console.log(`  ok   flight: prepared in ${((Date.now() - run.started) / 1000).toFixed(1)} s from ${run.tableSource}; `
+      + `trim ${(tr.speed * 3.6).toFixed(1)} km/h, glide ${tr.glideRatio.toFixed(2)}`);
+    const F = await fl.fly({ start: 'trim', input: 'right', rate: 'fast', travelMM: 650, holdS: 1 });
+    if (!F || F.error || !F.flight) throw new Error(`flight failed: ${F && F.error}`);
+    const cv = document.getElementById('vp-flight');
+    if (!cv.drawn || cv.drawn.fill < 40 || cv.drawn.text < 4) throw new Error(`the flight view drew ${JSON.stringify(cv.drawn && { ...cv.drawn, texts: undefined })}`);
+    if (!cv.drawn.texts.some((t) => /right brake to 65 cm/.test(t))) throw new Error('the flight view does not say what is flown');
+    if (document.getElementById('vp-flightchart').children.length < 10) throw new Error('the flight chart drew nothing');
+    const note = document.getElementById('note-flight')._text;
+    if (!/departed at|stayed flying/.test(note)) throw new Error(`flight note: ${note.slice(0, 100)}`);
+    console.log(`  ok   flight: ${F.label}: ${F.flight.frames.length} frames drawn, ${note.split(' · ')[2]}`);
+    const tools = fl.tools();
+    const labels = tools.children.map((c) => (c.attrs && c.attrs['aria-label']) || c._text);
+    for (const want of ['Flight starts from', 'Brake pulled', 'How fast the brake is pulled', 'Brake travel in millimetres',
+      'Seconds the brake is held', 'Release the brake after the hold', 'What happens after a departure', 'Fly this scenario',
+      'Fly every start, brake and rate', 'Brake free travel at the centre, mm', 'Brake free travel at the tip, mm', 'Camera',
+      'Chart shows', 'Play or pause', 'Time in the flight', 'Record the flight as a video', 'Save the flight frame by frame']) {
+      if (!labels.includes(want)) throw new Error(`flight tools have no "${want}"`);
+    }
+    const tsv = fl.tsv(F).trim().split('\n');
+    if (tsv.length !== F.flight.frames.length + 2 || !/^t_s\tnorth_m/.test(tsv[1])) throw new Error('the flight table is not a row a frame');
+    fl.record();
+    if (!/cannot record/.test(JSON.stringify(document.getElementById('status').children.map((c) => c._text)))) {
+      throw new Error('recording where the browser cannot did not say so');
+    }
+    console.log('  ok   flight: the tools bar has every control; the table writes a row a frame; recording says when it cannot');
+    await fl.flyAll();
+    const m = fl.get().matrix;
+    if (!m || m.length !== 18 || !m.every((r) => r.out && (r.out.summary || r.out.error))) throw new Error('not all eighteen flown');
+    if (globalThis.__S.flightChart !== 'matrix' || document.getElementById('vp-flightchart').children.length < 18 * 9) throw new Error('the eighteen are not tabled');
+    const mt = fl.matrixTsv(fl.get()).trim().split('\n');
+    if (mt.length !== 20) throw new Error(`the eighteen's table has ${mt.length} lines`);
+    const departed = m.filter((r) => r.out.summary?.departedS !== null).length;
+    console.log(`  ok   flight: all eighteen flown and tabled; ${departed} departed at 65 cm`);
+    globalThis.__tab('wing');
+  } catch (e) {
+    console.log('  FAIL flight: ' + e.message);
     process.exit(1);
   }
   console.log('\nall UI paths OK');

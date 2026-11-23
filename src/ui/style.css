@@ -161,6 +161,17 @@ html, body {
   overflow: visible;
 }
 
+/* The flight's view is a canvas, so it can be recorded to video: placed as
+   the drawings are, clear of the label and the note. */
+.vp > canvas {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 28px;
+  width: 100%;
+  height: calc(100% - 64px);
+}
+
 /* Labels sit above the drawing and must not be scaled by the viewBox fit. */
 .vp-label, .vp-note {
   max-width: calc(100% - 20px);

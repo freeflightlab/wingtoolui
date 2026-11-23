@@ -81,6 +81,8 @@ MODULES = [
     "vlm.js",
     "mfoil.js",
     "slices.js",
+    "brakesection.js",
+    "flight.js",
     "freebody.js",
     "bom.js",
     "loads.js",
@@ -235,6 +237,11 @@ def build():
     # weights of some, from OpenGlider's line types.
     stretch = (ROOT / "data" / "reference" / "line-stretch.tsv").read_text()
     reference_js += "\nconst LINE_STRETCH_TSV = " + json.dumps(stretch) + ";"
+    # The library's sections with their trailing edges bent as the brakes
+    # bend them, solved ahead with mfoil: a full table is two minutes of
+    # solving, and the default wing should not make anyone wait for it.
+    brake = (ROOT / "data" / "reference" / "brake-sections.tsv").read_text()
+    reference_js += "\nconst BRAKE_SECTIONS_TSV = " + json.dumps(brake) + ";"
 
     # Every published wing, as a starting point.
     #

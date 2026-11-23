@@ -180,6 +180,15 @@ import {
   sliceAnalysisSteps, sliceSectionDat, sliceXfoilScript, sliceMfoilScript, sliceSciroccoInput, sliceTable, SLICE_SETTINGS,
 } from '../src/core/slices.js';
 import { latticeSystem } from '../src/core/vlm.js';
+import {
+  BRAKE_SECTION, brakeDropForBend, brakeBendForDrop, brakeBentPoints, brakeBentSection, brakeSectionSteps,
+  brakeSectionTable, brakeSectionAt, brakeStallDeg,
+} from '../src/core/brakesection.js';
+import {
+  FLIGHT, FLIGHT_INPUTS, FLIGHT_STATES, FLIGHT_RATES, flightModel, flightWork, flightTrim, flightBarTrim, flightBends,
+  flightForces, flightDerivative, flightSchedule, flightDuration, flightSteps, flightSummary, flightRotation, flightEuler,
+  flightQuaternion, apparentMassBarrows,
+} from '../src/core/flight.js';
 
 const pick = (p) => (p ? { row: p.row, level: p.level, index: p.index } : null);
 
@@ -18806,6 +18815,190 @@ function demoWing() {
   const tab = sliceTable(A).trim().split('\n');
   check('slices export: a row for every slice', tab.length === A.slices.length + 2);
   function st0(an, p) { return an.stations[p.index].mirror; }
+}
+
+
+// The braked section's table from the solves shipped with the tool.
+function shippedBrakeSolve(code) {
+  const text = readFileSync('data/reference/brake-sections.tsv', 'utf8');
+  const set = {};
+  const levels = {};
+  for (const line of text.split('\n')) {
+    const m = /^# settings: (.*)$/.exec(line);
+    if (m) for (const kv of m[1].split(',')) { const [k, v] = kv.trim().split(/\s+/); set[k] = Number(v); }
+    if (!line || line.startsWith('#') || line.startsWith('section\t')) continue;
+    const c = line.split('\t');
+    if (c[0] !== code) continue;
+    (levels[c[1]] ??= []).push({ alphaDeg: +c[2], cl: +c[3], cd: +c[4], cdf: +c[5], cm: +c[6], xtrUpper: +c[7], xtrLower: +c[8] });
+  }
+  return { reynolds: set.reynolds, ncrit: set.ncrit, npanel: set.npanel, bendStart: set.bendStart,
+    levels: Object.entries(levels).map(([t, pts]) => ({ thetaDeg: +t, points: pts })) };
+}
+
+{
+  console.log('\nbrake section — the trailing edge bent down, and its table');
+  const flap = 1 - BRAKE_SECTION.bendStart;
+  check('brake section: a right-angle bend drops the edge 2/pi of the arc', Math.abs(brakeDropForBend(Math.PI / 2, flap) - 2 * flap / Math.PI) < 1e-12);
+  const back = [5, 20, 45, 80].map((d) => brakeBendForDrop(brakeDropForBend(d * Math.PI / 180, flap), flap) * 180 / Math.PI);
+  check('brake section: the bend for a drop is the inverse of the drop for a bend', back.every((v, k) => Math.abs(v - [5, 20, 45, 80][k]) < 1e-9),
+    back.map((v) => v.toFixed(9)).join(' '));
+  check('brake section: a drop past the right angle\'s is held there', brakeBendForDrop(0.5, flap) === Math.PI / 2);
+  const af = naca4('4415');
+  const bent = brakeBentPoints(af.points, { thetaDeg: 40 });
+  check('brake section: ahead of the bend nothing moves', af.points.every((p, i) => p[0] > BRAKE_SECTION.bendStart || (p[0] === bent[i][0] && p[1] === bent[i][1])));
+  // the chord line's own points keep their distance along it (the arc is the chord, bent)
+  const th = 40 * Math.PI / 180; const R = flap / th;
+  const te = [BRAKE_SECTION.bendStart + R * Math.sin(th), -R * (1 - Math.cos(th))];
+  const onChord = brakeBentPoints([[1, 0]], { thetaDeg: 40 })[0];
+  check('brake section: the chord\'s end lands on the arc, its length kept', Math.hypot(onChord[0] - te[0], onChord[1] - te[1]) < 1e-12,
+    `${onChord.map((v) => v.toFixed(4)).join(', ')}`);
+  near('brake section: a 40° bend drops the edge 0.117 of the chord', -te[1], brakeDropForBend(th, flap), 1e-12);
+  check('brake section: the bent section is named and carries its drop', /braked 40°/.test(brakeBentSection(af, { thetaDeg: 40 }).name));
+  // a quick solve: the generator runs and converges on a coarse panelling
+  const quick = runSteps(brakeSectionSteps(af, { reynolds: 1.4e6, ncrit: 7, npanel: 70, thetasDeg: [20], fromDeg: -2, toDeg: 2, stepDeg: 2 }));
+  check('brake section: mfoil solves a bent section', quick.levels[0].points.length >= 2 && quick.levels[0].points.every((q) => q.cl > 0.7),
+    quick.levels[0].points.map((q) => `${q.alphaDeg}: ${q.cl.toFixed(3)}`).join(', '));
+  // the shipped table
+  const solve = shippedBrakeSolve('4415');
+  check('brake section: the shipped NACA 4415 has its five bends', solve.levels.map((l) => l.thetaDeg).join() === '0,10,20,30,40'
+    && solve.reynolds === 1.4e6 && solve.ncrit === 7, solve.levels.map((l) => `${l.thetaDeg}: ${l.points.length}`).join(' · '));
+  const T = brakeSectionTable(solve);
+  // where the Ohio State tunnel puts the unbent section's maximum lift (14°)
+  check('brake section: the unbent section stalls within a degree of the tunnel\'s 14°', Math.abs(T.stall0Deg - 14) <= 1, `${T.stall0Deg}°`);
+  const osu = readFileSync('data/reference/naca4415-osu.tsv', 'utf8').split('\n').filter((l) => /^1500000\t/.test(l)).map((l) => l.split('\t').map(Number));
+  const errs = osu.filter((r) => r[1] >= -4 && r[1] <= 10).map((r) => Math.abs(brakeSectionAt(T, r[1], 0).cl - r[2]));
+  check('brake section: the unbent table is within 0.1 of the tunnel\'s lift from -4 to 10° (Re 1.5 million)', errs.length >= 6 && Math.max(...errs) < 0.1,
+    `largest ${Math.max(...errs).toFixed(3)} over ${errs.length} angles`);
+  // bounded and continuous everywhere a strip can meet
+  let worst = { cl: 0, cd: 0, cm: 0, jump: 0, cdMin: Infinity };
+  for (let t = 0; t <= 90; t += 2.5) {
+    let prev = null;
+    for (let a = -180; a <= 180; a += 0.5) {
+      const q = brakeSectionAt(T, a, t);
+      worst.cl = Math.max(worst.cl, Math.abs(q.cl)); worst.cd = Math.max(worst.cd, q.cd); worst.cm = Math.max(worst.cm, Math.abs(q.cm));
+      worst.cdMin = Math.min(worst.cdMin, q.cd);
+      if (prev) worst.jump = Math.max(worst.jump, Math.abs(q.cl - prev.cl));
+      prev = q;
+    }
+  }
+  check('brake section: lift, drag and moment stay bounded through any angle', worst.cl < 2.4 && worst.cd <= 2.05 && worst.cm < 0.7 && worst.cdMin > 0,
+    `|cl| ${worst.cl.toFixed(2)}, cd ${worst.cdMin.toFixed(4)} to ${worst.cd.toFixed(2)}, |cm| ${worst.cm.toFixed(2)}`);
+  check('brake section: nothing jumps between half degrees', worst.jump < 0.2, `largest step in lift ${worst.jump.toFixed(3)}`);
+  // what the bend does
+  const c0 = brakeSectionAt(T, 0, 0); const c20 = brakeSectionAt(T, 0, 20); const c40 = brakeSectionAt(T, 0, 40); const c90 = brakeSectionAt(T, 0, 90);
+  check('brake section: a bend adds lift and drag and turns the moment nose down', c20.cl > c0.cl + 0.4 && c40.cl > c20.cl && c40.cd > c20.cd
+    && c90.cd > c40.cd && c40.cm < c0.cm - 0.1, `cl ${c0.cl.toFixed(2)} ${c20.cl.toFixed(2)} ${c40.cl.toFixed(2)} ${c90.cl.toFixed(2)}, cd ${c0.cd.toFixed(3)} ${c40.cd.toFixed(3)} ${c90.cd.toFixed(3)}`);
+  check('brake section: and stalls it earlier', brakeStallDeg(T, 40) < brakeStallDeg(T, 0) - 3 && brakeStallDeg(T, 90) < brakeStallDeg(T, 40));
+  check('brake section: inside a solved level\'s range it is mfoil\'s, beyond its bends it is not',
+    brakeSectionAt(T, 2, 0).solved && brakeSectionAt(T, 2, 20).solved && !brakeSectionAt(T, 2, 60).solved && !brakeSectionAt(T, 40, 0).solved);
+  // every shipped section builds a sane table
+  for (const code of ['2414', '4412', '4418']) {
+    const Tc = brakeSectionTable(shippedBrakeSolve(code));
+    check(`brake section: NACA ${code} stalls between 12 and 18° unbent`, Tc.stall0Deg >= 12 && Tc.stall0Deg <= 18, `${Tc.stall0Deg}°`);
+  }
+}
+
+{
+  console.log('\nflight — the six degrees of freedom');
+  const q = flightQuaternion(0.3, -0.2, 1.1);
+  const e = flightEuler(q);
+  check('flight: roll, pitch and yaw come back from their quaternion', Math.abs(e[0] - 0.3) < 1e-12 && Math.abs(e[1] + 0.2) < 1e-12 && Math.abs(e[2] - 1.1) < 1e-12);
+  const Rm = flightRotation(q);
+  const orth = Math.max(...[0, 1, 2].flatMap((i) => [0, 1, 2].map((j) => Math.abs(Rm[i].reduce((s2, v, k) => s2 + v * Rm[j][k], 0) - (i === j ? 1 : 0)))));
+  check('flight: the rotation is orthonormal', orth < 1e-12);
+  // Barrows' apparent masses: flat, they are Lissaman and Brown's flat wing
+  const flat = apparentMassBarrows({ projectedAreaM2: 25, projectedSpanM: 10, flatAreaM2: 25, flatSpanM: 10, thicknessM: 0.3, tipDyM: 5, tipDzM: 1e-3 });
+  const t = 0.3; const b = 10; const c = 2.5; const AR = 4;
+  near('flight: apparent mass along the chord, flat: 0.85 pi t^2 b / 4', flat.m[0], 0.85 * Math.PI * t * t * b / 4, 1e-6);
+  near('flight: apparent mass square to the wing, flat: AR/(1+AR) pi c^2 b / 4', flat.m[2], AR / (1 + AR) * Math.PI * c * c * b / 4, 1e-9);
+  near('flight: apparent pitch inertia, flat: 0.0308 AR/(1+AR) c^3 S', flat.I[1], 0.0308 * AR / (1 + AR) * c ** 3 * 25, 1e-9);
+  const arched = apparentMassBarrows({ projectedAreaM2: 20, projectedSpanM: 9, flatAreaM2: 22.3, flatSpanM: 10.25, thicknessM: 0.35, tipDyM: 4.5, tipDzM: 2.1 });
+  check('flight: an arch puts the roll centre between the arch\'s centre and the pitch centre', arched.zRC2C < 0 && arched.zRC2C > arched.zPC2C,
+    `pitch centre ${arched.zPC2C.toFixed(2)} m, roll centre ${arched.zRC2C.toFixed(2)} m from the arch's centre`);
+  check('flight: an arch adds lateral apparent mass to the flat wing\'s edge', arched.m[1] > 10 * arched.flat.m22);
+  // the glider: the demonstration wing, a line plan with its brakes
+  const wing = demoWing();
+  const atm = atmosphere(1000);
+  const ribs = wing.ribs;
+  const rootC = ribs[0].chord;
+  const kar = [0.423 * rootC, 0.21, -7.0];
+  const anchorsAt = ribs.map((r, i) => i).filter((i) => i >= 2 && i <= ribs.length - 2 && i % 2 === 0);
+  const linePlan = {
+    karabiner: kar,
+    brakePlan: {
+      pulley: [kar[0] + 0.03, 0.34, -6.5],
+      lines: anchorsAt.map((i, k) => {
+        const r = ribs[i]; const o = r.frame.origin; const u = r.frame.u;
+        return { level: 'upper', index: k + 1, ribIndex: i, to: [o[0] + u[0] * r.chord, o[1] + u[1] * r.chord, o[2] + u[2] * r.chord] };
+      }),
+    },
+  };
+  const table = brakeSectionTable(shippedBrakeSolve('4415'));
+  const base = { wing, linePlan, airfoil: naca4('4415'), table, atm, pilotKg: 80, wingKg: 5, linesKg: 0.4, areaM2: 22.34, cxPilot: 0.015, cxLines: 0.02 };
+  const model = flightModel({ ...base, alphaWakeDeg: 7 });
+  check('flight: the air inside counts in the inertia, not the weight', model.massAir > 3 && model.massBody > model.massSolid
+    && Math.abs(model.massSolid - 85.4) < 1e-9, `${model.massAir.toFixed(2)} kg of air`);
+  const trim = flightTrim(model, { speed: 9.5, alphaDeg: 7, glide: 7 });
+  check('flight: the trim converges', trim.converged, `residual ${trim.residual.toExponential(2)} in ${trim.iterations}`);
+  // at trim, lift and drag hold the weight: their resultant is the weight, up
+  const qS = 0.5 * atm.density * trim.speed ** 2 * 22.34;
+  near('flight: lift and drag hold up the weight at trim', Math.hypot(trim.liftCoefficient, trim.dragCoefficient) * qS, 85.4 * atm.gravity, 0.002 * 85.4 * atm.gravity, ' N');
+  near('flight: and the glide is their ratio', trim.glideRatio, trim.liftCoefficient / trim.dragCoefficient, 1e-6);
+  check('flight: a paraglider\'s trim: 25 to 45 km/h, glide 5 to 11', trim.speed * 3.6 > 25 && trim.speed * 3.6 < 45 && trim.glideRatio > 5 && trim.glideRatio < 11,
+    `${(trim.speed * 3.6).toFixed(1)} km/h, glide ${trim.glideRatio.toFixed(2)}, the canopy at ${trim.canopyAlphaDeg.toFixed(2)}°`);
+  // the brakes
+  const b0 = flightBends(model, 0, 0); const bR = flightBends(model, 0, 400); const bB = flightBends(model, 650, 650);
+  check('flight: hands up, nothing bends', b0.every((v) => v === 0));
+  const right = [...bR].map((v, i) => [model.yMid[i], v]);
+  check('flight: one brake bends its own side and not the far side',
+    right.filter(([y]) => y > 1).every(([, v]) => v > 0) && right.filter(([y]) => y < -1).every(([, v]) => v === 0));
+  check('flight: no bend past a right angle', [...bB].every((v) => v <= 90 + 1e-9) && Math.max(...bB) > 80);
+  const fly = (sc, dur = null) => {
+    const tr = { ...trim, work: flightWork(model) };
+    tr.work.d.set(trim.work.d);
+    const f = runSteps(flightSteps(model, tr, { schedule: flightSchedule(sc), durationS: dur ?? flightDuration(sc) }));
+    return { f, s: flightSummary(f, trim) };
+  };
+  // nothing pulled: it stays where it is
+  const still = fly({ input: 'both', rate: 'slow', travelMM: 0 }, 4);
+  const lastS = still.f.frames[still.f.frames.length - 1];
+  check('flight: trimmed and left alone, it stays trimmed', Math.abs(lastS.speed - trim.speed) < 1e-4 && Math.abs(lastS.rollDeg) < 1e-9 && Math.abs(lastS.pitchDeg - trim.pitchDeg) < 1e-3,
+    `speed changed ${(lastS.speed - trim.speed).toExponential(1)} m/s in 4 s`);
+  // both brakes: nothing to turn it
+  const both = fly({ input: 'both', rate: 'fast', travelMM: 300, holdS: 2 });
+  const asym = Math.max(...both.f.frames.map((f) => Math.max(Math.abs(f.rollDeg), Math.abs(f.betaDeg), Math.abs(f.turnRateDeg))));
+  check('flight: both brakes together keep it symmetric', asym < 1e-9, `largest roll, slip or turn ${asym.toExponential(1)}`);
+  check('flight: both brakes slow it', both.s.minSpeed < trim.speed - 0.5, `${(both.s.minSpeed * 3.6).toFixed(1)} km/h`);
+  // left and right are mirror images
+  const L = fly({ input: 'left', rate: 'medium', travelMM: 300, holdS: 2 });
+  const Rr = fly({ input: 'right', rate: 'medium', travelMM: 300, holdS: 2 });
+  const mirror = Math.max(...L.f.frames.map((f, i) => {
+    const g = Rr.f.frames[i];
+    return Math.max(Math.abs(f.rollDeg + g.rollDeg), Math.abs(f.turnRateDeg + g.turnRateDeg), Math.abs(f.speed - g.speed), Math.abs(f.z - g.z));
+  }));
+  check('flight: the left brake is the right brake in a mirror', mirror < 1e-8, `largest difference ${mirror.toExponential(1)}`);
+  check('flight: the right brake turns it right', Rr.f.frames.some((f) => f.turnRateDeg > 5) && Rr.s.headingChangeDeg > 5,
+    `${Rr.s.headingChangeDeg.toFixed(1)}° in ${Rr.s.flownS.toFixed(1)} s`);
+  // EN 926-2 trim-speed spin tendency: one control to 25% of the symmetric
+  // range over 2 s, 20 s; then to 62.5%. A class A wing does not spin.
+  const sched = (tt) => ({ left: 0, right: tt < 1 ? 0 : tt < 3 ? 162 * (tt - 1) / 2 : tt < 15 ? 162 : tt < 17 ? 162 + 244 * (tt - 15) / 2 : 406 });
+  const tr2 = { ...trim, work: flightWork(model) }; tr2.work.d.set(trim.work.d);
+  const en = flightSummary(runSteps(flightSteps(model, tr2, { schedule: sched, durationS: 27 })), trim);
+  check('flight: the EN trim-speed spin test (25%, then 62.5% of 65 cm) does not depart', en.departedS === null,
+    `heading ${en.headingChangeDeg.toFixed(0)}°, bank up to ${en.maxRollDeg.toFixed(1)}°, ${en.stalledStripsPeak} strips past their stall`);
+  // a quick full pull of one brake does
+  const hard = fly({ input: 'right', rate: 'fast', travelMM: 650, holdS: 3 });
+  check('flight: one brake pulled to 65 cm in half a second departs, and the flight ends soon after',
+    hard.s.departedS !== null && hard.f.endedEarly && hard.f.frames[hard.f.frames.length - 1].t <= hard.s.departedS + FLIGHT.afterDepartureS + 0.05,
+    `departed at ${hard.s.departedS?.toFixed(2)} s with ${hard.s.departedTravelMM?.toFixed(0)} mm`);
+  // the bar, pushed until the trim would drop below the collapse floor
+  const rows = [0, 30, 60, 90, 120, 150].map((mm) => ({ barMM: mm, alphaDeg: 5 - 0.0314 * mm }));
+  const bar = flightBarTrim((rot) => flightModel({ ...base, alphaWakeDeg: 7, barRotationDeg: rot }), rows, { ...trim, model }, { minFlyingCz: 0.35 });
+  check('flight: on the bar it flies faster, and stops pushing where the lift would fall below the collapse floor',
+    bar.trim.speed > trim.speed && bar.trim.liftCoefficient >= 0.35 && (bar.barMM === 150 || bar.limitedBy?.reason),
+    `${bar.barMM} of 150 mm, ${(bar.trim.speed * 3.6).toFixed(1)} km/h, CL ${bar.trim.liftCoefficient.toFixed(3)}${bar.limitedBy ? `; ${bar.limitedBy.barMM} mm: ${bar.limitedBy.reason}` : ''}`);
+  check('flight: eighteen scenarios', FLIGHT_STATES.length * FLIGHT_INPUTS.length * FLIGHT_RATES.length === 18
+    && FLIGHT.rates.slow === 3 && FLIGHT.rates.medium === 1 && FLIGHT.rates.fast === 0.5 && FLIGHT.travelMM === 650);
 }
 
 console.log(`\n${'='.repeat(60)}`);

@@ -42,6 +42,19 @@ const created = [];
 globalThis.__createdNodes = created;
 globalThis.__recordNodes = false;
 const seeded = [];
+function fakeContext2d(node){
+  const drawn = node.drawn = { fill: 0, stroke: 0, text: 0, rect: 0, arc: 0, texts: [] };
+  return {
+    fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', globalAlpha: 1, textAlign: 'start',
+    beginPath(){}, moveTo(){}, lineTo(){}, closePath(){}, save(){}, restore(){}, setLineDash(){},
+    fill(){ drawn.fill++; }, stroke(){ drawn.stroke++; },
+    fillRect(){ drawn.rect++; }, strokeRect(){ drawn.rect++; }, clearRect(){},
+    arc(){ drawn.arc++; },
+    fillText(t){ drawn.text++; drawn.texts.push(String(t)); },
+    measureText(t){ return { width: String(t).length * 6 }; },
+    createLinearGradient(){ return { addColorStop(){} }; },
+  };
+}
 function mk(tag='div'){
   const n = {
     tagName:tag, children:[], _text:'', className:'', style:{}, files:[],
@@ -70,6 +83,11 @@ function mk(tag='div'){
     set innerHTML(v){ n.children=[]; n._text=String(v); },
     get lastChild(){ return n.children[n.children.length-1]; },
     querySelector(sel){const all=document.querySelectorAll(sel);return all.length?all[0]:null;}, contains(){return false;},
+    // A canvas's 2-D context that RECORDS what was drawn, as the attributes
+    // are recorded: the flight view draws into a canvas (so it can be
+    // recorded to video), and a stub that drew nothing could not tell a
+    // view that drew from one that threw before it did.
+    getContext(kind){ return kind === '2d' ? (n._ctx ??= fakeContext2d(n)) : null; },
   };
   // An id assigned in script names the node, as it does in a browser.
   //
@@ -152,7 +170,7 @@ const origErr = console.error;
 const REPLACES_DESIGN = /^(Load the Swoop2|Import LEP|Return to parametric)/;
 
 try {
-  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__setStatus=setStatus; globalThis.__importLep=(text,sections)=>{loadLepDesign(parseLep(text),sections||{}); S.reference=\'\'; S._appliedReference=null; buildControls(); rebuild();}; globalThis.__getLEP=()=>LEP; globalThis.__setXPOLAR=(p)=>{XPOLAR=p;}; globalThis.__parsePolar=parsePolar; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__slices={run:(o)=>runSliceAnalysis(o),get:()=>SLICE_RUN,shown:()=>sliceRunShown(),show:(i)=>{S.sliceIndex=i;draw();},tools:()=>{S.tab=\'slices\';buildTabTools();return document.getElementById(\'tabTools\');},text:(k,i)=>sliceExportText(k,i)}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__ribFeatures=(r)=>ribFeatures(r); globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__REFERENCE_TOTALS=typeof REFERENCE_TOTALS==="object"?REFERENCE_TOTALS:{}; globalThis.__parseDXF=parseDXF; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
+  new Function(js + '\n;globalThis.__S=S; globalThis.__getM=()=>M; globalThis.__rebuild=rebuild; globalThis.__setLEP=(d)=>{LEP=d;}; globalThis.__setStatus=setStatus; globalThis.__importLep=(text,sections)=>{loadLepDesign(parseLep(text),sections||{}); S.reference=\'\'; S._appliedReference=null; buildControls(); rebuild();}; globalThis.__getLEP=()=>LEP; globalThis.__setXPOLAR=(p)=>{XPOLAR=p;}; globalThis.__parsePolar=parsePolar; globalThis.__tab=(n)=>{S.tab=n;draw();}; globalThis.__slices={run:(o)=>runSliceAnalysis(o),get:()=>SLICE_RUN,shown:()=>sliceRunShown(),show:(i)=>{S.sliceIndex=i;draw();},tools:()=>{S.tab=\'slices\';buildTabTools();return document.getElementById(\'tabTools\');},text:(k,i)=>sliceExportText(k,i)}; globalThis.__flight={prepare:()=>flightPrepare(),fly:(sc)=>flightFly(Object.assign(flightScenario(),sc||{})),flyAll:()=>flightFlyAll(),get:()=>FLIGHT_RUN,shown:()=>flightShown(),play:FLIGHT_PLAY,tools:()=>{S.tab=\'flight\';buildTabTools();return document.getElementById(\'tabTools\');},tsv:(F)=>flightTsv(F),matrixTsv:(r)=>flightMatrixTsv(r),record:()=>flightRecord(),solves:()=>brakeSolves()}; globalThis.__rib=(i)=>{S.ribIndex=i;drawRib();}; globalThis.__ribFeatures=(r)=>ribFeatures(r); globalThis.__exports=()=>({dxf:panelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),marked:markedPanelsToDXF(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),ribs:ribsToDXF(M.wing),diagonals:vribsToDXF(M.vribs,{rollWidth:S.rollWidth}),svg:panelsToSVG(seamed(),{rollWidth:S.rollWidth,gap:S.panelGap/100}),lines:linesCSV(),lep:designToLep({wing:M.wing,airfoil:M.airfoil,name:S.name,balance:M.balance}),json:JSON.stringify(S)}); globalThis.__lep={parseLep,lepToDesign,describeLep,designToLep}; globalThis.__REFERENCE_TOTALS=typeof REFERENCE_TOTALS==="object"?REFERENCE_TOTALS:{}; globalThis.__parseDXF=parseDXF; globalThis.__controls=buildControls; globalThis.__saved={}; const __origSave=save; save=(f,t)=>{globalThis.__saved[f]=t;}; globalThis.__buttons=[]; const __origButton=button; button=(host,text,fn,cls)=>{globalThis.__buttons.push({text,fn}); return __origButton(host,text,fn,cls);};')();
 } catch(e){ errors.push('boot: '+e.message+'\n'+e.stack.split('\n').slice(0,4).join('\n')); }
 
 module.exports = { errors, REPLACES_DESIGN };

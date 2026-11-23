@@ -54,7 +54,7 @@ const gather = (n, out = []) => {
   return out;
 };
 const VIEWS = ['vp-plan', 'vp-front', 'vp-iso', 'vp-section', 'vp-rib', 'vp-diag',
-  'vp-lineplan', 'vp-polar', 'vp-atmos', 'vp-slice', 'vp-span', 'readout', 'balanceTable', 'envTable',
+  'vp-lineplan', 'vp-polar', 'vp-atmos', 'vp-slice', 'vp-span', 'vp-flightchart', 'readout', 'balanceTable', 'envTable',
   'cascadeTable'];
 const hash = (parts) => crypto.createHash('md5').update(parts.join('\n')).digest('hex');
 

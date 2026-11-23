@@ -62,6 +62,7 @@ tabs:
 | **Structure** | the diagonals, with the tension across each |
 | **Analysis** | polar, atmosphere |
 | **Slices** | one section in its own flow, and every slice tip to tip, with a slice selector (`docs/slices.md`) |
+| **Flight** | the glider flown through its brakes in 3D on a canvas (so it can be recorded to video), and its flight over time or all eighteen scenarios tabled (`docs/flight.md`) |
 
 Only the visible tab is drawn. Hidden grids have no size, so anything drawn
 into one fits to nothing — the redraw happens on the way in, not on the way

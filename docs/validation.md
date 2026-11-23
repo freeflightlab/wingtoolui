@@ -264,6 +264,32 @@ tunnel's clean NACA 4415 at Re 1.5 million (`naca4415-osu.tsv`), from 0° to
 6° the lift is within 0.06 and the moment within 0.016; the slope is 0.110 a
 degree against the tunnel's 0.095, whose walls were not corrected for.
 
+### 2.11 The flight model, against physics and EN 926-2's procedures
+
+The flight (`docs/flight.md`) has no measured paraglider flight to hold it
+to, so it is held to what must be true of any rigid body and to the
+certification standard's own manoeuvres.
+
+- **Physics.** Both brakes keep it symmetric to 1e-9; the left brake is the
+  right in a mirror to 1e-8; a trim left alone changes its speed by under
+  1e-4 m/s in 4 s; lift and drag at trim hold up the weight to 0.2%.
+  Barrows' apparent masses reduce to Lissaman and Brown's flat-wing figures
+  when the arch is taken away.
+- **The braked section.** Unbent, the table is within 0.1 of the Ohio State
+  tunnel's lift from −4° to 10° at Re 1.5 million and stalls at 15°, against
+  its 14°. Bounded through any angle and bend, with no step in lift over
+  0.2 between half degrees.
+- **EN 926-2's manoeuvres, on the default wing.** Both brakes over 5 s: it
+  departs at 52 cm, which the standard's table puts in class C for 80 to
+  100 kg (class A asks for more than 60). One control to 25% and then 62.5%
+  of the travel at trim speed: no spin, class A. These are the model's
+  verdicts on a wing nobody has built, against the standard's thresholds;
+  they are not a certificate.
+
+What is not checked: the turn. No measured turn rate or bank against brake
+travel was found for any paraglider, and before departing this model yaws
+and skids more than it banks.
+
 ---
 
 ## 3. Where sources disagree with each other
