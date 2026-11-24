@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2971-test validation suite and a benchmark with regression budgets
+- [x] 2978-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -1648,6 +1648,25 @@ Turning geometry into something a person can actually sew.
       junction's spread, and shares the anchors' loads so that they add up
       to the wing's load rather than so that the forces balance it.
 
+### Round of 2026-11-24: the turn, from PGSim
+
+- [x] **The brake turns the wing** — in the Flight tab a brake was pulled
+      and the wing seemed to fly straight. Two causes. The default flight
+      was the full 65 cm in a second, a spin entry that stalled the wing
+      2 s in. And the rigid canopy skidded round at half PGSim's turn and a
+      third of its bank, which flown headless on its own Geo 7 L PGSim
+      does too with its brake droop switched off. The droop is now the
+      flight's (`brakeDroop`, `flightDroop`); the default flight is a
+      turn, 35 cm held 12 s; and every flight flies its twin under the
+      other canopy, dotted on the chart, for the range.
+- [x] **The brake seen at work** — the bent part of each strip drawn on the
+      section's arc and tinted orange, the hands on the handles, the brake
+      lines to where the trailing edge has been drawn, the track from above,
+      and a chase camera that follows the heading a moment late.
+- [x] **The flight's frame rate** — the frames are kept every third step,
+      33⅓ a second; the flight said 30, and the view showed each moment's
+      frame a tenth early and never a flight's last tenth.
+
 ---
 
 ## Phase 4 — workflow
@@ -1829,12 +1848,24 @@ describing geometry and starts predicting behaviour.
       force and yaw stiffness within 10% of the tunnel, the drag's rise with
       lift within 8%, the pitch stiffness AVL's within 1%.
       `data/reference/belloc-2015-*.tsv`, `tools/windtunnel.mjs`.
-- [ ] **The turn's bank** — before departing, a one-sided input yaws and
-      skids this rigid arched wing more than it banks it (roll due to yaw
-      rate −90 Nm per rad/s, from the outer side's lift pointing outward).
-      Nine degrees of freedom, the pilot rolling under the canopy, may be
-      what a real wing banks with; no measured turn rate against brake
-      travel was found to check either.
+- [x] **The turn's bank** (1.18) — a one-sided input skidded this rigid
+      arched wing round nearly flat: the braked side's extra lift, square to
+      its canted cells, points outward and up through nearly the riser
+      midpoint (Slegers and Costello's skid steering). PGSim's brake droop,
+      the pulled side rolled outboard about its chords, now banks it; 0.3
+      here, scaled to this tool's brake, flies PGSim's turns on the Geo 7 L
+      (`brakeDroop`; `docs/flight.md`, "The turn";
+      `data/reference/pgsim-turns.tsv`).
+- [ ] **Two bodies** — the pilot hung under the canopy on line bundles, as
+      PGSim's default dynamics: they turn the Geo 7 L a third faster than
+      one body at 43 cm and 95 kg, and spiral at 115 kg. Gorman and Slegers
+      (2011) compare such models for parafoils.
+- [ ] **The brake through its cascade** — PGSim reads each trailing edge's
+      travel through the cascade's own angles (each junction moving along
+      its parent line, a child taking the parent's motion by the cosine
+      between them). This tool pulls every anchor straight from the pulley
+      beyond its free travel, a third more drop at 43 cm on the Geo 7 L,
+      and at 25 cm it turns a quarter to a third less than PGSim.
 - [ ] **The circulation's lag** — the strips' lift follows a brake at once;
       a real wing's lags about 0.3 s at trim (Wagner, Jones's correction),
       which matters on the half-second pull.

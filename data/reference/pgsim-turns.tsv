@@ -1,0 +1,40 @@
+# PGSim's one-brake turns on the Ozone Geo 7 L: a second model's answer, for the flight model's turn
+# Source: PGSim, this project's companion paraglider simulator (a single-page HTML flight simulator
+#   built in the same project; engine build 1791983168-52fd), its own Geo 7 L OBJ, flown headless
+#   in Node with its engine and EN 926-2 flight recorder unchanged
+# Retrieved: 2026-11-24
+# measure: computed, by PGSim; a model, not a flight: what a second, independently built model flies
+#
+# PGSim's defaults throughout (vortex lattice four panels a chord, brake cascade read from the
+# OBJ's own brake lines, 0.08 m of free travel, 0.95 efficiency), at the all-up weight given; no
+# weight shift, no speed bar, still air. From trim, the right brake from nothing at 1 s to the
+# travel at 2 s, held. Each figure is the mean from 8 to 16 s; the turn's least and most in that
+# window show how much it still swings.
+#
+# dynamics     rigid: one rigid body; two bodies: canopy and pilot joined by tension-only line
+#              bundles, PGSim's default
+# brake_droop  PGSim's brake droop: the braked strips roll outboard about their chords by this
+#              many radians a unit of trailing-edge drop over chord, at most 8 degrees; 0 is a
+#              rigid canopy. PGSim's default is 0.5
+# turn_deg_s   the heading's rate, degrees a second
+# bank_deg     the canopy's bank (roll), degrees
+# sideslip_deg the canopy's sideslip, degrees (negative: the air from the left, outside a right turn)
+# state        flying, or spiral where the sink passed 14 m/s within 17 s
+# trim_speed_ms  PGSim's hands-up trim speed at this weight
+weight_kg	travel_cm	dynamics	brake_droop	turn_deg_s	bank_deg	sideslip_deg	turn_min_deg_s	turn_max_deg_s	state	trim_speed_ms
+95	25	rigid	0	11.6	6.7	-1.4	9	14	flying	10.35
+95	25	rigid	0.5	17.6	13.7	-1.4	15	20	flying	10.35
+95	25	two bodies	0	11.1	6.0	-1.1	9	13	flying	10.35
+95	25	two bodies	0.5	17.5	13.6	-1.0	16	20	flying	10.35
+95	43	rigid	0	14.7	8.3	-5.3	11	18	flying	10.35
+95	43	rigid	0.5	22.9	19.6	-2.5	18	27	flying	10.35
+95	43	two bodies	0	14.9	8.1	-5.1	11	19	flying	10.35
+95	43	two bodies	0.5	31.2	27.7	-1.4	29	33	flying	10.35
+115	25	rigid	0	13.0	9.3	-1.4	11	15	flying	11.41
+115	25	rigid	0.5	20.1	18.3	-1.4	18	23	flying	11.41
+115	25	two bodies	0	12.5	8.6	-1.0	11	14	flying	11.41
+115	25	two bodies	0.5	20.3	18.5	-0.9	19	22	flying	11.41
+115	43	rigid	0	16.4	11.5	-5.5	13	20	flying	11.41
+115	43	rigid	0.5	26.4	25.6	-3.0	22	34	flying	11.41
+115	43	two bodies	0	16.5	11.2	-4.9	14	20	flying	11.41
+115	43	two bodies	0.5	81.8	66.1	16.5	48	144	spiral	11.41

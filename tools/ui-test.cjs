@@ -2765,7 +2765,7 @@ try {
     flightStart: 'Flight starts from', flightInput: 'Brake pulled', flightRate: 'How fast the brake is pulled',
     flightTravelMM: 'Brake travel in millimetres', flightHoldS: 'Seconds the brake is held',
     flightRelease: 'Release the brake after the hold', flightPastDeparture: 'What happens after a departure',
-    flightCamera: 'Camera', flightChart: 'Chart shows',
+    flightCamera: 'Camera', flightChart: 'Chart shows', flightCanopy: 'Canopy under the brake',
     brakeSlackCentreMM: 'Brake free travel at the centre, mm', brakeSlackTipMM: 'Brake free travel at the tip, mm',
   };
   for (const [k, aria] of Object.entries(flightKeys)) {
@@ -2903,10 +2903,31 @@ try {
     const note = document.getElementById('note-flight')._text;
     if (!/departed at|stayed flying/.test(note)) throw new Error(`flight note: ${note.slice(0, 100)}`);
     console.log(`  ok   flight: ${F.label}: ${F.flight.frames.length} frames drawn, ${note.split(' · ')[2]}`);
+    // The flight first shown is a turn the wing flies, not a spin entry: it
+    // was 65 cm in a second, which stalled the wing 2 s in and showed a
+    // straight glide, then "departed". The brake is seen pulled: the hands
+    // and the pulled trailing edge drawn orange, the track from above; and
+    // the same turn with a rigid canopy, the other assumption, beside it.
+    const D = await fl.fly({});
+    if (!D || D.error || !D.flight) throw new Error(`the default flight failed: ${D && D.error}`);
+    const ds = D.summary;
+    if (ds.departedS !== null || !(Math.abs(ds.headingChangeDeg) >= 270) || !(ds.maxRollDeg > 15)) {
+      throw new Error(`the default flight does not turn: ${D.label}, turned ${ds.headingChangeDeg.toFixed(0)}°, bank ${ds.maxRollDeg.toFixed(0)}°, departed ${ds.departedS}`);
+    }
+    if (!D.twin?.summary || !(Math.abs(D.twin.summary.headingChangeDeg) < Math.abs(ds.headingChangeDeg))
+      || !(D.twin.summary.maxRollDeg < ds.maxRollDeg)) throw new Error('the default flight has no rigid-canopy twin, or its twin turns as far');
+    fl.play.t = 8;
+    globalThis.__tab('flight');
+    const dv = document.getElementById('vp-flight').drawn;
+    if (!dv.texts.some((t) => /from above/.test(t)) || !dv.texts.some((t) => /turned right \d+°/.test(t))) throw new Error('the flight view has no track from above, or does not say how far it has turned');
+    const dn = document.getElementById('note-flight')._text;
+    if (!/with a rigid canopy: bank \d+°, turn \d+°\/s/.test(dn)) throw new Error(`the flight note does not give the rigid canopy's turn: ${dn.slice(0, 160)}`);
+    console.log(`  ok   flight: the default, ${D.label}, turns ${ds.headingChangeDeg.toFixed(0)}° at up to ${ds.maxTurnRateDeg.toFixed(0)}°/s and ${ds.maxRollDeg.toFixed(0)}° of bank; `
+      + `a rigid canopy ${D.twin.summary.headingChangeDeg.toFixed(0)}° at ${D.twin.summary.maxTurnRateDeg.toFixed(0)}°/s, ${D.twin.summary.maxRollDeg.toFixed(0)}°`);
     const tools = fl.tools();
     const labels = tools.children.map((c) => (c.attrs && c.attrs['aria-label']) || c._text);
     for (const want of ['Flight starts from', 'Brake pulled', 'How fast the brake is pulled', 'Brake travel in millimetres',
-      'Seconds the brake is held', 'Release the brake after the hold', 'What happens after a departure', 'Fly this scenario',
+      'Seconds the brake is held', 'Release the brake after the hold', 'Canopy under the brake', 'What happens after a departure', 'Fly this scenario',
       'Fly every start, brake and rate', 'Brake free travel at the centre, mm', 'Brake free travel at the tip, mm', 'Camera',
       'Chart shows', 'Play or pause', 'Time in the flight', 'Record the flight as a video', 'Save the flight frame by frame']) {
       if (!labels.includes(want)) throw new Error(`flight tools have no "${want}"`);
@@ -2925,7 +2946,7 @@ try {
     const mt = fl.matrixTsv(fl.get()).trim().split('\n');
     if (mt.length !== 20) throw new Error(`the eighteen's table has ${mt.length} lines`);
     const departed = m.filter((r) => r.out.summary?.departedS !== null).length;
-    console.log(`  ok   flight: all eighteen flown and tabled; ${departed} departed at 65 cm`);
+    console.log(`  ok   flight: all eighteen flown and tabled; ${departed} departed at ${(globalThis.__S.flightTravelMM / 10).toFixed(0)} cm`);
     // At a phone's width (420 px) the tables' columns sat at fixed shares of
     // the frame and ran into each other: the stability's by 35 px.
     const tightest = (width) => {
@@ -3065,6 +3086,49 @@ try {
   } catch (e) {
     console.log('  FAIL flight: ' + e.message);
     process.exit(1);
+  }
+  // The turn against a second model: PGSim, the project's simulator, flown
+  // headless on its own Geo 7 L (data/reference/pgsim-turns.tsv). The tool's
+  // Geo 7 L, from its specification, at the same weights, the right brake to
+  // the same travel the same way, held. Drooping, its turn falls inside the
+  // band PGSim's own two dynamics span with its droop, widened a third below
+  // (at 25 cm the tool turns about a third less, its brake biting later);
+  // rigid, within a third of PGSim's rigid canopy. Before the droop every
+  // turn here was the rigid canopy's, a skid half as fast.
+  {
+    const Sg = globalThis.__S;
+    const keep = JSON.parse(JSON.stringify(Sg));
+    try {
+      const rows = require('fs').readFileSync('data/reference/pgsim-turns.tsv', 'utf8').split('\n')
+        .filter((l) => l && !l.startsWith('#')).slice(1).map((l) => l.split('\t'));
+      const pg = (w, cm, dyn, k) => rows.find((r) => Number(r[0]) === w && Number(r[1]) === cm && r[2] === dyn && Number(r[3]) === k);
+      const said = [];
+      for (const [w, cm] of [[95, 25], [95, 43], [115, 43]]) {
+        Sg.reference = 'Ozone Geo 7 L'; globalThis.__rebuild();
+        Sg.pilotMass = Math.round((w - Sg.wingMass - Sg.lineMass) * 10) / 10; globalThis.__rebuild();
+        const G = await globalThis.__flight.fly({ start: 'trim', input: 'right', rate: 'medium', travelMM: cm * 10, holdS: 16, release: false, flyOn: false, canopy: 'droops' });
+        if (!G || G.error || !G.twin?.flight) throw new Error(`the Geo 7 L at ${w} kg, ${cm} cm did not fly: ${G?.error ?? G?.twin?.error}`);
+        const meanTurn = (fl) => { const win = fl.frames.filter((q) => q.t >= 8 && q.t <= 16); return win.reduce((a, q) => a + q.turnRateDeg, 0) / win.length; };
+        const droops = meanTurn(G.flight); const rigid = meanTurn(G.twin.flight);
+        const lo = Number(pg(w, cm, 'rigid', 0.5)[4]) * 2 / 3;
+        const twoBodies = pg(w, cm, 'two bodies', 0.5);
+        const hi = twoBodies[9] === 'spiral' ? Infinity : Number(twoBodies[4]) * 1.15;
+        const rigidPg = Number(pg(w, cm, 'rigid', 0)[4]);
+        if (!(droops >= lo && droops <= hi)) throw new Error(`the Geo 7 L at ${w} kg, ${cm} cm turns at ${droops.toFixed(1)}°/s, outside PGSim's ${lo.toFixed(1)} to ${hi.toFixed(1)}`);
+        if (!(Math.abs(rigid / rigidPg - 1) < 1 / 3)) throw new Error(`with a rigid canopy the Geo 7 L at ${w} kg, ${cm} cm turns at ${rigid.toFixed(1)}°/s against PGSim's ${rigidPg}`);
+        const pgRigid = Number(pg(w, cm, 'rigid', 0.5)[4]);
+        const band = twoBodies[9] === 'spiral' ? `${pgRigid} to a spiral`
+          : `${Math.min(pgRigid, Number(twoBodies[4]))} to ${Math.max(pgRigid, Number(twoBodies[4]))}`;
+        said.push(`${w} kg ${cm} cm ${droops.toFixed(0)}°/s (PGSim ${band}), rigid ${rigid.toFixed(0)} (${rigidPg})`);
+      }
+      console.log(`  ok   flight: the Geo 7 L's turns against PGSim's: ${said.join('; ')}`);
+    } catch (e) {
+      console.log('  FAIL flight against PGSim: ' + e.message);
+      process.exit(1);
+    }
+    for (const k of Object.keys(Sg)) if (!(k in keep)) delete Sg[k];
+    Object.assign(Sg, keep);
+    globalThis.__rebuild(); globalThis.__controls();
   }
   // This tool's own panels are parted at the intake, as a wing is cut: the
   // upper from where the intake opens round the nose, the lower from where

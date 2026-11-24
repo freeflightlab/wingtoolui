@@ -27,6 +27,14 @@
  * across the centre to the other side's first; outboard of the last it
  * falls to nothing at the tip. The drop over the chord gives the bend.
  *
+ * The canopy under the brake (`brakeDroop`, from PGSim): the pulled side
+ * rolls outboard about its chords, and its force with it. On an arch this
+ * steep the braked side's extra lift points outward and up through nearly
+ * the riser midpoint, and its extra drag yaws the wing: a rigid canopy
+ * skids round a turn nearly flat, at half the turn and a third of the bank
+ * PGSim's two bodies fly (docs/flight.md, "The turn"). The droop's tilt,
+ * about a lever as long as the lines, is what banks it into the turn.
+ *
  * The body: canopy cloth spread over the strips by area, the air inside the
  * canopy (its mass and inertia, not its weight, which the air outside
  * holds up), the lines at half their height, the pilot at the karabiners —
@@ -45,8 +53,11 @@
  * ---------------------------------------------------------------------------
  * What it is not
  * ---------------------------------------------------------------------------
- * A rigid canopy. A real one deforms, folds and collapses; nothing here
- * does. A section past its stall is the table's flat plate, and a strip
+ * A rigid canopy but for the droop under the brake, and one rigid body: the
+ * pilot does not swing under the wing on his own (PGSim's two bodies turn a
+ * third faster again at 43 cm on the Geo 7 L; docs/flight.md, "The turn").
+ * A real canopy also deforms, folds and collapses; nothing here does. A
+ * section past its stall is the table's flat plate, and a strip
  * whose lift falls near nothing is where a real canopy would start to fold:
  * both are counted and reported, never hidden, and a flight that reaches
  * them says it has left what the model can stand behind.
@@ -94,12 +105,26 @@ export const FLIGHT = Object.freeze({
   apparentMass: true,
   barPivotRow: 'C',
   collapseCl: 0.15,
+  // The canopy under the brake: the brake lines pull the trailing edge down
+  // and in toward the pilot's hand, and the braked part of the canopy rolls
+  // outboard about its chords, more anhedral where it is pulled (PGSim's
+  // brake droop). Each strip turns its force about its chord, outboard, by
+  // `brakeDroop` radians for each unit of its trailing edge's drop over its
+  // chord, at most `droopMaxDeg`. 0 is a rigid canopy, which on a wing as
+  // arched as a paraglider's skids round a turn nearly flat (docs/flight.md).
+  // PGSim takes 0.5 on its own cascade's drop; this tool's tip-first pull
+  // drops the trailing edge further for the same hand travel, and 0.3 here
+  // flies PGSim's rigid-body turns on the Geo 7 L (docs/flight.md, "The turn").
+  brakeDroop: 0.3,
+  droopMaxDeg: 8,
   // the wing's lift below which the riser model takes a frontal collapse
   minFlyingCz: 0.35,
   // past these the flight has departed (stalled through, spinning, folding)
   departAlphaDeg: 30,
   departNegativeAlphaDeg: 10,
   departBetaDeg: 30,
+  // a spiral dive: sinking as fast as EN 926-2 has a spiral dive flown to
+  spiralSinkMS: 14,
   afterDepartureS: 2,
   altitudeM: 1000,
   // Barrows (2002), the factors his arched-wing apparent masses carry
@@ -315,21 +340,27 @@ export function flightModel({
   const nrm = new Float64Array(3 * n); const spn = new Float64Array(3 * n); const chd = new Float64Array(3 * n);
   const chord = new Float64Array(n); const width = new Float64Array(n); const area = new Float64Array(n);
   const yMid = new Float64Array(n);
+  // along each strip's span, away from the middle: where its braked part rolls
+  const outb = new Float64Array(3 * n);
   sys.panels.forEach((p, i) => {
     const mid = [(p.a[0] + p.b[0]) / 2, (p.a[1] + p.b[1]) / 2, (p.a[2] + p.b[2]) / 2];
     const s = flUnit(p.span); const nn = p.normal; const c = flUnit(flCross(s, nn));
     const st = p.strip;
     const ch = (flNorm(flSub(st.leftTE, st.leftLE)) + flNorm(flSub(st.rightTE, st.rightLE))) / 2;
     const w = flNorm(p.span);
+    const away = Math.sign(mid[1]) * Math.sign(s[1]);
     for (let k = 0; k < 3; k++) {
       rq[3 * i + k] = mid[k] - RM[k]; rc[3 * i + k] = p.control[k] - RM[k];
       nrm[3 * i + k] = nn[k]; spn[3 * i + k] = s[k]; chd[3 * i + k] = c[k];
+      outb[3 * i + k] = away * s[k];
     }
     chord[i] = ch; width[i] = w; area[i] = ch * w; yMid[i] = mid[1];
   });
   // the brake anchors, both sides, with their free travel and their pull
   const bp = linePlan.brakePlan;
   const anchors = [];
+  // the right side's pulley, on the rear riser (the bar does not move it)
+  const brakePulley = bp?.pulley ? [bp.pulley[0], Math.abs(bp.pulley[1]), bp.pulley[2]] : null;
   if (bp) {
     // the pulley is on the rear riser, which the bar does not move
     const pulley = bp.pulley;
@@ -351,6 +382,12 @@ export function flightModel({
   }
   const K = anchors.length;
   const all = anchors.map((a) => ({ ...a, side: 'left', y: -a.y, te: [a.te[0], -a.te[1], a.te[2]] })).concat(anchors);
+  // the strip each anchor pulls on, for its normal
+  for (const a of all) {
+    let best = 0;
+    for (let i = 0; i < n; i++) if (Math.abs(yMid[i] - a.y) < Math.abs(yMid[best] - a.y)) best = i;
+    a.strip = best;
+  }
   // which anchors each strip's drop is read from
   const tipY = Math.max(...strips.map((s) => Math.max(Math.abs(s.leftTE[1]), Math.abs(s.rightTE[1]))));
   const weights = [];
@@ -480,13 +517,13 @@ export function flightModel({
   }
   const lu6 = flLu(A6, 6);
   return {
-    cfg, rho, g, n, sys, lu, tw, rq, rc, nrm, spn, chd, chord, width, area, yMid,
+    cfg, rho, g, n, sys, lu, tw, rq, rc, nrm, spn, chd, outb, chord, width, area, yMid,
     anchors: all, weights, tipY, table, flatAreaM2: flatArea, areaM2,
     dragPilotM2: areaM2 * cxPilot, dragLinesM2: areaM2 * cxLines,
     pilotAt, lineDragAt, linesAt, rSolidW, rSolidB: rS, rBodyB: rB, JB,
     massSolid, massAir, massBody, pilotKg, wingKg, linesKg,
     apparent: am, A6, lu6, RM, barRotationDeg, alphaWakeDeg,
-    strips, hangTop, pivot,
+    strips, hangTop, pivot, brakePulley,
   };
 }
 
@@ -500,13 +537,15 @@ export function flightWork(model) {
     d: new Float64Array(n).fill(-4 * Math.PI / 180),
     rhs: new Float64Array(n), gam: new Float64Array(n), theta: new Float64Array(n),
     aEff: new Float64Array(n), aGeo: new Float64Array(n), aDir: new Float64Array(n), deep: new Uint8Array(n),
+    dropC: new Float64Array(n), droop: new Float64Array(n),
     cl: new Float64Array(n), cd: new Float64Array(n), cm: new Float64Array(n),
     vp: new Float64Array(n), V: new Float64Array(3 * n), sec: [0, 0, 0], iterations: 0, residual: 0,
   };
 }
 
-/** Each strip's bend, in degrees, for the two handles' travel (mm). */
-export function flightBends(model, leftMM, rightMM, out = null) {
+/** Each strip's bend, in degrees, for the two handles' travel (mm); and,
+ * into `dropOut`, its trailing edge's drop over its chord. */
+export function flightBends(model, leftMM, rightMM, out = null, dropOut = null) {
   const { anchors, weights, chord, n } = model;
   const res = out || new Float64Array(n);
   const K2 = anchors.length; const K = K2 / 2;
@@ -520,8 +559,19 @@ export function flightBends(model, leftMM, rightMM, out = null) {
   for (let i = 0; i < n; i++) {
     let d = 0;
     for (const [k, w] of weights[i]) d += w * drop[k];
+    if (dropOut) dropOut[i] = d / chord[i];
     res[i] = brakeBendForDrop(d / chord[i], flap) * 180 / Math.PI;
   }
+  return res;
+}
+
+/** Each strip's roll under its brake (radians, outboard): `brakeDroop` for
+ * each unit of its trailing edge's drop over its chord, at most
+ * `droopMaxDeg`. */
+export function flightDroop(model, dropC, out = null) {
+  const res = out || new Float64Array(model.n);
+  const k = model.cfg.brakeDroop || 0; const most = (model.cfg.droopMaxDeg ?? 8) * Math.PI / 180;
+  for (let i = 0; i < model.n; i++) res[i] = k > 0 ? Math.min(k * dropC[i], most) : 0;
   return res;
 }
 
@@ -537,7 +587,8 @@ export function flightForces(model, x, ctrl, work) {
   const R = flightRotation([x[3], x[4], x[5], x[6]]);
   const gB = [R[2][0] * g, R[2][1] * g, R[2][2] * g];
   const vW = flToBody(vB); const wW = flToBody(wB); const gW = flToBody(gB);
-  flightBends(model, ctrl.left || 0, ctrl.right || 0, work.theta);
+  flightBends(model, ctrl.left || 0, ctrl.right || 0, work.theta, work.dropC);
+  flightDroop(model, work.dropC, work.droop);
   const { d, rhs, gam, theta, aEff, aGeo, deep, cl, cd, cm, vp, V, sec } = work;
   const RAD = Math.PI / 180;
   for (let i = 0; i < n; i++) {
@@ -618,11 +669,18 @@ export function flightForces(model, x, ctrl, work) {
   }
   // the strips' forces, on their quarter-chord lines
   const F = [0, 0, 0]; const M = [0, 0, 0];
+  const { droop } = work; const { outb } = model;
   for (let i = 0; i < n; i++) {
     const q = 0.5 * rho * vp[i] * vp[i] * area[i];
     const ca = Math.cos(aDir[i]); const sa = Math.sin(aDir[i]);
     const ex = chd[3 * i]; const ey = chd[3 * i + 1]; const ez = chd[3 * i + 2];
-    const nx = nrm[3 * i]; const ny = nrm[3 * i + 1]; const nz = nrm[3 * i + 2];
+    let nx = nrm[3 * i]; let ny = nrm[3 * i + 1]; let nz = nrm[3 * i + 2];
+    // a braked strip rolled outboard about its chord: its normal, and so its
+    // force, turned toward its own span's outboard end
+    if (droop[i] > 0) {
+      const c = Math.cos(droop[i]); const s = Math.sin(droop[i]);
+      nx = nx * c + outb[3 * i] * s; ny = ny * c + outb[3 * i + 1] * s; nz = nz * c + outb[3 * i + 2] * s;
+    }
     // the flow as the whole wing leaves it, and lift square to it
     const fx = q * (cl[i] * (-sa * ex + ca * nx) + cd[i] * (ca * ex + sa * nx));
     const fy = q * (cl[i] * (-sa * ey + ca * ny) + cd[i] * (ca * ey + sa * ny));
@@ -915,7 +973,11 @@ export function* flightSteps(model, trim, { schedule, durationS, dtS = model.cfg
       if (departedAt !== null && f.t >= departedAt + afterDepartureS) { endedEarly = true; break; }
     }
   }
-  return { frames, label, dtS, frameHz, durationS, n, minFlyingCz: model.cfg.minFlyingCz, departedAt, endedEarly };
+  // The rate the frames were kept at, which is the steps' whole number to a
+  // frame and not the rate asked: 30 a second asked, at 0.01 s steps, keeps
+  // every third, 33 1/3 a second. Given back as asked, the view found each
+  // time's frame a tenth early and never showed the flight's last tenth.
+  return { frames, label, dtS, frameHz: 1 / (every * dtS), durationS, n, minFlyingCz: model.cfg.minFlyingCz, spiralSinkMS: model.cfg.spiralSinkMS, departedAt, endedEarly };
 }
 
 /** What a flight did: its extremes up to where it departed (if it did),
@@ -929,11 +991,14 @@ export function flightSummary(flight, trim) {
   let minSpeed = Infinity; let maxSpeed = 0; let maxSink = -Infinity; let stalledPeak = 0; let foldingPeak = 0;
   let firstStall = null; let firstFold = null; let solvedMin = Infinity; let headingTotal = 0; let stalledFrames = 0;
   let departedAt = null; let lowLiftAt = null; let minLift = Infinity; let flown = 0; let lastFlown = F[0];
+  let spiralAt = null;
   const floor = flight.minFlyingCz ?? FLIGHT.minFlyingCz;
+  const spiralSink = flight.spiralSinkMS ?? FLIGHT.spiralSinkMS;
   for (const f of F) {
     if (departedAt === null && f.departed) departedAt = f;
     if (departedAt !== null) break;
     flown++; lastFlown = f;
+    if (spiralAt === null && f.sinkRate >= spiralSink) spiralAt = f;
     minLift = Math.min(minLift, f.liftCoefficient);
     if (lowLiftAt === null && f.liftCoefficient < floor) lowLiftAt = f;
     maxRoll = Math.max(maxRoll, Math.abs(f.rollDeg));
@@ -960,5 +1025,6 @@ export function flightSummary(flight, trim) {
     departedS: departedAt ? departedAt.t : null,
     departedTravelMM: departedAt ? Math.max(departedAt.left, departedAt.right) : null,
     lowLiftS: lowLiftAt ? lowLiftAt.t : null, minLiftBeforeDeparture: minLift,
+    spiralS: spiralAt ? spiralAt.t : null,
   };
 }

@@ -186,8 +186,8 @@ import {
 } from '../src/core/brakesection.js';
 import {
   FLIGHT, FLIGHT_INPUTS, FLIGHT_STATES, FLIGHT_RATES, flightModel, flightWork, flightTrim, flightBarTrim, flightBends,
-  flightForces, flightDerivative, flightSchedule, flightDuration, flightSteps, flightSummary, flightRotation, flightEuler,
-  flightQuaternion, apparentMassBarrows,
+  flightDroop, flightForces, flightDerivative, flightSchedule, flightDuration, flightSteps, flightSummary, flightRotation,
+  flightEuler, flightQuaternion, apparentMassBarrows,
 } from '../src/core/flight.js';
 import { trefftzInfluence } from '../src/core/vlm.js';
 import {
@@ -19318,6 +19318,61 @@ function shippedBrakeSolve(code) {
     `${bar.barMM} of 150 mm, ${(bar.trim.speed * 3.6).toFixed(1)} km/h, CL ${bar.trim.liftCoefficient.toFixed(3)}${bar.limitedBy ? `; ${bar.limitedBy.barMM} mm: ${bar.limitedBy.reason}` : ''}`);
   check('flight: eighteen scenarios', FLIGHT_STATES.length * FLIGHT_INPUTS.length * FLIGHT_RATES.length === 18
     && FLIGHT.rates.slow === 3 && FLIGHT.rates.medium === 1 && FLIGHT.rates.fast === 0.5 && FLIGHT.travelMM === 650);
+
+  // The frames are kept every third step at 0.01 s: 33 1/3 a second, and the
+  // flight says so. It said the 30 asked, and the view found each time's
+  // frame a tenth early. (The last is kept wherever the flight ends.)
+  const still2 = still.f;
+  check('flight: the frames are kept at the rate the flight gives', still2.frames.slice(0, -1).every((q, k) => Math.abs(q.t - k / still2.frameHz) < 1e-9)
+    && Math.abs(still2.frameHz - 100 / 3) < 1e-9, `${still2.frameHz.toFixed(3)} a second`);
+
+  // The canopy under the brake (PGSim's droop): each braked strip's force
+  // turned outboard about its chord by brakeDroop × its drop over its chord,
+  // at most droopMaxDeg. Hands up there is nothing to turn.
+  const rigid = { ...model, cfg: { ...model.cfg, brakeDroop: 0 } };
+  const atTrim = (mdl, ctrl) => { const w = flightWork(mdl); w.d.set(trim.work.d); w.tol = 1e-11; w.maxIterations = 600; return flightForces(mdl, trim.state, ctrl, w); };
+  const up0 = atTrim(model, { left: 0, right: 0 }); const up1 = atTrim(rigid, { left: 0, right: 0 });
+  check('flight: hands up, the canopy\'s droop changes nothing', up0.F.every((v, i) => v === up1.F[i]) && up0.M.every((v, i) => v === up1.M[i]));
+  const dropC = new Float64Array(model.n);
+  flightBends(model, 0, 400, null, dropC);
+  const dr = flightDroop(model, dropC);
+  const most = FLIGHT.droopMaxDeg * Math.PI / 180;
+  check('flight: the droop is brakeDroop times the drop over the chord, at most droopMaxDeg, on the pulled side',
+    [...dr].every((v, i) => Math.abs(v - Math.min(FLIGHT.brakeDroop * dropC[i], most)) < 1e-15)
+    && [...dr].every((v, i) => model.yMid[i] > 1 ? v > 0 : model.yMid[i] < -1 ? v === 0 : true) && FLIGHT.brakeDroop === 0.3,
+    `up to ${(Math.max(...dr) * 180 / Math.PI).toFixed(1)}° at 400 mm`);
+  const pulled = atTrim(model, { left: 0, right: 400 }); const pulledRigid = atTrim(rigid, { left: 0, right: 400 });
+  // body axes: x forward, y right, z down; a roll to the right is +M[0]
+  check('flight: drooping, the pulled side rolls the wing toward it and pushes it outboard',
+    pulled.M[0] > pulledRigid.M[0] + 10 && pulled.F[1] > pulledRigid.F[1],
+    `roll moment ${pulledRigid.M[0].toFixed(1)} → ${pulled.M[0].toFixed(1)} N·m, side force ${pulledRigid.F[1].toFixed(1)} → ${pulled.F[1].toFixed(1)} N`);
+  // Flown: a rigid canopy, its braked side lifting outward and dragging,
+  // skids round nearly flat; drooping, it banks into the turn.
+  const flyWith = (mdl, sc, dur = null) => {
+    const tr = { ...trim, work: flightWork(mdl) };
+    tr.work.d.set(trim.work.d);
+    const f = runSteps(flightSteps(mdl, tr, { schedule: flightSchedule(sc), durationS: dur ?? flightDuration(sc) }));
+    return { f, s: flightSummary(f, trim) };
+  };
+  const held = { input: 'right', rate: 'medium', travelMM: 300, holdS: 10, release: false };
+  const turnD = flyWith(model, held, 12); const turnR = flyWith(rigid, held, 12);
+  check('flight: drooping, one brake banks it into the turn: half again the rigid canopy\'s bank and turn',
+    turnD.s.departedS === null && turnD.s.maxRollDeg > 1.5 * turnR.s.maxRollDeg && turnD.s.headingChangeDeg > 1.5 * turnR.s.headingChangeDeg,
+    `bank ${turnR.s.maxRollDeg.toFixed(0)}° → ${turnD.s.maxRollDeg.toFixed(0)}°, turned ${turnR.s.headingChangeDeg.toFixed(0)}° → ${turnD.s.headingChangeDeg.toFixed(0)}° in 12 s`);
+  // A turn held: banked as far as its rate needs, tan(bank) = V ω / g, the
+  // wing slipping little. Over the last three seconds, averaged.
+  const last = turnD.f.frames.filter((q) => q.t >= 9);
+  const avg = (g) => last.reduce((a, q) => a + g(q), 0) / last.length;
+  const bankHeld = avg((q) => q.rollDeg); const wHeld = avg((q) => q.turnRateDeg) * Math.PI / 180;
+  const vHorizontal = avg((q) => q.groundSpeed);
+  const coordinated = Math.atan(vHorizontal * wHeld / atm.gravity) * 180 / Math.PI;
+  check('flight: a held turn banks as far as its rate needs (tan bank = V ω / g, within 20%), slipping under 5°',
+    Math.abs(bankHeld / coordinated - 1) < 0.2 && Math.abs(avg((q) => q.betaDeg)) < 5,
+    `bank ${bankHeld.toFixed(1)}° against ${coordinated.toFixed(1)}° for ${(wHeld * 180 / Math.PI).toFixed(1)}°/s at ${(vHorizontal * 3.6).toFixed(1)} km/h; slip ${avg((q) => q.betaDeg).toFixed(1)}°`);
+  // A spiral dive is marked where the sink passes EN 926-2's 14 m/s.
+  const fake = { frames: [0, 5, 13.9, 14.2, 20].map((sk, k) => ({ ...still2.frames[0], t: k, sinkRate: sk, departed: false })), n: model.n };
+  check('flight: a spiral dive is marked where the sink passes 14 m/s', flightSummary(fake, trim).spiralS === 3 && FLIGHT.spiralSinkMS === 14
+    && flightSummary(still2, trim).spiralS === null);
 }
 
 {

@@ -36,7 +36,7 @@ by tests. One design read exactly was evidence about that design; two are
 evidence about the reader.
 
 **Against 21 wings' line sheets from five manufacturers, and 55 published
-sizes**, in 150 reference tables, six of them the makers' own line-plan
+sizes**, in 151 reference tables, six of them the makers' own line-plan
 drawings transcribed line by line. Every line sheet is held to five physical
 invariants, not merely parsed. The anchor-density tables the generator works
 from are **measured from the corpus**, not hand-entered — the row ratios on 19
@@ -92,11 +92,12 @@ lines stretch on their own measured curves, from OpenGlider's line types.
   numbers at every frame. Its checks are physics' (symmetric to 1e-9,
   mirrored to 1e-8, a trim that holds) and EN 926-2's procedures, which a
   real wing's certificate reports only as classes: on the default free
-  travel its steady stall is at 70 cm and the EN pull departs at 88 cm,
+  travel its steady stall is at 67 cm and the EN pull departs at 74 cm,
   class A for its weight, and it does not spin at trim speed
   (`docs/flight.md`). 1.13 put the stall at 52 cm: its strips' forces
   pointed the wrong way, which Belloc's tunnel wing showed
-  (`docs/stability.md`).
+  (`docs/stability.md`). Its turn is held to a second model's, PGSim's,
+  on the Geo 7 L (`data/reference/pgsim-turns.tsv`).
 - **The glide, as a range.** Where the tool has two sourced answers — the
   polar or the lattice, the handbook's section drag or mfoil's, the typed
   line drag or the plan's — it flies the design as built under each
@@ -219,7 +220,7 @@ were that error (`docs/stability.md`).
 
 ## 5. What is missing
 
-**64 open items in the roadmap.** The substantial ones:
+**65 open items in the roadmap.** The substantial ones:
 
 - The Lynx 2's and the Artik R 2's linesets, a quarter over their totals:
   the Lynx 2's suspension 27% over its sheets, its middles carrying two
@@ -233,13 +234,16 @@ were that error (`docs/stability.md`).
 - The polar's lift and induced drag: on the default wing at trim, 10% and
   20% above the slices' and the lattice's — Prandtl's lifting line at an
   aspect ratio of 4.7. The balance, speed bar and glide still fly the polar.
-- The flight model's turn, drag and modes: before it departs, the rigid
-  arched wing yaws and skids more than it banks, with no measured turn to
-  check against; it trims 0.3° above the balance but on a smooth
-  canopy's drag, so its glide is 8.61 where the polar's profile drag would
-  give about 8.2; its circulation follows the brakes at once; its modes are
-  a rigid canopy's with no pilot to swing, and no measured paraglider modes
-  were found to check them; and nothing in it folds.
+- The flight model's turn, drag and modes: its turn banks through PGSim's
+  droop of the pulled canopy, scaled to this tool's brake, and has a
+  second model to check it against but no measured turn; it is one rigid
+  body, where PGSim's two turn a third faster at 43 cm; its brake pulls
+  each anchor straight from the pulley, not through the cascade's angles.
+  It trims 0.3° above the balance but on a smooth canopy's drag, so its
+  glide is 8.61 where the polar's profile drag would give about 8.2; its
+  circulation follows the brakes at once; its modes are a rigid canopy's
+  with no pilot to swing, and no measured paraglider modes were found to
+  check them; and nothing in it folds.
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
 - Collapse (Z) lines: three reference wings carry them; the model does not.

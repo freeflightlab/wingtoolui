@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2971 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2978 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -44,10 +44,14 @@ mfoil's own code to 1e-12 — and the slices are put back together into the
 wing on the vortex lattice (`docs/slices.md`).
 
 And it flies the design through its brakes: the left brake, the right or
-both, pulled to 65 cm over 3, 1 or half a second, from hands up or on the
-bar, in a six-degree-of-freedom model with the canopy's apparent mass and
-every strip on the lattice with its brake-deflected section — played in 3D,
-recorded to video, and stopped where a rigid canopy stops meaning anything
+both, pulled to any travel over 3, 1 or half a second, from hands up or on
+the bar, in a six-degree-of-freedom model with the canopy's apparent mass,
+every strip on the lattice with its brake-deflected section, and the pulled
+side of the canopy drooping as PGSim, the project's simulator, has it, so a
+brake banks the wing into its turn. Each flight is flown again with a rigid
+canopy, for the range; the turn is held to PGSim's on the Geo 7 L. It plays
+in 3D with the hands, the pulled trailing edge and the track from above,
+records to video, and stops where a rigid body stops meaning anything
 (`docs/flight.md`). It judges the trimmed glider as Poland and others (2026)
 judge a kite: its stability derivatives, its modes, its hang point and its
 planform, each variant of the planform built and flown as the design is. Its
@@ -92,7 +96,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2971 unit checks against known geometry and the sources |
+| `npm test` | 2978 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -260,7 +264,7 @@ tests/             the unit suite, the Phase 1 audit, the full pipeline, the
 tools/             the other check stages, the interface harness, figures,
                    importers, and readers for legacy sheets
 docs/              fifty notes; see below
-data/reference/    150 tables: line sheets of 21 wings from five makers, six
+data/reference/    151 tables: line sheets of 21 wings from five makers, six
                    of their line-plan drawings transcribed line by line, 55
                    published sizes and the makers' own specifications to check
                    them against, cell counts, the suppliers' line data, PHI's
@@ -268,8 +272,8 @@ data/reference/    150 tables: line sheets of 21 wings from five makers, six
                    types with their stretch measured, inspection records, a
                    published riser geometry, fabric schedules,
                    certification reports, mfoil's own results, a wind
-                   tunnel's NACA 4415, the library's sections braked and
-                   Belloc's wind-tunnel paraglider;
+                   tunnel's NACA 4415, the library's sections braked,
+                   Belloc's wind-tunnel paraglider and PGSim's turns;
                    and in lep/ the own files of three
                    complete designs, the Swoop2, the Tuluaq-19 and the
                    gnuC2-23
@@ -330,7 +334,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2971 checks |
+| unit suite | the maths, 2978 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -372,7 +376,7 @@ cascade: its riser layout, its counts, its tip lines and its stabilo's line.
 | `docs/line-sheets.md` | what can be recovered from a maker's published numbers |
 | `docs/environment-and-aero.md` | atmosphere, Reynolds number, and the wing polar |
 | `docs/slices.md` | the wing as its sections: mfoil ported and held to its own code, put together on the lattice |
-| `docs/flight.md` | the glider through its brakes: the braked section, six degrees of freedom, what the default wing does, what the model is not |
+| `docs/flight.md` | the glider through its brakes: the braked section, six degrees of freedom, the turn against PGSim, what the default wing does, what the model is not |
 | `docs/stability.md` | a kite paper's stability derivatives, the modes, the hang point and the planform, and the tool held to Belloc's wind-tunnel paraglider |
 | `docs/ranges.md` | the design as built under each of the tool's alternative assumptions: the range of the glide, and what moves it most |
 | `docs/validation.md` | every discrepancy found in the sources, and why |

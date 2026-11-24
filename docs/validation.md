@@ -280,20 +280,27 @@ certification standard's own manoeuvres.
   its 14°. Bounded through any angle and bend, with no step in lift over
   0.2 between half degrees.
 - **EN 926-2's manoeuvres, on the default wing.** Both brakes held, it glides
-  steadily to 69 cm and not at 70; lowered over 5 s it departs at 88 cm, the
-  phugoid carrying it past the steady stall. Both are class A for 80 to
-  100 kg, which asks for more than 60. One control to 25% and then 62.5% of
-  the travel at trim speed: no spin, class A. These are the model's verdicts
-  on a wing nobody has built, against the standard's thresholds; they are not
-  a certificate. (1.13 said 52 cm, class C: its force direction, 2.12.)
+  steadily to 66 cm and not at 67; lowered at 13 cm a second it departs at
+  74 cm, just past the steady stall. Both are class A for 80 to 100 kg,
+  which asks for more than 60. One control to 25% and then 62.5% of the
+  travel at trim speed: no spin, class A, though held past its first circle
+  it winds into a spiral dive. These are the model's verdicts on a wing
+  nobody has built, against the standard's thresholds; they are not a
+  certificate. (With a rigid canopy, before 1.18, the pull departed at
+  88 cm; 1.13 said 52 cm, class C: its force direction, 2.12.)
 - **The steady polar through the brakes**, against a measured wing of the
-  same kind: minimum 22.2 km/h and minimum sink 1.04 m/s, where Parapente Mag
+  same kind: minimum 22.5 km/h and minimum sink 1.06 m/s, where Parapente Mag
   measured a Niviuk Hook 3 at 24 km/h and 1.05 m/s (as Heatwole's thesis
   gives the test).
+- **The turn, against a second model** (`docs/flight.md`, "The turn").
+  PGSim, the project's simulator, flown headless on its own Geo 7 L: at
+  43 cm and 95 kg the tool's rigid canopy turns within 5% of PGSim's, and
+  its drooping one at 25°/s, between PGSim's one body (23) and two (31).
+  At 25 cm it turns a quarter to a third less. Held turns bank to the
+  coordinated turn's law within 20%, as pilots' thermalling circles do.
 
-What is not checked: the turn. No measured turn rate or bank against brake
-travel was found for any paraglider, and before departing this model yaws
-and skids more than it banks.
+What is not checked: the turn rate against brake travel on a real wing; no
+measured one was found for any paraglider.
 
 ### 2.12 The lattice and the flight's forces, against Belloc's wind tunnel
 

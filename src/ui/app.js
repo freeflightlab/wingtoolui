@@ -119,8 +119,14 @@ const S = {
   // Which slice is on show, and the flight the slices are analysed in, set
   // by the Slices tab's own tools as the rib on show is by the Rib tab's.
   sliceIndex: 0, sliceState: 'trim',
-  flightStart: 'trim', flightInput: 'right', flightRate: 'medium', flightTravelMM: 650, flightHoldS: 4,
+  // The flight first shown is a turn, one brake held about halfway down for
+  // a circle and let go. It was the full 65 cm in a second, held 4 s (a spin
+  // entry), which stalled the wing 2 s in and showed a straight glide and
+  // then a departure.
+  flightStart: 'trim', flightInput: 'right', flightRate: 'medium', flightTravelMM: 350, flightHoldS: 12,
   flightRelease: true, flightCamera: 'chase', flightChart: 'history', flightPastDeparture: 'stop',
+  // The canopy under the brake, drooping as PGSim has it, or rigid.
+  flightCanopy: 'droops',
   brakeSlackCentreMM: 180, brakeSlackTipMM: 60,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', dimensions: true,
@@ -3862,6 +3868,8 @@ function sliceExport(kind) {
 let FLIGHT_RUN = null;
 const FLIGHT_PLAY = { t: 0, playing: false, raf: 0, lastMs: 0, recording: false };
 const FLIGHT_CAMERAS = [['chase', 'behind'], ['side', 'side'], ['front', 'front'], ['ground', 'from the ground']];
+// how far behind the heading the chase camera follows, s
+const FLIGHT_CHASE_LAG_S = 0.8;
 
 /** The sections solved ahead and shipped in the bundle, by NACA code. */
 let BRAKE_SOLVES = null;
@@ -3921,13 +3929,19 @@ function flightScenario() {
   return {
     start: S.flightStart, input: S.flightInput, rate: S.flightRate,
     travelMM: S.flightTravelMM, holdS: S.flightHoldS, release: !!S.flightRelease,
-    flyOn: S.flightPastDeparture === 'continue',
+    flyOn: S.flightPastDeparture === 'continue', canopy: S.flightCanopy === 'rigid' ? 'rigid' : 'droops',
   };
 }
-function flightScenarioKey(sc) { return [sc.start, sc.input, sc.rate, sc.travelMM, sc.holdS, sc.release ? 1 : 0, sc.flyOn ? 1 : 0].join('|'); }
+function flightScenarioKey(sc) { return [sc.start, sc.input, sc.rate, sc.travelMM, sc.holdS, sc.release ? 1 : 0, sc.flyOn ? 1 : 0, sc.canopy ?? 'droops'].join('|'); }
 function flightScenarioLabel(sc) {
   const who = sc.input === 'both' ? 'both brakes' : `${sc.input} brake`;
-  return `${sc.start === 'accelerated' ? 'on the bar' : 'hands up'}, ${who} to ${(sc.travelMM / 10).toFixed(0)} cm in ${FLIGHT.rates[sc.rate]} s`;
+  return `${sc.start === 'accelerated' ? 'on the bar' : 'hands up'}, ${who} to ${(sc.travelMM / 10).toFixed(0)} cm in ${FLIGHT.rates[sc.rate]} s`
+    + (sc.canopy === 'rigid' ? ', rigid canopy' : '');
+}
+/** The flight model with the canopy the scenario asks for under the brake:
+ * drooping (the model's own) or rigid. */
+function flightCanopyModel(model, canopy) {
+  return canopy === 'rigid' ? { ...model, cfg: { ...model.cfg, brakeDroop: 0 } } : model;
 }
 
 /** The models and their trims: hands up, and the bar pushed as far as the
@@ -4019,12 +4033,16 @@ async function flightPrepare() {
   return run;
 }
 
-/** Fly one scenario; the flight is kept with the run. */
-async function flightFly(sc = flightScenario(), { show = true } = {}) {
+/** Fly one scenario; the flight is kept with the run. `twin`: fly it again
+ * under the other canopy too, for the chart and the note. All 18 does not,
+ * which would double its time for twins its table never shows; a flight of
+ * it shown later gets its twin then. */
+async function flightFly(sc = flightScenario(), { show = true, twin = true } = {}) {
   const run = await flightPrepare();
   if (!run || run.error || !run.prep) return null;
   const k = flightScenarioKey(sc);
-  if (run.flights[k]) { if (show) flightShow(k); return run.flights[k]; }
+  const kept = run.flights[k];
+  if (kept && (!twin || kept.twin || !kept.flight)) { if (show) flightShow(k); return kept; }
   const start = sc.start === 'accelerated' ? run.prep.accelerated : run.prep.trim;
   if (!start?.model) {
     const why = run.prep.accelerated?.limitedBy
@@ -4039,12 +4057,12 @@ async function flightFly(sc = flightScenario(), { show = true } = {}) {
     + (sc.start === 'accelerated' ? ` (${start.barMM} of ${run.prep.accelerated.fullBarMM} mm of bar)` : '');
   const schedule = flightSchedule({ input: sc.input, rate: sc.rate, travelMM: sc.travelMM, holdS: sc.holdS, release: sc.release });
   const durationS = flightDuration({ rate: sc.rate, holdS: sc.holdS, release: sc.release });
-  const trim = { ...start.trim, work: flightWork(start.model) };
-  // the coupling's corrections from the trim, so the first step starts settled
-  trim.work.d.set(start.trim.work.d);
-  let out;
-  try {
-    const flight = await runStepsAsync(flightSteps(start.model, trim, { schedule, durationS, label, afterDepartureS: sc.flyOn ? Infinity : FLIGHT.afterDepartureS }), {
+  const canopy = sc.canopy === 'rigid' ? 'rigid' : 'droops';
+  const flyWith = (model, lab) => {
+    const trim = { ...start.trim, work: flightWork(model) };
+    // the coupling's corrections from the trim, so the first step starts settled
+    trim.work.d.set(start.trim.work.d);
+    return runStepsAsync(flightSteps(model, trim, { schedule, durationS, label: lab, afterDepartureS: sc.flyOn ? Infinity : FLIGHT.afterDepartureS }), {
       onProgress: (p) => {
         run.progress = p;
         if (S.tab === 'flight' && FLIGHT_RUN === run) {
@@ -4054,9 +4072,27 @@ async function flightFly(sc = flightScenario(), { show = true } = {}) {
       },
       isCancelled: () => FLIGHT_RUN !== run,
     });
-    out = { sc, label, flight, summary: flightSummary(flight, start.trim), model: start.model, barMM: start.barMM ?? 0 };
-  } catch (e) {
-    out = { sc, label, error: e.message };
+  };
+  let out = kept;
+  if (!out) {
+    try {
+      const model = flightCanopyModel(start.model, canopy);
+      const flight = await flyWith(model, label);
+      out = { sc, label, flight, summary: flightSummary(flight, start.trim), model, barMM: start.barMM ?? 0 };
+    } catch (e) {
+      out = { sc, label, error: e.message };
+    }
+  }
+  // The same flight under the other canopy, for the range the canopy's
+  // assumption spans: drawn beside it on the chart and said in the note.
+  if (twin && out.flight && !out.twin) {
+    const other = canopy === 'rigid' ? 'droops' : 'rigid';
+    try {
+      const tf = await flyWith(flightCanopyModel(start.model, other), `${label} (${other === 'rigid' ? 'rigid canopy' : 'canopy drooping'})`);
+      out.twin = { canopy: other, flight: tf, summary: flightSummary(tf, start.trim) };
+    } catch (e) {
+      if (!/cancelled/.test(e.message)) out.twin = { canopy: other, error: e.message };
+    }
   }
   run.flights[k] = out;
   if (show && FLIGHT_RUN === run) flightShow(k);
@@ -4075,7 +4111,7 @@ async function flightFlyAll() {
       for (const rate of FLIGHT_RATES) {
         if (FLIGHT_RUN !== run) return;
         const sc = { ...base, start, input, rate };
-        const f = await flightFly(sc, { show: false });
+        const f = await flightFly(sc, { show: false, twin: false });
         rows.push({ sc, key: flightScenarioKey(sc), out: f });
       }
     }
@@ -4589,11 +4625,17 @@ function flightCamera(flight, f, W, H) {
   const f0 = flight.frames[0];
   const h0 = f0.headingDeg * Math.PI / 180;
   const hdg = Math.atan2(R[1][0], R[0][0]);
+  // The chase camera follows the heading a moment late, as a camera flown
+  // behind would: one locked to the heading turned with the glider, and a
+  // turn showed only as the ground going round.
+  const lag = flightFrameAt(flight, Math.max(0, f.t - FLIGHT_CHASE_LAG_S)).f;
+  const Rl = flightRotation(lag.q);
+  const hdgLag = Math.atan2(Rl[1][0], Rl[0][0]);
   let C;
   if (S.flightCamera === 'side') C = [T[0] + 24 * Math.cos(h0 + Math.PI / 2), T[1] + 24 * Math.sin(h0 + Math.PI / 2), T[2] - 3];
   else if (S.flightCamera === 'front') C = [T[0] + 22 * Math.cos(hdg), T[1] + 22 * Math.sin(hdg), T[2] - 2];
   else if (S.flightCamera === 'ground') C = [f0.x + 40 * Math.cos(h0 + Math.PI / 2) + 60 * Math.cos(h0), f0.y + 40 * Math.sin(h0 + Math.PI / 2) + 60 * Math.sin(h0), f0.z + 150];
-  else C = [T[0] - 20 * Math.cos(hdg), T[1] - 20 * Math.sin(hdg), T[2] - 6];
+  else C = [T[0] - 20 * Math.cos(hdgLag), T[1] - 20 * Math.sin(hdgLag), T[2] - 6];
   const fw = [T[0] - C[0], T[1] - C[1], T[2] - C[2]];
   const fl = Math.hypot(...fw); const fv = fw.map((v) => v / fl);
   // right: forward crossed with up (up is -z on the earth)
@@ -4675,19 +4717,32 @@ function drawFlightFrame(ctx, W, H, item, t) {
   };
   line(trail.map((q) => [q.x, q.y, zg]), light ? 'rgba(40,60,70,0.35)' : 'rgba(138,154,166,0.35)', 1);
   line(trail.map((q) => [q.x, q.y, q.z]), light ? '#b06a00' : '#e8c547', 1.5);
-  // the canopy: each strip a quad, its trailing edge pulled down by its bend
+  // The canopy: each strip in three pieces, the part ahead of the bend and
+  // the bent part in two, its trailing edge drawn where the brake has pulled
+  // it (the section's own arc, the drop square to the chord and the edge
+  // drawn forward as it curls) and tinted orange as far as it is bent. Drawn
+  // flat, as it was, the pulled edge was lost in the strip's colour.
   const n = model.n;
-  const flap = 1 - (model.table.bendStart ?? 0.65);
+  const start = model.table.bendStart ?? 0.65;
+  const flap = 1 - start;
+  const rel = (p) => [p[0] - model.RM[0], p[1] - model.RM[1], p[2] - model.RM[2]];
+  const orange = [255, 159, 67];
   const quads = [];
   for (let s = 0; s < n; s++) {
     const st = model.strips[s] || model.sys.panels[s].strip;
     const nn = [model.nrm[3 * s], model.nrm[3 * s + 1], model.nrm[3 * s + 2]];
     const theta = f.strip[3 * s + 1];
-    const drop = brakeDropForBend(theta * Math.PI / 180, flap) * model.chord[s];
-    const rel = (p) => [p[0] - model.RM[0], p[1] - model.RM[1], p[2] - model.RM[2]];
-    const te = (p) => { const q = rel(p); return [q[0] - nn[0] * drop, q[1] - nn[1] * drop, q[2] - nn[2] * drop]; };
-    const pts = [rel(st.leftLE), rel(st.rightLE), te(st.rightTE), te(st.leftTE)].map((p) => cam.project(flightToEarth(f, p)));
-    if (pts.some((p) => !p)) continue;
+    const th = theta * Math.PI / 180;
+    // a point along the chord at fraction u, on the section's bent arc
+    const at = (le, te, u) => {
+      const L = rel(le); const T = rel(te);
+      const e = [T[0] - L[0], T[1] - L[1], T[2] - L[2]];
+      const c = Math.hypot(...e);
+      if (u <= start || th < 1e-6) return [L[0] + e[0] * u, L[1] + e[1] * u, L[2] + e[2] * u];
+      const Rr = (flap * c) / th; const phi = ((u - start) / flap) * th;
+      const along = start * c + Rr * Math.sin(phi); const down = Rr * (1 - Math.cos(phi));
+      return [L[0] + (e[0] / c) * along - nn[0] * down, L[1] + (e[1] / c) * along - nn[1] * down, L[2] + (e[2] / c) * along - nn[2] * down];
+    };
     const a = f.strip[3 * s]; const cl = f.strip[3 * s + 2];
     const stall = brakeStallDeg(model.table, theta);
     const colour = cl < model.cfg.collapseCl ? [232, 91, 196]
@@ -4696,25 +4751,45 @@ function drawFlightFrame(ctx, W, H, item, t) {
     // lit from above: the panel's normal on the earth, against the vertical
     const ne = flightToEarth({ ...f, x: 0, y: 0, z: 0 }, nn);
     const lit = 0.55 + 0.45 * Math.max(0, Math.min(1, -ne[2]));
-    const rgb = `rgb(${colour.map((v) => Math.round(v * lit)).join(',')})`;
-    quads.push({ pts, z: (pts[0][2] + pts[1][2] + pts[2][2] + pts[3][2]) / 4, colour: rgb, s });
+    const us = [0, start, start + flap / 2, 1];
+    for (let k = 0; k < 3; k++) {
+      const pts = [at(st.leftLE, st.leftTE, us[k]), at(st.rightLE, st.rightTE, us[k]),
+        at(st.rightLE, st.rightTE, us[k + 1]), at(st.leftLE, st.leftTE, us[k + 1])].map((p) => cam.project(flightToEarth(f, p)));
+      if (pts.some((p) => !p)) continue;
+      const tint = k === 0 ? 0 : Math.min(0.85, theta / 35);
+      const mix = colour.map((v, j) => Math.round((v * (1 - tint) + orange[j] * tint) * lit));
+      quads.push({ pts, z: (pts[0][2] + pts[1][2] + pts[2][2] + pts[3][2]) / 4, colour: `rgb(${mix.join(',')})`, s });
+    }
   }
-  // lines to the pilot: every other strip's quarter chord
-  const kL = flightToEarth(f, [0, -0.21, 0]); const kR = flightToEarth(f, [0, 0.21, 0]);
+  // the pilot's frame, the wing's frame from the riser midpoint: the
+  // karabiners, the risers' tops at the pulleys, and the hands on the handles
+  // under them, down as far as each brake is pulled
+  const pul = model.brakePulley ? rel(model.brakePulley) : [0.05, 0.25, 0.45];
+  const pulley = (side) => [pul[0], side * Math.abs(pul[1]), pul[2]];
+  const hand = (side, mm) => [pul[0] + 0.05, side * (Math.abs(pul[1]) + 0.08), pul[2] - 0.12 - mm / 1000];
+  const kar = (side) => [0, side * 0.21, 0];
+  const E = (p) => cam.project(flightToEarth(f, p));
+  const seg3 = (A, B, style, w) => {
+    const a = E(A); const b = E(B);
+    if (!a || !b) return;
+    ctx.strokeStyle = style; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  };
+  // lines to the pilot: every other strip's quarter chord, from the risers
   ctx.lineWidth = 0.7;
-  ctx.strokeStyle = light ? 'rgba(40,50,60,0.55)' : 'rgba(200,210,220,0.45)';
-  for (let s = 0; s < n; s += 2) {
-    const qc = [model.rq[3 * s], model.rq[3 * s + 1], model.rq[3 * s + 2]];
-    const P = cam.project(flightToEarth(f, qc)); const K = cam.project(model.yMid[s] < 0 ? kL : kR);
-    if (P && K) { ctx.beginPath(); ctx.moveTo(K[0], K[1]); ctx.lineTo(P[0], P[1]); ctx.stroke(); }
-  }
-  // brake lines to the anchors, orange when pulled
+  const lineInk = light ? 'rgba(40,50,60,0.55)' : 'rgba(200,210,220,0.45)';
+  for (let s = 0; s < n; s += 2) seg3(pulley(model.yMid[s] < 0 ? -1 : 1), [model.rq[3 * s], model.rq[3 * s + 1], model.rq[3 * s + 2]], lineInk, 0.7);
+  // brake lines: from the pulley to each anchor's trailing edge where the
+  // brake has pulled it, orange once taut; and from the pulley to the hand
   for (const an of model.anchors) {
     const h = an.side === 'left' ? f.left : f.right;
-    if (!(h > an.slackMM)) continue;
-    const te = cam.project(flightToEarth(f, [an.te[0] - model.RM[0], an.te[1] - model.RM[1], an.te[2] - model.RM[2]]));
-    const K = cam.project(an.side === 'left' ? kL : kR);
-    if (te && K) { ctx.strokeStyle = '#ff9f43'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(K[0], K[1]); ctx.lineTo(te[0], te[1]); ctx.stroke(); }
+    const side = an.side === 'left' ? -1 : 1;
+    const s = an.strip ?? 0;
+    const nn = [model.nrm[3 * s], model.nrm[3 * s + 1], model.nrm[3 * s + 2]];
+    const drop = (an.gain * Math.max(0, h - an.slackMM)) / 1000;
+    const te = rel(an.te);
+    const taut = h > an.slackMM;
+    seg3(pulley(side), [te[0] - nn[0] * drop, te[1] - nn[1] * drop, te[2] - nn[2] * drop],
+      taut ? '#ff9f43' : (light ? 'rgba(120,90,50,0.35)' : 'rgba(255,159,67,0.28)'), taut ? 1.1 : 0.6);
   }
   quads.sort((p, q) => q.z - p.z);
   for (const q of quads) {
@@ -4724,20 +4799,40 @@ function drawFlightFrame(ctx, W, H, item, t) {
     ctx.closePath(); ctx.fill();
     ctx.globalAlpha = 1; ctx.strokeStyle = light ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.5)'; ctx.lineWidth = 0.6; ctx.stroke();
   }
-  // the pilot
-  const pilot = cam.project(flightToEarth(f, [0, 0, -0.3]));
+  // the pilot: risers, the harness, arms to the handles, the brake lines
+  // from the hands up through the pulleys
+  const body = light ? '#33424c' : '#d8e1e8';
+  for (const side of [-1, 1]) {
+    const mm = side < 0 ? f.left : f.right;
+    seg3(kar(side), pulley(side), body, 2);
+    seg3(hand(side, mm), pulley(side), mm > 0 ? '#ff9f43' : body, 1.2);
+    seg3([0.02, side * 0.18, 0.32], hand(side, mm), body, 2.2);
+    const hp = E(hand(side, mm));
+    if (hp) {
+      const r = Math.max(2, (0.06 * 0.9 * Math.min(W, H) * 1.6) / hp[2]);
+      ctx.fillStyle = mm > 0 ? '#ff9f43' : body;
+      ctx.beginPath(); ctx.arc(hp[0], hp[1], r, 0, 2 * Math.PI); ctx.fill();
+    }
+  }
+  const pilot = E([0, 0, -0.3]);
   if (pilot) {
     const rad = Math.max(2.5, (0.35 * 0.9 * Math.min(W, H) * 1.6) / pilot[2]);
-    ctx.fillStyle = light ? '#33424c' : '#d8e1e8';
+    ctx.fillStyle = body;
     ctx.beginPath(); ctx.arc(pilot[0], pilot[1], rad, 0, 2 * Math.PI); ctx.fill();
+  }
+  const head = E([0.05, 0, 0.45]);
+  if (head) {
+    ctx.fillStyle = body;
+    ctx.beginPath(); ctx.arc(head[0], head[1], Math.max(2, (0.13 * 0.9 * Math.min(W, H) * 1.6) / head[2]), 0, 2 * Math.PI); ctx.fill();
   }
   // what the glider is doing, in words and the handles
   const fs = Math.max(10, Math.min(20, Math.round(W / 62)));
   ctx.font = `${fs}px ui-monospace, monospace`;
+  const turned = f.headingUnwrappedDeg ?? 0;
   const lines = [
     `${item.label}`,
-    `t ${f.t.toFixed(2)} s · ${(f.speed * 3.6).toFixed(1)} km/h · sink ${f.sinkRate.toFixed(1)} m/s`,
-    `bank ${f.rollDeg.toFixed(0)}° · pitch ${f.pitchDeg.toFixed(0)}° · turn ${f.turnRateDeg.toFixed(0)}°/s · ${f.loadFactor.toFixed(2)} g`,
+    `t ${f.t.toFixed(2)} s · ${(f.speed * 3.6).toFixed(1)} km/h · sink ${f.sinkRate.toFixed(1)} m/s · brakes L ${(f.left / 10).toFixed(0)} R ${(f.right / 10).toFixed(0)} cm`,
+    `bank ${f.rollDeg.toFixed(0)}° · pitch ${f.pitchDeg.toFixed(0)}° · turn ${f.turnRateDeg.toFixed(0)}°/s · turned ${turned >= 0 ? 'right' : 'left'} ${Math.abs(turned).toFixed(0)}° · ${f.loadFactor.toFixed(2)} g`,
     `canopy ${f.canopyAlphaDeg.toFixed(1)}° · slip ${f.betaDeg.toFixed(1)}° · stalled ${f.stalled}/${n}`,
   ];
   // the strips' colours, as a line of the box: they were the end of the
@@ -4766,6 +4861,19 @@ function drawFlightFrame(ctx, W, H, item, t) {
     ctx.fillText(`${name} ${(mm / 10).toFixed(0)}`, x - 4, y0 - 6);
   };
   bar(18, f.left, 'L'); bar(W - 40, f.right, 'R');
+  drawFlightTrackInset(ctx, W, H, flight, fi, fs, light,
+    6 + boxW + 8 > W - Math.round(Math.min(W, H) * 0.3) - 8 ? 6 + fs * (lines.length + 1.9) : 0);
+  ctx.font = `${fs}px ui-monospace, monospace`;
+  if (summary.spiralS != null && f.t >= summary.spiralS && !(summary.departedS !== null && f.t >= summary.departedS)) {
+    ctx.fillStyle = 'rgba(176,106,0,0.85)';
+    const bw = Math.min(W - 120, fs * 34);
+    const by = H - 14 - fs * 2.4;
+    ctx.fillRect((W - bw) / 2, by, bw, fs * 2.0);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Spiral dive from ${summary.spiralS.toFixed(1)} s: sinking ${f.sinkRate.toFixed(0)} m/s at ${f.loadFactor.toFixed(1)} g.`, W / 2, by + fs * 1.3);
+    ctx.textAlign = 'start';
+  }
   if (summary.departedS !== null && f.t >= summary.departedS) {
     ctx.fillStyle = 'rgba(160,20,20,0.85)';
     const bw = Math.min(W - 120, fs * 36);
@@ -4777,6 +4885,59 @@ function drawFlightFrame(ctx, W, H, item, t) {
     ctx.fillText('A real canopy deforms here; a rigid one cannot show how.', W / 2, by + fs * 2.6);
     ctx.textAlign = 'start';
   }
+}
+
+/** The track seen from above, in the view's top right corner: the whole
+ * flight faint, what has been flown bright, the glider pointing along its
+ * heading, north up. The scale holds for the whole flight, so it does not
+ * jump as the track grows. */
+function drawFlightTrackInset(ctx, W, H, flight, fi, fs, light, below = 0) {
+  const fr = flight.frames;
+  const size = Math.round(Math.min(W, H) * 0.3);
+  if (size < 60) return;
+  // under the words where they reach across to it
+  const x0 = W - size - 8; const y0 = below > 0 ? below + 8 : 8;
+  if (y0 + size > H - 8) return;
+  let n0 = Infinity; let n1 = -Infinity; let e0 = Infinity; let e1 = -Infinity;
+  for (const q of fr) { n0 = Math.min(n0, q.x); n1 = Math.max(n1, q.x); e0 = Math.min(e0, q.y); e1 = Math.max(e1, q.y); }
+  const span = Math.max(60, n1 - n0, e1 - e0) * 1.15;
+  const cn = (n0 + n1) / 2; const ce = (e0 + e1) / 2;
+  const px = (q) => [x0 + size / 2 + ((q.y - ce) / span) * size, y0 + size / 2 - ((q.x - cn) / span) * size];
+  ctx.fillStyle = light ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.45)';
+  ctx.fillRect(x0, y0, size, size);
+  ctx.strokeStyle = light ? 'rgba(40,60,70,0.4)' : 'rgba(138,154,166,0.5)'; ctx.lineWidth = 1;
+  ctx.strokeRect(x0, y0, size, size);
+  const path = (list, style, w) => {
+    ctx.strokeStyle = style; ctx.lineWidth = w; ctx.beginPath();
+    list.forEach((q, k) => { const p = px(q); if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]); });
+    ctx.stroke();
+  };
+  path(fr, light ? 'rgba(40,60,70,0.25)' : 'rgba(138,154,166,0.3)', 1);
+  path(fr.slice(0, fi + 1), light ? '#b06a00' : '#e8c547', 1.6);
+  const s0 = px(fr[0]);
+  ctx.fillStyle = light ? '#33424c' : '#8a9aa6';
+  ctx.beginPath(); ctx.arc(s0[0], s0[1], 2.5, 0, 2 * Math.PI); ctx.fill();
+  // the glider, along its heading
+  const f = fr[fi]; const p = px(f); const h = f.headingDeg * Math.PI / 180;
+  const fwd = [Math.sin(h), -Math.cos(h)]; const side = [Math.cos(h), Math.sin(h)];
+  const k = Math.max(5, size / 22);
+  ctx.fillStyle = light ? '#0f7f8f' : '#35d6e8';
+  ctx.beginPath();
+  ctx.moveTo(p[0] + fwd[0] * k * 1.4, p[1] + fwd[1] * k * 1.4);
+  ctx.lineTo(p[0] - fwd[0] * k * 0.8 + side[0] * k, p[1] - fwd[1] * k * 0.8 + side[1] * k);
+  ctx.lineTo(p[0] - fwd[0] * k * 0.8 - side[0] * k, p[1] - fwd[1] * k * 0.8 - side[1] * k);
+  ctx.closePath(); ctx.fill();
+  // a scale bar about a quarter of the box
+  const want = span / 4;
+  const bar = [10, 20, 50, 100, 200, 500, 1000].reduce((b, v) => (Math.abs(v - want) < Math.abs(b - want) ? v : b), 50);
+  const bl = (bar / span) * size;
+  const fsz = Math.max(9, Math.round(fs * 0.8));
+  ctx.font = `${fsz}px ui-monospace, monospace`;
+  ctx.fillStyle = light ? '#14202a' : '#e6edf2';
+  ctx.strokeStyle = light ? '#14202a' : '#e6edf2'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(x0 + 8, y0 + size - 8); ctx.lineTo(x0 + 8 + bl, y0 + size - 8); ctx.stroke();
+  ctx.fillText(`${bar} m`, x0 + 10 + bl, y0 + size - 4);
+  ctx.fillText('from above · N up', x0 + 6, y0 + fsz + 2);
 }
 
 /** The view: the flight on show at the playback time, or the glider at
@@ -4811,7 +4972,8 @@ function drawFlightView() {
         : F?.error ? F.error
           : run?.error ? `Not prepared: ${run.error}`
             : 'The glider flown through its brakes, either or both, to a travel at a rate, hands up or on the bar: '
-              + 'six degrees of freedom, apparent mass, every strip with its braked section.';
+              + 'six degrees of freedom, apparent mass, every strip with its braked section, the pulled side of the canopy '
+              + 'drooping as PGSim has it (or rigid), and each flight flown again with the other canopy.';
     }
     return;
   }
@@ -4820,8 +4982,10 @@ function drawFlightView() {
     const s = F.summary;
     note.textContent = `${stale ? 'STALE — fly again · ' : ''}${F.label} · trim ${(s.trimSpeed * 3.6).toFixed(1)} km/h, glide ${s.trimGlide.toFixed(1)}`
       + (s.departedS !== null ? ` · departed at ${s.departedS.toFixed(2)} s with ${(s.departedTravelMM / 10).toFixed(0)} cm of brake` : ' · stayed flying')
-      + ` · up to then: bank ${s.maxRollDeg.toFixed(0)}°, turn ${s.maxTurnRateDeg.toFixed(0)}°/s, sink ${s.maxSinkRate.toFixed(1)} m/s, `
-      + `${s.maxLoadFactor.toFixed(2)} g, ${s.heightLostM.toFixed(0)} m lost`;
+      + ` · up to then: bank ${s.maxRollDeg.toFixed(0)}°, turn ${s.maxTurnRateDeg.toFixed(0)}°/s, turned ${Math.abs(s.headingChangeDeg).toFixed(0)}°, sink ${s.maxSinkRate.toFixed(1)} m/s, `
+      + `${s.maxLoadFactor.toFixed(2)} g, ${s.heightLostM.toFixed(0)} m lost`
+      + (s.spiralS !== null && s.spiralS !== undefined ? ` · a spiral dive from ${s.spiralS.toFixed(1)} s` : '')
+      + flightTwinText(F);
   }
 }
 
@@ -4881,14 +5045,35 @@ function drawFlightChart() {
   c.axes({ xStep: T > 12 ? 2 : 1, yStep: hi - lo > 150 ? 50 : 20, xTitle: 'time, s', yTitle: '° · °/s · km/h · m/s ×10 · cm' });
   const dep = F.summary.departedS;
   if (dep !== null) c.path([[dep, lo], [dep, hi], [T, hi], [T, lo]], '#ff5a5a', 0.5, { close: true, fill: 'rgba(255,90,90,0.10)' });
+  // the same flight under the other canopy, faint and dotted: its bank and
+  // its turn, the range the canopy's assumption spans
+  const tw = F.twin?.flight;
+  if (tw) {
+    const tdep = F.twin.summary?.departedS ?? null;
+    const tfr = tdep === null ? tw.frames : tw.frames.filter((f) => f.t <= tdep + 0.5);
+    for (const [, col, g] of series.slice(0, 3).filter((_, k) => k !== 1)) c.path(tfr.map((f) => [f.t, pin(g(f))]), col, 1, { dash: '1 3', opacity: 0.75 });
+  }
   for (const [, col, g] of series) c.path(fr.map((f) => [f.t, pin(g(f))]), col, col === '#8a9aa6' || col === '#c0c8d0' ? 1 : 1.4, col === '#8a9aa6' || col === '#c0c8d0' ? { dash: '4 3' } : {});
   c.path([[FLIGHT_PLAY.t, lo], [FLIGHT_PLAY.t, hi]], '#ffffff', 1, { dash: '2 2', opacity: 0.6 });
   c.fit();
   if (note) {
     note.textContent = series.map(([n2, col]) => `${n2}`).join(' · ')
       + ` (in that order: cyan, yellow, magenta, green, orange, grey dashed)`
-      + (dep !== null ? ' · shaded: after the departure' : '');
+      + (dep !== null ? ' · shaded: after the departure' : '')
+      + (tw ? ` · dotted: bank and turn with ${F.twin.canopy === 'rigid' ? 'a rigid canopy' : 'the canopy drooping'}` : '');
   }
+}
+
+/** What the flight's twin, under the other canopy, did: a clause for the
+ * note. */
+function flightTwinText(F) {
+  const t = F.twin;
+  if (!t) return '';
+  const name = t.canopy === 'rigid' ? 'a rigid canopy' : 'the canopy drooping';
+  if (t.error || !t.summary) return ` · with ${name}: not flown (${t.error ?? 'no flight'})`;
+  const s = t.summary;
+  return ` · with ${name}: bank ${s.maxRollDeg.toFixed(0)}°, turn ${s.maxTurnRateDeg.toFixed(0)}°/s, turned ${Math.abs(s.headingChangeDeg).toFixed(0)}°`
+    + (s.departedS !== null ? `, departed at ${s.departedS.toFixed(2)} s` : '');
 }
 
 function flightTrimText(run) {
@@ -5374,6 +5559,7 @@ function buildFlightTools(host) {
   rel.setAttribute('aria-label', 'Release the brake after the hold');
   rel.addEventListener('change', () => { S.flightRelease = rel.value === '1'; buildTabTools(); draw(); });
   host.append(rel);
+  sel('flightCanopy', [['droops', 'canopy droops under the brake'], ['rigid', 'rigid canopy']], 'Canopy under the brake');
   sel('flightPastDeparture', [['stop', 'stop 2 s after a departure'], ['continue', 'fly on past a departure (not credible)']], 'What happens after a departure');
   btn(busy ? 'Working…' : 'Fly', () => { if (!busy) flightFly(); }, 'Fly this scenario');
   btn('All 18', () => { if (!busy) flightFlyAll(); }, 'Fly every start, brake and rate');

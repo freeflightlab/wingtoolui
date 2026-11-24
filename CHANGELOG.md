@@ -4,6 +4,101 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.18.0 — 2026-11-24
+
+In the Flight tab a brake was pulled and the wing seemed to fly straight on.
+Two things made it so: the flight first shown was a spin entry, and the
+rigid canopy hardly banked. PGSim, the simulator built in this project, was
+flown headless on its own Geo 7 L to find out why, and its brake droop is now
+the flight's.
+
+**Fixed**
+
+- **One brake banks the wing into its turn.** A rigid paraglider canopy
+  skids round nearly flat. The braked side's extra lift is square to its
+  canted cells, so it points outward and up, through nearly the riser
+  midpoint; only the drag yaws the wing. On the Geo 7 L at 95 kg, 43 cm of
+  one brake turned it at 15°/s with 9° of bank. PGSim, with its brake droop
+  switched off, does the same: 14.7°/s and 8°. The droop is PGSim's
+  description of the pulled canopy: the brake lines draw the trailing edge
+  down and in toward the hand, and the braked sections roll outboard about
+  their chords, their force with them. It is now the flight's
+  (`brakeDroop`, `droopMaxDeg`, `flightDroop`): 0.3 radians a unit of
+  trailing-edge drop over chord, at most 8°. PGSim takes 0.5 on its own
+  cascade's drop, and this tool's brake drops the trailing edge a third
+  further for the same travel. With it, the Geo 7 L turns at 25°/s with 21°
+  of bank, between PGSim's one body (23°/s) and its two (31°/s). Hands up
+  nothing changes: the trims, the stability and the hang point are as they
+  were.
+- **The flight first shown is a turn.** It was the full 65 cm in a second,
+  held 4 s: a spin entry, which stalled the default wing 2 s in. What showed
+  was a straight glide and then "departed". It is now the right brake to
+  35 cm in a second, held 12 s and let go: the default wing banks to 29° on
+  average, turns at 31°/s and has gone round 371° when the brake is up.
+- **The flight's frames were shown a tenth early.** They are kept every
+  third step of 0.01 s, 33⅓ a second, and the flight said 30, the rate asked.
+  The view found each moment's frame a tenth before it, and never showed a
+  flight's last tenth.
+
+**Added**
+
+- **The canopy under the brake**, drooping or rigid, set in the tab. Every
+  flight shown is also flown under the other: the chart draws the twin's
+  bank and turn dotted, and the note gives what it did. On the default turn
+  the rigid canopy goes round 142° at up to 17°/s, banked at most 12°. All
+  18 flies no twins, which would double its time for flights its table
+  never shows: about 20 s at the default hold.
+- **The brake seen at work.** The bent part of each strip is drawn on the
+  section's own arc and tinted orange as far as it is bent. The pilot's hands
+  come down on the handles. The brake lines run from the pulleys to where
+  each trailing edge has been drawn, orange once taut. The track is drawn
+  from above in a corner, north up, the glider on it pointing along its
+  heading, and the words say how far it has turned and where both brakes
+  are. Behind, the camera follows the heading 0.8 s late, so a turn shows as
+  the wing turning across the view.
+- **A spiral dive is marked** from the moment the sink passes 14 m/s, the
+  sink EN 926-2 flies its spiral-dive test to (`spiralSinkMS`), with a banner
+  in the view.
+- `data/reference/pgsim-turns.tsv`: PGSim's turns on its Geo 7 L at 95 and
+  115 kg, 25 and 43 cm of one brake, rigid and two bodies, with and without
+  its droop. The interface test flies the tool's Geo 7 L through three of
+  them and holds it to PGSim's band.
+- Unit tests: the droop is its law and only on the pulled side; hands up it
+  changes nothing; drooping, the pulled side rolls the wing toward it; one
+  brake banks the wing half again as far as a rigid canopy; a held turn
+  banks as the coordinated turn's law asks (tan φ = V ω / g) within 20%,
+  slipping under 5°, as pilots' thermalling circles do (Ákos et al. 2008);
+  the frames are kept at the rate the flight gives.
+
+**Changed, on the default wing**
+
+- Both brakes droop alike, which turns a little of their lift outward. The
+  steady polar's lowest sink is 1.06 m/s, where it was 1.04, and its steady
+  stall 67 cm, where it was 70.
+- The EN 926-2 symmetric pull departs at 74 cm, where it was 88: the rigid
+  canopy's phugoid had carried it 18 cm past its steady stall. Still class A
+  for 80 to 100 kg.
+- The EN 926-2 trim-speed spin test: still no spin. At 62.5% of the travel it
+  now banks into a tightening turn, its first circle in 8.3 s, and held past
+  that circle it winds into a spiral dive. PGSim's two-body Geo 7 L does the
+  same at 115 kg, loaded about as heavily.
+- One brake on the bar at the default 35 cm now departs: the canopy at −2° to
+  −3°, the wing rolls and dives into a turn, slipping outward, until a
+  quarter of its span is deep in the stall. With a rigid canopy it did not.
+
+**Found**
+
+- PGSim's own turn, without its droop, is this tool's rigid canopy's to 5% at
+  43 cm. At 25 cm this tool turns a quarter to a third less than PGSim,
+  droop or not: its free travel at the centre is 180 mm against PGSim's 80,
+  and the braked sections differ.
+- PGSim's two bodies, the pilot hung on line bundles, turn the Geo 7 L a
+  third faster than its one at 43 cm and 95 kg, and spiral at 115 kg. This
+  tool has one body; the two are on the roadmap, and so is the brake through
+  its cascade's own angles, as PGSim reads it.
+- No paraglider's measured turn rate against brake travel was found. The
+  turn rests on two models' agreement and on the shape of real turns.
+
 ## 1.17.0 — 2026-11-24
 
 OpenGlider, reviewed a third time for what it does that this tool's own wings
