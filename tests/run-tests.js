@@ -37,7 +37,7 @@ import {
 } from '../src/core/trimdrift.js';
 import { planformFromDesignInputs, analyticPlanform, planformMetrics, flatArea, ribStations, cellWidths, totalCells, planformOutline } from '../src/core/planform.js';
 import { naca4, splitSurfaces, resampleSurface, airfoilMetrics, parseAirfoilText , LIBRARY, naca5, nacaSection, naca5MeanLine, NACA5_MEAN_LINES } from '../src/core/airfoil.js';
-import { buildLobe, washinAt, lobeMetrics, radiusForProjectedRatio, minArrowRatio, ellipseForProjectedRatio } from '../src/core/lobe.js';
+import { buildLobe, washinAt, lobeMetrics, radiusForProjectedRatio, minArrowRatio, ellipseForProjectedRatio, lobeWithProjectedRatio } from '../src/core/lobe.js';
 import { buildWing, projectedArea , ribLoops, mirrorRib } from '../src/core/wing3d.js';
 import { analyticPlanform as _ap } from '../src/core/planform.js';
 import { developPanel, developmentError, developWing } from '../src/core/flatdev.js';
@@ -119,7 +119,7 @@ import {
   altitudeForDensity, CONSTANTS,
 } from '../src/core/atmosphere.js';
 import {
-  thinAirfoil, liftingLine, wingPolar, estimateSectionPolar, profileDrag,
+  thinAirfoil, liftingLine, wingPolar, estimateSectionPolar, profileDrag, sectionCd,
   altitudeSweep,
   camberLine,
   polarAt as wingPolarAt,
@@ -192,7 +192,7 @@ import {
 import { trefftzInfluence } from '../src/core/vlm.js';
 import {
   STABILITY, STABILITY_COEFFICIENTS, STABILITY_STATES, stabilityReference, stabilityDerivatives, stabilityJacobian,
-  stabilityModes, stabilityMapSteps, eigenvalues, eigenvector,
+  stabilityModes, stabilityMapSteps, stabilityCell, stabilityGridSteps, eigenvalues, eigenvector,
 } from '../src/core/stability.js';
 import {
   BELLOC, bellocPoints, bellocWing, bellocMomentPoint, bellocTunnel, bellocCurve, slopeBetween, bellocSections,
@@ -635,6 +635,27 @@ section('Chapter 3 — main lobe');
     try { buildLobe({ type: 'ellipse', aRatio: 0.88, bRatio: 0.01 }, 5); return false; }
     catch (e) { return /arrow/i.test(e.message) && /half span/i.test(e.message); }
   })());
+
+  // The planform study's arcs: the same kind of arc at another projected
+  // span ratio. Moving an ellipse's width alone, as it first did, left every
+  // deeper arc too short to carry the span.
+  const ratioOfLobe = (sp, hs = 5.3) => lobeMetrics(buildLobe(sp, hs), hs).spanRatio;
+  const ell = { type: 'ellipse', aRatio: 0.86, bRatio: minArrowRatio(0.86) * 1.15 };
+  const bio = { type: 'bionic', aRatio: 0.9, bRatio: minArrowRatio(0.9, 'bionic', 1.6) * 1.1, exponent: 1.6 };
+  const worstLobe = Math.max(...[ell, bio].flatMap((sp) => [-0.08, -0.04, 0.03].map((d) => {
+    const own = ratioOfLobe(sp);
+    return Math.abs(ratioOfLobe(lobeWithProjectedRatio(sp, own + d)) - (own + d));
+  })));
+  check('an arc moved to another projected span ratio has it, ellipse and bionic', worstLobe < 1e-6, `worst ${worstLobe.toExponential(1)}`);
+  const deeper = lobeWithProjectedRatio(ell, ratioOfLobe(ell) - 0.08);
+  const flatter = lobeWithProjectedRatio(ell, 0.9);
+  check('deeper keeps the width and adds arrow; flatter than the width allows widens it at the least arrow',
+    deeper.aRatio === ell.aRatio && deeper.bRatio > ell.bRatio && flatter.aRatio === 0.9
+    && Math.abs(flatter.bRatio / minArrowRatio(0.9) - 1) < 1e-5,
+    `deeper b ${deeper.bRatio.toFixed(3)} against ${ell.bRatio.toFixed(3)}; flatter a ${flatter.aRatio}`);
+  check('a circle\'s is its projected ratio, and the ratio does not depend on the span',
+    lobeWithProjectedRatio({ type: 'circle', projectedRatio: 0.88 }, 0.84).projectedRatio === 0.84
+    && Math.abs(ratioOfLobe(deeper, 3.1) - ratioOfLobe(deeper, 7.7)) < 1e-6);
 }
 
 // ---------------------------------------------------------------------------
@@ -19075,6 +19096,40 @@ function shippedBrakeSolve(code) {
   const dragC = -(ffC.aero[0] * vB[0] + ffC.aero[1] * vB[1] + ffC.aero[2] * vB[2]) / Vt;
   check('force: the three-quarter chord\'s angle overstates it', dragC - dragPilotLines - dragProfile > 1.15 * dT,
     `${(dragC - dragPilotLines - dragProfile).toFixed(2)} N against ${dT.toFixed(2)} N`);
+
+  // The assumptions view's two ways to change the section's drag alone. In
+  // flight, a drag added to each strip from its lift: every strip that is
+  // not deep in its stall carries it, the circulation is untouched, and the
+  // drag the strips carry rises by exactly that.
+  const fmD = flightModel({ wing: wingT, linePlan: { karabiner: karF }, airfoil: naca4('4415'), table: fm.table,
+    atm: atmosphere(1000), pilotKg: 80, wingKg: 5, linesKg: 0.4, areaM2: 22.34, cxPilot: 0.015, cxLines: 0.02, alphaWakeDeg: 6,
+    settings: { profileDragDelta: (cl) => 0.002 + 0.001 * cl } });
+  const fwD = flightWork(fmD); fwD.d.set(ft.work.d); fwD.tol = 1e-11; fwD.maxIterations = 600;
+  flightForces(fmD, ft.state, { left: 0, right: 0 }, fwD);
+  let worstD = 0; let gamD = 0;
+  for (let i = 0; i < fm.n; i++) {
+    if (fw.deep[i]) continue;
+    worstD = Math.max(worstD, Math.abs(fwD.cd[i] - fw.cd[i] - (0.002 + 0.001 * fw.cl[i])));
+    gamD = Math.max(gamD, Math.abs(fwD.gam[i] - fw.gam[i]));
+  }
+  check('drag: a drag added to the strips in flight is each strip\'s own, the circulation untouched', worstD < 1e-12 && gamD < 1e-12,
+    `worst ${worstD.toExponential(1)}, circulation ${gamD.toExponential(1)}`);
+  const tD = flightTrim(fmD, { guess: ft.guess });
+  check('drag: and it lowers the glide', tD.converged && tD.glideRatio < ft.glideRatio, `${ft.glideRatio.toFixed(3)} → ${tD.glideRatio.toFixed(3)}`);
+  // On the polar, another section's drag at each station's lift: the
+  // section polar's own drag read through it is the same polar, and a
+  // constant one is the profile drag everywhere.
+  const pfD = planformFromDesignInputs({ span: 10.25, rootChord: 2.6, tipChord: 0.9, tipSweep: 1.1 });
+  const polarD = (profileDragAt) => wingPolar({ planform: pfD, airfoil: naca4('4415'), atm: atmosphere(1000), mass: 85, alphaRange: [2, 8], step: 2, profileDragAt });
+  const p0 = polarD(null);
+  const spD = estimateSectionPolar(naca4('4415'), { reynolds: p0.points[1].reynolds, mach: p0.points[1].mach });
+  const pSame = polarD((cl) => sectionCd(spD, cl));
+  check('drag: on the polar, its own section\'s drag read through the override is its own polar',
+    Math.abs(pSame.points[1].CDprofile / p0.points[1].CDprofile - 1) < 1e-12 && pSame.points[1].CL === p0.points[1].CL,
+    `${p0.points[1].CDprofile.toFixed(6)} at ${p0.points[1].alphaDeg}°`);
+  const pK = polarD(() => 0.0123);
+  check('drag: and a constant one is the profile drag at every angle, the lift kept',
+    pK.points.every((q, i) => Math.abs(q.CDprofile - 0.0123) < 1e-15 && q.CL === p0.points[i].CL));
 }
 
 {
@@ -19222,6 +19277,36 @@ function shippedBrakeSolve(code) {
   check('stability: the map\'s own cell is the trim, within 0.1%', Math.abs(map.cells[1].glideRatio / trim.glideRatio - 1) < 1e-3,
     `${map.cells[1].glideRatio.toFixed(4)} against ${trim.glideRatio.toFixed(4)}`);
   check('stability: the states are the eight of the linearisation', STABILITY_STATES.join() === 'u,v,w,p,q,r,phi,theta');
+  // one cell, its wake laid again along its trim whatever it moved (as the
+  // Flight tab's own trim is found): the trim itself, to the last digit
+  const wake0 = trim.alphaDeg + 0.4;
+  const own = stabilityCell((a) => flightModel({ ...base, alphaWakeDeg: a }), { start: { guess: trim.guess }, alphaWakeDeg: wake0, relatticeDeg: 0 });
+  const t1 = flightTrim(flightModel({ ...base, alphaWakeDeg: wake0 }), { guess: trim.guess });
+  const t2 = flightTrim(flightModel({ ...base, alphaWakeDeg: t1.alphaDeg }), { guess: t1.guess });
+  check('stability: a cell is trimmed, laid along its trim and trimmed again, as the Flight tab\'s trim is',
+    Math.abs(own.cell.glideRatio - t2.glideRatio) < 1e-12 && Math.abs(own.cell.speed - t2.speed) < 1e-12 && Math.abs(own.cell.alphaDeg - t2.alphaDeg) < 1e-12,
+    `glide ${own.cell.glideRatio.toFixed(4)}, speed ${(own.cell.speed * 3.6).toFixed(2)} km/h`);
+  check('stability: and it carries every mode, the least damped among them', own.cell.modes.length >= 4
+    && own.cell.modes.some((m) => m.name === own.cell.leastDamped.name && m.re === own.cell.leastDamped.re)
+    && own.cell.modes.every((m) => m.re <= own.cell.leastDamped.re),
+  own.cell.modes.map((m) => m.name).join(', '));
+  // the grid over any points: each point's own model, its extra figures kept,
+  // a point that cannot be built a cell that says why rather than a stop
+  const grid = runSteps(stabilityGridSteps([{ k: 0 }, { k: 1 }, { k: 2 }], ({ k }) => {
+    if (k === 2) throw new Error('no such wing');
+    return {
+      build: (a) => flightModel({ ...base, linePlan: { karabiner: [kar[0], kar[1], kar[2] + 0.5 * k] }, alphaWakeDeg: a }),
+      start: { guess: trim.guess }, alphaWakeDeg: wake0, extra: { tag: `k${k}` },
+    };
+  }));
+  check('stability: the grid gives a cell a point, its own figures and its error kept', grid.cells.length === 3
+    && grid.cells[0].tag === 'k0' && grid.cells[1].tag === 'k1' && grid.cells[2].error === 'no such wing'
+    && Math.abs(grid.cells[0].glideRatio - own.cell.glideRatio) < 1e-12,
+  grid.cells.map((c) => c.error ?? c.glideRatio.toFixed(4)).join(', '));
+  const rollUp = grid.cells[1].criteria.find((x) => x.key === 'Cl_beta').value;
+  const rollOwn = grid.cells[0].criteria.find((x) => x.key === 'Cl_beta').value;
+  check('stability: and half a metre shorter lines there roll as the hang map\'s do', rollUp > rollOwn,
+    `${rollOwn.toFixed(3)} → ${rollUp.toFixed(3)}`);
 }
 
 {

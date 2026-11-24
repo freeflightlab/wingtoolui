@@ -512,7 +512,50 @@ export function stabilityModes(model, trim, opts = {}) {
   };
 }
 
-/* ------------------------------------------------------ the hang point -- */
+/* --------------------------------------------------------------- maps -- */
+
+/**
+ * One point of a map. `build(alphaWakeDeg)` gives the flight model there,
+ * its lattice's wake laid along that angle; it is trimmed from `start` (what
+ * `flightTrim` takes: `{ guess }`, or `{ speed, alphaDeg, glide }`), and from
+ * `retry` if that fails, and built and trimmed again along the trim's own
+ * flow when that is more than `relatticeDeg` from the wake's (0: always, as
+ * the Flight tab's own trim does). Then its derivatives and modes.
+ *
+ * Returns the cell — its speed, glide and angles, the six criteria, every
+ * mode and the least damped — and the trim's guess, for the next point.
+ */
+export function stabilityCell(build, {
+  start, retry = null, alphaWakeDeg, relatticeDeg = 1, minFlyingCz = 0, ...opts
+} = {}) {
+  let model = build(alphaWakeDeg);
+  let trim = flightTrim(model, start);
+  if (!trim.converged && retry) trim = flightTrim(model, retry);
+  const again = relatticeDeg <= 0 || Math.abs(trim.alphaDeg - alphaWakeDeg) > relatticeDeg;
+  if (trim.converged && again) {
+    model = build(trim.alphaDeg);
+    trim = flightTrim(model, { guess: trim.guess });
+  }
+  if (!trim.converged) return { cell: { error: 'no steady glide' }, guess: null };
+  const cell = {
+    speed: trim.speed, glideRatio: trim.glideRatio, sinkRate: trim.sinkRate,
+    alphaDeg: trim.alphaDeg, canopyAlphaDeg: trim.canopyAlphaDeg, liftCoefficient: trim.liftCoefficient,
+    belowFloor: trim.liftCoefficient < minFlyingCz,
+  };
+  const d = stabilityDerivatives(model, trim, opts);
+  const m = stabilityModes(model, trim, opts);
+  cell.criteria = d.criteria.map(({ axis, kind, key, value, stable }) => ({ axis, kind, key, value, stable }));
+  cell.staticStable = d.criteria.filter((c) => c.kind === 'static').every((c) => c.stable);
+  cell.damped = d.criteria.filter((c) => c.kind === 'damping').every((c) => c.stable);
+  cell.modesStable = m.stable;
+  const brief = (x) => ({
+    name: x.name, re: x.eigenvalue.re, im: x.eigenvalue.im, periodS: x.periodS,
+    dampingRatio: x.dampingRatio, halfS: x.halfS, doubleS: x.doubleS, stable: x.stable,
+  });
+  cell.modes = m.modes.map(brief);
+  cell.leastDamped = m.leastDamped ? brief(m.leastDamped) : null;
+  return { cell, guess: trim.guess, model, trim };
+}
 
 /**
  * Glide against stability over where the pilot hangs: the paper's study of
@@ -537,35 +580,16 @@ export function* stabilityMapSteps(build, {
   for (const dz of dzM) {
     let last = guess;
     for (const dx of dxM) {
-      const cell = { dxM: dx, dzM: dz };
+      let cell;
       try {
-        let model = build({ dxM: dx, dzM: dz, alphaWakeDeg });
-        let trim = flightTrim(model, { guess: last });
-        if (!trim.converged && last !== guess) trim = flightTrim(model, { guess });
-        if (trim.converged && Math.abs(trim.alphaDeg - alphaWakeDeg) > 1) {
-          model = build({ dxM: dx, dzM: dz, alphaWakeDeg: trim.alphaDeg });
-          trim = flightTrim(model, { guess: trim.guess });
-        }
-        if (!trim.converged) {
-          cell.error = 'no steady glide';
-        } else {
-          last = trim.guess;
-          Object.assign(cell, {
-            speed: trim.speed, glideRatio: trim.glideRatio, sinkRate: trim.sinkRate,
-            alphaDeg: trim.alphaDeg, canopyAlphaDeg: trim.canopyAlphaDeg, liftCoefficient: trim.liftCoefficient,
-            belowFloor: trim.liftCoefficient < minFlyingCz,
-          });
-          const d = stabilityDerivatives(model, trim, opts);
-          const m = stabilityModes(model, trim, opts);
-          cell.criteria = d.criteria.map(({ axis, kind, key, value, stable }) => ({ axis, kind, key, value, stable }));
-          cell.staticStable = d.criteria.filter((c) => c.kind === 'static').every((c) => c.stable);
-          cell.damped = d.criteria.filter((c) => c.kind === 'damping').every((c) => c.stable);
-          cell.modesStable = m.stable;
-          const ld = m.leastDamped;
-          cell.leastDamped = ld ? { name: ld.name, re: ld.eigenvalue.re, im: ld.eigenvalue.im, periodS: ld.periodS, dampingRatio: ld.dampingRatio } : null;
-        }
+        const r = stabilityCell((a) => build({ dxM: dx, dzM: dz, alphaWakeDeg: a }), {
+          start: { guess: last }, retry: last !== guess ? { guess } : null,
+          alphaWakeDeg, relatticeDeg: 1, minFlyingCz, ...opts,
+        });
+        cell = { dxM: dx, dzM: dz, ...r.cell };
+        if (r.guess) last = r.guess;
       } catch (e) {
-        cell.error = e.message;
+        cell = { dxM: dx, dzM: dz, error: e.message };
       }
       cells.push(cell);
       done++;
@@ -573,4 +597,39 @@ export function* stabilityMapSteps(build, {
     }
   }
   return { dxM: dxM.slice(), dzM: dzM.slice(), cells };
+}
+
+/**
+ * The same over any set of points, each its own model: `prepare(point)`
+ * gives `{ build(alphaWakeDeg), start, alphaWakeDeg, minFlyingCz?, extra? }`
+ * for it, and the cell is the point, its `extra`, and what
+ * `stabilityCell` finds there (its wake laid again along its trim,
+ * `relatticeDeg` 0 by default). The planform study's grid: a variant of the
+ * design at each point, built, its lines and hang point drawn for it, and
+ * flown.
+ */
+export function* stabilityGridSteps(points, prepare, {
+  relatticeDeg = 0, minFlyingCz = 0, label = '', ...opts
+} = {}) {
+  const cells = [];
+  for (let i = 0; i < points.length; i++) {
+    const point = points[i];
+    let cell;
+    try {
+      const p = prepare(point);
+      // a breath between building a variant and flying it: each is a few
+      // tenths of a second in a browser
+      yield { phase: 'build', done: i, total: points.length, label };
+      const r = stabilityCell(p.build, {
+        start: p.start, retry: p.retry ?? null, alphaWakeDeg: p.alphaWakeDeg, relatticeDeg,
+        minFlyingCz: p.minFlyingCz ?? minFlyingCz, ...opts,
+      });
+      cell = { ...point, ...(p.extra ?? {}), ...r.cell };
+    } catch (e) {
+      cell = { ...point, error: e.message };
+    }
+    cells.push(cell);
+    yield { phase: 'map', done: i + 1, total: points.length, label };
+  }
+  return { cells };
 }

@@ -2847,6 +2847,9 @@ try {
       seen.add(n);
     }
     if (seen.size !== 3) throw new Error('the tip, centre and tip slices read the same');
+    // the colours explained in the drawings: the notes show two lines
+    const legendIn = (id, words) => document.getElementById(id).children.some((c) => c.tagName === 'text' && words.test(c._text || ''));
+    if (!legendIn('vp-span', /cd ×10/) || !legendIn('vp-slice', /displacement thickness/)) throw new Error('the slices\' colours are not explained in their drawings');
     console.log('  ok   slices: the left tip, the centre and the right tip each drawn with their own figures');
     const tools = sl.tools();
     const kids = tools.children.map((c) => c._text || c.tagName);
@@ -2892,6 +2895,8 @@ try {
     const cv = document.getElementById('vp-flight');
     if (!cv.drawn || cv.drawn.fill < 40 || cv.drawn.text < 4) throw new Error(`the flight view drew ${JSON.stringify(cv.drawn && { ...cv.drawn, texts: undefined })}`);
     if (!cv.drawn.texts.some((t) => /right brake to 65 cm/.test(t))) throw new Error('the flight view does not say what is flown');
+    // the strips' colours are drawn in the view, not left to the note's two lines
+    if (!cv.drawn.texts.some((t) => /near folding/.test(t))) throw new Error('the flight view does not say what its colours mean');
     if (document.getElementById('vp-flightchart').children.length < 10) throw new Error('the flight chart drew nothing');
     const note = document.getElementById('note-flight')._text;
     if (!/departed at|stayed flying/.test(note)) throw new Error(`flight note: ${note.slice(0, 100)}`);
@@ -2932,13 +2937,17 @@ try {
         if (!rows.has(y)) rows.set(y, []);
         rows.get(y).push(t);
       }
+      // each text's extent from its anchor: a start's runs right of x, an
+      // end's left of it, a middle's both ways
+      const extent = (t) => {
+        const w = 0.6 * Number(t.attrs['font-size']) * t._text.normalize('NFC').length;
+        const x = Number(t.attrs.x); const anchor = t.attrs['text-anchor'] || 'start';
+        return anchor === 'end' ? [x - w, x] : anchor === 'middle' ? [x - w / 2, x + w / 2] : [x, x + w];
+      };
       let room = Infinity;
       for (const ts of rows.values()) {
-        ts.sort((a, b) => a.attrs.x - b.attrs.x);
-        for (let k = 1; k < ts.length; k++) {
-          const w = 0.6 * Number(ts[k - 1].attrs['font-size']) * ts[k - 1]._text.normalize('NFC').length;
-          room = Math.min(room, ts[k].attrs.x - ts[k - 1].attrs.x - w);
-        }
+        const ex = ts.map(extent).sort((a, b) => a[0] - b[0]);
+        for (let k = 1; k < ex.length; k++) room = Math.min(room, ex[k][0] - ex[k - 1][1]);
       }
       return room;
     };
@@ -2952,7 +2961,11 @@ try {
     const sc = document.getElementById('vp-flightchart');
     if (sc.children.length < 30) throw new Error(`the stability table drew ${sc.children.length} children`);
     const sn = document.getElementById('note-flightchart')._text;
-    if (!/Poland, Masure, Cayon and Schmehl/.test(sn) || !/Belloc/.test(sn)) throw new Error(`stability note: ${sn.slice(0, 100)}`);
+    if (!/Poland et al\. \(2026\), §5\.5/.test(sn) || !/docs\/stability\.md/.test(sn)) throw new Error(`stability note: ${sn.slice(0, 100)}`);
+    // what stable and damped mean, in the table itself: the note shows two lines
+    if (!document.getElementById('vp-flightchart').children.some((c) => c.tagName === 'text' && /stable: Cl\/β < 0/.test(c._text || ''))) {
+      throw new Error('the stability table does not say what stable means');
+    }
     const roomS = tightest(420);
     if (!(roomS > 0)) throw new Error(`at 420 px the stability's columns run into each other by ${(-roomS).toFixed(0)} px`);
     const stTsv = fl.stabilityTsv(fl.get()).trim().split('\n');
@@ -2972,6 +2985,80 @@ try {
     if (mapTsv.length !== 37 || !/^aft_m\tup_m/.test(mapTsv[1])) throw new Error(`the map's table has ${mapTsv.length} lines`);
     if (!fl.tools().children.some((c) => c.attrs && c.attrs['aria-label'] === 'Save the hang-point map')) throw new Error('no button saves the map');
     console.log(`  ok   flight: the hang point mapped, ${map.cells.filter((c) => !c.error).length} of 35 trimmed; its own cell is the trim`);
+    // The planform: twenty variants of the design, each built, its lines and
+    // hang point drawn for it, flown and judged; the design itself untouched.
+    const S0 = globalThis.__S;
+    // the design's state, less which chart is on show (the map puts itself there)
+    const designState = () => JSON.stringify({ ...globalThis.__S, flightChart: null });
+    const beforePf = designState();
+    const M0 = globalThis.__getM();
+    const pf = await fl.planform();
+    if (!pf || pf.cells.length !== 20) throw new Error(`the planform map has ${pf && pf.cells.length} cells (${fl.get().planformError ?? ''})`);
+    if (designState() !== beforePf) {
+      const now = { ...globalThis.__S }; const was = JSON.parse(beforePf);
+      const moved = Object.keys({ ...now, ...was }).filter((k) => k !== 'flightChart' && JSON.stringify(now[k]) !== JSON.stringify(was[k]));
+      throw new Error(`building the variants changed the design on show: ${moved.join(', ')}`);
+    }
+    if (globalThis.__getM() !== M0) throw new Error('building the variants replaced the model on show');
+    const ownP = pf.cells.find((c) => c.aspect === 1 && c.arc === 0);
+    const trimP = fl.get().prep.trim.trim;
+    if (!ownP || ownP.error || ownP.glideRatio !== trimP.glideRatio || ownP.speed !== trimP.speed) {
+      throw new Error(`the planform's own cell is not the trim: ${ownP?.glideRatio} against ${trimP.glideRatio}`);
+    }
+    // each variant is the aspect ratio and the arc it was asked for, at the design's area
+    const arBad = pf.cells.filter((c) => !c.error && Math.abs(c.aspectRatio / (M0.metrics.aspectRatio * c.aspect) - 1) > 0.002);
+    const areaBad = pf.cells.filter((c) => !c.error && Math.abs(c.areaM2 / M0.metrics.area - 1) > 0.002);
+    const arcBad = pf.cells.filter((c) => !c.error && Math.abs(c.projectedSpanRatio - (M0.lobeM.projectedSpan / M0.lobeM.flatSpan + c.arc)) > 0.01);
+    if (arBad.length || areaBad.length || arcBad.length) throw new Error(`variants off what was asked: AR ${arBad.length}, area ${areaBad.length}, arc ${arcBad.length}`);
+    // the glide rises with the aspect ratio at the design's arc; the roll
+    // stiffness weakens as the arc flattens at the design's aspect ratio
+    const byAR = pf.cells.filter((c) => c.arc === 0).sort((a, b) => a.aspect - b.aspect).map((c) => c.glideRatio);
+    const rollByArc = pf.cells.filter((c) => c.aspect === 1).sort((a, b) => a.arc - b.arc).map((c) => c.criteria.find((x) => x.key === 'Cl_beta').value);
+    if (!byAR.every((g, i) => i === 0 || g > byAR[i - 1])) throw new Error(`the glide does not rise with the aspect ratio: ${byAR.map((g) => g.toFixed(2)).join(' ')}`);
+    if (!rollByArc.every((r, i) => i === 0 || r > rollByArc[i - 1])) throw new Error(`the roll stiffness does not weaken as the arc flattens: ${rollByArc.map((r) => r.toFixed(3)).join(' ')}`);
+    if (globalThis.__S.flightChart !== 'planform' || document.getElementById('vp-flightchart').children.length < 20 * 3) throw new Error('the planform map is not drawn');
+    if (!/§6\.2/.test(document.getElementById('note-flightchart').textContent)) throw new Error('the planform note does not cite the paper');
+    const pfTsv = fl.planformTsv(fl.get()).trim().split('\n');
+    if (pfTsv.length !== 22 || !/^aspect_factor\tarc_offset/.test(pfTsv[1])) throw new Error(`the planform's table has ${pfTsv.length} lines`);
+    if (!fl.tools().children.some((c) => c.attrs && c.attrs['aria-label'] === 'Save the planform map')) throw new Error('no button saves the planform map');
+    console.log(`  ok   flight: the planform mapped, ${pf.cells.filter((c) => !c.error).length} of 20 flown; glide ${byAR[0].toFixed(2)} to ${byAR[byAR.length - 1].toFixed(2)} over the aspect ratios, the design untouched`);
+    // The assumptions: the design as built under each of the tool's
+    // alternatives. What the tool reports is among them, to the digit.
+    const As = await fl.assumptions();
+    const nLines = Number.isFinite(M0.lineDragOwn?.cxLines) && M0.lineDragOwn.cxLines > 0 ? 2 : 1;
+    if (!As || As.cases.length !== 6 * nLines) throw new Error(`the assumptions have ${As && As.cases.length} cases (${fl.get().assumptionsError ?? ''})`);
+    const failed = As.cases.filter((c) => c.error);
+    if (failed.length) throw new Error(`assumptions without a trim: ${failed.map((c) => `${c.route}/${c.drag}/${c.lines}/${c.force}: ${c.error}`).join('; ')}`);
+    const balCase = As.cases.find((c) => c.route === 'polar' && c.tool);
+    const flCase = As.cases.find((c) => c.route === 'lattice' && c.tool);
+    const Mb = globalThis.__getM().balance;
+    if (!balCase || Math.abs(balCase.glideRatio / Mb.glideRatio - 1) > 1e-6 || Math.abs(balCase.speed / Mb.speedMS - 1) > 1e-6) {
+      throw new Error(`the polar's own case is not the balance: ${balCase?.glideRatio} against ${Mb.glideRatio}`);
+    }
+    if (!flCase || flCase.glideRatio !== trimP.glideRatio || flCase.speed !== trimP.speed) {
+      throw new Error(`the lattice's own case is not the flight's trim: ${flCase?.glideRatio} against ${trimP.glideRatio}`);
+    }
+    // the kite paper's force direction trims higher and glides worse than its twin
+    const quarter = As.cases.filter((c) => c.force === 'control');
+    if (!quarter.every((q) => { const t = As.cases.find((c) => c.force === 'trefftz' && c.drag === q.drag && c.lines === q.lines); return t && q.alphaDeg > t.alphaDeg && q.glideRatio < t.glideRatio; })) {
+      throw new Error('the three-quarter chord does not trim above its twin');
+    }
+    // and the plan's lighter lines glide better than the typed, on every route
+    if (nLines === 2 && M0.lineDragOwn.cxLines < globalThis.__S.cxLines
+      && !As.cases.filter((c) => c.lines === 'plan').every((p) => { const t = As.cases.find((c) => c.lines === 'typed' && c.route === p.route && c.drag === p.drag && c.force === p.force); return t && p.glideRatio > t.glideRatio; })) {
+      throw new Error('lighter lines do not glide better');
+    }
+    if (globalThis.__S.flightChart !== 'assumptions' || document.getElementById('vp-flightchart').children.length < As.cases.length * 8) throw new Error('the assumptions are not drawn');
+    if (!/docs\/ranges\.md/.test(document.getElementById('note-flightchart').textContent)) throw new Error('the assumptions note does not say where they are written up');
+    const roomA = tightest(420);
+    if (!(roomA > 0)) throw new Error(`at 420 px the assumptions' columns run into each other by ${(-roomA).toFixed(0)} px`);
+    const readout = document.getElementById('readout');
+    if (!readout.children.some((st) => st.children.some((k) => k._text === 'glide range'))) throw new Error('the readout does not show the glide\'s range');
+    const asTsv = fl.assumptionsTsv(fl.get()).trim().split('\n');
+    if (asTsv.length !== As.cases.length + 2 || !/^route\tsection_drag/.test(asTsv[1])) throw new Error(`the assumptions' table has ${asTsv.length} lines`);
+    if (!fl.tools().children.some((c) => c.attrs && c.attrs['aria-label'] === 'Save the design under each assumption')) throw new Error('no button saves the assumptions');
+    const ownAs = As.cases.filter((c) => c.force !== 'control');
+    console.log(`  ok   flight: ${As.cases.length} assumptions flown; glide ${Math.min(...ownAs.map((c) => c.glideRatio)).toFixed(2)} to ${Math.max(...ownAs.map((c) => c.glideRatio)).toFixed(2)}, the tool's own two among them to the digit`);
     globalThis.__tab('wing');
   } catch (e) {
     console.log('  FAIL flight: ' + e.message);

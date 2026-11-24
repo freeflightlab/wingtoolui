@@ -354,6 +354,11 @@ export function wingPolar({
   maxUsableCL = 0.9,
   // How much rougher the real fabric surface is than a smooth aerofoil.
   surfaceFactor = 1.0,
+  // Another section's drag at a station's lift coefficient — a viscous
+  // solve's, say — in place of the section polar's, whose lift and moment
+  // are kept: the drag alone changed, as a sensitivity of the glide to the
+  // section's drag takes it (the Flight tab's range by assumption; docs/ranges.md).
+  profileDragAt = null,
 }) {
   const S = area ?? 2 * simpson((y) => planform.chord(y), 0, planform.halfSpan, 400);
   const cRef = chordRef ?? S / planform.span;
@@ -406,7 +411,7 @@ export function wingPolar({
     let cdProfile = 0;
     let wsum = 0;
     for (const st of loading) {
-      const cd = sectionCd(sp, st.cl);
+      const cd = profileDragAt ? profileDragAt(st.cl) : sectionCd(sp, st.cl);
       cdProfile += cd * st.chord;
       wsum += st.chord;
     }
@@ -493,7 +498,8 @@ export function polarAt(polar, alphaDeg) {
 }
 
 /** Interpolate a section polar's drag at a given lift coefficient. */
-function sectionCd(sp, cl) {
+/** A section polar's drag at a lift coefficient, read along its points. */
+export function sectionCd(sp, cl) {
   const pts = sp.points;
   let lo = pts[0];
   let hi = pts[pts.length - 1];

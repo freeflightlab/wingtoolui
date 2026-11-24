@@ -321,7 +321,7 @@ Through the slices and through the flight model's forces:
 
 The two published sets of the measurements differ only in the angle, by
 1.70° per unit lift; the corrected one is used. The figures are in
-`docs/stability.md`, section 5, and the unit suite holds the tool to them.
+`docs/stability.md`, section 6, and the unit suite holds the tool to them.
 
 ---
 

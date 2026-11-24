@@ -2,7 +2,8 @@
 
 The Flight tab's **Stability** button judges the trimmed glider by its
 stability derivatives, then finds its dynamic modes. **Hang point** maps glide
-against stability as the karabiners move. The method comes from a kite paper.
+against stability as the karabiners move, and **Planform** as the aspect ratio
+and the arc change. The method comes from a kite paper.
 The tool checks both its own aerodynamics and the method against a wind-tunnel
 paraglider. The module is `src/core/stability.js`. The wind-tunnel case is in
 `tools/windtunnel.mjs` and its unit tests.
@@ -16,7 +17,7 @@ solutions. They check it against the TU Delft V3 kite in a wind tunnel. Then
 they judge its stability, in §5.5, and study the airfoil, the planform and the
 tow point, in §6.
 
-A paraglider is a kite whose tether is its pilot's weight. Six things carry
+A paraglider is a kite whose tether is its pilot's weight. Seven things carry
 over:
 
 - **The derivatives and their criteria.** These are used here exactly as the
@@ -36,17 +37,18 @@ over:
   apparent mass, so it gets the modal analysis here (section 3).
 - **The tow-point study.** For a glider, the tow point is the hang point
   (section 4).
+- **The planform study.** The aspect ratio and the arc, each variant a design
+  built and flown (section 5).
 - **A wind-tunnel paraglider.** The paper's data list carries Belloc's
   wind-tunnel data, which it used to judge the force's direction. The tool
-  uses the same data to check itself (section 5).
+  uses the same data to check itself (section 6).
 - **Where a strip's force points.** Following that data led to a correction
-  in the tool's own aerodynamics (section 6).
+  in the tool's own aerodynamics (section 7).
 
 The paper's airfoil study and its surrogates are for inflatable tubes and
-single-skin canopies, and do not carry over. Its planform study would mean
-rebuilding the design, and is left on the roadmap. So is its other practice:
-section data at several Reynolds numbers, interpolated in log Re. The slices
-already do this, and the flight model still flies one Reynolds number.
+single-skin canopies, and do not carry over. Its other practice, section data
+at several Reynolds numbers interpolated in log Re, is on the roadmap: the
+slices already do this, and the flight model still flies one Reynolds number.
 
 ## 2. The derivatives
 
@@ -195,7 +197,83 @@ efficiency but loses pitch and then yaw stability. A glider hung aft gains
 pitch and yaw stiffness, because its trim's lift grows with the angle. Its
 glide falls only slowly past the best.
 
-## 5. Against Belloc's wind tunnel
+## 5. The planform
+
+The paper's §6.2 stretches its kite to a quarter more aspect ratio, and
+deepens its anhedral by a quarter, and reads the efficiency and the
+derivatives. **Planform** does the same for the design, on a grid of twenty:
+
+- five flat aspect ratios, 0.85 to 1.45 times the design's, at its flat area:
+  the span stretched by the root of the factor, the chords and the sweep
+  shrunk by it;
+- four arcs, the design's projected span over flat span −0.08, −0.04, ±0 and
+  +0.04. A circle's projected ratio is that ratio. An ellipse or a bionic lobe
+  is deepened by more arrow at the same width, and flattened past its width
+  by a wider one at the least arrow that carries the span
+  (`lobeWithProjectedRatio`).
+
+**The lines go with the span.** The makers' line heights are a fixed fraction
+of the span across aspect ratios as well as across sizes: 0.60 of it on the
+PHI Allegro light (AR 6.0), 0.62 on the BGD Lynx 2 (6.2) and the Skywalk SAGE
+(6.4), and 0.63 on the default wing (4.7) (`scaling.md`). Held at the design's
+length instead, the lines of the longer spans grow short against their arcs,
+and the roll stiffness falls with the aspect ratio for that reason alone.
+
+Each variant is built as the design is: its panels, its line plan, and its
+hang point from the balance, which trims it at the design's angle on its own
+polar. Then it is flown to its trim and judged. Everything else is the
+design's: the section, the number of cells, the masses and the line drag's
+coefficient. The twenty take about two seconds. The design's own cell is the
+Flight tab's trim to the last digit, and the design on show is untouched
+(an interface test).
+
+**The default wing**, glide and roll stiffness Cl/β:
+
+| flat AR \ projected span ratio | 0.80 | 0.84 | 0.88 | 0.92 |
+| --- | --- | --- | --- | --- |
+| 4.0 | 7.49, −0.252 | 7.72, −0.154 | 7.95, −0.074 | 8.18, −0.012 |
+| 4.7 | 8.12, −0.280 | 8.36, −0.169 | **8.61, −0.077** | 8.86, −0.006 |
+| 5.4 | 8.68, −0.302 | 8.94, −0.180 | 9.21, −0.079 | 9.47, −0.0001 |
+| 6.1 | 9.19, −0.321 | 9.47, −0.189 | 9.75, −0.080 | 10.03, +0.005 |
+| 6.8 | 9.66, −0.337 | 9.95, −0.196 | 10.25, −0.081 | 10.55, +0.010 |
+
+- **The glide** rises with the aspect ratio, by 0.66 to 0.50 a step of 15%
+  at the design's arc, as the induced drag falls. It rises with a flatter arc, about 0.25 for each 0.04,
+  as the arc costs less lift. The paper found both for a kite's efficiency.
+- **The roll stiffness is the arc's.** With the lines going with the span,
+  Cl/β hardly moves with the aspect ratio. It is −0.25 to −0.34 at 0.80 and
+  nearly nothing at 0.92, where it turns unstable above an aspect ratio of 6
+  (the two red cells).
+- **The yaw stiffness grows with the aspect ratio**: Cn/β 0.047 to 0.070 at
+  the design's arc. This is the paper's finding for a kite, "greater yaw
+  static stability" with a larger aspect ratio. It falls as the arc flattens.
+- **The Dutch roll is the deep arc's price at a low aspect ratio.** At AR 4.0
+  and 0.80 its damping ratio is −0.016 (the amber cell): a strong roll
+  stiffness against a weak yaw stiffness, the classic trade. It is 0.067 at
+  the design's aspect ratio and 0.27 at 6.8.
+- **The phugoid's damping falls as the glide rises**, 0.10 to 0.04.
+  Lanchester's phugoid, whose damping ratio is about 1/(√2 L/D), gives 0.094
+  to 0.067.
+- **The pitch stiffness per chord grows with the aspect ratio**, Cm/α −0.96
+  to −2.64 across the grid, as the chord shrinks under lines that grow with
+  the span.
+
+**Where real wings sit.** The eleven families in the reference set whose
+makers publish a projected span, or as Niviuk do a projected aspect ratio,
+have flat aspect ratios of 4.6 to 6.9 and projected span ratios of 0.77 to
+0.82: the Geo 7 deepest at 0.770, the Skin 4 P flattest at 0.824. The map
+draws ten of them as rings (the Geo 7 falls off its deep side). They are
+their own planforms, not this one stretched. **The default wing, at 0.88, is
+flatter than every one of them.** That is why its roll stiffness, −0.077, is
+small (section 2). On a real wing's arc, 0.80, this model gives it −0.280,
+with a glide of 8.12 rather than 8.61.
+
+The paper's other planform variable, the anhedral, is this map's arc. Its
+kite turned better with more anhedral. For a glider the arc's side force
+shows here as the roll stiffness; the turn itself is the flight model's
+weakest part (`flight.md`).
+
+## 6. Against Belloc's wind tunnel
 
 **The model and its data.**
 
@@ -232,7 +310,7 @@ full scale.
 
 **The results**, against the tunnel and Heatwole's three models of the same
 wing. "Lifting line" is this tool's 1.14 force direction; "3/4 chord" is the
-one 1.13 used and the paper keeps (both explained in section 6):
+one 1.13 used and the paper keeps (both explained in section 7):
 
 | | tunnel | slices (lifting line) | flight (lifting line) | flight (3/4 chord) | AVL | XFLR5 | NLLT |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -274,7 +352,7 @@ Coefficients are on Belloc's reference: 0.444 m², with all three moments on
 The unit suite holds the tool to all of this, in its "Belloc's wind-tunnel
 paraglider" tests.
 
-## 6. Where a strip's force points
+## 7. Where a strip's force points
 
 Running Belloc's wing found that both of the tool's routes took a strip's
 force in the wrong direction.
@@ -346,7 +424,7 @@ takes its force from the three-quarter chord. There it enters only as the arched
 wing's lift over the flat one's, where the error nearly cancels: 0.804 against
 0.809. It is on the roadmap.
 
-## 7. Not covered
+## 8. Not covered
 
 - **Quasi-steady.** The derivatives and the modes come from the same rigid,
   quasi-steady model as the flight. They include no circulation lag, no
@@ -358,13 +436,13 @@ wing's lift over the flat one's, where the error nearly cancels: 0.804 against
 - **No measured modes.** No measured paraglider modes were found to compare
   with.
 
-## 8. References
+## 9. References
 
 - Poland, J. A. W., Masure, C., Cayon, O., and Schmehl, R. (2026).
   Computational aerodynamics for leading-edge inflatable kite design. *Wind
   Energy Science* 11, 4147–4178. doi:10.5194/wes-11-4147-2026 (CC BY 4.0).
-  §5.5 for the stability derivatives, §6.3 for the tow point, appendix B for
-  the force's direction.
+  §5.5 for the stability derivatives, §6.2 for the planform, §6.3 for the tow
+  point, appendix B for the force's direction.
 - The Vortex Step Method, github.com/awegroup/Vortex-Step-Method (MIT licence).
   Its solver's force law and its stability-derivative code, read for this
   release.

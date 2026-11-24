@@ -608,4 +608,7 @@ input[type=range]::-moz-range-thumb {
     overflow: visible;
   }
   .readout { width: 100%; margin-left: 0; }
+  /* half the width, so a third line for the same note: the pane is most of
+     the screen's height now */
+  .vp-note { -webkit-line-clamp: 3; }
 }

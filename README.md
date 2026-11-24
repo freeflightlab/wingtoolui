@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2920 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2931 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -46,9 +46,12 @@ bar, in a six-degree-of-freedom model with the canopy's apparent mass and
 every strip on the lattice with its brake-deflected section — played in 3D,
 recorded to video, and stopped where a rigid canopy stops meaning anything
 (`docs/flight.md`). It judges the trimmed glider as Poland and others (2026)
-judge a kite: its stability derivatives, its modes and its hang point. Its
+judge a kite: its stability derivatives, its modes, its hang point and its
+planform, each variant of the planform built and flown as the design is. Its
 aerodynamics are held to Belloc's wind-tunnel paraglider
-(`docs/stability.md`, `tools/windtunnel.mjs`).
+(`docs/stability.md`, `tools/windtunnel.mjs`). Where the tool has more than
+one sourced way to find a figure, it flies the design under every combination
+and shows the range (`docs/ranges.md`).
 
 What it is not: certified, tested, or flown. See **Safety** below.
 
@@ -86,7 +89,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2920 unit checks against known geometry and the sources |
+| `npm test` | 2931 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -224,7 +227,7 @@ src/core/          the maths — 45 modules, pure functions, no DOM, each tested
   slices.js        the wing as its sections, put together on the lattice
   brakesection.js  the section with its trailing edge braked: mfoil, then past it
   flight.js        the glider through its brakes: six degrees of freedom
-  stability.js     its derivatives, its modes, and the hang point mapped
+  stability.js     its derivatives, its modes, the hang point and planform mapped
   pressure.js      chordwise loading, row load shares from the section
   intake.js        cell openings, placed against the stagnation point
   inflated.js      the flying shape against the built one
@@ -253,7 +256,7 @@ tests/             the unit suite, the Phase 1 audit, the full pipeline, the
                    reference sweep, the benchmark
 tools/             the other check stages, the interface harness, figures,
                    importers, and readers for legacy sheets
-docs/              forty-nine notes; see below
+docs/              fifty notes; see below
 data/reference/    150 tables: line sheets of 21 wings from five makers, six
                    of their line-plan drawings transcribed line by line, 55
                    published sizes and the makers' own specifications to check
@@ -279,7 +282,7 @@ design inputs
    |-> aero -> equilibrium -> risers -> accelerated polar
    |-> vlm + mfoil -> slices (on demand: the wing as its sections)
    |-> vlm + brakesection -> flight (on demand: the brakes, in time)
-   |                            -> stability (on demand: modes, hang point)
+   |                            -> stability (on demand: modes, hang point, planform)
    \-> lineplan -> loads -> line schedule -> line drag --> back into equilibrium
 ```
 
@@ -324,7 +327,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2920 checks |
+| unit suite | the maths, 2931 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -367,7 +370,8 @@ cascade: its riser layout, its counts, its tip lines and its stabilo's line.
 | `docs/environment-and-aero.md` | atmosphere, Reynolds number, and the wing polar |
 | `docs/slices.md` | the wing as its sections: mfoil ported and held to its own code, put together on the lattice |
 | `docs/flight.md` | the glider through its brakes: the braked section, six degrees of freedom, what the default wing does, what the model is not |
-| `docs/stability.md` | a kite paper's stability derivatives, the modes and the hang point, and the tool held to Belloc's wind-tunnel paraglider |
+| `docs/stability.md` | a kite paper's stability derivatives, the modes, the hang point and the planform, and the tool held to Belloc's wind-tunnel paraglider |
+| `docs/ranges.md` | the design as built under each of the tool's alternative assumptions: the range of the glide, and what moves it most |
 | `docs/validation.md` | every discrepancy found in the sources, and why |
 | `docs/load-cases.md` | what sizes a line — the speed bar, a collapse, a gust — and a real lineset against this tool's loads |
 | `docs/source-map.md` | handbook chapter to implementation |

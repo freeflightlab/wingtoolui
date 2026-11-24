@@ -14,8 +14,8 @@ One offline HTML file, 2.0 MB, no build step and no network. That constraint
 drove the architecture: 45 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 86,400 lines**: 35,900 core, 8,300 interface, 20,400 tests, 6,900
-tools, 15,000 documentation.
+**About 87,700 lines**: 36,000 core, 8,900 interface, 20,400 tests, 7,000
+tools, 15,400 documentation.
 
 ## 2. What is genuinely validated
 
@@ -97,6 +97,14 @@ lines stretch on their own measured curves, from OpenGlider's line types.
   (`docs/flight.md`). 1.13 put the stall at 52 cm: its strips' forces
   pointed the wrong way, which Belloc's tunnel wing showed
   (`docs/stability.md`).
+- **The glide, as a range.** Where the tool has two sourced answers — the
+  polar or the lattice, the handbook's section drag or mfoil's, the typed
+  line drag or the plan's — it flies the design as built under each
+  (1.16). The default wing's glide runs 8.10 to 9.59. The lines' drag moves
+  it most (+0.92 on its own lines' 0.0119 against the handbook's 0.020),
+  and the route least (0.12). Neither end is a measurement. The cell
+  openings' drag, for which no source was found, would lower all of it
+  (`docs/ranges.md`).
 
 ## 4. What is wrong, or unexplained
 
@@ -188,6 +196,14 @@ centres it. On its own points it hangs the gnuC2-23 at 32.4% of chord at
 the 4.51° its file declares, where the file hangs it at 33% and the rules
 at 25.5%; on the Swoop2's reflex section neither balance hangs it where its
 file does (`docs/balance.md`).
+
+**The default wing's arc is flatter than every published wing's.** Its
+projected span is 0.88 of its flat span; the eleven families in the reference
+set that publish one are at 0.77 to 0.82. The planform study (1.15) puts the
+default wing's small roll stiffness, −0.077, down to that: on a real wing's
+0.80 the same model gives −0.280. The default keeps its arc, as the
+designer asked, with the published wings' arcs shown beside it on the
+planform map (`docs/stability.md`, section 5).
 
 **Belloc's wind-tunnel wing: a lift slope 26% steep, a roll stiffness 30%
 weak.** Run on the one paraglider measured in a tunnel with all six

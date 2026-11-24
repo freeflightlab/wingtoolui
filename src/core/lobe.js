@@ -224,6 +224,45 @@ export function ellipseForProjectedRatio(ratio) {
   return { type: 'ellipse', aRatio: ratio, bRatio: minArrowRatio(ratio, 'ellipse') * (1 + 1e-6) };
 }
 
+/**
+ * The arc of the same kind as `spec` whose projected span is `ratio` of the
+ * flat span: how the planform study deepens or flattens a design's arc.
+ *
+ *   circle   its projected ratio, which is the ratio exactly
+ *   ellipse, bionic   deeper than the arc is: the same width, more arrow,
+ *            which turns the tip down sooner along the same span; flatter
+ *            than its width allows even at the least arrow that carries the
+ *            span: as wide as the ratio, at that least arrow — the
+ *            handbook's ellipse through a projected span
+ *            (`ellipseForProjectedRatio`), the tip where the quarter ends
+ *
+ * Every spec here is in ratios of the flat half span, so its arc scales with
+ * the wing and the ratio does not depend on the span.
+ */
+export function lobeWithProjectedRatio(spec, ratio) {
+  const type = spec.type || 'circle';
+  if (!(ratio > 0.5 && ratio < 1)) {
+    throw new Error(`lobeWithProjectedRatio: a projected ratio between 0.5 and 1 (got ${ratio})`);
+  }
+  if (type === 'circle') return { type, projectedRatio: ratio };
+  if (type !== 'ellipse' && type !== 'bionic') throw new Error(`lobeWithProjectedRatio: no ${type} arc`);
+  const exponent = spec.exponent ?? 1.6;
+  const aRatio = spec.aRatio ?? 0.88;
+  const make = (a, b) => ({ type, aRatio: a, bRatio: b, ...(type === 'bionic' ? { exponent } : {}) });
+  const ratioOf = (sp) => lobeMetrics(buildLobe(sp, 1), 1).spanRatio;
+  const least = (a) => minArrowRatio(a, type, exponent) * (1 + 1e-6);
+  const bMin = least(aRatio);
+  if (ratio >= ratioOf(make(aRatio, bMin))) return make(ratio, least(ratio));
+  // deeper: the ratio falls as the arrow grows, the width held
+  let lo = bMin; let hi = bMin * 2;
+  for (let i = 0; i < 30 && ratioOf(make(aRatio, hi)) > ratio; i++) hi *= 2;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (ratioOf(make(aRatio, mid)) > ratio) lo = mid; else hi = mid;
+  }
+  return make(aRatio, (lo + hi) / 2);
+}
+
 /** Circle radius that turns a flat half-span into a given projected fraction. */
 export function radiusForProjectedRatio(halfSpan, ratio) {
   // Projected half span = R * sin(halfSpan/R). Solve R*sin(s/R)/s = ratio.

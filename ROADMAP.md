@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2920-test validation suite and a benchmark with regression budgets
+- [x] 2931-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -1669,6 +1669,10 @@ Making it pleasant to use across a real project.
       two-pane tabs had been squeezed to 0 to 60 px, the Flight's chart to
       nothing. Tables drawn as text start each column past the widest entry
       before it (an interface test). `docs/viewports.md`.
+- [x] **Legends in the drawings** (1.15) — the maps', the slices' and the
+      flight view's colours were explained at the end of notes too long for
+      the two lines a note shows, and were cut off; each draws its legend
+      now, and every note fits (measured in a browser at 1500 and 420 px).
 
 ---
 
@@ -1729,7 +1733,10 @@ describing geometry and starts predicting behaviour.
       lifting line overstates the lift slope at an aspect ratio of 4.7. The
       balance, speed bar and glide are built and checked on the polar, and
       were not changed; whether the arc factors should come off the lattice
-      directly, or the polar fly on the slices, is open.
+      directly, or the polar fly on the slices, is open. Trimmed as built,
+      on the same section and line drags, the two routes' glides come within
+      0.04 to 0.20 (1.16, `docs/ranges.md`): the polar's extra lift is
+      taken back by a lower trim.
 - [ ] **The section as the wing flies it** — the slices solve the rib's
       section closed and smooth: no cell openings, porosity, seams or billow
       between ribs. The polar's section estimate puts its profile drag at
@@ -1806,8 +1813,9 @@ describing geometry and starts predicting behaviour.
       put right (1.14) it trims 0.3° above it, 35.8 km/h against 35.2.
 - [ ] **The flight's canopy drag** — the flight's sections are mfoil's
       sealed, smooth ones (0.0069 at trim where the balance's polar counts
-      0.0107), so its glide, 8.61, is a smooth canopy's: about 8.2 on the
-      polar's figure. The cell openings and the cloth belong in it.
+      0.0107), so its glide, 8.61, is a smooth canopy's: 8.14 on the
+      polar's figure, flown (1.16, `docs/ranges.md`). The cell openings
+      and the cloth belong in it, and no figure for them was found.
 - [ ] **The plain lattice's force** — `vortexLattice` still takes its force
       on the three-quarter chord's velocity. It enters the tool only as the
       arched wing's lift over the flat one's (`arcFactors`), where the error
@@ -1819,9 +1827,31 @@ describing geometry and starts predicting behaviour.
 - [ ] **Belloc's drag at no lift** — the smooth NACA 23015 polars give the
       model 0.0075 against the tunnel's 0.0156. Its surface, its tips or the
       rod's tare: not separated.
-- [ ] **The planform against stability** — the kite paper's §6.2: aspect
-      ratio and arc against glide and the derivatives. It means building
-      each planform as a design; the map does the hang point only.
+- [x] **The planform against stability** (1.15) — the kite paper's §6.2:
+      twenty variants of the design, five flat aspect ratios at its area by
+      four arcs, each built with its own lines and hang point and flown
+      (`stabilityGridSteps`, `lobeWithProjectedRatio`). The roll stiffness is
+      the arc's; the yaw stiffness grows with the aspect ratio, as the
+      paper's does; a deep arc on a short span leaves the Dutch roll
+      undamped. `docs/stability.md`, section 5.
+- [x] **A real wing's arc on the default wing** (1.16) — its projected span
+      is 0.88 of its flat span, flatter than every one of the eleven
+      published families' (0.77 to 0.82); on a real wing's 0.80 this model
+      gives it roll stiffness −0.280 rather than −0.077. Kept as designed,
+      as the designer asked: the planform map shows the published wings'
+      arcs beside it.
+- [x] **The range of results by assumption** (1.16) — where the tool has
+      more than one sourced way to a figure (the polar or the lattice, the
+      handbook's section drag or mfoil's, the typed line drag or the plan's,
+      and on the lattice the force's direction) the design as built is
+      flown under every combination: twelve cases, the range, and what
+      moves the glide most. The typed line drag and the plan's are both
+      kept, as the designer asked, rather than one chosen.
+      `docs/ranges.md`.
+- [ ] **The planform's cells and lines** — the study's variants keep the
+      design's number of cells and its typed line drag. A real wing of a
+      higher aspect ratio carries more of both; the plan's own line drag
+      (`cxLinesFromPlan`) would grow with them.
 - [ ] **Reynolds number along the span, in flight** — the slices read the
       polars at each slice's own Reynolds number, interpolated in log Re as
       the kite paper's surrogates are; the flight's braked table is at one.

@@ -62,11 +62,16 @@ seven tabs:
 | **Structure** | the diagonals, with the tension across each |
 | **Analysis** | polar, atmosphere |
 | **Slices** | one section in its own flow, and every slice tip to tip, with a slice selector (`docs/slices.md`) |
-| **Flight** | the glider flown through its brakes in 3D on a canvas (so it can be recorded to video), and beside it the flight over time, all eighteen scenarios tabled, the stability derivatives and modes at trim, or the hang point mapped (`docs/flight.md`, `docs/stability.md`) |
+| **Flight** | the glider flown through its brakes in 3D on a canvas (so it can be recorded to video), and beside it the flight over time, all eighteen scenarios tabled, the stability derivatives and modes at trim, the hang point or the planform mapped, or the design under each assumption (`docs/flight.md`, `docs/stability.md`, `docs/ranges.md`) |
 
 Only the visible tab is drawn. Hidden grids have no size, so anything drawn
 into one fits to nothing — the redraw happens on the way in, not on the way
 out.
+
+**A pane's note** shows two lines, three on a narrow screen. What a drawing's
+colours mean is drawn in the drawing, as a legend, not left to the note: in
+1.14 the maps', the slices' and the flight view's legends came at the end of
+notes too long for their lines, and were cut off.
 
 **On a narrow screen**, 900 px wide or less, the page scrolls and the panes
 stack, one under another, each most of the screen's height. Until 1.14 the

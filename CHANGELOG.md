@@ -4,6 +4,126 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.16.0 — 2026-11-24
+
+The range of results by assumption. Where the tool has more than one sourced
+way to find a figure, it now flies the design under every combination and
+shows the spread, rather than choosing one.
+
+**Added**
+
+- **Range**, in the Flight tab. The design as built, its lines and
+  hang point held, flown under each of the tool's alternative assumptions:
+  - the route: the polar (the balance's lifting line) or the lattice (the
+    flight model);
+  - the section's drag: the handbook's estimate or mfoil's solve;
+  - the lines' drag: the typed coefficient or the plan's own lines;
+  - on the lattice, the force's direction: the lifting line's, or the kite
+    paper's three-quarter chord, drawn dim and kept out of the range.
+
+  That is twelve cases in about a second, each with its trim's angle, speed,
+  sink and glide, and the glide drawn on a scale. Below them come the range,
+  and a bar for how far each assumption moves the glide. What the tool
+  reports, the balance and the flight, are among the cases to the last
+  digit. Once it has run, the masthead shows the glide's range beside the
+  single figure. **Range .tsv** saves it. `docs/ranges.md`.
+- `asBuiltOnPolar` (app.js): the design's calage held, trimmed on the polar
+  remade with another line drag or section drag. An imported design hangs
+  at its own file's calage.
+- `profileDragAt` (aero.js `wingPolar`): another section's drag at each
+  station's lift, with the lift and moment kept. `profileDragDelta`
+  (flight.js): a drag added to each strip from its lift. `sectionCd` is
+  exported.
+
+**Found**
+
+- **On the default wing the glide runs 8.10 to 9.59** across the
+  assumptions, at 35.0 to 37.1 km/h and a sink of 1.07 to 1.20 m/s.
+- **The lines' drag moves it most**: the plan's own lines, at 0.0119 against
+  the typed 0.020, add 0.92. The section's drag comes next: mfoil's for the
+  estimate adds 0.44. The route moves it least, 0.12.
+- **The balance's 8.10 and the flight's 8.61 differ by the section's drag,
+  not the route.** With the same drags, flown as built, the polar and the
+  lattice come within 0.04 to 0.20. The polar's 10% more lift at a given
+  angle is taken back by a lower trim.
+- **The kite paper's force direction** would put the glide at 6.47 to 7.68,
+  the trim 2.1 to 2.3° higher.
+- **A wing of the class, the Hook 3**, was measured at a glide of 9.3. The
+  cases on the plan's lines bracket it, at 8.98 to 9.59, and those on the
+  typed figure all fall below.
+
+**Changed**
+
+- The two choices asked about in 1.14 and 1.15 are left to the designer, as
+  the designer asked. The typed line drag and the plan's are both flown,
+  side by side. The default wing keeps its arc, and the planform map shows
+  the published wings' arcs beside it.
+- The interface test measures text by its anchor when it checks that a
+  table's columns do not run into each other.
+
+## 1.15.0 — 2026-11-23
+
+The rest of the kite paper's design study: the planform. Each variant is
+built and flown as the design is. Set beside the published wings, the default
+wing's arc is flatter than any of them.
+
+**Added**
+
+- **Planform**, in the Flight tab: the kite paper's planform study (§6.2) for
+  a glider. It builds twenty variants of the design: five flat aspect
+  ratios, 0.85 to 1.45 times its own at the same area, by four arcs, its
+  projected span ratio −0.08 to +0.04. Each is built with its own panels,
+  line plan and hang point, as the design is, then trimmed and judged by the
+  six criteria and its modes. The lines go with the span, as the makers' do
+  across aspect ratios. Each cell gives the glide and the roll stiffness,
+  coloured by what holds, and the published families sit on the grid as
+  rings. It takes about two seconds. **Planform .tsv** saves it.
+- `lobeWithProjectedRatio` (lobe.js): an arc of the same kind at another
+  projected span ratio. A circle takes the ratio. An ellipse or a bionic
+  lobe takes more arrow at its width, or a wider width at the least arrow.
+- `stabilityCell` and `stabilityGridSteps` (stability.js): one point of a
+  map, and a map over any points, each its own model.
+- `buildModel` (app.js): the design's model, built without drawing it, so
+  variants can be built beside the one on show without disturbing it.
+
+**Found**
+
+- **The default wing's arc is flatter than every published wing's.** Its
+  projected span is 0.88 of its flat span. The eleven families in the
+  reference set that publish one are at 0.77 to 0.82. That is why its roll
+  stiffness, −0.077, is small. On a real wing's 0.80 this model gives
+  −0.280, and a glide of 8.12 rather than 8.61. The default is unchanged:
+  that is the designer's call, and every figure quoted for the default wing
+  would move.
+- **The roll stiffness is the arc's, not the aspect ratio's.** With lines
+  that go with the span, Cl/β hardly moves from AR 4.0 to 6.8. It is −0.25
+  to −0.34 at a projected span ratio of 0.80, and turns unstable at 0.92
+  above AR 6.
+- **The yaw stiffness grows with the aspect ratio**, Cn/β 0.047 to 0.070.
+  This is the paper's finding for a kite.
+- **A deep arc on a short span leaves the Dutch roll undamped.** At AR 4.0
+  and 0.80 its damping ratio is −0.016.
+- **The glide rises with the aspect ratio**, 7.95 at AR 4.0 to 10.25 at 6.8
+  on the design's arc. The phugoid's damping falls with it, 0.085 to 0.044,
+  which is Lanchester's trend.
+
+**Fixed**
+
+- **Colours explained only in a note that was cut off.** A pane's note shows
+  two lines. On a pane 600 px wide the hang point's note was cut off halfway
+  through amber, before red and grey (measured in a browser). The two slice
+  views' and the flight view's colours came at the end of notes of 250 to
+  370 characters, and were cut off too. Each map, both slice views
+  and the flight view (and so its videos) now draw their own legends. The
+  stability table says what stable and damped mean. Every tab's notes, and
+  those the slices' and the flight's runs write, now fit their two lines at
+  1500 px and three at 420 px, where the panes stack (measured in a
+  browser).
+- In the Wing tab's section view, the F and m labels sat on the B and C of
+  the line rows anchored above them.
+- The arc factors' cache held one wing. It holds the last 24 now, so the
+  planform's variants do not put the design's own out of it.
+
 ## 1.14.0 — 2026-11-23
 
 The glider judged as a kite paper judges a kite: its stability derivatives,

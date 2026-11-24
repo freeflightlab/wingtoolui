@@ -79,6 +79,11 @@ export const FLIGHT = Object.freeze({
   // 'control', the three-quarter-chord angle the coupling reads its section
   // at (1.13; it overstated the induced drag)
   inducedAngle: 'trefftz',
+  // a drag to add to each strip's section, from its lift coefficient: what
+  // another estimate of the section's drag makes of it (the assumptions
+  // range's lattice on the handbook's estimate; docs/ranges.md). A
+  // strip deep in its stall keeps its own.
+  profileDragDelta: null,
   // past its stall by this much, or below this, a strip meets its own air
   deepStallMarginDeg: 10,
   deepStallNegativeDeg: 15,
@@ -590,6 +595,8 @@ export function flightForces(model, x, ctrl, work) {
     if (resid < tol) break;
   }
   work.iterations = it; work.residual = resid;
+  // drag takes no part in the coupling: another estimate of it is added once
+  if (cfg.profileDragDelta) for (let i = 0; i < n; i++) if (!deep[i]) cd[i] += cfg.profileDragDelta(cl[i]);
   // Each strip's force is square to the flow it meets with the wing's
   // downwash in it: its geometric angle less its induced angle at the
   // lifting line, half the Trefftz plane's wash on it, so the strips' induced

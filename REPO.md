@@ -14,7 +14,7 @@ wingtoolui/
 │                          importers, figures, and the search tool
 ├── data/reference/        150 tables of published and supplied data, and
 │                          three complete designs' own files in lep/
-├── docs/                  49 notes on what was built, and what it cost
+├── docs/                  50 notes on what was built, and what it cost
 ├── build.py               bundles src/ into dist/, with a collision guard
 ├── package.json           the version, named scripts; no dependencies to install
 ├── MANIFEST.txt           every file, generated

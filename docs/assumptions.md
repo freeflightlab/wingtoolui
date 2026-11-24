@@ -25,6 +25,11 @@ Each is asserted to change the model, and separately asserted to change an
 exported file. **A control that changes nothing is worse than no control:** it
 tells the user they have a choice when they do not.
 
+Where the physics itself has more than one sourced answer — the polar or the
+lattice, the section's drag, the lines' drag, a strip's force direction — no
+control chooses for the user. The Flight tab's **Range** flies the design
+under every combination and shows the spread (`ranges.md`).
+
 ## 2. Three things the audit found on the way
 
 ### `M.loads` was read in three places and assigned in none

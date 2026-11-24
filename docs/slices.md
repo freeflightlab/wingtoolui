@@ -185,7 +185,7 @@ half the Trefftz plane's wash on it. The strips' induced drag then adds up to
 the Trefftz plane's. Until 1.14 the force was taken on the velocity at the
 three-quarter chord, which carries the strip's own bound vortex, so it came
 out square to the plate rather than to the flow. Belloc's wind-tunnel
-paraglider showed it (`stability.md`, sections 5 and 6).
+paraglider showed it (`stability.md`, sections 6 and 7).
 
 What the tests hold it to (`slices` in the unit suite): on flat-plate
 sections the coupled lattice is the lattice itself, to 1e-12 in circulation;
