@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-JWxoU8ORTTmiO0DKkE27to/9MEJfJXYHcBkmpeaZcSk='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-IFkzwL/7rtV8hn2Dorvq+c2DGypoMY6rSkk5st7cb0s='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Paraglider Design Tool</title>
 <style>/* Palette note: the geometry colours are the AutoCAD Color Index values the
    handbook's own panel subroutine writes into its DXF (2 yellow, 3 green,
@@ -424,13 +424,8 @@ input[type=range]::-moz-range-thumb {
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
 
 /* ---------- responsive ---------- */
-
-@media (max-width: 900px) {
-  .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .controls { border-right: none; border-bottom: 1px solid var(--rule); max-height: 42vh; }
-  .viewports { grid-template-columns: 1fr; grid-template-rows: repeat(6, minmax(220px, 1fr)); overflow-y: auto; }
-  .readout { width: 100%; margin-left: 0; }
-}
+/* The narrow screen's layout is at the end of this file: it has to come
+   after the one- and two-pane layouts it replaces. */
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
@@ -595,13 +590,39 @@ input[type=range]::-moz-range-thumb {
   cursor: pointer;
 }
 .themebtn:hover { color: var(--text); border-color: var(--text-faint); }
+
+/* ---------- a narrow screen ---------- */
+
+/* On a screen 900 px wide or less the shell cannot hold the masthead, the
+   controls and the drawings in one fixed frame. At a phone's width the
+   readout alone wraps to a third of the height, the controls take 42% of it
+   and the Flight's tools wrap to four rows: the panes of the one- and
+   two-pane tabs were left between 0 and 60 px tall, the Flight's chart
+   nothing at all, and the two-pane tabs sat side by side at half the width.
+   The page scrolls instead; the controls keep their own scroll box, and each
+   pane takes most of the screen's height, one under another. Last in the
+   file because `.viewports.one` and `.viewports.two` above would otherwise
+   win on order. */
+@media (max-width: 900px) {
+  .shell { height: auto; min-height: 100%; overflow: visible; }
+  .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; overflow: visible; }
+  .controls { border-right: none; border-bottom: 1px solid var(--rule); max-height: 42vh; }
+  .stage { overflow: visible; }
+  .viewports, .viewports.one, .viewports.two {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: minmax(300px, 68vh);
+    overflow: visible;
+  }
+  .readout { width: 100%; margin-left: 0; }
+}
 </style>
 </head>
 <body>
 <div class="shell">
 
   <header class="masthead">
-    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.13.0</span></div>
+    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.14.0</span></div>
     <input class="wingname" id="wingName" value="gnu-01" aria-label="Wing name">
     <div class="readout" id="readout"></div>
     <button class="themebtn" id="themeBtn" aria-label="Switch between dark and light">Light</button>
@@ -18971,6 +18992,47 @@ function trefftzSegments(trace, gamma, rho = 1.225) {
 }
 
 /**
+ * The Trefftz plane's influence, unit circulation by unit circulation: entry
+ * [i * n + j] is the normal wash that segment j's pair of legs puts on the
+ * middle of segment i, by segment i's length — so that, with `gamma`,
+ *
+ *     D_i = (rho / 2) * gamma_i * sum_j( T[i*n+j] * gamma_j )
+ *
+ * is `trefftzSegments`' share i. Fixed with the wake's trace, it turns a
+ * circulation into each strip's share of the induced drag with one product,
+ * and each strip's induced angle at the lifting line — half the far wake's
+ * wash, as Prandtl's lifting line has it — with one division:
+ *
+ *     alpha_i = sum_j( T[i*n+j] * gamma_j ) / (2 V w_i)
+ *
+ * w_i the strip's span along its bound vortex.
+ */
+function trefftzInfluence(trace) {
+  const n = trace.length;
+  const T = new Float64Array(n * n);
+  for (let i = 0; i < n; i++) {
+    const [[ya, za], [yb, zb]] = trace[i];
+    const yc = (ya + yb) / 2;
+    const zc = (za + zb) / 2;
+    for (let j = 0; j < n; j++) {
+      let v = 0;
+      let w = 0;
+      for (const [[yv, zv], sign] of [[trace[j][0], 1], [trace[j][1], -1]]) {
+        const dy = yc - yv;
+        const dz = zc - zv;
+        const r2 = dy * dy + dz * dz;
+        if (r2 < 1e-9) continue;
+        const k = sign / (2 * Math.PI * r2);
+        v -= k * dz;
+        w += k * dy;
+      }
+      T[i * n + j] = w * (yb - ya) - v * (zb - za);
+    }
+  }
+  return T;
+}
+
+/**
  * The lattice's geometry and influence, without solving it: each strip's
  * horseshoe (bound segment on the quarter-chord line, control point at three
  * quarters, the strip's own upward normal), every horseshoe's velocity at
@@ -22430,25 +22492,47 @@ function coupleSlices({
     if (resid < tol) break;
     for (let i = 0; i < n; i++) d[i] += relax * (clSec[i] - clInv[i]) / twoPi;
   }
-  // forces at unit speed and density: Kutta-Joukowski on each bound vortex
-  const forces = sys.panels.map((p, i) => {
-    const vi = [0, 0, 0];
-    for (let j = 0; j < n; j++) {
-      vi[0] += sys.VX[i * n + j] * gamma[j];
-      vi[1] += sys.VY[i * n + j] * gamma[j];
-      vi[2] += sys.VZ[i * n + j] * gamma[j];
-    }
-    const vLocal = slAdd(U, vi);
-    return slScale(slCross(vLocal, p.span), gamma[i]);
-  });
   const seen = (q) => [q[1], q[2] * Math.cos(sys.alpha) - q[0] * Math.sin(sys.alpha)];
   const trace = sys.panels.map((p) => [seen(p.ta), seen(p.tb)]);
   // trefftzDrag takes rho; with rho = 2 it returns sum(Gamma Vn s): D/q at unit speed
   const inducedOverQ = trefftzDrag(trace, gamma, 2);
+  // Forces at unit speed and density: Kutta-Joukowski on each bound vortex,
+  // the circulation by the flow across it, square to the flow the strip
+  // meets with the wing's downwash in it — its induced angle at the lifting
+  // line, half the Trefftz plane's wash on it, so the strips' own induced
+  // drag adds up to the Trefftz plane's.
+  //
+  // They were taken from the velocity at the three-quarter chord, where the
+  // boundary condition is set. That velocity carries the strip's own bound
+  // vortex, which turns the flow there to lie along the plate: the force
+  // came out square to the plate rather than to the flow, tilted back by the
+  // plate's angle, cl / 2 pi. The lift lost a few per cent and the force's
+  // line of action was wrong: on Belloc's wind-tunnel wing the pitching
+  // moment about a point a line's length below rose with the angle, where
+  // the tunnel's falls. (The Vortex Step Method takes the direction from the
+  // quarter chord in the same way, after Gaunaa, Li and Pirrung, 2026; see
+  // docs/stability.md for the kite paper's other choice.)
+  const T = trefftzInfluence(trace);
+  const inducedDeg = new Array(n);
+  const forces = sys.panels.map((p, i) => {
+    const sp = slUnit(p.span); const nn = p.normal; const e = chordDir[i];
+    const Vs = slDot(U, sp);
+    const Up = [U[0] - Vs * sp[0], U[1] - Vs * sp[1], U[2] - Vs * sp[2]];
+    const vp = slNorm(Up);
+    const width = slNorm(p.span);
+    const aGeo = Math.atan2(slDot(Up, nn), slDot(Up, e));
+    let wash = 0;
+    for (let j = 0; j < n; j++) wash += T[i * n + j] * gamma[j];
+    const aInd = wash / (2 * Math.max(1e-9, vp) * width);
+    inducedDeg[i] = aInd / SL_RAD;
+    const a = aGeo - aInd;
+    const lift = [-Math.sin(a) * e[0] + Math.cos(a) * nn[0], -Math.sin(a) * e[1] + Math.cos(a) * nn[1], -Math.sin(a) * e[2] + Math.cos(a) * nn[2]];
+    return slScale(lift, gamma[i] * vp * width);
+  });
   return {
     converged: resid < tol, iterations: it, residual: resid,
     correctionDeg: d.map((v) => v / SL_RAD),
-    gamma, clLattice: clInv, alphaEffDeg: aEff, section: sec, forces, inducedOverQ, system: sys,
+    gamma, clLattice: clInv, alphaEffDeg: aEff, section: sec, forces, inducedOverQ, inducedDeg, system: sys,
   };
 }
 
@@ -23406,6 +23490,11 @@ const FLIGHT = Object.freeze({
   // the induced angle a strip may have, down and up (tip upwash)
   inducedMaxDeg: 15,
   upwashMaxDeg: 6,
+  // where a strip's force takes its direction from: 'trefftz', its lifting
+  // line's induced angle (half the Trefftz plane's wash on it), or
+  // 'control', the three-quarter-chord angle the coupling reads its section
+  // at (1.13; it overstated the induced drag)
+  inducedAngle: 'trefftz',
   // past its stall by this much, or below this, a strip meets its own air
   deepStallMarginDeg: 10,
   deepStallNegativeDeg: 15,
@@ -23628,6 +23717,9 @@ function flightModel({
   const sys = latticeSystem(strips, { alphaDeg: alphaWakeDeg });
   const n = sys.n;
   const lu = flLu(sys.A, n);
+  // the wake's trace, seen down it: each strip's induced angle from it
+  const seenW = (q) => [q[1], q[2] * Math.cos(sys.alpha) - q[0] * Math.sin(sys.alpha)];
+  const tw = trefftzInfluence(sys.panels.map((p) => [seenW(p.ta), seenW(p.tb)]));
   // per strip, relative to the riser midpoint, in the wing's frame
   const rq = new Float64Array(3 * n); const rc = new Float64Array(3 * n);
   const nrm = new Float64Array(3 * n); const spn = new Float64Array(3 * n); const chd = new Float64Array(3 * n);
@@ -23798,7 +23890,7 @@ function flightModel({
   }
   const lu6 = flLu(A6, 6);
   return {
-    cfg, rho, g, n, sys, lu, rq, rc, nrm, spn, chd, chord, width, area, yMid,
+    cfg, rho, g, n, sys, lu, tw, rq, rc, nrm, spn, chd, chord, width, area, yMid,
     anchors: all, weights, tipY, table, flatAreaM2: flatArea, areaM2,
     dragPilotM2: areaM2 * cxPilot, dragLinesM2: areaM2 * cxLines,
     pilotAt, lineDragAt, linesAt, rSolidW, rSolidB: rS, rBodyB: rB, JB,
@@ -23817,7 +23909,7 @@ function flightWork(model) {
   return {
     d: new Float64Array(n).fill(-4 * Math.PI / 180),
     rhs: new Float64Array(n), gam: new Float64Array(n), theta: new Float64Array(n),
-    aEff: new Float64Array(n), aGeo: new Float64Array(n), deep: new Uint8Array(n),
+    aEff: new Float64Array(n), aGeo: new Float64Array(n), aDir: new Float64Array(n), deep: new Uint8Array(n),
     cl: new Float64Array(n), cd: new Float64Array(n), cm: new Float64Array(n),
     vp: new Float64Array(n), V: new Float64Array(3 * n), sec: [0, 0, 0], iterations: 0, residual: 0,
   };
@@ -23913,11 +24005,30 @@ function flightForces(model, x, ctrl, work) {
     if (resid < tol) break;
   }
   work.iterations = it; work.residual = resid;
+  // Each strip's force is square to the flow it meets with the wing's
+  // downwash in it: its geometric angle less its induced angle at the
+  // lifting line, half the Trefftz plane's wash on it, so the strips' induced
+  // drag adds up to the Trefftz plane's. The section's coefficients are
+  // still read at the coupling's angle, which is the lattice's: it is the
+  // three-quarter-chord one, whose larger downwash put the induced drag a
+  // third high on Belloc's tunnel wing when the force took its direction
+  // from it (1.13; docs/stability.md). A strip deep in its stall meets its
+  // own air, as before.
+  const { aDir } = work;
+  const fromControl = cfg.inducedAngle === 'control';
+  for (let i = 0; i < n; i++) {
+    if (deep[i]) { aDir[i] = aGeo[i]; continue; }
+    if (fromControl) { aDir[i] = aEff[i]; continue; }
+    let wash = 0;
+    for (let j = 0; j < n; j++) wash += model.tw[i * n + j] * gam[j];
+    const ai = wash / (2 * Math.max(1e-6, vp[i]) * model.width[i]);
+    aDir[i] = aGeo[i] - Math.max(-hi, Math.min(lo, ai));
+  }
   // the strips' forces, on their quarter-chord lines
   const F = [0, 0, 0]; const M = [0, 0, 0];
   for (let i = 0; i < n; i++) {
     const q = 0.5 * rho * vp[i] * vp[i] * area[i];
-    const ca = Math.cos(aEff[i]); const sa = Math.sin(aEff[i]);
+    const ca = Math.cos(aDir[i]); const sa = Math.sin(aDir[i]);
     const ex = chd[3 * i]; const ey = chd[3 * i + 1]; const ez = chd[3 * i + 2];
     const nx = nrm[3 * i]; const ny = nrm[3 * i + 1]; const nz = nrm[3 * i + 2];
     // the flow as the whole wing leaves it, and lift square to it
@@ -23947,9 +24058,10 @@ function flightForces(model, x, ctrl, work) {
   const fg = flScale(gW, model.massSolid);
   const mg = flCross(model.rSolidW, fg);
   const aeroW = [F[0], F[1], F[2]];
+  const aeroMW = [M[0], M[1], M[2]];
   F[0] += fg[0]; F[1] += fg[1]; F[2] += fg[2];
   M[0] += mg[0]; M[1] += mg[1]; M[2] += mg[2];
-  return { F: flToBody(F), M: flToBody(M), aero: flToBody(aeroW), pilotDrag: flToBody(fPilot), gB };
+  return { F: flToBody(F), M: flToBody(M), aero: flToBody(aeroW), aeroM: flToBody(aeroMW), pilotDrag: flToBody(fPilot), gB };
 }
 
 /** The state's rate of change: the rigid body with its apparent mass. */
@@ -23993,14 +24105,18 @@ function flightDerivative(model, x, ctrl, work, info = null) {
 
 /**
  * Steady straight glide: the body's forward and down speed and its pitch at
- * which nothing accelerates, by Newton's method from a guess.
+ * which nothing accelerates, by Newton's method from a guess. `controls`
+ * holds the handles ({ left, right }, mm) through it: equal, the glide stays
+ * straight, and the brakes' steady polar is a trim at each travel.
  */
-function flightTrim(model, { speed = 10, alphaDeg = 5, glide = 8, guess = null, work = null, tol = 1e-8, maxIterations = 40 } = {}) {
+function flightTrim(model, { speed = 10, alphaDeg = 5, glide = 8, guess = null, work = null, tol = 1e-8, maxIterations = 40, controls = null } = {}) {
   const wk = work || flightWork(model);
   // the coupling solved far tighter than a flight needs, so the differences
   // the Jacobian is made of are the trim's and not the coupling's noise
   const keep = [wk.tol, wk.maxIterations];
   wk.tol = 1e-11; wk.maxIterations = 600;
+  // the handles where they are held: symmetric, so the trim stays in the plane
+  const held = controls ? { left: controls.left ?? 0, right: controls.right ?? 0 } : { left: 0, right: 0 };
   const a0 = alphaDeg * Math.PI / 180;
   let z = guess ? [guess.u, guess.w, guess.theta] : [speed * Math.cos(a0), speed * Math.sin(a0), a0 - Math.atan(1 / glide)];
   const stateOf = (zz) => {
@@ -24008,7 +24124,7 @@ function flightTrim(model, { speed = 10, alphaDeg = 5, glide = 8, guess = null, 
     return Float64Array.from([0, 0, -model.cfg.altitudeM, ...q, zz[0], 0, zz[1], 0, 0, 0]);
   };
   const res = (zz) => {
-    const dx = flightDerivative(model, stateOf(zz), { left: 0, right: 0 }, wk);
+    const dx = flightDerivative(model, stateOf(zz), held, wk);
     return [dx[7], dx[9], dx[11]];
   };
   let r = res(z); let norm = Math.hypot(...r); let it = 0;
@@ -24253,6 +24369,582 @@ function flightSummary(flight, trim) {
     departedTravelMM: departedAt ? Math.max(departedAt.left, departedAt.right) : null,
     lowLiftS: lowLiftAt ? lowLiftAt.t : null, minLiftBeforeDeparture: minLift,
   };
+}
+
+/* ===== stability.js ===== */
+/* stability.js — the glider's stability, found as a kite's is, and then
+ * its modes.
+ *
+ * ---------------------------------------------------------------------------
+ * The derivatives
+ * ---------------------------------------------------------------------------
+ * Poland, Masure, Cayon and Schmehl (2026, Wind Energy Science 11, 4147,
+ * section 5.5) judge a kite's stability by its quasi-steady rigid-body
+ * derivatives: the six force and moment coefficients, differenced centrally
+ * in the angle of attack and the sideslip (0.005 rad either side) and in the
+ * roll, pitch and yaw rates (0.1 rad/s either side), at the trim. Statically
+ * stable is
+ *
+ *     roll   dCl/dbeta  < 0      pitch  dCm/dalpha < 0      yaw  dCn/dbeta > 0
+ *
+ * and damped is a negative dCl/dp^, dCm/dq^ and dCn/dr^, the rates made
+ * dimensionless as p^ = p b / 2V, q^ = q c / 2V, r^ = r b / 2V. All of it is
+ * in the body's axes, x forward, y right, z down.
+ *
+ * A kite turns about its tow point, the tether holding it; the paper takes
+ * its moments there, and notes that a kite's anhedral is what steadies it in
+ * roll, where an aeroplane, turning about its centre of mass, needs dihedral.
+ * A paraglider is a kite whose tether is its pilot's weight. It flies free,
+ * so it turns about its centre of mass, and its centre of mass hangs most of
+ * a line's length below the canopy: the arc's sideslip force, high above
+ * it, steadies it as a kite's does. The moments here are taken about the
+ * centre of the solid mass (the weight's line of action: canopy, lines and
+ * pilot, not the air inside), and about the riser midpoint for comparison
+ * with the paper's tow point. The forces are everything aerodynamic on the
+ * glider: the canopy's strips, the pilot's drag and the lines'.
+ *
+ * Coefficients are on the projected area and span, as the paper's are, and
+ * as aircraft practice takes them: Cl and Cn on the span, Cm on the mean
+ * chord c = S / b. (The tool's polar elsewhere is on the flat area.)
+ *
+ * ---------------------------------------------------------------------------
+ * The modes
+ * ---------------------------------------------------------------------------
+ * The paper leaves dynamic stability to a modal analysis. The flight model
+ * (flight.js) is one already: the six-degree-of-freedom rigid body with its
+ * apparent mass. Linearised at the trim by central differences of its own
+ * equations of motion, in the velocity and rotation of the riser midpoint
+ * and the roll and pitch angles, it separates into a longitudinal block
+ * (u, w, q, theta) and a lateral one (v, p, r, phi) — the trim is symmetric,
+ * so the coupling between them is the differences' rounding — and each
+ * block's eigenvalues are its modes: a frequency and a damping, or a pure
+ * growth or decay. The heading and the position do not feed back and are
+ * left out.
+ */
+
+/** What the analysis uses unless told otherwise. */
+const STABILITY = Object.freeze({
+  angleStepRad: 0.005,       // Poland et al. (2026): alpha and beta, either side
+  rateStepRadS: 0.1,         // and the body rates
+  couplingTol: 1e-11,        // the alpha method as tight as the trim's
+  couplingIterations: 600,
+  linVelocityFraction: 0.005, // the linearisation: velocity steps, of the speed
+  linRateRadS: 0.01,         // rate steps
+  linAngleRad: 0.005,        // roll and pitch angle steps
+});
+
+const ST_RAD = Math.PI / 180;
+const stCross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+/** The coefficients' names, in their order. */
+const STABILITY_COEFFICIENTS = Object.freeze(['CX', 'CY', 'CZ', 'Cl', 'Cm', 'Cn']);
+
+/** The projected area and span the coefficients are on, and the mean chord. */
+function stabilityReference(model) {
+  const am = model.apparent;
+  let S = am?.projectedAreaM2;
+  if (!(S > 0)) {
+    S = 0;
+    model.sys.panels.forEach((p, i) => { S += model.area[i] * Math.abs(p.normal[2]); });
+  }
+  const b = am?.projectedSpanM > 0 ? am.projectedSpanM : 2 * model.tipY;
+  return { areaM2: S, spanM: b, chordM: S / b };
+}
+
+/** A workspace for the model held as tight as the trim held it, started
+ * from the trim's corrections. */
+function stWork(model, trim, cfg) {
+  const w = flightWork(model);
+  if (trim?.work?.d) w.d.set(trim.work.d);
+  w.tol = cfg.couplingTol; w.maxIterations = cfg.couplingIterations;
+  return w;
+}
+
+/**
+ * The derivatives at the trim (`flightTrim`), about the centre of the solid
+ * mass ('cg') or the riser midpoint ('riser').
+ *
+ * Returns the coefficients at the trim, their derivatives (`d.alpha`,
+ * `d.beta` per radian; `d.p`, `d.q`, `d.r` per dimensionless rate), each an
+ * array in `STABILITY_COEFFICIENTS`' order, and the six criteria.
+ */
+function stabilityDerivatives(model, trim, { about = 'cg', ...opts } = {}) {
+  const cfg = { ...STABILITY, ...opts };
+  const ref = stabilityReference(model);
+  const { areaM2: S, spanM: b, chordM: c } = ref;
+  const V = trim.speed;
+  const a0 = trim.alphaDeg * ST_RAD;
+  const q0 = trim.state.slice(3, 7);
+  const r0 = about === 'riser' ? [0, 0, 0] : model.rSolidB;
+  const work = stWork(model, trim, cfg);
+  const qS = 0.5 * model.rho * V * V * S;
+  const lengths = [1, 1, 1, b, c, b];
+  const coeffs = ({ alpha = a0, beta = 0, p = 0, q = 0, r = 0 }) => {
+    const ca = Math.cos(alpha); const sa = Math.sin(alpha); const cb = Math.cos(beta); const sb = Math.sin(beta);
+    const vRef = [V * ca * cb, V * sb, V * sa * cb];
+    const w = [p, q, r];
+    // the riser midpoint moves with the reference point, and the turn about it
+    const wr = stCross(w, r0);
+    const x = Float64Array.from([0, 0, -model.cfg.altitudeM, ...q0, vRef[0] - wr[0], vRef[1] - wr[1], vRef[2] - wr[2], p, q, r]);
+    const f = flightForces(model, x, { left: 0, right: 0 }, work);
+    const F = f.aero;
+    const M = f.aeroM;
+    const rxF = stCross(r0, F);
+    const Mr = [M[0] - rxF[0], M[1] - rxF[1], M[2] - rxF[2]];
+    const all = [...F, ...Mr];
+    return all.map((v, k) => v / (qS * lengths[k]));
+  };
+  const C0 = coeffs({});
+  const da = cfg.angleStepRad; const dr = cfg.rateStepRadS;
+  const diff = (plus, minus, h) => plus.map((v, k) => (v - minus[k]) / (2 * h));
+  const d = {
+    alpha: diff(coeffs({ alpha: a0 + da }), coeffs({ alpha: a0 - da }), da),
+    beta: diff(coeffs({ beta: da }), coeffs({ beta: -da }), da),
+    // per dimensionless rate: d/dp^ = (2V/b) d/dp
+    p: diff(coeffs({ p: dr }), coeffs({ p: -dr }), dr).map((v) => v * 2 * V / b),
+    q: diff(coeffs({ q: dr }), coeffs({ q: -dr }), dr).map((v) => v * 2 * V / c),
+    r: diff(coeffs({ r: dr }), coeffs({ r: -dr }), dr).map((v) => v * 2 * V / b),
+  };
+  const k = (name) => STABILITY_COEFFICIENTS.indexOf(name);
+  const crit = (axis, kind, key, value, stableIf) => ({ axis, kind, key, value, stable: stableIf(value) });
+  const criteria = [
+    crit('roll', 'static', 'Cl_beta', d.beta[k('Cl')], (v) => v < 0),
+    crit('pitch', 'static', 'Cm_alpha', d.alpha[k('Cm')], (v) => v < 0),
+    crit('yaw', 'static', 'Cn_beta', d.beta[k('Cn')], (v) => v > 0),
+    crit('roll', 'damping', 'Cl_p', d.p[k('Cl')], (v) => v < 0),
+    crit('pitch', 'damping', 'Cm_q', d.q[k('Cm')], (v) => v < 0),
+    crit('yaw', 'damping', 'Cn_r', d.r[k('Cn')], (v) => v < 0),
+  ];
+  return {
+    about, reference: ref, speed: V, alphaDeg: trim.alphaDeg, at: r0.slice(),
+    coefficients: C0, d, criteria, stable: criteria.every((x) => x.stable),
+    steps: { angleRad: da, rateRadS: dr },
+  };
+}
+
+/* ---------------------------------------------------------- eigenvalues -- */
+
+/**
+ * The eigenvalues of a real square matrix: balanced (Parlett and Reinsch),
+ * reduced to upper Hessenberg form by elimination with pivoting, and the
+ * Hessenberg matrix's eigenvalues found by Francis's double-shift QR — the
+ * classic sequence (balanc, elmhes, hqr). Returns [{ re, im }], complex
+ * pairs together, the positive imaginary part first.
+ */
+function eigenvalues(A0) {
+  const n = A0.length;
+  if (!n) return [];
+  // 1-based, as the algorithms are written
+  const a = [null];
+  for (let i = 0; i < n; i++) a.push([0, ...A0[i].map(Number)]);
+  for (let i = 1; i <= n; i++) for (let j = 1; j <= n; j++) {
+    if (!Number.isFinite(a[i][j])) throw new Error('eigenvalues: the matrix has a value that is not a number');
+  }
+  // balance
+  const RADIX = 2; const sq = RADIX * RADIX;
+  for (let last = 0; last === 0;) {
+    last = 1;
+    for (let i = 1; i <= n; i++) {
+      let r = 0; let c = 0;
+      for (let j = 1; j <= n; j++) if (j !== i) { c += Math.abs(a[j][i]); r += Math.abs(a[i][j]); }
+      if (c && r) {
+        let g = r / RADIX; let f = 1; const s = c + r;
+        while (c < g) { f *= RADIX; c *= sq; }
+        g = r * RADIX;
+        while (c > g) { f /= RADIX; c /= sq; }
+        if ((c + r) / f < 0.95 * s) {
+          last = 0; g = 1 / f;
+          for (let j = 1; j <= n; j++) a[i][j] *= g;
+          for (let j = 1; j <= n; j++) a[j][i] *= f;
+        }
+      }
+    }
+  }
+  // to Hessenberg form
+  for (let m = 2; m < n; m++) {
+    let x = 0; let i = m;
+    for (let j = m; j <= n; j++) if (Math.abs(a[j][m - 1]) > Math.abs(x)) { x = a[j][m - 1]; i = j; }
+    if (i !== m) {
+      for (let j = m - 1; j <= n; j++) { const t = a[i][j]; a[i][j] = a[m][j]; a[m][j] = t; }
+      for (let j = 1; j <= n; j++) { const t = a[j][i]; a[j][i] = a[j][m]; a[j][m] = t; }
+    }
+    if (x) {
+      for (i = m + 1; i <= n; i++) {
+        let y = a[i][m - 1];
+        if (y) {
+          y /= x; a[i][m - 1] = y;
+          for (let j = m; j <= n; j++) a[i][j] -= y * a[m][j];
+          for (let j = 1; j <= n; j++) a[j][m] += y * a[j][i];
+        }
+      }
+    }
+  }
+  for (let i = 3; i <= n; i++) for (let j = 1; j <= i - 2; j++) a[i][j] = 0;
+  // the shifted QR
+  const wr = new Array(n + 1).fill(0); const wi = new Array(n + 1).fill(0);
+  const sign = (u, v) => (v >= 0 ? Math.abs(u) : -Math.abs(u));
+  let anorm = 0;
+  for (let i = 1; i <= n; i++) for (let j = Math.max(i - 1, 1); j <= n; j++) anorm += Math.abs(a[i][j]);
+  let nn = n; let t = 0;
+  let p = 0; let q = 0; let r = 0; let s = 0; let w = 0; let x = 0; let y = 0; let z = 0;
+  while (nn >= 1) {
+    let its = 0; let l;
+    do {
+      for (l = nn; l >= 2; l--) {
+        s = Math.abs(a[l - 1][l - 1]) + Math.abs(a[l][l]);
+        if (s === 0) s = anorm;
+        if (Math.abs(a[l][l - 1]) + s === s) { a[l][l - 1] = 0; break; }
+      }
+      x = a[nn][nn];
+      if (l === nn) {
+        wr[nn] = x + t; wi[nn] = 0; nn--;
+      } else {
+        y = a[nn - 1][nn - 1];
+        w = a[nn][nn - 1] * a[nn - 1][nn];
+        if (l === nn - 1) {
+          p = 0.5 * (y - x);
+          q = p * p + w;
+          z = Math.sqrt(Math.abs(q));
+          x += t;
+          if (q >= 0) {
+            z = p + sign(z, p);
+            wr[nn - 1] = wr[nn] = x + z;
+            if (z) wr[nn] = x - w / z;
+            wi[nn - 1] = wi[nn] = 0;
+          } else {
+            wr[nn - 1] = wr[nn] = x + p;
+            wi[nn - 1] = -(wi[nn] = z);
+          }
+          nn -= 2;
+        } else {
+          if (its === 60) throw new Error('eigenvalues: the QR iteration did not converge');
+          if (its === 10 || its === 20 || its === 40) {
+            t += x;
+            for (let i = 1; i <= nn; i++) a[i][i] -= x;
+            s = Math.abs(a[nn][nn - 1]) + Math.abs(a[nn - 1][nn - 2]);
+            y = x = 0.75 * s;
+            w = -0.4375 * s * s;
+          }
+          ++its;
+          let m;
+          for (m = nn - 2; m >= l; m--) {
+            z = a[m][m];
+            r = x - z;
+            s = y - z;
+            p = (r * s - w) / a[m + 1][m] + a[m][m + 1];
+            q = a[m + 1][m + 1] - z - r - s;
+            r = a[m + 2][m + 1];
+            s = Math.abs(p) + Math.abs(q) + Math.abs(r);
+            p /= s; q /= s; r /= s;
+            if (m === l) break;
+            const u = Math.abs(a[m][m - 1]) * (Math.abs(q) + Math.abs(r));
+            const v = Math.abs(p) * (Math.abs(a[m - 1][m - 1]) + Math.abs(z) + Math.abs(a[m + 1][m + 1]));
+            if (u + v === v) break;
+          }
+          for (let i = m + 2; i <= nn; i++) {
+            a[i][i - 2] = 0;
+            if (i !== m + 2) a[i][i - 3] = 0;
+          }
+          for (let k = m; k <= nn - 1; k++) {
+            if (k !== m) {
+              p = a[k][k - 1];
+              q = a[k + 1][k - 1];
+              r = 0;
+              if (k !== nn - 1) r = a[k + 2][k - 1];
+              x = Math.abs(p) + Math.abs(q) + Math.abs(r);
+              if (x !== 0) { p /= x; q /= x; r /= x; }
+            }
+            s = sign(Math.sqrt(p * p + q * q + r * r), p);
+            if (s !== 0) {
+              if (k === m) {
+                if (l !== m) a[k][k - 1] = -a[k][k - 1];
+              } else {
+                a[k][k - 1] = -s * x;
+              }
+              p += s;
+              x = p / s; y = q / s; z = r / s;
+              q /= p; r /= p;
+              for (let j = k; j <= nn; j++) {
+                p = a[k][j] + q * a[k + 1][j];
+                if (k !== nn - 1) {
+                  p += r * a[k + 2][j];
+                  a[k + 2][j] -= p * z;
+                }
+                a[k + 1][j] -= p * y;
+                a[k][j] -= p * x;
+              }
+              const mmin = nn < k + 3 ? nn : k + 3;
+              for (let i = l; i <= mmin; i++) {
+                p = x * a[i][k] + y * a[i][k + 1];
+                if (k !== nn - 1) {
+                  p += z * a[i][k + 2];
+                  a[i][k + 2] -= p * r;
+                }
+                a[i][k + 1] -= p * q;
+                a[i][k] -= p;
+              }
+            }
+          }
+        }
+      }
+    } while (l < nn - 1);
+  }
+  const out = [];
+  for (let i = 1; i <= n; i++) out.push({ re: wr[i], im: wi[i] });
+  // a pair together, the positive imaginary part first
+  out.sort((u, v) => (u.re - v.re) || (v.im - u.im));
+  return out;
+}
+
+/** The eigenvector of A for an eigenvalue, by inverse iteration: complex,
+ * as [[re, im], ...], scaled so its largest component is one. */
+function eigenvector(A, lambda) {
+  const n = A.length;
+  let scale = 0;
+  for (const row of A) for (const v of row) scale = Math.max(scale, Math.abs(v));
+  scale = scale || 1;
+  const mu = [lambda.re + 1e-10 * scale, lambda.im + 1e-10 * scale];
+  // M = A - mu I, complex, as two real arrays
+  const solve = (bRe, bIm) => {
+    const R = A.map((row, i) => row.map((v, j) => (i === j ? v - mu[0] : v)));
+    const I = A.map((row, i) => row.map((v, j) => (i === j ? -mu[1] : 0)));
+    const xr = bRe.slice(); const xi = bIm.slice();
+    for (let c = 0; c < n; c++) {
+      let piv = c;
+      for (let r = c + 1; r < n; r++) if (Math.hypot(R[r][c], I[r][c]) > Math.hypot(R[piv][c], I[piv][c])) piv = r;
+      [R[c], R[piv]] = [R[piv], R[c]]; [I[c], I[piv]] = [I[piv], I[c]];
+      [xr[c], xr[piv]] = [xr[piv], xr[c]]; [xi[c], xi[piv]] = [xi[piv], xi[c]];
+      let dr = R[c][c]; let di = I[c][c];
+      if (Math.hypot(dr, di) < 1e-300) { dr = 1e-14 * scale; di = 0; R[c][c] = dr; }
+      const d2 = dr * dr + di * di;
+      for (let r = c + 1; r < n; r++) {
+        const fr = (R[r][c] * dr + I[r][c] * di) / d2;
+        const fi = (I[r][c] * dr - R[r][c] * di) / d2;
+        if (!fr && !fi) continue;
+        for (let k = c; k < n; k++) {
+          R[r][k] -= fr * R[c][k] - fi * I[c][k];
+          I[r][k] -= fr * I[c][k] + fi * R[c][k];
+        }
+        xr[r] -= fr * xr[c] - fi * xi[c];
+        xi[r] -= fr * xi[c] + fi * xr[c];
+      }
+    }
+    for (let c = n - 1; c >= 0; c--) {
+      let sr = xr[c]; let si = xi[c];
+      for (let k = c + 1; k < n; k++) {
+        sr -= R[c][k] * xr[k] - I[c][k] * xi[k];
+        si -= R[c][k] * xi[k] + I[c][k] * xr[k];
+      }
+      const dr = R[c][c]; const di = I[c][c]; const d2 = dr * dr + di * di;
+      xr[c] = (sr * dr + si * di) / d2;
+      xi[c] = (si * dr - sr * di) / d2;
+    }
+    return [xr, xi];
+  };
+  let vr = Array.from({ length: n }, (_, i) => 1 / (i + 1));
+  let vi = Array.from({ length: n }, (_, i) => 0.3 / (i + 2));
+  for (let it = 0; it < 3; it++) {
+    [vr, vi] = solve(vr, vi);
+    let big = 0; let kb = 0;
+    for (let i = 0; i < n; i++) { const m = Math.hypot(vr[i], vi[i]); if (m > big) { big = m; kb = i; } }
+    if (!(big > 0) || !Number.isFinite(big)) break;
+    // divide by the largest component, so it is one and real
+    const br = vr[kb]; const bi = vi[kb]; const b2 = br * br + bi * bi;
+    const nr = vr.map((v, i) => (v * br + vi[i] * bi) / b2);
+    const ni = vi.map((v, i) => (v * br - vr[i] * bi) / b2);
+    vr = nr; vi = ni;
+  }
+  return vr.map((v, i) => [v, vi[i]]);
+}
+
+/* ---------------------------------------------------------------- modes -- */
+
+/** The linearised states' names, in order. */
+const STABILITY_STATES = Object.freeze(['u', 'v', 'w', 'p', 'q', 'r', 'phi', 'theta']);
+const ST_LONG = [0, 2, 4, 7];
+const ST_LAT = [1, 3, 5, 6];
+
+/**
+ * The glider's equations of motion linearised at the trim: the Jacobian of
+ * (u, v, w, p, q, r, phi, theta)' — the riser midpoint's velocity and the
+ * rotation in the body's axes, the roll and pitch angles — by central
+ * differences of `flightDerivative`.
+ */
+function stabilityJacobian(model, trim, opts = {}) {
+  const cfg = { ...STABILITY, ...opts };
+  const work = stWork(model, trim, cfg);
+  const g = trim.guess;
+  const x0 = [g.u, 0, g.w, 0, 0, 0, 0, g.theta];
+  const f = (s) => {
+    const [u, v, w, p, q, r, phi, theta] = s;
+    const quat = flightQuaternion(phi, theta, 0);
+    const x = Float64Array.from([0, 0, -model.cfg.altitudeM, ...quat, u, v, w, p, q, r]);
+    const dx = flightDerivative(model, x, { left: 0, right: 0 }, work);
+    const sf = Math.sin(phi); const cf = Math.cos(phi);
+    return [dx[7], dx[8], dx[9], dx[10], dx[11], dx[12],
+      p + Math.tan(theta) * (q * sf + r * cf), q * cf - r * sf];
+  };
+  const V = trim.speed;
+  const h = [V * cfg.linVelocityFraction, V * cfg.linVelocityFraction, V * cfg.linVelocityFraction,
+    cfg.linRateRadS, cfg.linRateRadS, cfg.linRateRadS, cfg.linAngleRad, cfg.linAngleRad];
+  const n = 8;
+  const A = Array.from({ length: n }, () => new Array(n).fill(0));
+  const f0 = f(x0);
+  for (let j = 0; j < n; j++) {
+    const xp = x0.slice(); xp[j] += h[j];
+    const xm = x0.slice(); xm[j] -= h[j];
+    const fp = f(xp); const fm = f(xm);
+    for (let i = 0; i < n; i++) A[i][j] = (fp[i] - fm[i]) / (2 * h[j]);
+  }
+  return { A, x0, f0, steps: h, states: STABILITY_STATES.slice() };
+}
+
+/** A mode's figures from its eigenvalue. */
+function stModeFigures(lambda) {
+  const { re, im } = lambda;
+  const wn = Math.hypot(re, im);
+  return {
+    eigenvalue: { re, im },
+    naturalFrequency: wn,
+    dampingRatio: wn > 0 ? -re / wn : 1,
+    periodS: Math.abs(im) > 1e-9 ? (2 * Math.PI) / Math.abs(im) : null,
+    halfS: re < 0 ? Math.LN2 / -re : null,
+    doubleS: re > 0 ? Math.LN2 / re : null,
+    stable: re < 0,
+  };
+}
+
+/**
+ * The glider's modes at the trim: the linearised model's two blocks and
+ * their eigenvalues, each mode named by what moves in it.
+ *
+ *   pitch       a longitudinal oscillation the angle of attack moves in
+ *   phugoid     a longitudinal one the speed and the pitch angle trade in
+ *   Dutch roll  a lateral oscillation of yaw and sideslip
+ *   roll        a lateral oscillation of bank: the glider swinging side to
+ *               side under its arc, yawing as it goes
+ *   spiral      the slow lateral mode, bank and heading drifting together
+ *   subsidence  a fast mode that only dies away
+ */
+function stabilityModes(model, trim, opts = {}) {
+  const J = stabilityJacobian(model, trim, opts);
+  const { A } = J;
+  const V = trim.speed; const u0 = trim.guess.u; const w0 = trim.guess.w;
+  const block = (idx) => idx.map((i) => idx.map((j) => A[i][j]));
+  // the coupling the symmetric trim should leave at nothing
+  let cross = 0; let norm = 0;
+  for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) {
+    norm = Math.max(norm, Math.abs(A[i][j]));
+    if (ST_LONG.includes(i) !== ST_LONG.includes(j)) cross = Math.max(cross, Math.abs(A[i][j]));
+  }
+  const modes = [];
+  const add = (idx, kind) => {
+    const B = block(idx);
+    const ev = eigenvalues(B);
+    const seen = [];
+    for (const lam of ev) {
+      if (lam.im < -1e-12) continue; // its pair's other half
+      const vec = eigenvector(B, lam);
+      const mag = (k) => Math.hypot(vec[k][0], vec[k][1]);
+      let shape;
+      if (kind === 'longitudinal') {
+        // [u, w, q, theta]: speed and angle of attack from u and w
+        const dV = [(u0 * vec[0][0] + w0 * vec[1][0]) / (V * V), (u0 * vec[0][1] + w0 * vec[1][1]) / (V * V)];
+        const dA = [(u0 * vec[1][0] - w0 * vec[0][0]) / (V * V), (u0 * vec[1][1] - w0 * vec[0][1]) / (V * V)];
+        shape = { speed: Math.hypot(...dV), alpha: Math.hypot(...dA), q: mag(2), theta: mag(3) };
+      } else {
+        // [v, p, r, phi]
+        shape = { beta: mag(0) / V, p: mag(1), r: mag(2), phi: mag(3) };
+      }
+      const big = Math.max(...Object.values(shape)) || 1;
+      for (const key of Object.keys(shape)) shape[key] /= big;
+      seen.push({ kind, ...stModeFigures(lam), shape });
+    }
+    // names, from what moves: the speed or the angle of attack; the
+    // sideslip (with the yaw) or the bank
+    if (kind === 'longitudinal') {
+      for (const m of seen) {
+        if (m.periodS) m.name = m.shape.speed > m.shape.alpha ? 'phugoid' : 'pitch';
+        else m.name = m.shape.speed > m.shape.alpha ? 'speed subsidence' : 'pitch subsidence';
+      }
+    } else {
+      const real = seen.filter((m) => !m.periodS).sort((p, q) => Math.abs(p.eigenvalue.re) - Math.abs(q.eigenvalue.re));
+      for (const m of seen) if (m.periodS) m.name = m.shape.beta > m.shape.phi ? 'Dutch roll' : 'roll';
+      if (real.length) real[0].name = 'spiral';
+      for (const m of real.slice(1)) m.name = 'roll subsidence';
+    }
+    modes.push(...seen);
+  };
+  add(ST_LONG, 'longitudinal');
+  add(ST_LAT, 'lateral');
+  return {
+    modes, jacobian: J, coupling: norm > 0 ? cross / norm : 0,
+    stable: modes.every((m) => m.stable),
+    leastDamped: modes.reduce((b, m) => (b === null || m.eigenvalue.re > b.eigenvalue.re ? m : b), null),
+  };
+}
+
+/* ------------------------------------------------------ the hang point -- */
+
+/**
+ * Glide against stability over where the pilot hangs: the paper's study of
+ * a kite's tow point (section 6.3), for a glider whose tow point is its
+ * karabiners. At each point of a grid — the hang point moved aft by `dxM`
+ * and up by `dzM` (shorter lines), metres, in the wing's frame — the model
+ * is trimmed (its wake laid again along a trim that moves by more than a
+ * degree), and its derivatives and modes found. A generator of progress;
+ * `build({ dxM, dzM, alphaWakeDeg })` gives the flight model there.
+ *
+ * Each cell says whether it trims, its speed, glide and angle, the six
+ * criteria and the least damped mode. Moving the hang point aft raises the
+ * trim's angle and, to a point, the glide; past it the pitch stiffness goes.
+ */
+function* stabilityMapSteps(build, {
+  dxM = [-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3], dzM = [-1, -0.5, 0, 0.5, 1],
+  guess, alphaWakeDeg, minFlyingCz = 0, label = '', ...opts
+} = {}) {
+  const total = dxM.length * dzM.length;
+  const cells = [];
+  let done = 0;
+  for (const dz of dzM) {
+    let last = guess;
+    for (const dx of dxM) {
+      const cell = { dxM: dx, dzM: dz };
+      try {
+        let model = build({ dxM: dx, dzM: dz, alphaWakeDeg });
+        let trim = flightTrim(model, { guess: last });
+        if (!trim.converged && last !== guess) trim = flightTrim(model, { guess });
+        if (trim.converged && Math.abs(trim.alphaDeg - alphaWakeDeg) > 1) {
+          model = build({ dxM: dx, dzM: dz, alphaWakeDeg: trim.alphaDeg });
+          trim = flightTrim(model, { guess: trim.guess });
+        }
+        if (!trim.converged) {
+          cell.error = 'no steady glide';
+        } else {
+          last = trim.guess;
+          Object.assign(cell, {
+            speed: trim.speed, glideRatio: trim.glideRatio, sinkRate: trim.sinkRate,
+            alphaDeg: trim.alphaDeg, canopyAlphaDeg: trim.canopyAlphaDeg, liftCoefficient: trim.liftCoefficient,
+            belowFloor: trim.liftCoefficient < minFlyingCz,
+          });
+          const d = stabilityDerivatives(model, trim, opts);
+          const m = stabilityModes(model, trim, opts);
+          cell.criteria = d.criteria.map(({ axis, kind, key, value, stable }) => ({ axis, kind, key, value, stable }));
+          cell.staticStable = d.criteria.filter((c) => c.kind === 'static').every((c) => c.stable);
+          cell.damped = d.criteria.filter((c) => c.kind === 'damping').every((c) => c.stable);
+          cell.modesStable = m.stable;
+          const ld = m.leastDamped;
+          cell.leastDamped = ld ? { name: ld.name, re: ld.eigenvalue.re, im: ld.eigenvalue.im, periodS: ld.periodS, dampingRatio: ld.dampingRatio } : null;
+        }
+      } catch (e) {
+        cell.error = e.message;
+      }
+      cells.push(cell);
+      done++;
+      yield { phase: 'map', done, total, label };
+    }
+  }
+  return { dxM: dxM.slice(), dzM: dzM.slice(), cells };
 }
 
 /* ===== freebody.js ===== */
@@ -39796,14 +40488,18 @@ function flightScenarioLabel(sc) {
 
 /** The models and their trims: hands up, and the bar pushed as far as the
  * model's own trim keeps the wing above the collapse floor. */
-function flightModels(table) {
+function flightBase(table) {
   const minFlyingCz = M.speedBar?.liftModel?.minFlyingCz ?? FLIGHT.minFlyingCz;
-  const base = {
+  return {
     wing: M.wing, linePlan: M.linePlan, airfoil: M.airfoil, table, atm: M.atm,
     pilotKg: S.pilotMass, wingKg: S.wingMass, linesKg: S.lineMass, areaM2: M.metrics.area,
     cxPilot: S.cxPilot, cxLines: M.cxLinesUsed,
     settings: { slackCentreMM: S.brakeSlackCentreMM, slackTipMM: S.brakeSlackTipMM, minFlyingCz },
   };
+}
+function flightModels(table) {
+  const base = flightBase(table);
+  const { minFlyingCz } = base.settings;
   const a0 = M.alphaFlown ?? S.alphaDeg; const V0 = M.balance?.speedMS ?? 10; const g0 = M.balance?.glideRatio ?? 8;
   let model = flightModel({ ...base, alphaWakeDeg: a0 });
   let trim = flightTrim(model, { speed: V0, alphaDeg: a0, glide: g0 });
@@ -39942,6 +40638,79 @@ async function flightFlyAll() {
   S.flightChart = 'matrix';
   if (S.tab === 'flight' && FLIGHT_RUN === run) { buildTabTools(); draw(); }
   setStatus(null, `Flight: ${rows.length} scenarios flown`);
+}
+
+/* -- stability: the derivatives, the modes, the hang point ---------------- */
+
+/** The derivatives and the modes, hands up and on the bar where it flies
+ * (stability.js), once per design. */
+async function flightStabilityRun() {
+  const run = await flightPrepare();
+  if (!run || run.error || !run.prep) return null;
+  if (!run.stability) {
+    const at = (start) => {
+      if (!start?.model || !start?.trim) return null;
+      try {
+        return {
+          cg: stabilityDerivatives(start.model, start.trim, { about: 'cg' }),
+          riser: stabilityDerivatives(start.model, start.trim, { about: 'riser' }),
+          modes: stabilityModes(start.model, start.trim),
+          trim: start.trim, barMM: start.barMM ?? 0,
+        };
+      } catch (e) {
+        return { error: e.message };
+      }
+    };
+    run.stability = { trim: at(run.prep.trim), bar: at(run.prep.accelerated) };
+  }
+  if (FLIGHT_RUN === run) {
+    S.flightChart = 'stability';
+    if (S.tab === 'flight') { buildTabTools(); draw(); }
+  }
+  return run.stability;
+}
+
+/** Glide against stability over the hang point: the karabiners moved fore
+ * and aft and up and down, the model trimmed and judged at each. */
+async function flightHangMap() {
+  const run = await flightPrepare();
+  if (!run || run.error || !run.prep) return null;
+  if (run.hangMap) {
+    S.flightChart = 'hangpoint';
+    if (S.tab === 'flight') { buildTabTools(); draw(); }
+    return run.hangMap;
+  }
+  if (run.mapping) return null;
+  run.mapping = true;
+  if (S.tab === 'flight') buildTabTools();
+  const base = flightBase(run.table);
+  const kar = M.linePlan.karabiner;
+  const { trim } = run.prep.trim;
+  const build = ({ dxM, dzM, alphaWakeDeg }) => flightModel({
+    ...base, linePlan: { ...M.linePlan, karabiner: [kar[0] + dxM, kar[1], kar[2] + dzM] }, alphaWakeDeg,
+  });
+  try {
+    run.hangMap = await runStepsAsync(stabilityMapSteps(build, {
+      guess: trim.guess, alphaWakeDeg: trim.alphaDeg, minFlyingCz: run.prep.minFlyingCz,
+    }), {
+      onProgress: (p) => {
+        if (S.tab === 'flight' && FLIGHT_RUN === run) {
+          const n = document.getElementById('note-flightchart');
+          if (n) n.textContent = `Trimming and judging the glider at hang point ${p.done} of ${p.total}…`;
+        }
+      },
+      isCancelled: () => FLIGHT_RUN !== run,
+    });
+  } catch (e) {
+    run.hangMapError = e.message;
+  }
+  run.mapping = false;
+  if (FLIGHT_RUN === run) {
+    if (run.hangMap) S.flightChart = 'hangpoint';
+    if (S.tab === 'flight') { buildTabTools(); draw(); }
+    if (run.hangMapError && !/cancelled/.test(run.hangMapError)) setStatus(`Hang-point map: ${run.hangMapError}`);
+  }
+  return run.hangMap;
 }
 
 function flightShow(k) {
@@ -40186,11 +40955,13 @@ function drawFlightView() {
     ctx.fillStyle = S.theme === 'light' ? '#e8f0f5' : '#101b22';
     ctx.fillRect(0, 0, cv.width, cv.height);
     ctx.fillStyle = S.theme === 'light' ? '#14202a' : '#8a9aa6';
-    ctx.font = `${Math.round(cv.height / 30)}px ui-monospace, monospace`;
     const msg = run?.running ? flightProgressText(run)
       : F?.error ? F.error
         : run?.error ? `Not prepared: ${run.error}`
           : 'Choose a start, a brake and a rate, and press "Fly".';
+    // as large as the height allows and no wider than the view (a monospace
+    // character is about 0.6 of its size across)
+    ctx.font = `${Math.max(9, Math.round(Math.min(cv.height / 30, (cv.width - 32) / (0.62 * msg.length))))}px ui-monospace, monospace`;
     ctx.fillText(msg, 16, cv.height / 2);
     if (note) {
       note.textContent = run?.running ? flightProgressText(run)
@@ -40213,10 +40984,25 @@ function drawFlightView() {
 
 /** Over time: the attitude, the turn, the speed and the handles; or, after
  * all eighteen, what each did. */
+/** The chart's title, by what it shows: its label's own text, the save
+ * buttons beside it left alone. */
+function flightChartTitle(text) {
+  const svg = document.getElementById('vp-flightchart');
+  const label = svg?.parentNode?.querySelector ? svg.parentNode.querySelector('.vp-label') : null;
+  const t = label?.firstChild;
+  if (t && t.nodeType === 3) t.nodeValue = text;
+}
+
 function drawFlightChart() {
   const note = document.getElementById('note-flightchart');
   const { run, F } = flightShown();
+  const shows = (S.flightChart === 'matrix' && run?.matrix) ? 'all eighteen'
+    : (S.flightChart === 'stability' && run?.stability) ? 'stability'
+      : (S.flightChart === 'hangpoint' && run?.hangMap) ? 'the hang point' : 'over time';
+  flightChartTitle(`Flight — ${shows}`);
   if (S.flightChart === 'matrix' && run?.matrix) { drawFlightMatrix(run, note); return; }
+  if (S.flightChart === 'stability' && run?.stability) { drawFlightStability(run, note); return; }
+  if (S.flightChart === 'hangpoint' && run?.hangMap) { drawHangMap(run, note); return; }
   if (!F || !F.flight) {
     const c = canvas('vp-flightchart', [[0, 0], [1, 1]], 0.1, { chart: true });
     c.text(run?.running ? 'preparing…' : 'nothing flown yet', [0.5, 0.5], '#8a9aa6', 10, 'middle');
@@ -40267,29 +41053,201 @@ function flightTrimText(run) {
     + ` · sections: ${run.tableSource}`;
 }
 
+/**
+ * Where the columns of a table drawn as text start, in the chart's x units:
+ * at their share of the frame, or a gap past the widest entry of the column
+ * before, whichever is further. The shares alone overlapped on a phone,
+ * where the frame is 420 px and one column's longest entry is 160; past the
+ * frame, the fit scales the whole table down to it, text and all.
+ * `columns` holds each column's entries; widths are estimated at 0.62 of the
+ * font size a character, a monospace advance with a margin.
+ */
+function textColumnsX(c, shares, columns, size = 9, gapPx = 14) {
+  const xs = [shares[0]];
+  for (let k = 1; k < shares.length; k++) {
+    const widest = Math.max(0, ...columns[k - 1].map((s) => String(s).normalize('NFC').length)) * 0.62 * size;
+    xs.push(Math.max(shares[k], xs[k - 1] + (widest + gapPx) / c.scale));
+  }
+  return xs;
+}
+
 /** The eighteen as a table. */
 function drawFlightMatrix(run, note) {
   const rows = run.matrix;
   const c = canvas('vp-flightchart', [[0, 0], [1, 1]], 0.04, { chart: true });
   const cols = ['start', 'brake', 'rate', 'departed', 'bank', 'turn', 'sink', 'g', 'lost'];
-  const xs = [0, 0.13, 0.25, 0.37, 0.55, 0.65, 0.76, 0.86, 0.94];
+  const table = rows.map((r) => {
+    const s = r.out?.summary;
+    return [
+      r.sc.start === 'accelerated' ? `bar ${r.out?.barMM ?? ''}` : 'hands up', r.sc.input, `${FLIGHT.rates[r.sc.rate]} s`,
+      !s ? (r.out?.error ? 'not flown' : '—') : s.departedS !== null ? `${s.departedS.toFixed(1)} s, ${(s.departedTravelMM / 10).toFixed(0)} cm` : 'no',
+      s ? `${s.maxRollDeg.toFixed(0)}°` : '', s ? `${s.maxTurnRateDeg.toFixed(0)}°/s` : '', s ? `${s.maxSinkRate.toFixed(1)}` : '',
+      s ? s.maxLoadFactor.toFixed(2) : '', s ? `${s.heightLostM.toFixed(0)} m` : '',
+    ];
+  });
+  const xs = textColumnsX(c, [0, 0.13, 0.25, 0.37, 0.55, 0.65, 0.76, 0.86, 0.94],
+    cols.map((h, k) => [h, ...table.map((cells) => cells[k])]));
   const dy = 1 / (rows.length + 2);
   cols.forEach((h, k) => c.text(h, [xs[k], 1 - dy * 0.5], '#8a9aa6', 9));
   rows.forEach((r, i) => {
     const y = 1 - dy * (i + 1.6);
     const s = r.out?.summary;
     const col = !s ? '#8a9aa6' : s.departedS !== null ? '#ff5a5a' : '#e6edf2';
-    const cells = [
-      r.sc.start === 'accelerated' ? `bar ${r.out?.barMM ?? ''}` : 'hands up', r.sc.input, `${FLIGHT.rates[r.sc.rate]} s`,
-      !s ? (r.out?.error ? 'not flown' : '—') : s.departedS !== null ? `${s.departedS.toFixed(1)} s, ${(s.departedTravelMM / 10).toFixed(0)} cm` : 'no',
-      s ? `${s.maxRollDeg.toFixed(0)}°` : '', s ? `${s.maxTurnRateDeg.toFixed(0)}°/s` : '', s ? `${s.maxSinkRate.toFixed(1)}` : '',
-      s ? s.maxLoadFactor.toFixed(2) : '', s ? `${s.heightLostM.toFixed(0)} m` : '',
-    ];
-    cells.forEach((v, k) => c.text(v, [xs[k], y], k === 3 ? col : '#c8d2da', 9));
+    table[i].forEach((v, k) => c.text(v, [xs[k], y], k === 3 ? col : '#c8d2da', 9));
   });
   c.fit();
   if (note) note.textContent = `All ${rows.length}: extremes up to the departure, where there was one; red departed. `
     + `Travel ${(S.flightTravelMM / 10).toFixed(0)} cm, held ${S.flightHoldS} s${S.flightRelease ? ', then released at the same rate' : ''}.`;
+}
+
+const STABILITY_LABELS = {
+  Cl_beta: 'roll, Cl/β', Cm_alpha: 'pitch, Cm/α', Cn_beta: 'yaw, Cn/β',
+  Cl_p: 'roll damping, Cl/p̂', Cm_q: 'pitch damping, Cm/q̂', Cn_r: 'yaw damping, Cn/r̂',
+};
+
+/** A mode as a short line of figures: its period and damping ratio, and
+ * the time to halve (or double). */
+function stabilityModeText(m) {
+  // a ratio under a hundredth keeps its sign and a figure: "-0.00" read as
+  // nothing at all beside a mode that doubles
+  const z = m.dampingRatio; const zText = Math.abs(z) < 0.01 && z !== 0 ? z.toFixed(3) : z.toFixed(2);
+  const parts = [m.periodS ? `${m.periodS.toFixed(2)} s, ζ ${zText}` : 'no swing'];
+  if (m.halfS) parts.push(`halves ${m.halfS < 10 ? m.halfS.toFixed(2) : m.halfS.toFixed(1)} s`);
+  if (m.doubleS) parts.push(`DOUBLES ${m.doubleS.toFixed(0)} s`);
+  return parts.join(', ');
+}
+
+/** The derivatives and the modes, hands up and on the bar, as a table. */
+function drawFlightStability(run, note) {
+  const st = run.stability;
+  const cols = [['hands up', st.trim], [st.bar ? `on the bar, ${st.bar.barMM} mm` : 'on the bar', st.bar]];
+  const c = canvas('vp-flightchart', [[0, 0], [1, 1]], 0.04, { chart: true });
+  const ok = '#5fd97a'; const bad = '#ff5a5a'; const grey = '#8a9aa6'; const ink = '#c8d2da';
+  const trimText = (s) => (s?.trim ? `${(s.trim.speed * 3.6).toFixed(1)} km/h, ${s.trim.canopyAlphaDeg.toFixed(1)}°, glide ${s.trim.glideRatio.toFixed(2)}` : (s?.error ?? 'not flown'));
+  const criterionText = (s, key) => {
+    const cg = s?.cg?.criteria.find((x) => x.key === key);
+    const rs = s?.riser?.criteria.find((x) => x.key === key);
+    return cg ? { text: `${cg.value >= 0 ? '+' : ''}${cg.value.toFixed(3)} ${cg.stable ? 'stable' : 'UNSTABLE'} (${rs.value >= 0 ? '+' : ''}${rs.value.toFixed(3)})`, stable: cg.stable } : null;
+  };
+  const names = [...new Set(cols.flatMap(([, s]) => (s?.modes?.modes ?? []).map((m) => m.name)))];
+  const modeOf = (s, name) => s?.modes?.modes.find((x) => x.name === name) ?? null;
+  // each column's entries, for the widths; the two section headings span
+  // the table and are left out
+  const xs = textColumnsX(c, [0, 0.36, 0.69], [
+    ['trim', ...Object.values(STABILITY_LABELS), ...names],
+    ...cols.map(([h, s]) => [h, trimText(s), ...Object.keys(STABILITY_LABELS).map((key) => criterionText(s, key)?.text ?? ''),
+      ...names.map((name) => { const m = modeOf(s, name); return m ? stabilityModeText(m) : ''; })]),
+  ]);
+  const nRows = 9 + Math.max(...cols.map(([, s]) => s?.modes?.modes.length ?? 0));
+  const dy = 1 / (nRows + 2);
+  let y = 1 - dy * 0.5;
+  cols.forEach(([h], k) => c.text(h, [xs[k + 1], y], grey, 9));
+  y -= dy;
+  c.text('trim', [xs[0], y], grey, 9);
+  cols.forEach(([, s], k) => c.text(trimText(s), [xs[k + 1], y], ink, 9));
+  y -= dy * 1.2;
+  c.text('about the centre of mass (about the karabiners)', [xs[0], y], grey, 8.5);
+  for (const key of Object.keys(STABILITY_LABELS)) {
+    y -= dy;
+    c.text(STABILITY_LABELS[key], [xs[0], y], ink, 9);
+    cols.forEach(([, s], k) => {
+      const cr = criterionText(s, key);
+      if (cr) c.text(cr.text, [xs[k + 1], y], cr.stable ? ok : bad, 9);
+    });
+  }
+  y -= dy * 1.2;
+  c.text('modes', [xs[0], y], grey, 8.5);
+  for (const name of names) {
+    y -= dy;
+    c.text(name, [xs[0], y], ink, 9);
+    cols.forEach(([, s], k) => {
+      const m = modeOf(s, name);
+      if (m) c.text(stabilityModeText(m), [xs[k + 1], y], m.stable ? ok : bad, 9);
+    });
+  }
+  c.fit();
+  if (note) {
+    const ref = st.trim?.cg?.reference;
+    note.textContent = 'The quasi-steady derivatives of Poland, Masure, Cayon and Schmehl (2026): central differences in α and β '
+      + '(0.005 rad) and in the rates (0.1 rad/s), on the projected area'
+      + (ref ? ` (${ref.areaM2.toFixed(1)} m²) and span (${ref.spanM.toFixed(2)} m)` : '')
+      + '; stable is Cl/β < 0, Cm/α < 0, Cn/β > 0 and damped is each damping below 0. '
+      + 'The modes are the flight model\'s, linearised at the trim, its apparent mass in them: each one\'s period, '
+      + 'its damping ratio ζ, and the time it takes to halve. '
+      + 'Checked on Belloc\'s wind-tunnel paraglider: side force and yaw within 10% of the tunnel, roll 30% weak (docs/stability.md).';
+  }
+}
+
+/** The hang-point map: glide in each cell, coloured by what holds. */
+function drawHangMap(run, note) {
+  const map = run.hangMap;
+  const nx = map.dxM.length; const nz = map.dzM.length;
+  const chord = M.wing.ribs[0].chord;
+  const c = canvas('vp-flightchart', [[-1.6, -1.2], [nx, nz + 0.6]], 0.04, { chart: true });
+  const fill = (cell) => {
+    if (cell.error || cell.belowFloor) return 'rgba(138,154,166,0.25)';
+    if (!cell.staticStable) return 'rgba(255,90,90,0.45)';
+    if (!cell.damped || !cell.modesStable) return 'rgba(255,159,67,0.45)';
+    return 'rgba(95,217,122,0.35)';
+  };
+  map.cells.forEach((cell) => {
+    const i = map.dxM.indexOf(cell.dxM); const j = map.dzM.indexOf(cell.dzM);
+    c.path([[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]], '#2a3440', 0.8, { close: true, fill: fill(cell) });
+    const centre = [i + 0.5, j + 0.5];
+    if (cell.error) { c.text('no trim', centre, '#8a9aa6', 8, 'middle', [0, 3]); return; }
+    c.text(cell.glideRatio.toFixed(2), centre, '#e6edf2', 10, 'middle', [0, -2]);
+    c.text(`${cell.canopyAlphaDeg.toFixed(1)}°`, centre, '#c8d2da', 8, 'middle', [0, 10]);
+    if (Math.abs(cell.dxM) < 1e-9 && Math.abs(cell.dzM) < 1e-9) {
+      c.path([[i + 0.04, j + 0.04], [i + 0.96, j + 0.04], [i + 0.96, j + 0.96], [i + 0.04, j + 0.96]], '#ffffff', 1.6, { close: true });
+    }
+  });
+  map.dxM.forEach((d, i) => c.text(`${d >= 0 ? '+' : ''}${((d / chord) * 100).toFixed(0)}%`, [i + 0.5, nz + 0.25], '#8a9aa6', 8.5, 'middle'));
+  map.dzM.forEach((d, j) => c.text(`${d > 0 ? '+' : ''}${d.toFixed(1)} m`, [-0.15, j + 0.5], '#8a9aa6', 8.5, 'end', [0, 3]));
+  c.text('hang point aft, % of the central chord', [nx / 2, nz + 0.55], '#8a9aa6', 9, 'middle');
+  c.text('higher', [-1.5, nz - 0.3], '#8a9aa6', 8.5);
+  c.text('lower', [-1.5, 0.3], '#8a9aa6', 8.5);
+  c.fit();
+  if (note) {
+    note.textContent = 'Glide ratio, and the canopy\'s angle, with the karabiners moved fore and aft and up and down (shorter or longer lines): '
+      + 'green holds every criterion and mode; amber is statically stable with a mode or a damping that is not; red is statically '
+      + 'unstable; grey has no steady glide above the collapse floor. The design is outlined. The kite paper\'s tow-point study, '
+      + 'for a tow point the pilot hangs from (Poland et al. 2026, §6.3).';
+  }
+}
+
+/** The derivatives and modes as a table to save. */
+function flightStabilityTsv(run) {
+  const out = [`# ${S.name}: stability at the trims (stability.js; Poland et al. 2026's derivatives, the 6-DOF model's modes)`];
+  out.push(['trim', 'about', 'quantity', 'value', 'stable'].join('\t'));
+  for (const [name, s] of [['hands up', run.stability.trim], ['bar', run.stability.bar]]) {
+    if (!s?.cg) continue;
+    for (const about of ['cg', 'riser']) {
+      for (const k of ['alpha', 'beta', 'p', 'q', 'r']) {
+        STABILITY_COEFFICIENTS.forEach((coef, i) => out.push([name, about, `d${coef}/d${k}`, s[about].d[k][i].toPrecision(6), ''].join('\t')));
+      }
+      for (const cr of s[about].criteria) out.push([name, about, cr.key, cr.value.toPrecision(6), cr.stable ? 1 : 0].join('\t'));
+    }
+    for (const m of s.modes.modes) {
+      out.push([name, 'modes', `${m.name} eigenvalue`, `${m.eigenvalue.re.toPrecision(6)}${m.eigenvalue.im >= 0 ? '+' : '-'}${Math.abs(m.eigenvalue.im).toPrecision(6)}i`, m.stable ? 1 : 0].join('\t'));
+      out.push([name, 'modes', `${m.name} period_s`, m.periodS?.toPrecision(6) ?? '', ''].join('\t'));
+      out.push([name, 'modes', `${m.name} damping_ratio`, m.dampingRatio.toPrecision(6), ''].join('\t'));
+    }
+  }
+  return `${out.join('\n')}\n`;
+}
+
+/** The hang-point map as a table to save. */
+function flightHangMapTsv(run) {
+  const head = ['aft_m', 'up_m', 'trims', 'speed_kmh', 'glide', 'canopy_alpha_deg', 'lift_coefficient',
+    'Cl_beta', 'Cm_alpha', 'Cn_beta', 'Cl_p', 'Cm_q', 'Cn_r', 'static_stable', 'damped', 'modes_stable', 'least_damped', 'least_damped_re'];
+  const rows = run.hangMap.cells.map((cl) => {
+    if (cl.error) return [cl.dxM, cl.dzM, 0].join('\t');
+    const v = (key) => cl.criteria.find((x) => x.key === key).value.toPrecision(5);
+    return [cl.dxM, cl.dzM, cl.belowFloor ? 0 : 1, (cl.speed * 3.6).toFixed(2), cl.glideRatio.toFixed(3), cl.canopyAlphaDeg.toFixed(2),
+      cl.liftCoefficient.toFixed(4), v('Cl_beta'), v('Cm_alpha'), v('Cn_beta'), v('Cl_p'), v('Cm_q'), v('Cn_r'),
+      cl.staticStable ? 1 : 0, cl.damped ? 1 : 0, cl.modesStable ? 1 : 0, cl.leastDamped?.name ?? '', cl.leastDamped?.re.toPrecision(4) ?? ''].join('\t');
+  });
+  return `# ${S.name}: glide against stability over the hang point (stability.js stabilityMapSteps)\n${head.join('\t')}\n${rows.join('\n')}\n`;
 }
 
 /* -- playing and recording ----------------------------------------------- */
@@ -40445,11 +41403,16 @@ function buildFlightTools(host) {
   sel('flightPastDeparture', [['stop', 'stop 2 s after a departure'], ['continue', 'fly on past a departure (not credible)']], 'What happens after a departure');
   btn(busy ? 'Working…' : 'Fly', () => { if (!busy) flightFly(); }, 'Fly this scenario');
   btn('All 18', () => { if (!busy) flightFlyAll(); }, 'Fly every start, brake and rate');
+  btn('Stability', () => { if (!busy) flightStabilityRun(); }, 'Stability derivatives and modes at trim');
+  btn(run?.mapping ? 'Mapping…' : 'Hang point', () => { if (!busy && !run?.mapping) flightHangMap(); }, 'Map glide and stability over the hang point');
   num('brakeSlackCentreMM', 'free travel centre', 'Brake free travel at the centre, mm', 0, 400, 5);
   num('brakeSlackTipMM', 'tip', 'Brake free travel at the tip, mm', 0, 400, 5);
-  if (!F?.flight && !run?.matrix) return;
-  sel('flightCamera', FLIGHT_CAMERAS, 'Camera');
-  sel('flightChart', [['history', 'over time'], ['matrix', 'all 18']], 'Chart shows');
+  if (!F?.flight && !run?.matrix && !run?.stability && !run?.hangMap) return;
+  if (F?.flight || run?.matrix) sel('flightCamera', FLIGHT_CAMERAS, 'Camera');
+  sel('flightChart', [['history', 'over time'], ['matrix', 'all 18'], ['stability', 'stability'], ['hangpoint', 'hang-point map']]
+    .filter(([v]) => v === 'history' || (v === 'matrix' && run?.matrix) || (v === 'stability' && run?.stability) || (v === 'hangpoint' && run?.hangMap)), 'Chart shows');
+  if (run?.stability) btn('Stability .tsv', () => save(`${S.name}-stability.tsv`, flightStabilityTsv(run)), 'Save the stability derivatives and modes');
+  if (run?.hangMap) btn('Map .tsv', () => save(`${S.name}-hang-point-map.tsv`, flightHangMapTsv(run)), 'Save the hang-point map');
   if (F?.flight) {
     const end = F.flight.frames[F.flight.frames.length - 1].t;
     btn(FLIGHT_PLAY.playing ? '❚❚' : '▶', () => {

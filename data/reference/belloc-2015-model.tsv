@@ -1,0 +1,38 @@
+# Belloc's rigid paraglider reference wing: the 1/8 wind-tunnel model, section by section
+# Source: H. Belloc, "Wind Tunnel Investigation of a Rigid Paraglider Reference Wing", Journal of
+#   Aircraft 52(2), 703-708, 2015, doi:10.2514/1.C032513, Tables 1 and 2, as P. F. Heatwole,
+#   "Parametric Paraglider Modeling", MSc thesis, 2022, Tables 9.1 and 9.2 give them
+#   (pfheatwole.github.io/thesis/validation.html; the thesis is CC BY 4.0); the reference area,
+#   length and point as Heatwole's AVL and MachUpX models of the wing take them
+#   (github.com/pfheatwole/thesis, source/figures/paraglider/belloc/avl/belloc.avl, machupx/belloc.json)
+# Retrieved: 2026-11-23
+# measure: as-published
+# reference: area 0.444 m2, length 0.350 m for all three moments; moments about T1, a quarter of
+#   the central chord back from its leading edge and 1.0 m below it (the model stood on a 1 m rod
+#   to the balance); 40 m/s, Re 0.92 million on the central chord, air 1.187 kg/m3
+#
+# The full-scale wing (Table 1): arch 3.00 m, central chord 2.80 m, projected area 25.08 m2,
+# projected span 11.00 m, flat area 28.56 m2, flat span 13.64 m. Every section is a NACA 23015.
+# The sections are placed along their 0.6 chord line, which is straight fore and aft (no sweep
+# at 60% of the chord); between the points the y, z, chord and torsion run straight, by the
+# distance along the (y, z) points, as Heatwole interpolates them.
+#
+# i            the point, left tip to right tip
+# y_m          across, from the centre, metres
+# z_m          down, metres (Heatwole's sign: the tips at 0, the centre 0.375 above them)
+# chord_m      the section's chord, metres
+# torsion_deg  the section turned nose up about its 0.6 chord point, degrees
+i	y_m	z_m	chord_m	torsion_deg
+0	-0.688	0.000	0.107	3
+1	-0.664	-0.097	0.137	3
+2	-0.595	-0.188	0.198	0
+3	-0.486	-0.265	0.259	0
+4	-0.344	-0.325	0.308	0
+5	-0.178	-0.362	0.339	0
+6	0.000	-0.375	0.350	0
+7	0.178	-0.362	0.339	0
+8	0.344	-0.325	0.308	0
+9	0.486	-0.265	0.259	0
+10	0.595	-0.188	0.198	0
+11	0.664	-0.097	0.137	3
+12	0.688	0.000	0.107	3

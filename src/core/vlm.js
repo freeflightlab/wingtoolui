@@ -178,6 +178,47 @@ export function trefftzSegments(trace, gamma, rho = 1.225) {
 }
 
 /**
+ * The Trefftz plane's influence, unit circulation by unit circulation: entry
+ * [i * n + j] is the normal wash that segment j's pair of legs puts on the
+ * middle of segment i, by segment i's length — so that, with `gamma`,
+ *
+ *     D_i = (rho / 2) * gamma_i * sum_j( T[i*n+j] * gamma_j )
+ *
+ * is `trefftzSegments`' share i. Fixed with the wake's trace, it turns a
+ * circulation into each strip's share of the induced drag with one product,
+ * and each strip's induced angle at the lifting line — half the far wake's
+ * wash, as Prandtl's lifting line has it — with one division:
+ *
+ *     alpha_i = sum_j( T[i*n+j] * gamma_j ) / (2 V w_i)
+ *
+ * w_i the strip's span along its bound vortex.
+ */
+export function trefftzInfluence(trace) {
+  const n = trace.length;
+  const T = new Float64Array(n * n);
+  for (let i = 0; i < n; i++) {
+    const [[ya, za], [yb, zb]] = trace[i];
+    const yc = (ya + yb) / 2;
+    const zc = (za + zb) / 2;
+    for (let j = 0; j < n; j++) {
+      let v = 0;
+      let w = 0;
+      for (const [[yv, zv], sign] of [[trace[j][0], 1], [trace[j][1], -1]]) {
+        const dy = yc - yv;
+        const dz = zc - zv;
+        const r2 = dy * dy + dz * dz;
+        if (r2 < 1e-9) continue;
+        const k = sign / (2 * Math.PI * r2);
+        v -= k * dz;
+        w += k * dy;
+      }
+      T[i * n + j] = w * (yb - ya) - v * (zb - za);
+    }
+  }
+  return T;
+}
+
+/**
  * The lattice's geometry and influence, without solving it: each strip's
  * horseshoe (bound segment on the quarter-chord line, control point at three
  * quarters, the strip's own upward normal), every horseshoe's velocity at

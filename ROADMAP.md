@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2884-test validation suite and a benchmark with regression budgets
+- [x] 2920-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -1664,6 +1664,11 @@ Making it pleasant to use across a real project.
 - [x] **Printed pattern output** — tiled to A4/A3 at exactly 1:1, with a
       100 mm calibration bar on every page, overlapping rather than butting,
       and blank tiles skipped: 518 pages instead of 1110.
+- [x] **A phone's screen** (1.14) — at 900 px wide or less the page scrolls
+      and the panes stack, each most of the screen's height; the one- and
+      two-pane tabs had been squeezed to 0 to 60 px, the Flight's chart to
+      nothing. Tables drawn as text start each column past the widest entry
+      before it (an interface test). `docs/viewports.md`.
 
 ---
 
@@ -1747,17 +1752,43 @@ describing geometry and starts predicting behaviour.
       14°) and earlier with the bend, Viterna past it; the library's four
       sections solved ahead (`brakesection.js`,
       `data/reference/brake-sections.tsv`).
-- [x] **What flying it turned up** — the model trims the default wing at
-      7.4° on the balance's hang point, chosen for 5°; on the bar it keeps 90
-      of 150 mm above the collapse floor; its symmetric stall travel is 52 cm
-      (EN class C at 80 to 100 kg) and follows the free travel cm for cm; it
-      passes the EN trim-speed spin test; braking on the bar takes the
-      canopy to −2.6°, as the manuals warn. Viterna's form divides by the
-      plate's angle, which a bent chord swings through zero: one strip read
-      a lift of 198 and broke the flight's symmetry.
+- [x] **What flying it turned up** (1.13) — the model trimmed the default
+      wing at 7.4° on the balance's hang point, chosen for 5°; on the bar it
+      kept 90 of 150 mm above the collapse floor; its symmetric stall travel
+      was 52 cm (EN class C at 80 to 100 kg); it passes the EN trim-speed
+      spin test; braking on the bar takes the canopy nose down, as the
+      manuals warn. Viterna's form divides by the plate's angle, which a bent
+      chord swings through zero: one strip read a lift of 198 and broke the
+      flight's symmetry. The trim and the stall travel were the force
+      direction's (1.14, below).
+- [x] **A strip's force, square to the flow at its lifting line** (1.14) —
+      the slices took the force on the three-quarter chord's velocity, which
+      turned it square to the plate; the flight took its direction from the
+      three-quarter chord's angle, a third more induced drag than the
+      Trefftz plane's. Both now take the strip's geometric angle less half
+      the Trefftz plane's wash (`trefftzInfluence`). The flight trims the
+      default wing at 35.8 km/h and 5.3°, 0.3° above the balance; its
+      steady stall is at 70 cm and the EN pull departs at 88 cm (class A).
+      Found by Belloc's tunnel wing. `docs/stability.md`.
+- [x] **Stability derivatives and modes** (1.14) — the kite paper's
+      quasi-steady derivatives (Poland et al. 2026, §5.5) about the centre
+      of mass and the karabiners, its six criteria; the flight model
+      linearised at the trim and its modes found (balancing, Hessenberg,
+      Francis's QR): pitch, phugoid, Dutch roll and roll. The default wing
+      is stable and damped in all three axes; on the bar its phugoid is
+      neutral. `stability.js`, `docs/stability.md`.
+- [x] **The hang point against stability** (1.14) — the paper's tow-point
+      study for a glider: glide, angle, derivatives and modes over the
+      karabiners moved ±0.3 m and ±1 m. Shorter lines weaken the roll
+      stiffness, as a kite's higher tow point does.
+- [x] **Belloc's wind-tunnel paraglider** (1.14) — the 1/8 model built rib by
+      rib, NACA 23015 by mfoil, through the slices and the flight: side
+      force and yaw stiffness within 10% of the tunnel, the drag's rise with
+      lift within 8%, the pitch stiffness AVL's within 1%.
+      `data/reference/belloc-2015-*.tsv`, `tools/windtunnel.mjs`.
 - [ ] **The turn's bank** — before departing, a one-sided input yaws and
       skids this rigid arched wing more than it banks it (roll due to yaw
-      rate −95 Nm per rad/s, from the outer side's lift pointing outward).
+      rate −90 Nm per rad/s, from the outer side's lift pointing outward).
       Nine degrees of freedom, the pilot rolling under the canopy, may be
       what a real wing banks with; no measured turn rate against brake
       travel was found to check either.
@@ -1770,10 +1801,34 @@ describing geometry and starts predicting behaviour.
 - [ ] **The braked trailing edge, measured** — where the bend starts (65%),
       its shape (an arc) and its cap (90°) are reasoned, not measured; the
       stall's shift with the bend is XFLR5's trend on another section.
-- [ ] **The flight's trim against the balance's** — the balance chooses the
-      hang point on the polar's lift and the thin-aerofoil moment; the
-      model, on the lattice and mfoil's moment, trims 2.4° higher on it. One
-      of them should set the hang point.
+- [x] **The flight's trim against the balance's** — 1.13's flight trimmed
+      2.4° above the balance on its hang point; with the force's direction
+      put right (1.14) it trims 0.3° above it, 35.8 km/h against 35.2.
+- [ ] **The flight's canopy drag** — the flight's sections are mfoil's
+      sealed, smooth ones (0.0069 at trim where the balance's polar counts
+      0.0107), so its glide, 8.61, is a smooth canopy's: about 8.2 on the
+      polar's figure. The cell openings and the cloth belong in it.
+- [ ] **The plain lattice's force** — `vortexLattice` still takes its force
+      on the three-quarter chord's velocity. It enters the tool only as the
+      arched wing's lift over the flat one's (`arcFactors`), where the error
+      nearly cancels: 0.804 against 0.809 on the default wing.
+- [ ] **Belloc's lift slope** — the tool's lattice, as AVL, XFLR5 and
+      Heatwole's lifting line, has the tunnel wing's lift slope 14 to 26%
+      steep (0.0645 a degree against 0.0510), and its roll stiffness 30%
+      weak. Unexplained; the tunnel's walls were not corrected for.
+- [ ] **Belloc's drag at no lift** — the smooth NACA 23015 polars give the
+      model 0.0075 against the tunnel's 0.0156. Its surface, its tips or the
+      rod's tare: not separated.
+- [ ] **The planform against stability** — the kite paper's §6.2: aspect
+      ratio and arc against glide and the derivatives. It means building
+      each planform as a design; the map does the hang point only.
+- [ ] **Reynolds number along the span, in flight** — the slices read the
+      polars at each slice's own Reynolds number, interpolated in log Re as
+      the kite paper's surrogates are; the flight's braked table is at one.
+      The tips fly at less than half the centre's.
+- [ ] **Unsteady modes** — the modes are quasi-steady with the apparent
+      mass; the paper asks for unsteady aerodynamics in a modal analysis,
+      and no measured paraglider modes were found to hold these to.
 
 Phase 5 items should be treated as research, not as features. Anything here
 that produces a number a person might trust needs validation against measured

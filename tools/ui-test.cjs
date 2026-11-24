@@ -2919,6 +2919,59 @@ try {
     if (mt.length !== 20) throw new Error(`the eighteen's table has ${mt.length} lines`);
     const departed = m.filter((r) => r.out.summary?.departedS !== null).length;
     console.log(`  ok   flight: all eighteen flown and tabled; ${departed} departed at 65 cm`);
+    // At a phone's width (420 px) the tables' columns sat at fixed shares of
+    // the frame and ran into each other: the stability's by 35 px.
+    const tightest = (width) => {
+      const svg = document.getElementById('vp-flightchart');
+      const rect0 = svg.getBoundingClientRect;
+      svg.getBoundingClientRect = () => ({ width, height: 548, top: 0, left: 0 });
+      try { globalThis.__tab('flight'); } finally { svg.getBoundingClientRect = rect0; }
+      const rows = new Map();
+      for (const t of svg.children.filter((n) => n.tagName === 'text')) {
+        const y = Number(t.attrs.y).toFixed(1);
+        if (!rows.has(y)) rows.set(y, []);
+        rows.get(y).push(t);
+      }
+      let room = Infinity;
+      for (const ts of rows.values()) {
+        ts.sort((a, b) => a.attrs.x - b.attrs.x);
+        for (let k = 1; k < ts.length; k++) {
+          const w = 0.6 * Number(ts[k - 1].attrs['font-size']) * ts[k - 1]._text.normalize('NFC').length;
+          room = Math.min(room, ts[k].attrs.x - ts[k - 1].attrs.x - w);
+        }
+      }
+      return room;
+    };
+    const roomM = tightest(420);
+    if (!(roomM > 0)) throw new Error(`at 420 px the eighteen's columns run into each other by ${(-roomM).toFixed(0)} px`);
+    // stability (stability.js): the derivatives and the modes, hands up and on the bar
+    const st = await fl.stability();
+    if (!st || !st.trim?.cg || !st.trim.modes) throw new Error('no stability at the trim');
+    if (st.trim.cg.criteria.length !== 6 || !st.trim.modes.modes.length) throw new Error('the stability has not its six criteria and its modes');
+    if (globalThis.__S.flightChart !== 'stability') throw new Error('the chart does not show the stability');
+    const sc = document.getElementById('vp-flightchart');
+    if (sc.children.length < 30) throw new Error(`the stability table drew ${sc.children.length} children`);
+    const sn = document.getElementById('note-flightchart')._text;
+    if (!/Poland, Masure, Cayon and Schmehl/.test(sn) || !/Belloc/.test(sn)) throw new Error(`stability note: ${sn.slice(0, 100)}`);
+    const roomS = tightest(420);
+    if (!(roomS > 0)) throw new Error(`at 420 px the stability's columns run into each other by ${(-roomS).toFixed(0)} px`);
+    const stTsv = fl.stabilityTsv(fl.get()).trim().split('\n');
+    if (!/^trim\tabout\tquantity/.test(stTsv[1]) || stTsv.length < 100) throw new Error(`the stability table has ${stTsv.length} lines`);
+    const labels2 = fl.tools().children.map((c) => (c.attrs && c.attrs['aria-label']) || c._text);
+    for (const want of ['Stability derivatives and modes at trim', 'Map glide and stability over the hang point', 'Save the stability derivatives and modes']) {
+      if (!labels2.includes(want)) throw new Error(`flight tools have no "${want}"`);
+    }
+    console.log(`  ok   flight: stability at trim, ${st.trim.cg.criteria.filter((c) => c.stable).length} of 6 criteria held; modes ${st.trim.modes.modes.map((x) => x.name).join(', ')}`);
+    // the hang point: 35 trims, mapped
+    const map = await fl.hangMap();
+    if (!map || map.cells.length !== 35) throw new Error(`the hang-point map has ${map && map.cells.length} cells`);
+    if (globalThis.__S.flightChart !== 'hangpoint' || document.getElementById('vp-flightchart').children.length < 35 * 2) throw new Error('the hang-point map is not drawn');
+    const own = map.cells.find((c) => c.dxM === 0 && c.dzM === 0);
+    if (!own || own.error || Math.abs(own.glideRatio / st.trim.trim.glideRatio - 1) > 1e-3) throw new Error('the map\'s own cell is not the trim');
+    const mapTsv = fl.mapTsv(fl.get()).trim().split('\n');
+    if (mapTsv.length !== 37 || !/^aft_m\tup_m/.test(mapTsv[1])) throw new Error(`the map's table has ${mapTsv.length} lines`);
+    if (!fl.tools().children.some((c) => c.attrs && c.attrs['aria-label'] === 'Save the hang-point map')) throw new Error('no button saves the map');
+    console.log(`  ok   flight: the hang point mapped, ${map.cells.filter((c) => !c.error).length} of 35 trimmed; its own cell is the trim`);
     globalThis.__tab('wing');
   } catch (e) {
     console.log('  FAIL flight: ' + e.message);

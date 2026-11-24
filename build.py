@@ -83,6 +83,7 @@ MODULES = [
     "slices.js",
     "brakesection.js",
     "flight.js",
+    "stability.js",
     "freebody.js",
     "bom.js",
     "loads.js",

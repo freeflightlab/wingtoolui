@@ -3814,14 +3814,18 @@ function flightScenarioLabel(sc) {
 
 /** The models and their trims: hands up, and the bar pushed as far as the
  * model's own trim keeps the wing above the collapse floor. */
-function flightModels(table) {
+function flightBase(table) {
   const minFlyingCz = M.speedBar?.liftModel?.minFlyingCz ?? FLIGHT.minFlyingCz;
-  const base = {
+  return {
     wing: M.wing, linePlan: M.linePlan, airfoil: M.airfoil, table, atm: M.atm,
     pilotKg: S.pilotMass, wingKg: S.wingMass, linesKg: S.lineMass, areaM2: M.metrics.area,
     cxPilot: S.cxPilot, cxLines: M.cxLinesUsed,
     settings: { slackCentreMM: S.brakeSlackCentreMM, slackTipMM: S.brakeSlackTipMM, minFlyingCz },
   };
+}
+function flightModels(table) {
+  const base = flightBase(table);
+  const { minFlyingCz } = base.settings;
   const a0 = M.alphaFlown ?? S.alphaDeg; const V0 = M.balance?.speedMS ?? 10; const g0 = M.balance?.glideRatio ?? 8;
   let model = flightModel({ ...base, alphaWakeDeg: a0 });
   let trim = flightTrim(model, { speed: V0, alphaDeg: a0, glide: g0 });
@@ -3960,6 +3964,79 @@ async function flightFlyAll() {
   S.flightChart = 'matrix';
   if (S.tab === 'flight' && FLIGHT_RUN === run) { buildTabTools(); draw(); }
   setStatus(null, `Flight: ${rows.length} scenarios flown`);
+}
+
+/* -- stability: the derivatives, the modes, the hang point ---------------- */
+
+/** The derivatives and the modes, hands up and on the bar where it flies
+ * (stability.js), once per design. */
+async function flightStabilityRun() {
+  const run = await flightPrepare();
+  if (!run || run.error || !run.prep) return null;
+  if (!run.stability) {
+    const at = (start) => {
+      if (!start?.model || !start?.trim) return null;
+      try {
+        return {
+          cg: stabilityDerivatives(start.model, start.trim, { about: 'cg' }),
+          riser: stabilityDerivatives(start.model, start.trim, { about: 'riser' }),
+          modes: stabilityModes(start.model, start.trim),
+          trim: start.trim, barMM: start.barMM ?? 0,
+        };
+      } catch (e) {
+        return { error: e.message };
+      }
+    };
+    run.stability = { trim: at(run.prep.trim), bar: at(run.prep.accelerated) };
+  }
+  if (FLIGHT_RUN === run) {
+    S.flightChart = 'stability';
+    if (S.tab === 'flight') { buildTabTools(); draw(); }
+  }
+  return run.stability;
+}
+
+/** Glide against stability over the hang point: the karabiners moved fore
+ * and aft and up and down, the model trimmed and judged at each. */
+async function flightHangMap() {
+  const run = await flightPrepare();
+  if (!run || run.error || !run.prep) return null;
+  if (run.hangMap) {
+    S.flightChart = 'hangpoint';
+    if (S.tab === 'flight') { buildTabTools(); draw(); }
+    return run.hangMap;
+  }
+  if (run.mapping) return null;
+  run.mapping = true;
+  if (S.tab === 'flight') buildTabTools();
+  const base = flightBase(run.table);
+  const kar = M.linePlan.karabiner;
+  const { trim } = run.prep.trim;
+  const build = ({ dxM, dzM, alphaWakeDeg }) => flightModel({
+    ...base, linePlan: { ...M.linePlan, karabiner: [kar[0] + dxM, kar[1], kar[2] + dzM] }, alphaWakeDeg,
+  });
+  try {
+    run.hangMap = await runStepsAsync(stabilityMapSteps(build, {
+      guess: trim.guess, alphaWakeDeg: trim.alphaDeg, minFlyingCz: run.prep.minFlyingCz,
+    }), {
+      onProgress: (p) => {
+        if (S.tab === 'flight' && FLIGHT_RUN === run) {
+          const n = document.getElementById('note-flightchart');
+          if (n) n.textContent = `Trimming and judging the glider at hang point ${p.done} of ${p.total}…`;
+        }
+      },
+      isCancelled: () => FLIGHT_RUN !== run,
+    });
+  } catch (e) {
+    run.hangMapError = e.message;
+  }
+  run.mapping = false;
+  if (FLIGHT_RUN === run) {
+    if (run.hangMap) S.flightChart = 'hangpoint';
+    if (S.tab === 'flight') { buildTabTools(); draw(); }
+    if (run.hangMapError && !/cancelled/.test(run.hangMapError)) setStatus(`Hang-point map: ${run.hangMapError}`);
+  }
+  return run.hangMap;
 }
 
 function flightShow(k) {
@@ -4204,11 +4281,13 @@ function drawFlightView() {
     ctx.fillStyle = S.theme === 'light' ? '#e8f0f5' : '#101b22';
     ctx.fillRect(0, 0, cv.width, cv.height);
     ctx.fillStyle = S.theme === 'light' ? '#14202a' : '#8a9aa6';
-    ctx.font = `${Math.round(cv.height / 30)}px ui-monospace, monospace`;
     const msg = run?.running ? flightProgressText(run)
       : F?.error ? F.error
         : run?.error ? `Not prepared: ${run.error}`
           : 'Choose a start, a brake and a rate, and press "Fly".';
+    // as large as the height allows and no wider than the view (a monospace
+    // character is about 0.6 of its size across)
+    ctx.font = `${Math.max(9, Math.round(Math.min(cv.height / 30, (cv.width - 32) / (0.62 * msg.length))))}px ui-monospace, monospace`;
     ctx.fillText(msg, 16, cv.height / 2);
     if (note) {
       note.textContent = run?.running ? flightProgressText(run)
@@ -4231,10 +4310,25 @@ function drawFlightView() {
 
 /** Over time: the attitude, the turn, the speed and the handles; or, after
  * all eighteen, what each did. */
+/** The chart's title, by what it shows: its label's own text, the save
+ * buttons beside it left alone. */
+function flightChartTitle(text) {
+  const svg = document.getElementById('vp-flightchart');
+  const label = svg?.parentNode?.querySelector ? svg.parentNode.querySelector('.vp-label') : null;
+  const t = label?.firstChild;
+  if (t && t.nodeType === 3) t.nodeValue = text;
+}
+
 function drawFlightChart() {
   const note = document.getElementById('note-flightchart');
   const { run, F } = flightShown();
+  const shows = (S.flightChart === 'matrix' && run?.matrix) ? 'all eighteen'
+    : (S.flightChart === 'stability' && run?.stability) ? 'stability'
+      : (S.flightChart === 'hangpoint' && run?.hangMap) ? 'the hang point' : 'over time';
+  flightChartTitle(`Flight — ${shows}`);
   if (S.flightChart === 'matrix' && run?.matrix) { drawFlightMatrix(run, note); return; }
+  if (S.flightChart === 'stability' && run?.stability) { drawFlightStability(run, note); return; }
+  if (S.flightChart === 'hangpoint' && run?.hangMap) { drawHangMap(run, note); return; }
   if (!F || !F.flight) {
     const c = canvas('vp-flightchart', [[0, 0], [1, 1]], 0.1, { chart: true });
     c.text(run?.running ? 'preparing…' : 'nothing flown yet', [0.5, 0.5], '#8a9aa6', 10, 'middle');
@@ -4285,29 +4379,201 @@ function flightTrimText(run) {
     + ` · sections: ${run.tableSource}`;
 }
 
+/**
+ * Where the columns of a table drawn as text start, in the chart's x units:
+ * at their share of the frame, or a gap past the widest entry of the column
+ * before, whichever is further. The shares alone overlapped on a phone,
+ * where the frame is 420 px and one column's longest entry is 160; past the
+ * frame, the fit scales the whole table down to it, text and all.
+ * `columns` holds each column's entries; widths are estimated at 0.62 of the
+ * font size a character, a monospace advance with a margin.
+ */
+function textColumnsX(c, shares, columns, size = 9, gapPx = 14) {
+  const xs = [shares[0]];
+  for (let k = 1; k < shares.length; k++) {
+    const widest = Math.max(0, ...columns[k - 1].map((s) => String(s).normalize('NFC').length)) * 0.62 * size;
+    xs.push(Math.max(shares[k], xs[k - 1] + (widest + gapPx) / c.scale));
+  }
+  return xs;
+}
+
 /** The eighteen as a table. */
 function drawFlightMatrix(run, note) {
   const rows = run.matrix;
   const c = canvas('vp-flightchart', [[0, 0], [1, 1]], 0.04, { chart: true });
   const cols = ['start', 'brake', 'rate', 'departed', 'bank', 'turn', 'sink', 'g', 'lost'];
-  const xs = [0, 0.13, 0.25, 0.37, 0.55, 0.65, 0.76, 0.86, 0.94];
+  const table = rows.map((r) => {
+    const s = r.out?.summary;
+    return [
+      r.sc.start === 'accelerated' ? `bar ${r.out?.barMM ?? ''}` : 'hands up', r.sc.input, `${FLIGHT.rates[r.sc.rate]} s`,
+      !s ? (r.out?.error ? 'not flown' : '—') : s.departedS !== null ? `${s.departedS.toFixed(1)} s, ${(s.departedTravelMM / 10).toFixed(0)} cm` : 'no',
+      s ? `${s.maxRollDeg.toFixed(0)}°` : '', s ? `${s.maxTurnRateDeg.toFixed(0)}°/s` : '', s ? `${s.maxSinkRate.toFixed(1)}` : '',
+      s ? s.maxLoadFactor.toFixed(2) : '', s ? `${s.heightLostM.toFixed(0)} m` : '',
+    ];
+  });
+  const xs = textColumnsX(c, [0, 0.13, 0.25, 0.37, 0.55, 0.65, 0.76, 0.86, 0.94],
+    cols.map((h, k) => [h, ...table.map((cells) => cells[k])]));
   const dy = 1 / (rows.length + 2);
   cols.forEach((h, k) => c.text(h, [xs[k], 1 - dy * 0.5], '#8a9aa6', 9));
   rows.forEach((r, i) => {
     const y = 1 - dy * (i + 1.6);
     const s = r.out?.summary;
     const col = !s ? '#8a9aa6' : s.departedS !== null ? '#ff5a5a' : '#e6edf2';
-    const cells = [
-      r.sc.start === 'accelerated' ? `bar ${r.out?.barMM ?? ''}` : 'hands up', r.sc.input, `${FLIGHT.rates[r.sc.rate]} s`,
-      !s ? (r.out?.error ? 'not flown' : '—') : s.departedS !== null ? `${s.departedS.toFixed(1)} s, ${(s.departedTravelMM / 10).toFixed(0)} cm` : 'no',
-      s ? `${s.maxRollDeg.toFixed(0)}°` : '', s ? `${s.maxTurnRateDeg.toFixed(0)}°/s` : '', s ? `${s.maxSinkRate.toFixed(1)}` : '',
-      s ? s.maxLoadFactor.toFixed(2) : '', s ? `${s.heightLostM.toFixed(0)} m` : '',
-    ];
-    cells.forEach((v, k) => c.text(v, [xs[k], y], k === 3 ? col : '#c8d2da', 9));
+    table[i].forEach((v, k) => c.text(v, [xs[k], y], k === 3 ? col : '#c8d2da', 9));
   });
   c.fit();
   if (note) note.textContent = `All ${rows.length}: extremes up to the departure, where there was one; red departed. `
     + `Travel ${(S.flightTravelMM / 10).toFixed(0)} cm, held ${S.flightHoldS} s${S.flightRelease ? ', then released at the same rate' : ''}.`;
+}
+
+const STABILITY_LABELS = {
+  Cl_beta: 'roll, Cl/β', Cm_alpha: 'pitch, Cm/α', Cn_beta: 'yaw, Cn/β',
+  Cl_p: 'roll damping, Cl/p̂', Cm_q: 'pitch damping, Cm/q̂', Cn_r: 'yaw damping, Cn/r̂',
+};
+
+/** A mode as a short line of figures: its period and damping ratio, and
+ * the time to halve (or double). */
+function stabilityModeText(m) {
+  // a ratio under a hundredth keeps its sign and a figure: "-0.00" read as
+  // nothing at all beside a mode that doubles
+  const z = m.dampingRatio; const zText = Math.abs(z) < 0.01 && z !== 0 ? z.toFixed(3) : z.toFixed(2);
+  const parts = [m.periodS ? `${m.periodS.toFixed(2)} s, ζ ${zText}` : 'no swing'];
+  if (m.halfS) parts.push(`halves ${m.halfS < 10 ? m.halfS.toFixed(2) : m.halfS.toFixed(1)} s`);
+  if (m.doubleS) parts.push(`DOUBLES ${m.doubleS.toFixed(0)} s`);
+  return parts.join(', ');
+}
+
+/** The derivatives and the modes, hands up and on the bar, as a table. */
+function drawFlightStability(run, note) {
+  const st = run.stability;
+  const cols = [['hands up', st.trim], [st.bar ? `on the bar, ${st.bar.barMM} mm` : 'on the bar', st.bar]];
+  const c = canvas('vp-flightchart', [[0, 0], [1, 1]], 0.04, { chart: true });
+  const ok = '#5fd97a'; const bad = '#ff5a5a'; const grey = '#8a9aa6'; const ink = '#c8d2da';
+  const trimText = (s) => (s?.trim ? `${(s.trim.speed * 3.6).toFixed(1)} km/h, ${s.trim.canopyAlphaDeg.toFixed(1)}°, glide ${s.trim.glideRatio.toFixed(2)}` : (s?.error ?? 'not flown'));
+  const criterionText = (s, key) => {
+    const cg = s?.cg?.criteria.find((x) => x.key === key);
+    const rs = s?.riser?.criteria.find((x) => x.key === key);
+    return cg ? { text: `${cg.value >= 0 ? '+' : ''}${cg.value.toFixed(3)} ${cg.stable ? 'stable' : 'UNSTABLE'} (${rs.value >= 0 ? '+' : ''}${rs.value.toFixed(3)})`, stable: cg.stable } : null;
+  };
+  const names = [...new Set(cols.flatMap(([, s]) => (s?.modes?.modes ?? []).map((m) => m.name)))];
+  const modeOf = (s, name) => s?.modes?.modes.find((x) => x.name === name) ?? null;
+  // each column's entries, for the widths; the two section headings span
+  // the table and are left out
+  const xs = textColumnsX(c, [0, 0.36, 0.69], [
+    ['trim', ...Object.values(STABILITY_LABELS), ...names],
+    ...cols.map(([h, s]) => [h, trimText(s), ...Object.keys(STABILITY_LABELS).map((key) => criterionText(s, key)?.text ?? ''),
+      ...names.map((name) => { const m = modeOf(s, name); return m ? stabilityModeText(m) : ''; })]),
+  ]);
+  const nRows = 9 + Math.max(...cols.map(([, s]) => s?.modes?.modes.length ?? 0));
+  const dy = 1 / (nRows + 2);
+  let y = 1 - dy * 0.5;
+  cols.forEach(([h], k) => c.text(h, [xs[k + 1], y], grey, 9));
+  y -= dy;
+  c.text('trim', [xs[0], y], grey, 9);
+  cols.forEach(([, s], k) => c.text(trimText(s), [xs[k + 1], y], ink, 9));
+  y -= dy * 1.2;
+  c.text('about the centre of mass (about the karabiners)', [xs[0], y], grey, 8.5);
+  for (const key of Object.keys(STABILITY_LABELS)) {
+    y -= dy;
+    c.text(STABILITY_LABELS[key], [xs[0], y], ink, 9);
+    cols.forEach(([, s], k) => {
+      const cr = criterionText(s, key);
+      if (cr) c.text(cr.text, [xs[k + 1], y], cr.stable ? ok : bad, 9);
+    });
+  }
+  y -= dy * 1.2;
+  c.text('modes', [xs[0], y], grey, 8.5);
+  for (const name of names) {
+    y -= dy;
+    c.text(name, [xs[0], y], ink, 9);
+    cols.forEach(([, s], k) => {
+      const m = modeOf(s, name);
+      if (m) c.text(stabilityModeText(m), [xs[k + 1], y], m.stable ? ok : bad, 9);
+    });
+  }
+  c.fit();
+  if (note) {
+    const ref = st.trim?.cg?.reference;
+    note.textContent = 'The quasi-steady derivatives of Poland, Masure, Cayon and Schmehl (2026): central differences in α and β '
+      + '(0.005 rad) and in the rates (0.1 rad/s), on the projected area'
+      + (ref ? ` (${ref.areaM2.toFixed(1)} m²) and span (${ref.spanM.toFixed(2)} m)` : '')
+      + '; stable is Cl/β < 0, Cm/α < 0, Cn/β > 0 and damped is each damping below 0. '
+      + 'The modes are the flight model\'s, linearised at the trim, its apparent mass in them: each one\'s period, '
+      + 'its damping ratio ζ, and the time it takes to halve. '
+      + 'Checked on Belloc\'s wind-tunnel paraglider: side force and yaw within 10% of the tunnel, roll 30% weak (docs/stability.md).';
+  }
+}
+
+/** The hang-point map: glide in each cell, coloured by what holds. */
+function drawHangMap(run, note) {
+  const map = run.hangMap;
+  const nx = map.dxM.length; const nz = map.dzM.length;
+  const chord = M.wing.ribs[0].chord;
+  const c = canvas('vp-flightchart', [[-1.6, -1.2], [nx, nz + 0.6]], 0.04, { chart: true });
+  const fill = (cell) => {
+    if (cell.error || cell.belowFloor) return 'rgba(138,154,166,0.25)';
+    if (!cell.staticStable) return 'rgba(255,90,90,0.45)';
+    if (!cell.damped || !cell.modesStable) return 'rgba(255,159,67,0.45)';
+    return 'rgba(95,217,122,0.35)';
+  };
+  map.cells.forEach((cell) => {
+    const i = map.dxM.indexOf(cell.dxM); const j = map.dzM.indexOf(cell.dzM);
+    c.path([[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]], '#2a3440', 0.8, { close: true, fill: fill(cell) });
+    const centre = [i + 0.5, j + 0.5];
+    if (cell.error) { c.text('no trim', centre, '#8a9aa6', 8, 'middle', [0, 3]); return; }
+    c.text(cell.glideRatio.toFixed(2), centre, '#e6edf2', 10, 'middle', [0, -2]);
+    c.text(`${cell.canopyAlphaDeg.toFixed(1)}°`, centre, '#c8d2da', 8, 'middle', [0, 10]);
+    if (Math.abs(cell.dxM) < 1e-9 && Math.abs(cell.dzM) < 1e-9) {
+      c.path([[i + 0.04, j + 0.04], [i + 0.96, j + 0.04], [i + 0.96, j + 0.96], [i + 0.04, j + 0.96]], '#ffffff', 1.6, { close: true });
+    }
+  });
+  map.dxM.forEach((d, i) => c.text(`${d >= 0 ? '+' : ''}${((d / chord) * 100).toFixed(0)}%`, [i + 0.5, nz + 0.25], '#8a9aa6', 8.5, 'middle'));
+  map.dzM.forEach((d, j) => c.text(`${d > 0 ? '+' : ''}${d.toFixed(1)} m`, [-0.15, j + 0.5], '#8a9aa6', 8.5, 'end', [0, 3]));
+  c.text('hang point aft, % of the central chord', [nx / 2, nz + 0.55], '#8a9aa6', 9, 'middle');
+  c.text('higher', [-1.5, nz - 0.3], '#8a9aa6', 8.5);
+  c.text('lower', [-1.5, 0.3], '#8a9aa6', 8.5);
+  c.fit();
+  if (note) {
+    note.textContent = 'Glide ratio, and the canopy\'s angle, with the karabiners moved fore and aft and up and down (shorter or longer lines): '
+      + 'green holds every criterion and mode; amber is statically stable with a mode or a damping that is not; red is statically '
+      + 'unstable; grey has no steady glide above the collapse floor. The design is outlined. The kite paper\'s tow-point study, '
+      + 'for a tow point the pilot hangs from (Poland et al. 2026, §6.3).';
+  }
+}
+
+/** The derivatives and modes as a table to save. */
+function flightStabilityTsv(run) {
+  const out = [`# ${S.name}: stability at the trims (stability.js; Poland et al. 2026's derivatives, the 6-DOF model's modes)`];
+  out.push(['trim', 'about', 'quantity', 'value', 'stable'].join('\t'));
+  for (const [name, s] of [['hands up', run.stability.trim], ['bar', run.stability.bar]]) {
+    if (!s?.cg) continue;
+    for (const about of ['cg', 'riser']) {
+      for (const k of ['alpha', 'beta', 'p', 'q', 'r']) {
+        STABILITY_COEFFICIENTS.forEach((coef, i) => out.push([name, about, `d${coef}/d${k}`, s[about].d[k][i].toPrecision(6), ''].join('\t')));
+      }
+      for (const cr of s[about].criteria) out.push([name, about, cr.key, cr.value.toPrecision(6), cr.stable ? 1 : 0].join('\t'));
+    }
+    for (const m of s.modes.modes) {
+      out.push([name, 'modes', `${m.name} eigenvalue`, `${m.eigenvalue.re.toPrecision(6)}${m.eigenvalue.im >= 0 ? '+' : '-'}${Math.abs(m.eigenvalue.im).toPrecision(6)}i`, m.stable ? 1 : 0].join('\t'));
+      out.push([name, 'modes', `${m.name} period_s`, m.periodS?.toPrecision(6) ?? '', ''].join('\t'));
+      out.push([name, 'modes', `${m.name} damping_ratio`, m.dampingRatio.toPrecision(6), ''].join('\t'));
+    }
+  }
+  return `${out.join('\n')}\n`;
+}
+
+/** The hang-point map as a table to save. */
+function flightHangMapTsv(run) {
+  const head = ['aft_m', 'up_m', 'trims', 'speed_kmh', 'glide', 'canopy_alpha_deg', 'lift_coefficient',
+    'Cl_beta', 'Cm_alpha', 'Cn_beta', 'Cl_p', 'Cm_q', 'Cn_r', 'static_stable', 'damped', 'modes_stable', 'least_damped', 'least_damped_re'];
+  const rows = run.hangMap.cells.map((cl) => {
+    if (cl.error) return [cl.dxM, cl.dzM, 0].join('\t');
+    const v = (key) => cl.criteria.find((x) => x.key === key).value.toPrecision(5);
+    return [cl.dxM, cl.dzM, cl.belowFloor ? 0 : 1, (cl.speed * 3.6).toFixed(2), cl.glideRatio.toFixed(3), cl.canopyAlphaDeg.toFixed(2),
+      cl.liftCoefficient.toFixed(4), v('Cl_beta'), v('Cm_alpha'), v('Cn_beta'), v('Cl_p'), v('Cm_q'), v('Cn_r'),
+      cl.staticStable ? 1 : 0, cl.damped ? 1 : 0, cl.modesStable ? 1 : 0, cl.leastDamped?.name ?? '', cl.leastDamped?.re.toPrecision(4) ?? ''].join('\t');
+  });
+  return `# ${S.name}: glide against stability over the hang point (stability.js stabilityMapSteps)\n${head.join('\t')}\n${rows.join('\n')}\n`;
 }
 
 /* -- playing and recording ----------------------------------------------- */
@@ -4463,11 +4729,16 @@ function buildFlightTools(host) {
   sel('flightPastDeparture', [['stop', 'stop 2 s after a departure'], ['continue', 'fly on past a departure (not credible)']], 'What happens after a departure');
   btn(busy ? 'Working…' : 'Fly', () => { if (!busy) flightFly(); }, 'Fly this scenario');
   btn('All 18', () => { if (!busy) flightFlyAll(); }, 'Fly every start, brake and rate');
+  btn('Stability', () => { if (!busy) flightStabilityRun(); }, 'Stability derivatives and modes at trim');
+  btn(run?.mapping ? 'Mapping…' : 'Hang point', () => { if (!busy && !run?.mapping) flightHangMap(); }, 'Map glide and stability over the hang point');
   num('brakeSlackCentreMM', 'free travel centre', 'Brake free travel at the centre, mm', 0, 400, 5);
   num('brakeSlackTipMM', 'tip', 'Brake free travel at the tip, mm', 0, 400, 5);
-  if (!F?.flight && !run?.matrix) return;
-  sel('flightCamera', FLIGHT_CAMERAS, 'Camera');
-  sel('flightChart', [['history', 'over time'], ['matrix', 'all 18']], 'Chart shows');
+  if (!F?.flight && !run?.matrix && !run?.stability && !run?.hangMap) return;
+  if (F?.flight || run?.matrix) sel('flightCamera', FLIGHT_CAMERAS, 'Camera');
+  sel('flightChart', [['history', 'over time'], ['matrix', 'all 18'], ['stability', 'stability'], ['hangpoint', 'hang-point map']]
+    .filter(([v]) => v === 'history' || (v === 'matrix' && run?.matrix) || (v === 'stability' && run?.stability) || (v === 'hangpoint' && run?.hangMap)), 'Chart shows');
+  if (run?.stability) btn('Stability .tsv', () => save(`${S.name}-stability.tsv`, flightStabilityTsv(run)), 'Save the stability derivatives and modes');
+  if (run?.hangMap) btn('Map .tsv', () => save(`${S.name}-hang-point-map.tsv`, flightHangMapTsv(run)), 'Save the hang-point map');
   if (F?.flight) {
     const end = F.flight.frames[F.flight.frames.length - 1].t;
     btn(FLIGHT_PLAY.playing ? '❚❚' : '▶', () => {

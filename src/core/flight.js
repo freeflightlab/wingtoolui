@@ -52,7 +52,7 @@
  * them says it has left what the model can stand behind.
  */
 
-import { wingStrips, latticeSystem } from './vlm.js';
+import { wingStrips, latticeSystem, trefftzInfluence } from './vlm.js';
 import { brakeSectionAt, brakeBendForDrop, brakeStallDeg, BRAKE_SECTION } from './brakesection.js';
 import { tipFirstSlack } from './lineplan.js';
 
@@ -74,6 +74,11 @@ export const FLIGHT = Object.freeze({
   // the induced angle a strip may have, down and up (tip upwash)
   inducedMaxDeg: 15,
   upwashMaxDeg: 6,
+  // where a strip's force takes its direction from: 'trefftz', its lifting
+  // line's induced angle (half the Trefftz plane's wash on it), or
+  // 'control', the three-quarter-chord angle the coupling reads its section
+  // at (1.13; it overstated the induced drag)
+  inducedAngle: 'trefftz',
   // past its stall by this much, or below this, a strip meets its own air
   deepStallMarginDeg: 10,
   deepStallNegativeDeg: 15,
@@ -297,6 +302,9 @@ export function flightModel({
   const sys = latticeSystem(strips, { alphaDeg: alphaWakeDeg });
   const n = sys.n;
   const lu = flLu(sys.A, n);
+  // the wake's trace, seen down it: each strip's induced angle from it
+  const seenW = (q) => [q[1], q[2] * Math.cos(sys.alpha) - q[0] * Math.sin(sys.alpha)];
+  const tw = trefftzInfluence(sys.panels.map((p) => [seenW(p.ta), seenW(p.tb)]));
   // per strip, relative to the riser midpoint, in the wing's frame
   const rq = new Float64Array(3 * n); const rc = new Float64Array(3 * n);
   const nrm = new Float64Array(3 * n); const spn = new Float64Array(3 * n); const chd = new Float64Array(3 * n);
@@ -467,7 +475,7 @@ export function flightModel({
   }
   const lu6 = flLu(A6, 6);
   return {
-    cfg, rho, g, n, sys, lu, rq, rc, nrm, spn, chd, chord, width, area, yMid,
+    cfg, rho, g, n, sys, lu, tw, rq, rc, nrm, spn, chd, chord, width, area, yMid,
     anchors: all, weights, tipY, table, flatAreaM2: flatArea, areaM2,
     dragPilotM2: areaM2 * cxPilot, dragLinesM2: areaM2 * cxLines,
     pilotAt, lineDragAt, linesAt, rSolidW, rSolidB: rS, rBodyB: rB, JB,
@@ -486,7 +494,7 @@ export function flightWork(model) {
   return {
     d: new Float64Array(n).fill(-4 * Math.PI / 180),
     rhs: new Float64Array(n), gam: new Float64Array(n), theta: new Float64Array(n),
-    aEff: new Float64Array(n), aGeo: new Float64Array(n), deep: new Uint8Array(n),
+    aEff: new Float64Array(n), aGeo: new Float64Array(n), aDir: new Float64Array(n), deep: new Uint8Array(n),
     cl: new Float64Array(n), cd: new Float64Array(n), cm: new Float64Array(n),
     vp: new Float64Array(n), V: new Float64Array(3 * n), sec: [0, 0, 0], iterations: 0, residual: 0,
   };
@@ -582,11 +590,30 @@ export function flightForces(model, x, ctrl, work) {
     if (resid < tol) break;
   }
   work.iterations = it; work.residual = resid;
+  // Each strip's force is square to the flow it meets with the wing's
+  // downwash in it: its geometric angle less its induced angle at the
+  // lifting line, half the Trefftz plane's wash on it, so the strips' induced
+  // drag adds up to the Trefftz plane's. The section's coefficients are
+  // still read at the coupling's angle, which is the lattice's: it is the
+  // three-quarter-chord one, whose larger downwash put the induced drag a
+  // third high on Belloc's tunnel wing when the force took its direction
+  // from it (1.13; docs/stability.md). A strip deep in its stall meets its
+  // own air, as before.
+  const { aDir } = work;
+  const fromControl = cfg.inducedAngle === 'control';
+  for (let i = 0; i < n; i++) {
+    if (deep[i]) { aDir[i] = aGeo[i]; continue; }
+    if (fromControl) { aDir[i] = aEff[i]; continue; }
+    let wash = 0;
+    for (let j = 0; j < n; j++) wash += model.tw[i * n + j] * gam[j];
+    const ai = wash / (2 * Math.max(1e-6, vp[i]) * model.width[i]);
+    aDir[i] = aGeo[i] - Math.max(-hi, Math.min(lo, ai));
+  }
   // the strips' forces, on their quarter-chord lines
   const F = [0, 0, 0]; const M = [0, 0, 0];
   for (let i = 0; i < n; i++) {
     const q = 0.5 * rho * vp[i] * vp[i] * area[i];
-    const ca = Math.cos(aEff[i]); const sa = Math.sin(aEff[i]);
+    const ca = Math.cos(aDir[i]); const sa = Math.sin(aDir[i]);
     const ex = chd[3 * i]; const ey = chd[3 * i + 1]; const ez = chd[3 * i + 2];
     const nx = nrm[3 * i]; const ny = nrm[3 * i + 1]; const nz = nrm[3 * i + 2];
     // the flow as the whole wing leaves it, and lift square to it
@@ -616,9 +643,10 @@ export function flightForces(model, x, ctrl, work) {
   const fg = flScale(gW, model.massSolid);
   const mg = flCross(model.rSolidW, fg);
   const aeroW = [F[0], F[1], F[2]];
+  const aeroMW = [M[0], M[1], M[2]];
   F[0] += fg[0]; F[1] += fg[1]; F[2] += fg[2];
   M[0] += mg[0]; M[1] += mg[1]; M[2] += mg[2];
-  return { F: flToBody(F), M: flToBody(M), aero: flToBody(aeroW), pilotDrag: flToBody(fPilot), gB };
+  return { F: flToBody(F), M: flToBody(M), aero: flToBody(aeroW), aeroM: flToBody(aeroMW), pilotDrag: flToBody(fPilot), gB };
 }
 
 /** The state's rate of change: the rigid body with its apparent mass. */
@@ -662,14 +690,18 @@ export function flightDerivative(model, x, ctrl, work, info = null) {
 
 /**
  * Steady straight glide: the body's forward and down speed and its pitch at
- * which nothing accelerates, by Newton's method from a guess.
+ * which nothing accelerates, by Newton's method from a guess. `controls`
+ * holds the handles ({ left, right }, mm) through it: equal, the glide stays
+ * straight, and the brakes' steady polar is a trim at each travel.
  */
-export function flightTrim(model, { speed = 10, alphaDeg = 5, glide = 8, guess = null, work = null, tol = 1e-8, maxIterations = 40 } = {}) {
+export function flightTrim(model, { speed = 10, alphaDeg = 5, glide = 8, guess = null, work = null, tol = 1e-8, maxIterations = 40, controls = null } = {}) {
   const wk = work || flightWork(model);
   // the coupling solved far tighter than a flight needs, so the differences
   // the Jacobian is made of are the trim's and not the coupling's noise
   const keep = [wk.tol, wk.maxIterations];
   wk.tol = 1e-11; wk.maxIterations = 600;
+  // the handles where they are held: symmetric, so the trim stays in the plane
+  const held = controls ? { left: controls.left ?? 0, right: controls.right ?? 0 } : { left: 0, right: 0 };
   const a0 = alphaDeg * Math.PI / 180;
   let z = guess ? [guess.u, guess.w, guess.theta] : [speed * Math.cos(a0), speed * Math.sin(a0), a0 - Math.atan(1 / glide)];
   const stateOf = (zz) => {
@@ -677,7 +709,7 @@ export function flightTrim(model, { speed = 10, alphaDeg = 5, glide = 8, guess =
     return Float64Array.from([0, 0, -model.cfg.altitudeM, ...q, zz[0], 0, zz[1], 0, 0, 0]);
   };
   const res = (zz) => {
-    const dx = flightDerivative(model, stateOf(zz), { left: 0, right: 0 }, wk);
+    const dx = flightDerivative(model, stateOf(zz), held, wk);
     return [dx[7], dx[9], dx[11]];
   };
   let r = res(z); let norm = Math.hypot(...r); let it = 0;

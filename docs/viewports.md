@@ -51,8 +51,8 @@ trailing edge to look at the calage should not lose it because a slider moved.
 
 ## 3. Tabs
 
-Twelve viewports do not fit usefully in one grid, so they are grouped in six
-tabs:
+Fourteen viewports do not fit usefully in one grid, so they are grouped in
+seven tabs:
 
 | tab | shows |
 | --- | --- |
@@ -62,11 +62,19 @@ tabs:
 | **Structure** | the diagonals, with the tension across each |
 | **Analysis** | polar, atmosphere |
 | **Slices** | one section in its own flow, and every slice tip to tip, with a slice selector (`docs/slices.md`) |
-| **Flight** | the glider flown through its brakes in 3D on a canvas (so it can be recorded to video), and its flight over time or all eighteen scenarios tabled (`docs/flight.md`) |
+| **Flight** | the glider flown through its brakes in 3D on a canvas (so it can be recorded to video), and beside it the flight over time, all eighteen scenarios tabled, the stability derivatives and modes at trim, or the hang point mapped (`docs/flight.md`, `docs/stability.md`) |
 
 Only the visible tab is drawn. Hidden grids have no size, so anything drawn
 into one fits to nothing — the redraw happens on the way in, not on the way
 out.
+
+**On a narrow screen**, 900 px wide or less, the page scrolls and the panes
+stack, one under another, each most of the screen's height. Until 1.14 the
+shell stayed one fixed frame: at a phone's width the masthead and the
+controls took all but 190 px of it, and the panes of the one- and two-pane
+tabs were left 0 to 60 px tall. A table drawn as text — the eighteen, the
+stability — starts each column past the widest entry before it, so on a
+narrow pane the fit shrinks the table rather than overlapping its columns.
 
 ## 4. The rib view
 

@@ -374,6 +374,29 @@ say(bad === 0, 'documented numbers match the code', `${claims.length} claims che
   const unlisted = notesMd.filter((f) => !readmeAll.includes(`| \`docs/${f}\` |`));
   say(unlisted.length === 0, "and every note is in the README's table of them",
     unlisted.join(', ') || `${notesMd.length} listed`);
+
+  // The core modules and the reference tables, as the README and REPO count
+  // them, and the README's list of the modules. REPO said 40 modules and 144
+  // tables while there were 44 and 147: nothing held it to them.
+  const repoAll = readFileSync('REPO.md', 'utf8');
+  const coreJs = readdirSync('src/core').filter((f) => f.endsWith('.js'));
+  const tsvCount = readdirSync('data/reference').filter((f) => f.endsWith('.tsv')).length;
+  const counts = {
+    'README modules': /src\/core\/\s+the maths — (\d+) modules/.exec(readmeAll)?.[1],
+    'REPO modules': /core\/\s+(\d+) modules/.exec(repoAll)?.[1],
+    'README tables': /data\/reference\/\s+(\d+) tables/.exec(readmeAll)?.[1],
+    'REPO tables': /data\/reference\/\s+(\d+) tables/.exec(repoAll)?.[1],
+  };
+  const repoWords = /\b([A-Za-z-]+) modules with no sub-folders/.exec(repoAll)?.[1]?.toLowerCase();
+  say(Number(counts['README modules']) === coreJs.length && Number(counts['REPO modules']) === coreJs.length
+    && repoWords === inWords(coreJs.length),
+  'the README and REPO count the core modules there are',
+  `README ${counts['README modules']}, REPO ${counts['REPO modules']} and "${repoWords}", src/core has ${coreJs.length}`);
+  say(Number(counts['README tables']) === tsvCount && Number(counts['REPO tables']) === tsvCount,
+    'and the reference tables', `README ${counts['README tables']}, REPO ${counts['REPO tables']}, data/reference has ${tsvCount}`);
+  const unnamed = coreJs.filter((f) => !new RegExp(`^  ${f.replace('.', '\\.')} `, 'm').test(readmeAll));
+  say(unnamed.length === 0, "and every core module is in the README's architecture",
+    unnamed.join(', ') || `${coreJs.length} named`);
 }
 
 /* ---- 2b. terminology matches the standard ------------------------------ */

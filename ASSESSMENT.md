@@ -10,12 +10,12 @@ openings, diagonals and rods, panel development, nesting, and DXF or printed
 patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
-One offline HTML file, 1.9 MB, no build step and no network. That constraint
-drove the architecture: 44 core modules bundled into a single scope, with the
+One offline HTML file, 2.0 MB, no build step and no network. That constraint
+drove the architecture: 45 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
-**About 84,300 lines**: 35,200 core, 8,000 interface, 20,100 tests, 6,600
-tools, 14,400 documentation.
+**About 86,400 lines**: 35,900 core, 8,300 interface, 20,400 tests, 6,900
+tools, 15,000 documentation.
 
 ## 2. What is genuinely validated
 
@@ -36,7 +36,7 @@ by tests. One design read exactly was evidence about that design; two are
 evidence about the reader.
 
 **Against 21 wings' line sheets from five manufacturers, and 55 published
-sizes**, in 147 reference tables, six of them the makers' own line-plan
+sizes**, in 150 reference tables, six of them the makers' own line-plan
 drawings transcribed line by line. Every line sheet is held to five physical
 invariants, not merely parsed. The anchor-density tables the generator works
 from are **measured from the corpus**, not hand-entered — the row ratios on 19
@@ -92,8 +92,11 @@ lines stretch on their own measured curves, from OpenGlider's line types.
   numbers at every frame. Its checks are physics' (symmetric to 1e-9,
   mirrored to 1e-8, a trim that holds) and EN 926-2's procedures, which a
   real wing's certificate reports only as classes: on the default free
-  travel it stalls symmetrically at 52 cm, class C for its weight, and does
-  not spin at trim speed (`docs/flight.md`).
+  travel its steady stall is at 70 cm and the EN pull departs at 88 cm,
+  class A for its weight, and it does not spin at trim speed
+  (`docs/flight.md`). 1.13 put the stall at 52 cm: its strips' forces
+  pointed the wrong way, which Belloc's tunnel wing showed
+  (`docs/stability.md`).
 
 ## 4. What is wrong, or unexplained
 
@@ -186,9 +189,21 @@ the 4.51° its file declares, where the file hangs it at 33% and the rules
 at 25.5%; on the Swoop2's reflex section neither balance hangs it where its
 file does (`docs/balance.md`).
 
+**Belloc's wind-tunnel wing: a lift slope 26% steep, a roll stiffness 30%
+weak.** Run on the one paraglider measured in a tunnel with all six
+coefficients, the tool's side force and yaw stiffness are within 10% of the
+tunnel's and its drag's rise with lift within 8%, and its pitch stiffness is
+AVL's. Its lift slope is 26% steeper than the tunnel's: Heatwole found AVL,
+XFLR5 and his own lifting line 14 to 19% steep and called it "difficult to
+explain", and this does not explain it either. The roll stiffness is 30%
+weak, as AVL's is, with the sign right. Running that wing is also what found
+the strips' forces pointing the wrong way, in the slices since 1.12 and the
+flight model since 1.13: the flight's trim at 7.4° and its stall at 52 cm
+were that error (`docs/stability.md`).
+
 ## 5. What is missing
 
-**57 open items in the roadmap.** The substantial ones:
+**63 open items in the roadmap.** The substantial ones:
 
 - The Lynx 2's and the Artik R 2's linesets, a quarter over their totals:
   the Lynx 2's suspension 27% over its sheets, its middles carrying two
@@ -202,10 +217,13 @@ file does (`docs/balance.md`).
 - The polar's lift and induced drag: on the default wing at trim, 10% and
   20% above the slices' and the lattice's — Prandtl's lifting line at an
   aspect ratio of 4.7. The balance, speed bar and glide still fly the polar.
-- The flight model's turn and trim: before it departs, the rigid arched
-  wing yaws and skids more than it banks, with no measured turn to check
-  against; it trims 2.4° above the balance on the balance's own hang point;
-  its circulation follows the brakes at once; and nothing in it folds.
+- The flight model's turn, drag and modes: before it departs, the rigid
+  arched wing yaws and skids more than it banks, with no measured turn to
+  check against; it trims 0.3° above the balance but on a smooth
+  canopy's drag, so its glide is 8.61 where the polar's profile drag would
+  give about 8.2; its circulation follows the brakes at once; its modes are
+  a rigid canopy's with no pilot to swing, and no measured paraglider modes
+  were found to check them; and nothing in it folds.
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
 - Collapse (Z) lines: three reference wings carry them; the model does not.

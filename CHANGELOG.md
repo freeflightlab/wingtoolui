@@ -4,6 +4,95 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.14.0 — 2026-11-23
+
+The glider judged as a kite paper judges a kite: its stability derivatives,
+its modes and its hang point. Its aerodynamics are held to Belloc's
+wind-tunnel paraglider, which found each strip's force pointing the wrong
+way.
+
+**Added**
+
+- **Stability**, in the Flight tab. Poland, Masure, Cayon and Schmehl's
+  quasi-steady derivatives (2026, §5.5), at the hands-up trim and on the
+  bar. The six coefficients are differenced in α and β (0.005 rad) and in
+  the three rates (0.1 rad/s), on the projected area and span, about the
+  centre of mass and about the karabiners, and judged by the paper's six
+  criteria. Then the flight model is linearised at each trim and its modes
+  found: pitch, phugoid, Dutch roll and roll, each with its period, damping
+  ratio and time to halve or double. **Stability .tsv** saves both.
+  `stability.js`, `docs/stability.md`.
+- **Hang point**: the paper's tow-point study (§6.3) for the karabiners. 35
+  trims, 0.3 m fore and aft and a metre up and down, each cell giving its
+  glide and its canopy's angle, coloured by which criteria and modes hold.
+  It takes about a second. **Map .tsv** saves it.
+- **Belloc's wind-tunnel paraglider** (Belloc 2015). Its geometry is built
+  rib by rib and its NACA 23015 solved with mfoil at the model's Reynolds
+  numbers. Its six coefficients come from the tunnel, and from Heatwole's
+  AVL, XFLR5 and lifting-line models of it
+  (`data/reference/belloc-2015-*.tsv`). Both of the tool's routes, the
+  slices and the flight model, are run on it (`tools/windtunnel.mjs`), and
+  the unit suite holds them to it.
+- **The steady polar through the brakes**: `flightTrim` takes the handles
+  held.
+- `trefftzInfluence` (vlm.js): each strip's wash in the Trefftz plane from
+  every strip's circulation.
+
+**Found**
+
+- **Each strip's force pointed the wrong way, in both routes.**
+  - The slices took it on the three-quarter chord's velocity. That velocity
+    holds the strip's own bound vortex, so the force came out square to the
+    plate, not the flow.
+  - The flight model took it on the three-quarter chord's angle. The
+    trailing legs start just behind that point, so its downwash is too
+    large: the induced drag came out a third above the Trefftz plane's.
+  - Both now take it square to the flow at the lifting line, as the Vortex
+    Step Method does. The strips' induced drag is the Trefftz plane's, to
+    0.6% on the slices and 2% in flight. On Belloc's wing the pitch
+    stiffness about the hang point is AVL's: −1.60 a radian against −1.61.
+  - The kite paper kept the three-quarter chord, because its drag came
+    closer to the tunnels'. On Belloc's wing, that is its excess induced
+    drag standing in for the profile drag the smooth sections lack.
+- **The default wing's trim was that error.** It now trims at 35.8 km/h,
+  glide 8.61, canopy 5.3°, 0.3° above the balance's 5°. The 32.9 km/h and
+  7.4° that 1.13 called a finding about the hang point came from the force
+  direction. Its steady stall is at 70 cm of brake, and the EN 926-2 pull
+  departs at 88 cm: class A, where 1.13 said 52 cm and class C.
+- **The default wing is stable and damped** by all six criteria, hands up
+  and on the bar.
+  - Pitch oscillation: 2.6 s, damping ratio 0.69.
+  - Phugoid: 6.7 s at 0.07; neutral on the bar, where it doubles over
+    230 s.
+  - Dutch roll: 2.4 s at 0.23.
+  - Its roll stiffness is small, Cl/β −0.077, because the arc's centre lies
+    near the centre of mass.
+- **The hang point.** The glide peaks 0.1 m aft of the design. Raising the
+  hang point weakens the roll stiffness, as the paper found for a kite's tow
+  point. Moving it aft stiffens pitch and yaw, where a kite loses them.
+- **Against Belloc's tunnel:**
+  - the side force and the yaw stiffness within 10%;
+  - the drag's rise with lift within 8%;
+  - the lift slope 26% steep. Heatwole found AVL, XFLR5 and his lifting
+    line 14 to 19% steep, and could not explain it either;
+  - the roll stiffness 30% weak, as AVL's is;
+  - the drag at no lift half the tunnel's, from smooth sections.
+- **The flight's glide is a smooth canopy's.** On the polar's profile drag
+  it would be about 8.2 rather than 8.61.
+- The plain lattice (`vortexLattice`) still takes its force at the
+  three-quarter chord. It enters the polar only as the arched wing's lift
+  over the flat one's, where the error nearly cancels: 0.804 against 0.809.
+  It is on the roadmap.
+
+**Fixed**
+
+- On a screen 900 px wide or less, the panes of the one- and two-pane tabs
+  were squeezed to between 0 and 60 px tall, and the Flight's chart to
+  nothing. The page now scrolls, with each pane under the one before.
+- At a phone's width, the stability table's columns ran into each other.
+  Its columns, and the eighteen's, now start past the widest entry before
+  them (an interface test).
+
 ## 1.13.0 — 2026-11-23
 
 The glider flown through its brakes: either brake or both, pulled to 65 cm

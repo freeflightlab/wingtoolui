@@ -177,7 +177,15 @@ numbers move with it. Then every slice is solved on its own at its angle and
 Reynolds number, and its own lift goes back into the coupling (a defect
 correction: the grid gives the slopes, the slices the values), until the
 lattice's lift and the slices' agree within 0.003. On the default wing at
-trim, one round takes the difference from 0.0095 to 0.0009.
+trim, one round takes the difference from 0.0102 to 0.0010.
+
+Each strip's force is the circulation's on the flow across it, square to the
+flow at its lifting line: the strip's geometric angle less its induced angle,
+half the Trefftz plane's wash on it. The strips' induced drag then adds up to
+the Trefftz plane's. Until 1.14 the force was taken on the velocity at the
+three-quarter chord, which carries the strip's own bound vortex, so it came
+out square to the plate rather than to the flow. Belloc's wind-tunnel
+paraglider showed it (`stability.md`, sections 5 and 6).
 
 What the tests hold it to (`slices` in the unit suite): on flat-plate
 sections the coupled lattice is the lattice itself, to 1e-12 in circulation;
@@ -192,25 +200,28 @@ span.
 
 | | hands up, 5.00° | full bar, 150 mm, 0.29° |
 | --- | --- | --- |
-| speed | 36.96 km/h | 46.85 km/h |
-| CL | 0.640 | 0.398 |
+| speed | 36.60 km/h | 46.78 km/h |
+| CL | 0.652 | 0.399 |
 | CDi | 0.0341 | 0.0132 |
 | CDp, the sections | 0.0069 | 0.0071 |
-| Cm, central quarter chord | −0.122 | −0.110 |
-| the wing alone, L/D | 15.6 | 19.6 |
-| sections solved | 24, one read between | 24 |
+| Cm, central quarter chord | −0.100 | −0.100 |
+| the wing alone, L/D | 15.9 | 19.6 |
+| sections solved | 24 | 24 |
 
 Coefficients on the flat area; the lines and the pilot are not in them. At
 trim the tips meet the air at −0.1° and lift at 0.44, the centre at 2.6°
 and 0.72; the most heavily loaded section is 2.4 m out, at 0.76. Reynolds
-numbers run from 0.70 million at the tips to 1.68 at the centre.
+numbers run from 0.69 million at the tips to 1.67 at the centre. (Before
+1.14's force direction the figures were 36.96 km/h, CL 0.640 and Cm −0.122.)
 
 **Against the tool's own polar** at 5°: CL 0.702, CDi 0.0410, CDp 0.0107. The
 lattice alone, flat plates at the angle less the section's zero-lift angle,
-gives 0.643 — the slices' 0.640 less a little viscous lift. The polar's 10%
-more lift and 20% more induced drag come from its lifting line: Prandtl's
-lifting line overstates the lift slope at an aspect ratio of 4.7, which the
-lattice does not. Its profile drag is the section estimate's, 0.0107 at that
+gives 0.643 by its own force recovery, which still takes the three-quarter
+chord's velocity; on the free stream, as the slices now take it, 0.653 — the
+slices' 0.652 less a little viscous lift. The polar's 8% more lift and 20%
+more induced drag come from its lifting line: Prandtl's lifting line
+overstates the lift slope at an aspect ratio of 4.7, which the lattice does
+not. Its profile drag is the section estimate's, 0.0107 at that
 lift against 0.0069 from mfoil for the smooth section. Nothing in the balance
 was changed for this release: it is built and checked on the polar, and the
 roadmap carries the question.

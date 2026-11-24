@@ -49,7 +49,7 @@
  * of the grid and flagged on the slice, never passed off as a result.
  */
 
-import { wingStrips, latticeSystem, trefftzDrag } from './vlm.js';
+import { wingStrips, latticeSystem, trefftzDrag, trefftzInfluence } from './vlm.js';
 import { centralFrame } from './wing3d.js';
 import { mfoilModel, mfoilSolve, mfoilState, mfoilDistributions } from './mfoil.js';
 
@@ -388,25 +388,47 @@ export function coupleSlices({
     if (resid < tol) break;
     for (let i = 0; i < n; i++) d[i] += relax * (clSec[i] - clInv[i]) / twoPi;
   }
-  // forces at unit speed and density: Kutta-Joukowski on each bound vortex
-  const forces = sys.panels.map((p, i) => {
-    const vi = [0, 0, 0];
-    for (let j = 0; j < n; j++) {
-      vi[0] += sys.VX[i * n + j] * gamma[j];
-      vi[1] += sys.VY[i * n + j] * gamma[j];
-      vi[2] += sys.VZ[i * n + j] * gamma[j];
-    }
-    const vLocal = slAdd(U, vi);
-    return slScale(slCross(vLocal, p.span), gamma[i]);
-  });
   const seen = (q) => [q[1], q[2] * Math.cos(sys.alpha) - q[0] * Math.sin(sys.alpha)];
   const trace = sys.panels.map((p) => [seen(p.ta), seen(p.tb)]);
   // trefftzDrag takes rho; with rho = 2 it returns sum(Gamma Vn s): D/q at unit speed
   const inducedOverQ = trefftzDrag(trace, gamma, 2);
+  // Forces at unit speed and density: Kutta-Joukowski on each bound vortex,
+  // the circulation by the flow across it, square to the flow the strip
+  // meets with the wing's downwash in it — its induced angle at the lifting
+  // line, half the Trefftz plane's wash on it, so the strips' own induced
+  // drag adds up to the Trefftz plane's.
+  //
+  // They were taken from the velocity at the three-quarter chord, where the
+  // boundary condition is set. That velocity carries the strip's own bound
+  // vortex, which turns the flow there to lie along the plate: the force
+  // came out square to the plate rather than to the flow, tilted back by the
+  // plate's angle, cl / 2 pi. The lift lost a few per cent and the force's
+  // line of action was wrong: on Belloc's wind-tunnel wing the pitching
+  // moment about a point a line's length below rose with the angle, where
+  // the tunnel's falls. (The Vortex Step Method takes the direction from the
+  // quarter chord in the same way, after Gaunaa, Li and Pirrung, 2026; see
+  // docs/stability.md for the kite paper's other choice.)
+  const T = trefftzInfluence(trace);
+  const inducedDeg = new Array(n);
+  const forces = sys.panels.map((p, i) => {
+    const sp = slUnit(p.span); const nn = p.normal; const e = chordDir[i];
+    const Vs = slDot(U, sp);
+    const Up = [U[0] - Vs * sp[0], U[1] - Vs * sp[1], U[2] - Vs * sp[2]];
+    const vp = slNorm(Up);
+    const width = slNorm(p.span);
+    const aGeo = Math.atan2(slDot(Up, nn), slDot(Up, e));
+    let wash = 0;
+    for (let j = 0; j < n; j++) wash += T[i * n + j] * gamma[j];
+    const aInd = wash / (2 * Math.max(1e-9, vp) * width);
+    inducedDeg[i] = aInd / SL_RAD;
+    const a = aGeo - aInd;
+    const lift = [-Math.sin(a) * e[0] + Math.cos(a) * nn[0], -Math.sin(a) * e[1] + Math.cos(a) * nn[1], -Math.sin(a) * e[2] + Math.cos(a) * nn[2]];
+    return slScale(lift, gamma[i] * vp * width);
+  });
   return {
     converged: resid < tol, iterations: it, residual: resid,
     correctionDeg: d.map((v) => v / SL_RAD),
-    gamma, clLattice: clInv, alphaEffDeg: aEff, section: sec, forces, inducedOverQ, system: sys,
+    gamma, clLattice: clInv, alphaEffDeg: aEff, section: sec, forces, inducedOverQ, inducedDeg, system: sys,
   };
 }
 

@@ -417,13 +417,8 @@ input[type=range]::-moz-range-thumb {
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
 
 /* ---------- responsive ---------- */
-
-@media (max-width: 900px) {
-  .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .controls { border-right: none; border-bottom: 1px solid var(--rule); max-height: 42vh; }
-  .viewports { grid-template-columns: 1fr; grid-template-rows: repeat(6, minmax(220px, 1fr)); overflow-y: auto; }
-  .readout { width: 100%; margin-left: 0; }
-}
+/* The narrow screen's layout is at the end of this file: it has to come
+   after the one- and two-pane layouts it replaces. */
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
@@ -588,3 +583,29 @@ input[type=range]::-moz-range-thumb {
   cursor: pointer;
 }
 .themebtn:hover { color: var(--text); border-color: var(--text-faint); }
+
+/* ---------- a narrow screen ---------- */
+
+/* On a screen 900 px wide or less the shell cannot hold the masthead, the
+   controls and the drawings in one fixed frame. At a phone's width the
+   readout alone wraps to a third of the height, the controls take 42% of it
+   and the Flight's tools wrap to four rows: the panes of the one- and
+   two-pane tabs were left between 0 and 60 px tall, the Flight's chart
+   nothing at all, and the two-pane tabs sat side by side at half the width.
+   The page scrolls instead; the controls keep their own scroll box, and each
+   pane takes most of the screen's height, one under another. Last in the
+   file because `.viewports.one` and `.viewports.two` above would otherwise
+   win on order. */
+@media (max-width: 900px) {
+  .shell { height: auto; min-height: 100%; overflow: visible; }
+  .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; overflow: visible; }
+  .controls { border-right: none; border-bottom: 1px solid var(--rule); max-height: 42vh; }
+  .stage { overflow: visible; }
+  .viewports, .viewports.one, .viewports.two {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: minmax(300px, 68vh);
+    overflow: visible;
+  }
+  .readout { width: 100%; margin-left: 0; }
+}

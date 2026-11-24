@@ -279,16 +279,49 @@ certification standard's own manoeuvres.
   tunnel's lift from −4° to 10° at Re 1.5 million and stalls at 15°, against
   its 14°. Bounded through any angle and bend, with no step in lift over
   0.2 between half degrees.
-- **EN 926-2's manoeuvres, on the default wing.** Both brakes over 5 s: it
-  departs at 52 cm, which the standard's table puts in class C for 80 to
-  100 kg (class A asks for more than 60). One control to 25% and then 62.5%
-  of the travel at trim speed: no spin, class A. These are the model's
-  verdicts on a wing nobody has built, against the standard's thresholds;
-  they are not a certificate.
+- **EN 926-2's manoeuvres, on the default wing.** Both brakes held, it glides
+  steadily to 69 cm and not at 70; lowered over 5 s it departs at 88 cm, the
+  phugoid carrying it past the steady stall. Both are class A for 80 to
+  100 kg, which asks for more than 60. One control to 25% and then 62.5% of
+  the travel at trim speed: no spin, class A. These are the model's verdicts
+  on a wing nobody has built, against the standard's thresholds; they are not
+  a certificate. (1.13 said 52 cm, class C: its force direction, 2.12.)
+- **The steady polar through the brakes**, against a measured wing of the
+  same kind: minimum 22.2 km/h and minimum sink 1.04 m/s, where Parapente Mag
+  measured a Niviuk Hook 3 at 24 km/h and 1.05 m/s (as Heatwole's thesis
+  gives the test).
 
 What is not checked: the turn. No measured turn rate or bank against brake
 travel was found for any paraglider, and before departing this model yaws
 and skids more than it banks.
+
+### 2.12 The lattice and the flight's forces, against Belloc's wind tunnel
+
+Belloc (2015) tested a rigid 1/8 paraglider wing at 40 m/s: lift, drag and
+pitch against the angle, side force, roll and yaw against the sideslip. Its
+geometry is published section by section, and the tool builds it rib by rib
+as it builds its own wings (flat and projected areas within 0.2% of the
+paper's). NACA 23015 is solved by mfoil at the model's Reynolds numbers.
+Through the slices and through the flight model's forces:
+
+- **Against the tunnel.** The side force and the yaw stiffness agree within
+  10%, and the drag's rise with lift within 8%. The lift slope is 26% steep,
+  as AVL's, XFLR5's and Heatwole's lifting line's are 14 to 19% steep, which
+  he could not explain; the roll stiffness is 30% weak, as theirs are; the
+  drag at no lift, from smooth sections, is half the model's.
+- **Against AVL on the same wing.** The lift slope within 7%, the pitch
+  stiffness about the balance's point within 1%.
+- **What it found.** The slices' force came out square to the plate, not the
+  flow, and the pitching moment a line's length below rose with the angle
+  where the tunnel's falls; the flight's direction, the three-quarter
+  chord's, put the induced drag a third high. Both now take the lifting
+  line's direction, and the strips' induced drag adds up to the Trefftz
+  plane's. On the default wing this moved the flight's trim from 7.4° to
+  5.3°, 0.3° above the balance's 5°.
+
+The two published sets of the measurements differ only in the angle, by
+1.70° per unit lift; the corrected one is used. The figures are in
+`docs/stability.md`, section 5, and the unit suite holds the tool to them.
 
 ---
 

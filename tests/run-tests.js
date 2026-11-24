@@ -189,6 +189,15 @@ import {
   flightForces, flightDerivative, flightSchedule, flightDuration, flightSteps, flightSummary, flightRotation, flightEuler,
   flightQuaternion, apparentMassBarrows,
 } from '../src/core/flight.js';
+import { trefftzInfluence } from '../src/core/vlm.js';
+import {
+  STABILITY, STABILITY_COEFFICIENTS, STABILITY_STATES, stabilityReference, stabilityDerivatives, stabilityJacobian,
+  stabilityModes, stabilityMapSteps, eigenvalues, eigenvector,
+} from '../src/core/stability.js';
+import {
+  BELLOC, bellocPoints, bellocWing, bellocMomentPoint, bellocTunnel, bellocCurve, slopeBetween, bellocSections,
+  bellocAirfoil, bellocSlices, bellocFlightModel, bellocFlightCoefficients,
+} from '../tools/windtunnel.mjs';
 
 const pick = (p) => (p ? { row: p.row, level: p.level, index: p.index } : null);
 
@@ -18999,6 +19008,299 @@ function shippedBrakeSolve(code) {
     `${bar.barMM} of 150 mm, ${(bar.trim.speed * 3.6).toFixed(1)} km/h, CL ${bar.trim.liftCoefficient.toFixed(3)}${bar.limitedBy ? `; ${bar.limitedBy.barMM} mm: ${bar.limitedBy.reason}` : ''}`);
   check('flight: eighteen scenarios', FLIGHT_STATES.length * FLIGHT_INPUTS.length * FLIGHT_RATES.length === 18
     && FLIGHT.rates.slow === 3 && FLIGHT.rates.medium === 1 && FLIGHT.rates.fast === 0.5 && FLIGHT.travelMM === 650);
+}
+
+{
+  console.log('\nthe force on a strip — square to the flow at its lifting line');
+  // The Trefftz plane's influence is its segments' drag one circulation at a time.
+  const wingT = demoWing();
+  const sysT = latticeSystem(wingStrips(wingT), { alphaDeg: 6 });
+  const seenT = (q) => [q[1], q[2] * Math.cos(sysT.alpha) - q[0] * Math.sin(sysT.alpha)];
+  const trace = sysT.panels.map((p) => [seenT(p.ta), seenT(p.tb)]);
+  const gT = sysT.panels.map((p, i) => 0.5 + 0.3 * Math.cos(i));
+  const T = trefftzInfluence(trace);
+  const segs = trefftzSegments(trace, gT, 1.225);
+  const nT = trace.length;
+  const worstT = Math.max(...segs.map((d, i) => {
+    let w = 0;
+    for (let j = 0; j < nT; j++) w += T[i * nT + j] * gT[j];
+    return Math.abs(0.5 * 1.225 * gT[i] * w - d) / Math.max(1e-9, Math.abs(d));
+  }));
+  check('force: the Trefftz influence gives each segment\'s drag', worstT < 1e-12, `worst ${worstT.toExponential(1)}`);
+  // The slices: flat plates, no profile drag. The strips' own drag is the
+  // Trefftz plane's, and their lift the circulation's.
+  const st = sliceStations(wingT);
+  const sys2 = latticeSystem(st.map((x) => x.strip), { alphaDeg: 6 });
+  const plate = coupleSlices({ slices: st, alphaDeg: 6, system: sys2, tol: 1e-10, maxIterations: 2000,
+    sectionAt: (i, a) => ({ cl: 2 * Math.PI * a * Math.PI / 180, cd: 0, cm: 0 }) });
+  const dd = [Math.cos(sys2.alpha), 0, Math.sin(sys2.alpha)]; const ld = [-Math.sin(sys2.alpha), 0, Math.cos(sys2.alpha)];
+  const Dq = plate.forces.reduce((a, f) => a + 2 * (f[0] * dd[0] + f[2] * dd[2]), 0);
+  // to first order in the induced angle: its sine, and the tips' upwash, leave a little
+  check('force: on the slices the strips\' induced drag adds up to the Trefftz plane\'s, within 1%', Math.abs(Dq / plate.inducedOverQ - 1) < 0.01,
+    `${Dq.toFixed(6)} against ${plate.inducedOverQ.toFixed(6)} m²`);
+  const Lq = plate.forces.reduce((a, f) => a + 2 * (f[0] * ld[0] + f[2] * ld[2]), 0);
+  const Lkj = sys2.panels.reduce((a, p, i) => {
+    const U = sys2.U; const sp = p.span;
+    const c = [U[1] * sp[2] - U[2] * sp[1], U[2] * sp[0] - U[0] * sp[2], U[0] * sp[1] - U[1] * sp[0]];
+    return a + 2 * plate.gamma[i] * (c[0] * ld[0] + c[2] * ld[2]);
+  }, 0);
+  check('force: and their lift is the circulation\'s on the free stream, within the induced angle\'s cosine', Math.abs(Lq / Lkj - 1) < 0.01,
+    `${Lq.toFixed(4)} against ${Lkj.toFixed(4)} m²`);
+  // The flight model: at trim, what is left of the drag after the pilot's,
+  // the lines' and the sections' is the Trefftz plane's.
+  const ribsF = wingT.ribs; const rootF = ribsF[0].chord;
+  const karF = [0.423 * rootF, 0.21, -7.0];
+  const fm = flightModel({ wing: wingT, linePlan: { karabiner: karF }, airfoil: naca4('4415'), table: brakeSectionTable(shippedBrakeSolve('4415')),
+    atm: atmosphere(1000), pilotKg: 80, wingKg: 5, linesKg: 0.4, areaM2: 22.34, cxPilot: 0.015, cxLines: 0.02, alphaWakeDeg: 6 });
+  const ft = flightTrim(fm, { speed: 10, alphaDeg: 6, glide: 8 });
+  const fw = flightWork(fm); fw.d.set(ft.work.d); fw.tol = 1e-11; fw.maxIterations = 600;
+  const ff = flightForces(fm, ft.state, { left: 0, right: 0 }, fw);
+  const vB = [ft.state[7], ft.state[8], ft.state[9]]; const Vt = Math.hypot(...vB);
+  const dragAll = -(ff.aero[0] * vB[0] + ff.aero[1] * vB[1] + ff.aero[2] * vB[2]) / Vt;
+  const dragPilotLines = 0.5 * fm.rho * Vt * Vt * (fm.dragPilotM2 + fm.dragLinesM2);
+  let dragProfile = 0;
+  for (let i = 0; i < fm.n; i++) dragProfile += 0.5 * fm.rho * fw.vp[i] ** 2 * fm.area[i] * fw.cd[i] * Math.cos(fw.aDir[i] - fw.aGeo[i]);
+  const seenF = (q) => [q[1], q[2] * Math.cos(fm.sys.alpha) - q[0] * Math.sin(fm.sys.alpha)];
+  const dT = trefftzDrag(fm.sys.panels.map((p) => [seenF(p.ta), seenF(p.tb)]), Array.from(fw.gam), fm.rho);
+  const left = dragAll - dragPilotLines - dragProfile;
+  check('force: in flight, the drag the strips\' lift carries is the Trefftz plane\'s', Math.abs(left / dT - 1) < 0.02,
+    `${left.toFixed(2)} N against ${dT.toFixed(2)} N`);
+  // As 1.13 had it, the three-quarter chord's angle, the same wing's induced
+  // drag comes out well above the Trefftz plane's.
+  const fmC = flightModel({ wing: wingT, linePlan: { karabiner: karF }, airfoil: naca4('4415'), table: fm.table,
+    atm: atmosphere(1000), pilotKg: 80, wingKg: 5, linesKg: 0.4, areaM2: 22.34, cxPilot: 0.015, cxLines: 0.02, alphaWakeDeg: 6,
+    settings: { inducedAngle: 'control' } });
+  const fwC = flightWork(fmC); fwC.d.set(ft.work.d); fwC.tol = 1e-11; fwC.maxIterations = 600;
+  const ffC = flightForces(fmC, ft.state, { left: 0, right: 0 }, fwC);
+  const dragC = -(ffC.aero[0] * vB[0] + ffC.aero[1] * vB[1] + ffC.aero[2] * vB[2]) / Vt;
+  check('force: the three-quarter chord\'s angle overstates it', dragC - dragPilotLines - dragProfile > 1.15 * dT,
+    `${(dragC - dragPilotLines - dragProfile).toFixed(2)} N against ${dT.toFixed(2)} N`);
+}
+
+{
+  console.log('\nstability — the derivatives and the modes');
+  // eigenvalues, against matrices whose eigenvalues are known
+  const near2 = (a, b) => Math.abs(a.re - b.re) + Math.abs(a.im - b.im);
+  const companion = (coef) => {
+    // x^n + c[n-1] x^(n-1) + ... + c[0]
+    const n = coef.length;
+    return Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === 0 ? -coef[n - 1 - j] : (j === i - 1 ? 1 : 0))));
+  };
+  // (x+1)(x+2)(x^2+2x+5)(x-0.5)(x^2+0.2x+4)
+  const mul = (a, b) => { const r = new Array(a.length + b.length - 1).fill(0); a.forEach((x, i) => b.forEach((y, j) => { r[i + j] += x * y; })); return r; };
+  let poly = [1];
+  for (const f of [[1, 1], [1, 2], [1, 2, 5], [1, -0.5], [1, 0.2, 4]]) poly = mul(poly, f);
+  const coefs = poly.slice(1).reverse();
+  // each wanted root matched to the nearest found: three share a real part
+  const matchErr = (found, wanted) => {
+    const left = found.slice();
+    return Math.max(...wanted.map((w) => {
+      let bi = 0;
+      left.forEach((f, i) => { if (near2(f, w) < near2(left[bi], w)) bi = i; });
+      const e = near2(left[bi], w); left.splice(bi, 1); return e;
+    }));
+  };
+  const evC = eigenvalues(companion(coefs));
+  const want = ([{ re: -1, im: 0 }, { re: -2, im: 0 }, { re: -1, im: 2 }, { re: -1, im: -2 }, { re: 0.5, im: 0 },
+    { re: -0.1, im: Math.sqrt(4 - 0.01) }, { re: -0.1, im: -Math.sqrt(4 - 0.01) }]);
+  const errC = matchErr(evC, want);
+  check('stability: the eigenvalues of a polynomial\'s companion are its roots', evC.length === 7 && errC < 1e-9, `worst ${errC.toExponential(1)}`);
+  // a block-diagonal matrix with known eigenvalues, hidden by a similarity
+  const Dm = Array.from({ length: 8 }, () => new Array(8).fill(0));
+  const blocks = [[-0.3, 1.7], [-2.2, 2.4], [0.05, 0.9], [-0.6, 0]];
+  blocks.forEach(([re, im], k) => {
+    const i = 2 * k;
+    if (im) { Dm[i][i] = re; Dm[i][i + 1] = im; Dm[i + 1][i] = -im; Dm[i + 1][i + 1] = re; } else { Dm[i][i] = re; Dm[i + 1][i + 1] = -4.5; }
+  });
+  const P = Array.from({ length: 8 }, (_, i) => Array.from({ length: 8 }, (_, j) => (i === j ? 2 : 0) + Math.sin(1 + i * 3 + j * 7) * 0.7));
+  // P^-1 by Gauss-Jordan
+  const inv = (A) => {
+    const n = A.length; const M2 = A.map((r, i) => [...r, ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))]);
+    for (let c = 0; c < n; c++) {
+      let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(M2[r][c]) > Math.abs(M2[piv][c])) piv = r;
+      [M2[c], M2[piv]] = [M2[piv], M2[c]];
+      const d = M2[c][c]; for (let k = 0; k < 2 * n; k++) M2[c][k] /= d;
+      for (let r = 0; r < n; r++) if (r !== c) { const f = M2[r][c]; for (let k = 0; k < 2 * n; k++) M2[r][k] -= f * M2[c][k]; }
+    }
+    return M2.map((r) => r.slice(n));
+  };
+  const mm = (A, B) => A.map((r) => B[0].map((_, j) => r.reduce((t, v, k) => t + v * B[k][j], 0)));
+  const Am = mm(mm(P, Dm), inv(P));
+  const evB = eigenvalues(Am);
+  const wantB = ([{ re: -0.3, im: 1.7 }, { re: -0.3, im: -1.7 }, { re: -2.2, im: 2.4 }, { re: -2.2, im: -2.4 },
+    { re: 0.05, im: 0.9 }, { re: 0.05, im: -0.9 }, { re: -0.6, im: 0 }, { re: -4.5, im: 0 }]);
+  const errB = matchErr(evB, wantB);
+  check('stability: and of a matrix similar to known blocks, the blocks\'', errB < 1e-9, `worst ${errB.toExponential(1)}`);
+  // eigenvectors: A v = lambda v
+  let worstV = 0;
+  for (const lam of eigenvalues(Am)) {
+    const v = eigenvector(Am, lam);
+    for (let i = 0; i < 8; i++) {
+      let re = 0; let im = 0;
+      for (let j = 0; j < 8; j++) { re += Am[i][j] * v[j][0]; im += Am[i][j] * v[j][1]; }
+      worstV = Math.max(worstV, Math.hypot(re - (lam.re * v[i][0] - lam.im * v[i][1]), im - (lam.re * v[i][1] + lam.im * v[i][0])));
+    }
+  }
+  check('stability: each eigenvector is one, A v = lambda v', worstV < 1e-8, `worst residual ${worstV.toExponential(1)}`);
+
+  // the glider: the demonstration wing at its trim
+  const wing = demoWing();
+  const rootC = wing.ribs[0].chord;
+  const kar = [0.423 * rootC, 0.21, -7.0];
+  const base = { wing, linePlan: { karabiner: kar }, airfoil: naca4('4415'), table: brakeSectionTable(shippedBrakeSolve('4415')),
+    atm: atmosphere(1000), pilotKg: 80, wingKg: 5, linesKg: 0.4, areaM2: 22.34, cxPilot: 0.015, cxLines: 0.02 };
+  let model = flightModel({ ...base, alphaWakeDeg: 6 });
+  let trim = flightTrim(model, { speed: 10, alphaDeg: 6, glide: 8 });
+  model = flightModel({ ...base, alphaWakeDeg: trim.alphaDeg });
+  trim = flightTrim(model, { guess: trim.guess });
+  const ref = stabilityReference(model);
+  check('stability: on the projected area and span, the mean chord their ratio', ref.areaM2 > 15 && ref.areaM2 < 22.34 && Math.abs(ref.chordM - ref.areaM2 / ref.spanM) < 1e-12,
+    `${ref.areaM2.toFixed(2)} m², ${ref.spanM.toFixed(2)} m`);
+  const d = stabilityDerivatives(model, trim);
+  const k = (n) => STABILITY_COEFFICIENTS.indexOf(n);
+  // symmetry: a symmetric glider has no lateral force or moment from alpha or q,
+  // and no longitudinal one from beta, p or r
+  const cross = Math.max(...['CY', 'Cl', 'Cn'].flatMap((c) => [Math.abs(d.d.alpha[k(c)]), Math.abs(d.d.q[k(c)])]),
+    ...['CX', 'CZ', 'Cm'].flatMap((c) => [Math.abs(d.d.beta[k(c)]), Math.abs(d.d.p[k(c)]), Math.abs(d.d.r[k(c)])]));
+  check('stability: symmetric, the lateral and the longitudinal derivatives do not mix', cross < 1e-8, `largest ${cross.toExponential(1)}`);
+  // the paper's robustness: half the steps move the criteria by little
+  const dh = stabilityDerivatives(model, trim, { angleStepRad: STABILITY.angleStepRad / 2, rateStepRadS: STABILITY.rateStepRadS / 2 });
+  const moved = Math.max(...d.criteria.map((c, i) => Math.abs(dh.criteria[i].value / c.value - 1)));
+  check('stability: half the steps move the six criteria by less than 0.5%', moved < 0.005, `largest ${(moved * 100).toFixed(3)}%`);
+  // moments move between points as the force's lever says
+  const dr = stabilityDerivatives(model, trim, { about: 'riser' });
+  const r0 = model.rSolidB; const L = [1, 1, 1, ref.spanM, ref.chordM, ref.spanM];
+  // M_cg = M_riser - r0 x F: in coefficients, Cm_cg = Cm_riser - (r0 x CF)_y / c
+  const cF = [0, 1, 2].map((i) => d.d.alpha[i]);
+  const transfer = dr.d.alpha[k('Cm')] - (r0[2] * cF[0] - r0[0] * cF[2]) / L[4];
+  check('stability: the pitch stiffness moves from the karabiners to the centre of mass by the lever', Math.abs(transfer - d.d.alpha[k('Cm')]) < 1e-9,
+    `${d.d.alpha[k('Cm')].toFixed(6)} against ${transfer.toFixed(6)}`);
+  check('stability: the glider is statically stable and damped in roll, pitch and yaw', d.stable,
+    d.criteria.map((c) => `${c.key} ${c.value.toFixed(3)}`).join(', '));
+  check('stability: its pitch stiffness dwarfs its yaw stiffness, its yaw damping is the weakest', Math.abs(d.criteria[1].value) > 5 * d.criteria[2].value
+    && Math.abs(d.criteria[5].value) < Math.abs(d.criteria[4].value) && Math.abs(d.criteria[5].value) < Math.abs(d.criteria[3].value) + Math.abs(d.criteria[4].value));
+  // the modes
+  const md = stabilityModes(model, trim);
+  check('stability: linearised, the longitudinal and the lateral blocks do not couple', md.coupling < 1e-8, `${md.coupling.toExponential(1)}`);
+  const names = md.modes.map((m) => m.name);
+  check('stability: it has a pitch oscillation and a phugoid, and a lateral oscillation', names.includes('pitch') && names.includes('phugoid')
+    && md.modes.some((m) => m.kind === 'lateral' && m.periodS), names.join(', '));
+  const pitch = md.modes.find((m) => m.name === 'pitch'); const phug = md.modes.find((m) => m.name === 'phugoid');
+  check('stability: the pitch oscillation is quick and well damped, the phugoid slow and light', pitch.periodS > 1 && pitch.periodS < 5 && pitch.dampingRatio > 0.3
+    && phug.periodS > pitch.periodS && phug.dampingRatio < pitch.dampingRatio,
+    `pitch ${pitch.periodS.toFixed(2)} s at ${pitch.dampingRatio.toFixed(2)}, phugoid ${phug.periodS.toFixed(2)} s at ${phug.dampingRatio.toFixed(2)}`);
+  // the linear model is the nonlinear one, a small push from trim
+  const { A, x0 } = stabilityJacobian(model, trim);
+  const push = [0.05, 0.08, -0.04, 0.01, 0.015, -0.01, 0.01, 0.005];
+  const f8 = (s8, w8) => {
+    const [u, v, w, p, q, r, phi, theta] = s8;
+    const x = Float64Array.from([0, 0, -1000, ...flightQuaternion(phi, theta, 0), u, v, w, p, q, r]);
+    const dx = flightDerivative(model, x, { left: 0, right: 0 }, w8);
+    return [dx[7], dx[8], dx[9], dx[10], dx[11], dx[12], p + Math.tan(theta) * (q * Math.sin(phi) + r * Math.cos(phi)), q * Math.cos(phi) - r * Math.sin(phi)];
+  };
+  const w8 = flightWork(model); w8.d.set(trim.work.d); w8.tol = 1e-10; w8.maxIterations = 600;
+  const rk = (fn, y, h) => {
+    const k1 = fn(y); const k2 = fn(y.map((v, i) => v + 0.5 * h * k1[i])); const k3 = fn(y.map((v, i) => v + 0.5 * h * k2[i])); const k4 = fn(y.map((v, i) => v + h * k3[i]));
+    return y.map((v, i) => v + (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+  };
+  let yN = x0.map((v, i) => v + push[i]); let yL = push.slice();
+  let worstL = 0; let peak = 0;
+  for (let t = 0; t < 6; t += 0.02) {
+    yN = rk((y) => f8(y, w8), yN, 0.02);
+    yL = rk((y) => A.map((row) => row.reduce((a, aij, j) => a + aij * y[j], 0)), yL, 0.02);
+    for (const i of [4, 5]) { worstL = Math.max(worstL, Math.abs(yN[i] - x0[i] - yL[i])); peak = Math.max(peak, Math.abs(yL[i])); }
+  }
+  check('stability: pushed a little from trim, the nonlinear model follows the linear one', worstL < 0.05 * peak,
+    `pitch and yaw rates within ${(worstL / peak * 100).toFixed(2)}% of their peak over 6 s`);
+  // the hang point: up (shorter lines) weakens the roll stiffness, as raising a kite's tow point does
+  const map = runSteps(stabilityMapSteps(({ dxM, dzM, alphaWakeDeg }) => flightModel({ ...base, linePlan: { karabiner: [kar[0] + dxM, kar[1], kar[2] + dzM] }, alphaWakeDeg }),
+    { dxM: [0], dzM: [-1, 0, 1], guess: trim.guess, alphaWakeDeg: trim.alphaDeg }));
+  const roll = map.cells.map((c) => c.criteria?.find((x) => x.key === 'Cl_beta')?.value);
+  check('stability: shorter lines weaken the roll stiffness, as a kite\'s higher tow point does', roll.every(Number.isFinite) && roll[0] < roll[1] && roll[1] < roll[2],
+    roll.map((v) => v.toFixed(3)).join(' → '));
+  // its wake laid along this trim's angle rather than the first one's
+  check('stability: the map\'s own cell is the trim, within 0.1%', Math.abs(map.cells[1].glideRatio / trim.glideRatio - 1) < 1e-3,
+    `${map.cells[1].glideRatio.toFixed(4)} against ${trim.glideRatio.toFixed(4)}`);
+  check('stability: the states are the eight of the linearisation', STABILITY_STATES.join() === 'u,v,w,p,q,r,phi,theta');
+}
+
+{
+  console.log('\nBelloc\'s wind-tunnel paraglider — the tool\'s aerodynamics against a measured wing');
+  const wing = bellocWing();
+  const P = bellocPoints();
+  check('belloc: thirteen sections, symmetric', P.length === 13 && P.every((p, i) => Math.abs(p.y + P[12 - i].y) < 1e-12 && p.chord === P[12 - i].chord));
+  // its areas and spans against the paper's, at 1/8 scale
+  const sys = latticeSystem(wingStrips(wing), { alphaDeg: 5 });
+  let flat = 0; let proj = 0; let fspan = 0;
+  sys.panels.forEach((p) => {
+    const s2 = p.strip;
+    const c = (Math.hypot(...[0, 1, 2].map((q) => s2.leftTE[q] - s2.leftLE[q])) + Math.hypot(...[0, 1, 2].map((q) => s2.rightTE[q] - s2.rightLE[q]))) / 2;
+    const w = Math.hypot(...p.span);
+    flat += c * w; proj += c * w * Math.abs(p.normal[2]); fspan += w;
+  });
+  check('belloc: built as the tool builds its ribs, its areas are the paper\'s within 0.5%', Math.abs(flat / (28.56 / 64) - 1) < 0.005 && Math.abs(proj / (25.08 / 64) - 1) < 0.005,
+    `flat ${flat.toFixed(4)} m², projected ${proj.toFixed(4)} m²`);
+  check('belloc: and its flat span within 1%', Math.abs(fspan / (13.64 / 8) - 1) < 0.01, `${fspan.toFixed(4)} m`);
+  // the two published sets are one test
+  const all = bellocTunnel();
+  const clF = bellocCurve(all, { coefficient: 'CL', sweep: 'alpha', heldDeg: 0 });
+  const cdF = bellocCurve(all, { coefficient: 'CD', sweep: 'alpha', heldDeg: 0 });
+  const clA = bellocCurve(all, { set: 'fairaero', coefficient: 'CL', sweep: 'alpha', heldDeg: 0 });
+  const cdA = bellocCurve(all, { set: 'fairaero', coefficient: 'CD', sweep: 'alpha', heldDeg: 0 });
+  const interp = (curve, x) => { let i = 0; while (i < curve.length - 2 && curve[i + 1][0] < x) i++; const [x0, y0] = curve[i]; const [x1, y1] = curve[i + 1]; return y0 + (y1 - y0) * (x - x0) / (x1 - x0); };
+  const rising = clF.filter(([a]) => a < 17);
+  const alphaAt = (cl) => { let i = 0; while (i < rising.length - 2 && rising[i + 1][1] < cl) i++; const [a0, c0] = rising[i]; const [a1, c1] = rising[i + 1]; return a0 + (a1 - a0) * (cl - c0) / (c1 - c0); };
+  const pairs = clA.filter(([a, cl]) => a > -1.2 && a < 15.5 && cl > 0).map(([a, cl], i) => ({ cl, dA: alphaAt(cl) - a, dCD: interp(cdF, alphaAt(cl)) - cdA.find((r) => r[0] === a)[1] }));
+  const fitA = slopeBetween(pairs.map((p) => [p.cl, p.dA]), 0, 1);
+  check('belloc: the two sets agree on drag at equal lift, within 0.002', Math.max(...pairs.map((p) => Math.abs(p.dCD))) < 0.002);
+  check('belloc: and differ in angle by 1.7° per unit of lift, the figures\' corrected for the load', Math.abs(fitA.slope - 1.70) < 0.1 && Math.abs(fitA.intercept) < 0.1,
+    `${fitA.slope.toFixed(3)}° per unit lift, ${fitA.intercept.toFixed(3)}° at none`);
+  // the NACA 23015 polars shipped are mfoil's
+  const { grid, flight } = bellocSections();
+  const model23 = sliceSectionModel(bellocAirfoil(), {});
+  const mid = grid.reynolds[2];
+  const errs = [0, 4].map((a) => {
+    const r = mfoilSolve(model23, { alpha: a, Re: mid, ncrit: 9 });
+    const g = grid.rows[2].find((p) => p.alphaDeg === a);
+    return r.converged ? Math.abs(r.cl - g.cl) + Math.abs(r.cd - g.cd) : 1;
+  });
+  check('belloc: the shipped NACA 23015 grid is mfoil\'s, solved again cold', Math.max(...errs) < 1e-6, errs.map((e) => e.toExponential(1)).join(' '));
+  check('belloc: the flight\'s section has the unbent level and two bends at the mean chord\'s Reynolds number', flight.levels.map((l) => l.thetaDeg).join() === '0,10,20'
+    && Math.abs(flight.reynolds / (BELLOC.reynoldsCentral * (28.56 / 64 / (13.64 / 8)) / 0.35) - 1) < 0.02, `${flight.reynolds}`);
+  // the slices' route
+  const sl = [0, 2, 4, 6, 8, 10].map((a) => bellocSlices(a, { wing, grid }));
+  const clS = slopeBetween(sl.map((o) => [o.alphaDeg, o.CL]), 0, 10).slope;
+  const avl = slopeBetween(bellocCurve(all, { method: 'AVL', coefficient: 'CL', sweep: 'alpha', heldDeg: 0 }), 0, 10).slope;
+  const tun = slopeBetween(clF, 0, 10).slope;
+  check('belloc: the slices\' lift slope is AVL\'s on the same wing, within 10%', Math.abs(clS / avl - 1) < 0.1,
+    `${clS.toFixed(4)} against AVL's ${avl.toFixed(4)} a degree; the tunnel's ${tun.toFixed(4)}`);
+  // drag: its rise with lift (CD = CD0 + k CL^2) is the tunnel's
+  const kOf = (pts) => slopeBetween(pts.filter(([cl]) => cl >= 0.15 && cl <= 0.75).map(([cl, cd]) => [cl * cl, cd]), 0, 1);
+  const kS = kOf(sl.map((o) => [o.CL, o.CD])); const kT = kOf(clA.map(([a, cl], i) => [cl, cdA[i][1]]));
+  check('belloc: the drag\'s rise with lift is the tunnel\'s, within 10%', Math.abs(kS.slope / kT.slope - 1) < 0.1,
+    `${kS.slope.toFixed(4)} against ${kT.slope.toFixed(4)} per CL²; at no lift ${kS.intercept.toFixed(4)} against ${kT.intercept.toFixed(4)}`);
+  // the pitching moment about T1, a line's length below
+  const cmS = slopeBetween(sl.map((o) => [o.alphaDeg, o.Cm]), 0, 10).slope * 180 / Math.PI;
+  const cmA = slopeBetween(bellocCurve(all, { method: 'AVL', coefficient: 'Cm', sweep: 'alpha', heldDeg: 0 }), 0, 10).slope * 180 / Math.PI;
+  const cmT = slopeBetween(bellocCurve(all, { coefficient: 'Cm', sweep: 'alpha', heldDeg: 0 }), 0, 10).slope * 180 / Math.PI;
+  check('belloc: about T1 the pitching moment falls with the angle, as the tunnel\'s, and as steeply as AVL\'s within 10%', cmS < 0 && cmT < 0 && Math.abs(cmS / cmA - 1) < 0.1,
+    `${cmS.toFixed(3)} a radian; AVL ${cmA.toFixed(3)}, the tunnel ${cmT.toFixed(3)}`);
+  // the flight model's sideslip derivatives against the tunnel's
+  for (const a of [5, 10]) {
+    const m = bellocFlightModel(a);
+    const pts = [-5, -3, -1, 1, 3, 5].map((b) => [b, bellocFlightCoefficients(m, a, b)]);
+    const der = (c) => slopeBetween(pts.map(([b, x]) => [b, x[c]]), -5, 5).slope * 180 / Math.PI;
+    const tunnel = (c) => slopeBetween(bellocCurve(all, { coefficient: c, sweep: 'beta', heldDeg: a }), -5, 5).slope * 180 / Math.PI;
+    const [cy, cl, cn] = ['CY', 'Cl', 'Cn'].map(der); const [ty, tl, tn] = ['CY', 'Cl', 'Cn'].map(tunnel);
+    check(`belloc: at ${a}° the side force and the yaw stiffness are the tunnel's within 10%`, Math.abs(cy / ty - 1) < 0.1 && Math.abs(cn / tn - 1) < 0.1,
+      `CY/β ${cy.toFixed(3)} (${ty.toFixed(3)}), Cn/β ${cn.toFixed(3)} (${tn.toFixed(3)})`);
+    check(`belloc: at ${a}° the roll stiffness has the tunnel's sign, and is within 40% of it`, cl < 0 && tl < 0 && Math.abs(cl / tl - 1) < 0.4,
+      `Cl/β ${cl.toFixed(3)} (${tl.toFixed(3)})`);
+  }
+  check('belloc: its moments are about T1, a quarter chord back and a metre below the central leading edge', (() => {
+    const t1 = bellocMomentPoint(wing); const le = wing.ribs[0].frame.origin;
+    return Math.abs(t1[0] - le[0] - 0.0875) < 1e-12 && Math.abs(le[2] - t1[2] - 1) < 1e-12;
+  })());
 }
 
 console.log(`\n${'='.repeat(60)}`);
