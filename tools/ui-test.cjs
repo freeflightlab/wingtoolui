@@ -1861,7 +1861,9 @@ try {
       // On a roll of their own: the bill ordered cloth for the sail and
       // the diagonals and none for the ribs, which are a third of it.
       ['the ribs', /Rib cloth\n\s+[\d.]+ m of [\d.]+ m roll\s+\(\d+% used\)\n\s+\d+ pieces, [\d.]+ m2, \d+ g\n\s+\d+% of [\d.]+ m2 removed as openings/],
-      ['what the roll total is made of', /roll to order: [\d.]+ m \(sail cloth [\d.]+, rib cloth [\d.]+, diagonal cloth [\d.]+\)/],
+      ['what the roll total is made of', /roll to order: [\d.]+ m \(sail cloth [\d.]+, rib cloth [\d.]+, mini-rib cloth [\d.]+, diagonal cloth [\d.]+\)/],
+      // The mini-ribs, a piece in the middle of every cell but the tip's.
+      ['the mini-ribs', /Mini-rib cloth\n\s+[\d.]+ m of [\d.]+ m roll\s+\(\d+% used\)\n\s+\d+ pieces, [\d.]+ m2, \d+ g\n\s+trailing-edge mini-ribs, 15% of chord/],
       ['the diagonals', /Diagonal cloth/],
       ['the anchor patches', /Dacron at the anchors/],
       ['the tabs', /Attachment tabs/],
@@ -1889,11 +1891,11 @@ try {
       const m = /Riser maillons\s+(\d+)/.exec(first);
       if (m && Number(m[1]) !== want) fail(`the bill lists ${m[1]} riser maillons for ${want} risers`);
     }
-    // The roll to order is the three rolls listed, added up.
+    // The roll to order is the four rolls listed, added up.
     {
-      const r = /roll to order: ([\d.]+) m \(sail cloth ([\d.]+), rib cloth ([\d.]+), diagonal cloth ([\d.]+)\)/.exec(first);
-      if (Math.abs(Number(r[1]) - (Number(r[2]) + Number(r[3]) + Number(r[4]))) > 0.11) {
-        fail(`the roll to order, ${r[1]} m, is not the rolls listed: ${r[2]} + ${r[3]} + ${r[4]}`);
+      const r = /roll to order: ([\d.]+) m \(sail cloth ([\d.]+), rib cloth ([\d.]+), mini-rib cloth ([\d.]+), diagonal cloth ([\d.]+)\)/.exec(first);
+      if (!r || Math.abs(Number(r[1]) - (Number(r[2]) + Number(r[3]) + Number(r[4]) + Number(r[5]))) > 0.11) {
+        fail(`the roll to order${r ? `, ${r[1]} m,` : ''} is not the rolls listed${r ? `: ${r[2]} + ${r[3]} + ${r[4]} + ${r[5]}` : ''}`);
       }
     }
     const ribs0 = grams(first, 'Rib cloth');
@@ -2323,7 +2325,7 @@ try {
 
     // The bill of materials against the weight the maker publishes.
     //
-    // Cloth, film, tape, line and rods come to 60 to 93% of the published
+    // Cloth, film, tape, line and rods come to 60 to 91% of the published
     // weight across the double-surface wings in the data, on the default
     // cloths: the rest is what the bill names as not weighed. An ultralight
     // weighed in a 32 g sail comes out OVER its real weight, and a
@@ -3062,6 +3064,93 @@ try {
     globalThis.__tab('wing');
   } catch (e) {
     console.log('  FAIL flight: ' + e.message);
+    process.exit(1);
+  }
+  // This tool's own panels are parted at the intake, as a wing is cut: the
+  // upper from where the intake opens round the nose, the lower from where
+  // it closes. Developed whole, every cell was closed at the nose. And the
+  // cutting file carries an allowance by edge, and the hem when asked.
+  try {
+    const Sx = globalThis.__S;
+    if (globalThis.__getLEP()) throw new Error('still on an imported design');
+    globalThis.__rebuild();
+    const Mx = globalThis.__getM();
+    const startsAt = (surface) => Mx.panels.filter((p) => p.surface === surface).map((p) => p.panel.stations?.left?.[0]);
+    if (!startsAt('upper').every((u) => Math.abs(u - Sx.intakeStart / 100) < 1e-9)
+      || !startsAt('lower').every((u) => Math.abs(u - Sx.intakeEnd / 100) < 1e-9)) {
+      throw new Error(`the panels do not part at the intake: upper from ${startsAt('upper')[0]}, lower from ${startsAt('lower')[0]}`);
+    }
+    if (!/the intake\u2019s lips/.test(document.getElementById('note-iso').textContent || '')) {
+      globalThis.__tab('wing'); globalThis.__rebuild();
+    }
+    const areaOf = (q) => { let t = 0; for (let i = 0, j = q.length - 1; i < q.length; j = i++) t += q[j][0] * q[i][1] - q[i][0] * q[j][1]; return Math.abs(t / 2); };
+    const sail = () => globalThis.__parseDXF(globalThis.__exports().dxf).polylines
+      .filter((pl) => /^(upper|lower)-cell-/.test(pl.layer)).reduce((t, pl) => t + areaOf(pl.points), 0);
+    const keep = { side: Sx.seamAllowance, entry: Sx.entryAllowance, te: Sx.trailingAllowance, hem: Sx.entryHem, end: Sx.intakeEnd };
+    const plain = sail();
+    // Each intake edge across, as cut: the front end of every panel's sewing
+    // line, and the sides' allowance either side of it.
+    const side = Sx.seamAllowance / 1000;
+    const across = Mx.panels.reduce((t, p) => t + Math.hypot(p.panel.right[0][0] - p.panel.left[0][0], p.panel.right[0][1] - p.panel.left[0][1]) + 2 * side, 0);
+    Sx.entryHem = true; globalThis.__rebuild();
+    const hemmed = sail();
+    // Folded twice, 10 mm each: one more allowance's depth across every intake edge.
+    const extra = (hemmed - plain) / (across * Sx.entryAllowance / 1000);
+    if (!(Math.abs(extra - 1) < 0.05)) throw new Error(`the hem adds ${(extra * 100).toFixed(0)}% of a fold across the intake edges`);
+    globalThis.__buttons.length = 0; globalThis.__controls(); globalThis.__saved = {};
+    globalThis.__buttons.find((b) => b.text === 'Bill of materials').fn();
+    const billH = Object.values(globalThis.__saved).map(String).join('\n');
+    if (!/hemmed \(folded twice\)/.test(billH)) throw new Error('the bill does not say the intake is hemmed');
+    Sx.entryAllowance = 20; Sx.trailingAllowance = 15; Sx.entryHem = false; globalThis.__rebuild();
+    const byEdge = sail();
+    const backAcross = Mx.panels.reduce((t, p) => { const n = p.panel.left.length; return t + Math.hypot(p.panel.right[n - 1][0] - p.panel.left[n - 1][0], p.panel.right[n - 1][1] - p.panel.left[n - 1][1]) + 2 * side; }, 0);
+    const want = across * 0.010 + backAcross * 0.005;
+    if (!(Math.abs((byEdge - plain) / want - 1) < 0.05)) throw new Error(`20 mm at the intake and 15 at the trailing edge add ${((byEdge - plain) * 1e4).toFixed(0)} cm2, not ${(want * 1e4).toFixed(0)}`);
+    // Closed, the intake is a seam between the two panels, and nothing is hemmed.
+    Sx.intakeEnd = Sx.intakeStart; Sx.entryAllowance = keep.entry; Sx.trailingAllowance = keep.te; globalThis.__rebuild();
+    const shutPlain = sail();
+    Sx.entryHem = true; globalThis.__rebuild();
+    const shutHem = sail();
+    const Mz = globalThis.__getM();
+    const meet = Mz.panels.filter((p) => p.surface === 'upper').every((p) => Math.abs(p.panel.stations.left[0] - Sx.intakeStart / 100) < 1e-9)
+      && Mz.panels.filter((p) => p.surface === 'lower').every((p) => Math.abs(p.panel.stations.left[0] - Sx.intakeStart / 100) < 1e-9);
+    if (!meet || Math.abs(shutHem - shutPlain) > 1e-9) throw new Error('a closed intake is still hemmed, or its panels do not meet');
+    Object.assign(Sx, { seamAllowance: keep.side, entryAllowance: keep.entry, trailingAllowance: keep.te, entryHem: keep.hem, intakeEnd: keep.end });
+    globalThis.__rebuild();
+    console.log(`  ok   the tool's own panels part at the intake (upper from ${Sx.intakeStart}%, lower from ${Sx.intakeEnd}% of chord); `
+      + `hemmed, the intake edges take ${(extra * 100).toFixed(0)}% of a fold more; an allowance by edge reaches the cutting file`);
+  } catch (e) {
+    console.log('  FAIL own panels: ' + e.message);
+    process.exit(1);
+  }
+  // Its own trailing-edge mini-ribs: in the bill, in a cutting file of their
+  // own, and drawn; none when asked for none.
+  try {
+    const Sx = globalThis.__S;
+    const keepLen = Sx.miniRibLength;
+    globalThis.__rebuild();
+    const Mx = globalThis.__getM();
+    const mr = Mx.miniRibs;
+    if (!mr || mr.count !== Mx.wing.ribs.length - 2) throw new Error(`${mr?.count} mini-ribs on ${Mx.wing.ribs.length} ribs`);
+    globalThis.__buttons.length = 0; globalThis.__controls(); globalThis.__saved = {};
+    globalThis.__buttons.find((b) => b.text === 'Mini-ribs DXF').fn();
+    const dxf = Object.entries(globalThis.__saved).find(([f]) => /-miniribs\.dxf$/.test(f))?.[1] ?? '';
+    const cuts = globalThis.__parseDXF(dxf).polylines.filter((pl) => pl.layer === 'minirib-cut').length;
+    const sewn = globalThis.__parseDXF(dxf).polylines.filter((pl) => pl.layer === 'minirib-sewing').length;
+    if (cuts !== mr.count || sewn !== 2 * mr.count) throw new Error(`the mini-ribs' file cuts ${cuts} and sews ${sewn}`);
+    globalThis.__tab('wing'); globalThis.__rebuild();
+    if (!/the mini-ribs/.test(document.getElementById('note-iso').textContent || '')) throw new Error('the 3D view does not say where the mini-ribs are');
+    Sx.miniRibLength = 0;
+    globalThis.__rebuild();
+    globalThis.__buttons.length = 0; globalThis.__controls(); globalThis.__saved = {};
+    globalThis.__buttons.find((b) => b.text === 'Bill of materials').fn();
+    const billNone = Object.values(globalThis.__saved).map(String).join('\n');
+    if (/Mini-rib cloth/.test(billNone) || globalThis.__getM().miniRibs.count !== 0) throw new Error('none asked for, and still billed');
+    Sx.miniRibLength = keepLen;
+    globalThis.__rebuild();
+    console.log(`  ok   ${mr.count} trailing-edge mini-ribs a side, ${mr.totalAreaM2.toFixed(2)} m2 for the wing: billed, cut in their own file, drawn; none at 0%`);
+  } catch (e) {
+    console.log('  FAIL mini-ribs: ' + e.message);
     process.exit(1);
   }
   console.log('\nall UI paths OK');

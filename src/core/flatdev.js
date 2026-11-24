@@ -23,7 +23,7 @@
  * arced wings. Results are identical wherever the original was well behaved.
  */
 
-import { dist3 } from './num.js';
+import { dist3, lerp3 } from './num.js';
 
 /**
  * Unroll one panel between two rib polylines.
@@ -120,10 +120,116 @@ export function developPanel(L, R) {
 }
 
 /**
+ * Where a cell's intake parts a rib's surfaces, and the two sewing edges that
+ * leaves the rib, in 3D and front end first.
+ *
+ * A wing is not cut as two whole surfaces. The upper panel runs from the
+ * trailing edge over the top, round the nose and down under it to where the
+ * intake opens; the lower panel from where the intake closes back to the
+ * trailing edge; the opening between is no panel's. LEparagliding cuts its
+ * designs so (`lepPanels`), and OpenGlider parts its panels at the entry the
+ * same way. Developed as two whole surfaces, nose to tail, every cell of this
+ * tool's own wings was closed at the nose — no air could have got in — and
+ * the cloth was on the wrong surface: on the three complete designs' ribs,
+ * 4 to 7% short on the upper and 5 to 8% over on the lower against their
+ * cutting files (`docs/panels.md`).
+ *
+ * `intake` is `{ start, end }` in fractions of chord along the lower
+ * surface, measured in the rib's own section from its x = 0, as the rib view
+ * draws it. An intake that ends where it starts, or before, parts the
+ * surfaces at one point: a closed cell, its two panels sewn together there.
+ *
+ * Each edge's points are the rib's own, with the lip put in where it falls
+ * between two of them, so a panel's sewing edge is the rib's outline to the
+ * micrometre. `stations` gives every point's chord fraction, for what is
+ * defined along the chord rather than along the panel.
+ */
+export function partedEdges(rib, intake) {
+  const sec = rib.section;
+  if (!sec || sec.lower?.length !== rib.lower.length || sec.upper?.length !== rib.upper.length
+    || !(rib.chord > 0)) {
+    throw new Error(`rib ${rib.index ?? '?'}: parting at the intake needs the rib's own section`);
+  }
+  const c = rib.chord;
+  const s = sec.lower;
+  const from = Math.min(0.5, Math.max(0, intake.start)) * c;
+  const to = Math.min(0.5, Math.max(intake.start, intake.end)) * c;
+  // The lower surface runs nose to tail, so its chord position only grows.
+  const lip = (u) => {
+    let k = 1;
+    while (k < s.length - 1 && s[k][0] < u) k++;
+    const g = Math.min(1, Math.max(0, (u - s[k - 1][0]) / ((s[k][0] - s[k - 1][0]) || 1)));
+    return { k, p: lerp3(rib.lower[k - 1], rib.lower[k], g), u: s[k - 1][0] + g * (s[k][0] - s[k - 1][0]) };
+  };
+  const same = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 1e-9;
+  const a = lip(from);
+  const b = lip(to);
+
+  const upper = [a.p];
+  const upperAt = [a.u / c];
+  for (let j = a.k - 1; j >= 1; j--) {
+    if (same(upper[upper.length - 1], rib.lower[j])) continue;
+    upper.push(rib.lower[j]);
+    upperAt.push(s[j][0] / c);
+  }
+  rib.upper.forEach((q, i) => {
+    if (same(upper[upper.length - 1], q)) return;
+    upper.push(q);
+    upperAt.push(sec.upper[i][0] / c);
+  });
+
+  const lower = [b.p];
+  const lowerAt = [b.u / c];
+  for (let j = b.k; j < rib.lower.length; j++) {
+    if (same(lower[lower.length - 1], rib.lower[j])) continue;
+    lower.push(rib.lower[j]);
+    lowerAt.push(s[j][0] / c);
+  }
+  return { upper, lower, stations: { upper: upperAt, lower: lowerAt }, open: to > from };
+}
+
+/**
+ * Two edges of a panel with the same number of points, for `developPanel`.
+ *
+ * Ribs with one section have their lips in the same place along their
+ * points and need nothing. Ribs of different sections or thicknesses do
+ * not, and the shorter edge has its longest segments split in two until the
+ * counts agree: a point put on a segment changes neither its shape nor its
+ * length, so the seam is still the rib's.
+ */
+function matchCounts(A, a, B, b) {
+  const grow = (P, t, n) => {
+    const Q = P.map((p) => p.slice());
+    const T = t.slice();
+    while (Q.length < n) {
+      let at = 1;
+      let longest = -1;
+      for (let i = 1; i < Q.length; i++) {
+        const l = dist3(Q[i - 1], Q[i]);
+        if (l > longest) { longest = l; at = i; }
+      }
+      Q.splice(at, 0, lerp3(Q[at - 1], Q[at], 0.5));
+      T.splice(at, 0, (T[at - 1] + T[at]) / 2);
+    }
+    return [Q, T];
+  };
+  const n = Math.max(A.length, B.length);
+  const [L, l] = grow(A, a, n);
+  const [R, r] = grow(B, b, n);
+  return { L, R, l, r };
+}
+
+/**
  * Develop every panel of the half wing, upper and lower surfaces.
  * Panel k lies between rib k and rib k+1.
+ *
+ * With `intake` the surfaces part there, as a wing is cut (`partedEdges`):
+ * each rib's own intake when it carries one, this one otherwise, and every
+ * panel then carries its edges' chord fractions (`stations`). Without, each
+ * surface is developed whole, nose to tail.
  */
-export function developWing(wing) {
+export function developWing(wing, { intake = null } = {}) {
+  if (intake) return developParted(wing, intake);
   const out = [];
 
   // The centre cell, when there is one.
@@ -169,6 +275,31 @@ export function developWing(wing) {
       surface: 'lower',
       panel: developPanel(Lr.lower, Rr.lower),
     });
+  }
+  return out;
+}
+
+/** `developWing` with the surfaces parted at the intake. */
+function developParted(wing, intake) {
+  const out = [];
+  const edges = wing.ribs.map((r) => partedEdges(r, r.intake ?? intake));
+  const develop = (cell, surface, A, B, extra = {}) => {
+    const m = matchCounts(A[surface], A.stations[surface], B[surface], B.stations[surface]);
+    const panel = developPanel(m.L, m.R);
+    panel.stations = { left: m.l, right: m.r };
+    out.push({ cell, surface, ...extra, panel });
+  };
+  // The centre cell, between the innermost rib and its mirror.
+  if (wing.centreRib === false && edges.length) {
+    const e = edges[0];
+    const flip = (pts) => pts.map(([x, y, z]) => [x, -y, z]);
+    const mirror = { upper: flip(e.upper), lower: flip(e.lower), stations: e.stations };
+    develop(0, 'upper', mirror, e, { centre: true });
+    develop(0, 'lower', mirror, e, { centre: true });
+  }
+  for (let i = 0; i < edges.length - 1; i++) {
+    develop(i + 1, 'upper', edges[i], edges[i + 1]);
+    develop(i + 1, 'lower', edges[i], edges[i + 1]);
   }
   return out;
 }

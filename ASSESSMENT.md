@@ -219,7 +219,7 @@ were that error (`docs/stability.md`).
 
 ## 5. What is missing
 
-**63 open items in the roadmap.** The substantial ones:
+**64 open items in the roadmap.** The substantial ones:
 
 - The Lynx 2's and the Artik R 2's linesets, a quarter over their totals:
   the Lynx 2's suspension 27% over its sheets, its middles carrying two

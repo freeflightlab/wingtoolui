@@ -4,6 +4,74 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.17.0 — 2026-11-24
+
+OpenGlider, reviewed a third time for what it does that this tool's own wings
+did not, and two of its features adopted: panels parted at the entry and cut
+by edge, and mini-ribs. Reading its panel cuts against this tool's found that
+this tool's own wings had no intake in their cutting files at all.
+
+**Fixed**
+
+- **A wing of this tool's own was cut with every cell closed at the nose.**
+  Its panels were developed as two whole surfaces, leading edge to trailing
+  edge, so the upper and lower panels met at the nose and the cloth was on
+  the wrong surface. They part at the intake now, as OpenGlider and
+  LEparagliding part theirs. The upper panel runs round the nose to where the
+  intake opens and the lower from where it closes; the opening between is no
+  panel's (`partedEdges`, `developWing(wing, { intake })`). The 3D view draws
+  the two lips.
+- On the three complete designs' own ribs, this tool's own development now
+  comes to within 0.8% of every surface of their cutting files. On the same
+  allowances, developed whole, it was 2 to 4% short on the upper and 8 to 9%
+  over on the lower. On the default wing the sail is 52.4 m² as cut, where it
+  was 53.5, and 58.2 m of roll, where it was 60.1.
+- A pressure-derived billow reads the loading at each point's own chord
+  fraction. A parted lower panel starts 5.5% of chord back, and would
+  otherwise have read the nose's.
+- The leading-edge cloth takes the upper panel's run under the nose, to the
+  intake: 8.18 m² of the default wing's upper surface, where it was 7.68.
+
+**Added**
+
+- **An allowance by edge**: the seam allowance at the sides, which is the
+  ribs' too, and one each at the intake and the trailing edge, 10 mm each by
+  default; corners mitred (`cutOutline`, which replaces `addSeamAllowance`).
+- **The intake's edges hemmed**, as OpenGlider's `FoldedCut` cuts the entry:
+  folded twice, each side's cutting line mirrored about the fold and then
+  repeated, so that the hem lies flat on its sides. A plain allowance folded
+  over a side leaning 3° stands 2.0 mm off it. A closed intake is a seam, and
+  is not hemmed.
+- **Trailing-edge mini-ribs on a wing of this tool's own**, 15% of chord by
+  default, one in the middle of every cell but the tip's (`buildMiniRibs`).
+  Each is the cell's section halfway between its ribs, as OpenGlider's
+  `MiniRib` is. Its front is raised to the billow of the tool's own panels:
+  by LEparagliding's rule, 0.85 of it eased back over 6% of chord, or by
+  OpenGlider's, all of it eased along the whole mini-rib. On the three
+  designs' ribs, the first comes to within 4% of their cutting files'
+  mini-ribs, and the second 6 to 8% over on the two whose programs raise
+  them. The bill weighs them (1.32 m² and
+  53 g on the default wing), the 3D view draws them, and **Mini-ribs DXF**
+  cuts them.
+- `lerp3` in num.js, shared by the line plan and the panels.
+
+**Found**
+
+- OpenGlider's knot correction subtracts its 2.0 in metres, where its seam
+  correction is converted from millimetres: two metres off a line in its
+  length table, wherever its one entry matches. It is the fifth slip noted
+  in `docs/openglider.md`.
+- Hemmed, the three designs' panels come out 0.8 to 2.0% over their cutting
+  files, so their programs cut a plain allowance at the front, not a hem.
+
+**Changed**
+
+- The construction notes' comparison of the bill with published weights had
+  drifted with the bill's earlier rounds. Measured again, the 43 ordinary
+  double-surface sizes come to 60–91% of their published weight.
+- The nesting notes' default-wing figures have been measured again for the
+  parted panels.
+
 ## 1.16.0 — 2026-11-24
 
 The range of results by assumption. Where the tool has more than one sourced

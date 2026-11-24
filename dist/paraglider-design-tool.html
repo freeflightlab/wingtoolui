@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-211h/+EC9RuGhakb9xwaaA+ZZWLu5n0tcO2JPf6YIq4='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-FA7wYX0ql61+TWHBkh07N1/wtnjHHmPCED0bRP31wx8='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Paraglider Design Tool</title>
 <style>/* Palette note: the geometry colours are the AutoCAD Color Index values the
    handbook's own panel subroutine writes into its DXF (2 yellow, 3 green,
@@ -625,7 +625,7 @@ input[type=range]::-moz-range-thumb {
 <div class="shell">
 
   <header class="masthead">
-    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.16.0</span></div>
+    <div class="wordmark"><b>LE</b> Paraglider Design Tool <span class="version" id="appVersion">v1.17.0</span></div>
     <input class="wingname" id="wingName" value="gnu-01" aria-label="Wing name">
     <div class="readout" id="readout"></div>
     <button class="themebtn" id="themeBtn" aria-label="Switch between dark and light">Light</button>
@@ -785,6 +785,8 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const deg = (r) => (r * 180) / Math.PI;
 const rad = (d) => (d * Math.PI) / 180;
 const lerp = (a, b, t) => a + (b - a) * t;
+/** A point a fraction `t` of the way from 3D point `a` to `b`. */
+const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 /** Composite Simpson integration. n is forced even. */
 function simpson(f, a, b, n = 200) {
@@ -3381,10 +3383,116 @@ function developPanel(L, R) {
 }
 
 /**
+ * Where a cell's intake parts a rib's surfaces, and the two sewing edges that
+ * leaves the rib, in 3D and front end first.
+ *
+ * A wing is not cut as two whole surfaces. The upper panel runs from the
+ * trailing edge over the top, round the nose and down under it to where the
+ * intake opens; the lower panel from where the intake closes back to the
+ * trailing edge; the opening between is no panel's. LEparagliding cuts its
+ * designs so (`lepPanels`), and OpenGlider parts its panels at the entry the
+ * same way. Developed as two whole surfaces, nose to tail, every cell of this
+ * tool's own wings was closed at the nose — no air could have got in — and
+ * the cloth was on the wrong surface: on the three complete designs' ribs,
+ * 4 to 7% short on the upper and 5 to 8% over on the lower against their
+ * cutting files (`docs/panels.md`).
+ *
+ * `intake` is `{ start, end }` in fractions of chord along the lower
+ * surface, measured in the rib's own section from its x = 0, as the rib view
+ * draws it. An intake that ends where it starts, or before, parts the
+ * surfaces at one point: a closed cell, its two panels sewn together there.
+ *
+ * Each edge's points are the rib's own, with the lip put in where it falls
+ * between two of them, so a panel's sewing edge is the rib's outline to the
+ * micrometre. `stations` gives every point's chord fraction, for what is
+ * defined along the chord rather than along the panel.
+ */
+function partedEdges(rib, intake) {
+  const sec = rib.section;
+  if (!sec || sec.lower?.length !== rib.lower.length || sec.upper?.length !== rib.upper.length
+    || !(rib.chord > 0)) {
+    throw new Error(`rib ${rib.index ?? '?'}: parting at the intake needs the rib's own section`);
+  }
+  const c = rib.chord;
+  const s = sec.lower;
+  const from = Math.min(0.5, Math.max(0, intake.start)) * c;
+  const to = Math.min(0.5, Math.max(intake.start, intake.end)) * c;
+  // The lower surface runs nose to tail, so its chord position only grows.
+  const lip = (u) => {
+    let k = 1;
+    while (k < s.length - 1 && s[k][0] < u) k++;
+    const g = Math.min(1, Math.max(0, (u - s[k - 1][0]) / ((s[k][0] - s[k - 1][0]) || 1)));
+    return { k, p: lerp3(rib.lower[k - 1], rib.lower[k], g), u: s[k - 1][0] + g * (s[k][0] - s[k - 1][0]) };
+  };
+  const same = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 1e-9;
+  const a = lip(from);
+  const b = lip(to);
+
+  const upper = [a.p];
+  const upperAt = [a.u / c];
+  for (let j = a.k - 1; j >= 1; j--) {
+    if (same(upper[upper.length - 1], rib.lower[j])) continue;
+    upper.push(rib.lower[j]);
+    upperAt.push(s[j][0] / c);
+  }
+  rib.upper.forEach((q, i) => {
+    if (same(upper[upper.length - 1], q)) return;
+    upper.push(q);
+    upperAt.push(sec.upper[i][0] / c);
+  });
+
+  const lower = [b.p];
+  const lowerAt = [b.u / c];
+  for (let j = b.k; j < rib.lower.length; j++) {
+    if (same(lower[lower.length - 1], rib.lower[j])) continue;
+    lower.push(rib.lower[j]);
+    lowerAt.push(s[j][0] / c);
+  }
+  return { upper, lower, stations: { upper: upperAt, lower: lowerAt }, open: to > from };
+}
+
+/**
+ * Two edges of a panel with the same number of points, for `developPanel`.
+ *
+ * Ribs with one section have their lips in the same place along their
+ * points and need nothing. Ribs of different sections or thicknesses do
+ * not, and the shorter edge has its longest segments split in two until the
+ * counts agree: a point put on a segment changes neither its shape nor its
+ * length, so the seam is still the rib's.
+ */
+function matchCounts(A, a, B, b) {
+  const grow = (P, t, n) => {
+    const Q = P.map((p) => p.slice());
+    const T = t.slice();
+    while (Q.length < n) {
+      let at = 1;
+      let longest = -1;
+      for (let i = 1; i < Q.length; i++) {
+        const l = dist3(Q[i - 1], Q[i]);
+        if (l > longest) { longest = l; at = i; }
+      }
+      Q.splice(at, 0, lerp3(Q[at - 1], Q[at], 0.5));
+      T.splice(at, 0, (T[at - 1] + T[at]) / 2);
+    }
+    return [Q, T];
+  };
+  const n = Math.max(A.length, B.length);
+  const [L, l] = grow(A, a, n);
+  const [R, r] = grow(B, b, n);
+  return { L, R, l, r };
+}
+
+/**
  * Develop every panel of the half wing, upper and lower surfaces.
  * Panel k lies between rib k and rib k+1.
+ *
+ * With `intake` the surfaces part there, as a wing is cut (`partedEdges`):
+ * each rib's own intake when it carries one, this one otherwise, and every
+ * panel then carries its edges' chord fractions (`stations`). Without, each
+ * surface is developed whole, nose to tail.
  */
-function developWing(wing) {
+function developWing(wing, { intake = null } = {}) {
+  if (intake) return developParted(wing, intake);
   const out = [];
 
   // The centre cell, when there is one.
@@ -3430,6 +3538,31 @@ function developWing(wing) {
       surface: 'lower',
       panel: developPanel(Lr.lower, Rr.lower),
     });
+  }
+  return out;
+}
+
+/** `developWing` with the surfaces parted at the intake. */
+function developParted(wing, intake) {
+  const out = [];
+  const edges = wing.ribs.map((r) => partedEdges(r, r.intake ?? intake));
+  const develop = (cell, surface, A, B, extra = {}) => {
+    const m = matchCounts(A[surface], A.stations[surface], B[surface], B.stations[surface]);
+    const panel = developPanel(m.L, m.R);
+    panel.stations = { left: m.l, right: m.r };
+    out.push({ cell, surface, ...extra, panel });
+  };
+  // The centre cell, between the innermost rib and its mirror.
+  if (wing.centreRib === false && edges.length) {
+    const e = edges[0];
+    const flip = (pts) => pts.map(([x, y, z]) => [x, -y, z]);
+    const mirror = { upper: flip(e.upper), lower: flip(e.lower), stations: e.stations };
+    develop(0, 'upper', mirror, e, { centre: true });
+    develop(0, 'lower', mirror, e, { centre: true });
+  }
+  for (let i = 0; i < edges.length - 1; i++) {
+    develop(i + 1, 'upper', edges[i], edges[i + 1]);
+    develop(i + 1, 'lower', edges[i], edges[i + 1]);
   }
   return out;
 }
@@ -3624,6 +3757,13 @@ function applyOvalization(panel, {
     return Math.min(1, Math.max(0, u));
   };
 
+  // A panel parted at the intake (`partedEdges`) knows each point's own
+  // chord fraction, and the loading is read there: the lower panel starts
+  // at the intake's rear lip, 5.5% of chord back on the default wing, where
+  // the panel's own fraction says 0 and the loading would have been read at
+  // the nose. The transitions stay the panel's own, from its two ends.
+  const stations = panel.stations?.left?.length === n ? panel.stations.left : null;
+
   for (let i = 0; i < n; i++) {
     const t = chordFraction(i);
     const width = Math.hypot(right[i][0] - left[i][0], right[i][1] - left[i][1]);
@@ -3632,7 +3772,7 @@ function applyOvalization(panel, {
     if (pressure) {
       // Pressure difference at this chord station, interpolated from the
       // loading, and the excess the cloth needs to take up the arc.
-      const dp = Math.abs(interpolateCp(pressure.loading, t))
+      const dp = Math.abs(interpolateCp(pressure.loading, stations ? stations[i] : t))
         * pressure.dynamicPressurePa;
       const b = billowFromPressure({
         spacingM: Math.max(width, 1e-6),
@@ -3671,6 +3811,7 @@ function applyOvalization(panel, {
     left: outL,
     right: outR,
     seamLengths: panel.seamLengths,
+    ...(panel.stations ? { stations: panel.stations } : {}),
     ovalized: true,
     // What was actually applied, so a flat amount and a pressure-derived one
     // can be compared rather than assumed equivalent.
@@ -3720,29 +3861,131 @@ function seamEasing(panelBefore, panelAfter) {
   };
 }
 
-/** Add a uniform seam allowance around a developed panel outline. */
-function addSeamAllowance(panel, mm = 10) {
-  const a = mm / 1000;
-  const n = panel.left.length;
-  const L = [];
-  const R = [];
-  for (let i = 0; i < n; i++) {
-    const dx = panel.right[i][0] - panel.left[i][0];
-    const dy = panel.right[i][1] - panel.left[i][1];
-    const w = Math.hypot(dx, dy) || 1;
-    L.push([panel.left[i][0] - (dx / w) * a, panel.left[i][1] - (dy / w) * a]);
-    R.push([panel.right[i][0] + (dx / w) * a, panel.right[i][1] + (dy / w) * a]);
-  }
-  // Extend the ends along the seam direction too.
-  const ext = (p, q) => {
-    const dx = p[0] - q[0];
-    const dy = p[1] - q[1];
-    const m = Math.hypot(dx, dy) || 1;
-    return [p[0] + (dx / m) * a, p[1] + (dy / m) * a];
+/**
+ * A developed panel's cutting line: each edge moved out by its own seam
+ * allowance, as a cutting file gives them — the sides, sewn to the ribs; the
+ * front end, at the intake; the trailing-edge end (LEparagliding's section
+ * 6, OpenGlider's allowances by cut) — every point of a side along the mean
+ * of its segments' normals, and each corner where two edges meet mitred.
+ *
+ * Or the front end hemmed (`hem`), as OpenGlider's `FoldedCut` cuts the
+ * entry: folded twice, `front` wide each time. A hem lies flat only if the
+ * cloth folded over is the mirror of the panel's own about the fold, so the
+ * cut line beyond it is each side's cutting line mirrored about the fold,
+ * then the same again as it is: folded twice, the hem's edges lie on the
+ * sides'. An allowance carried straight on past the fold folds over to lie
+ * off the side's line by twice its depth times the sine of how far from
+ * square the side meets the fold: 2 mm for a 20 mm allowance on a side
+ * leaning 3 degrees.
+ *
+ * This replaced a uniform allowance, each side pushed out across the panel
+ * and the ends carried on along it: one figure for every edge, and no hem.
+ *
+ * Returns `{ left, right }`, front end first as the panel's are, so its
+ * outline is the left and the right reversed; with a hem, `hem` counts the
+ * points at the front of each that are the hem's, and the rest is the side.
+ */
+function cutOutline(panel, { side = 10, front = side, back = side, hem = false } = {}) {
+  const Lp = panel.left;
+  const Rp = panel.right;
+  const n = Lp.length;
+  const sub = (p, q) => [p[0] - q[0], p[1] - q[1]];
+  const add = (p, v, k = 1) => [p[0] + v[0] * k, p[1] + v[1] * k];
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1];
+  const unit = (v) => { const m = Math.hypot(v[0], v[1]) || 1; return [v[0] / m, v[1] / m]; };
+  const perp = (v) => [-v[1], v[0]];
+  const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+  const m = n >> 1;
+
+  // A side moved out by `d`, away from the other side.
+  const offsetSide = (P, other, d) => {
+    if (!d) return P.map((p) => p.slice());
+    const normals = [];
+    for (let i = 0; i < n - 1; i++) normals.push(perp(unit(sub(P[i + 1], P[i]))));
+    const k = Math.min(m, n - 2);
+    const sign = dot(normals[k], sub(other[k + 1], P[k + 1])) > 0 ? -1 : 1;
+    return P.map((p, i) => {
+      const a = normals[Math.max(0, i - 1)];
+      const b = normals[Math.min(n - 2, i)];
+      const bis = unit([a[0] + b[0], a[1] + b[1]]);
+      const reach = d / Math.max(dot(bis, b), 0.4);
+      return add(p, bis, sign * reach / 1000);
+    });
   };
-  L[0] = ext(L[0], L[1]); R[0] = ext(R[0], R[1]);
-  L[n - 1] = ext(L[n - 1], L[n - 2]); R[n - 1] = ext(R[n - 1], R[n - 2]);
-  return { left: L, right: R, allowanceMM: mm };
+  // Where the line through p along v crosses the line through q along w.
+  const meet = (p, v, q, w) => {
+    const den = v[0] * w[1] - v[1] * w[0];
+    if (Math.abs(den) < 1e-12) return null;
+    const t = ((q[0] - p[0]) * w[1] - (q[1] - p[1]) * w[0]) / den;
+    return add(p, v, t);
+  };
+  // An end of the panel, as a line, and its outward normal: away from the
+  // panel's own body beside it.
+  const endLine = (a, b, inner) => {
+    const along = unit(sub(b, a));
+    let nrm = perp(along);
+    if (dot(nrm, sub(inner, mid(a, b))) > 0) nrm = [-nrm[0], -nrm[1]];
+    return { at: a, along, nrm };
+  };
+
+  const L = offsetSide(Lp, Rp, side);
+  const R = offsetSide(Rp, Lp, side);
+  const head = endLine(Lp[0], Rp[0], mid(Lp[1], Rp[1]));
+  const tail = endLine(Lp[n - 1], Rp[n - 1], mid(Lp[n - 2], Rp[n - 2]));
+  // A side's end carried to the end line moved out by `d`: the mitre.
+  const corner = (S, first, line, d) => {
+    const p = first ? S[0] : S[n - 1];
+    const q = first ? S[1] : S[n - 2];
+    return meet(p, sub(q, p), add(line.at, line.nrm, d / 1000), line.along) ?? add(p, line.nrm, d / 1000);
+  };
+
+  const backL = corner(L, false, tail, back);
+  const backR = corner(R, false, tail, back);
+  if (!hem || !(front > 0)) {
+    const left = [corner(L, true, head, front), ...L.slice(1, n - 1), backL];
+    const right = [corner(R, true, head, front), ...R.slice(1, n - 1), backR];
+    return { left, right, allowanceMM: { side, front, back }, hem: null };
+  }
+
+  // The hem. Its fold is the panel's front end; `h` deep each fold.
+  const h = front / 1000;
+  const depth = (p) => -dot(sub(p, head.at), head.nrm);   // into the panel
+  const hemOf = (S) => {
+    const atFold = meet(S[0], sub(S[1], S[0]), head.at, head.along) ?? S[0];
+    // The side's cutting line from the fold inward: from its first point
+    // inside the fold, which is its second unless the first segment is
+    // shorter than the side's own offset.
+    let first = 1;
+    while (first < n - 2 && depth(S[first]) <= 1e-12) first++;
+    const sideLine = [atFold, ...S.slice(first, n - 1)];
+    // The piece of it the hem mirrors: from the fold to `h` inside.
+    const piece = [atFold];
+    for (let i = first; i < n; i++) {
+      const prev = piece[piece.length - 1];
+      if (depth(S[i]) >= h) {
+        const g = (h - depth(prev)) / ((depth(S[i]) - depth(prev)) || 1);
+        piece.push(add(prev, sub(S[i], prev), g));
+        break;
+      }
+      piece.push(S[i]);
+    }
+    // Folded over once: mirrored about the fold. Folded again: as it is,
+    // moved out by two depths. Out from the fold, then reversed so that
+    // the side reads front end first.
+    const once = piece.map((p) => add(p, head.nrm, 2 * depth(p)));
+    const twice = piece.slice().reverse().map((p) => add(p, head.nrm, 2 * h));
+    return { points: once.concat(twice.slice(1)).reverse(), side: sideLine };
+  };
+  const hl = hemOf(L);
+  const hr = hemOf(R);
+  const left = [...hl.points.slice(0, -1), ...hl.side, backL];
+  const right = [...hr.points.slice(0, -1), ...hr.side, backR];
+  return {
+    left,
+    right,
+    allowanceMM: { side, front, back },
+    hem: { left: hl.points.length - 1, right: hr.points.length - 1, folds: 2, depthMM: front },
+  };
 }
 
 /* ------------------------------------------------ billow from pressure -- */
@@ -4897,6 +5140,7 @@ function guessGroupCount(n) {
  * there are branches. That is what `inferTopology` does, and it is a strong
  * check: if the names and the lengths disagree, the remainders scatter.
  */
+
 
 
 // 'S' is the stabilo — the outermost line, on its own riser on many wings.
@@ -7292,7 +7536,6 @@ function referenceTotals(lineSet, rowOrder = null) {
 }
 
 const mm = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000);
-const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 /**
  * How far a line from `from` up to `to` lies from vertical, in degrees.
@@ -12349,6 +12592,17 @@ function markSeamLength(poly) {
 }
 
 /**
+ * A cut panel's two sides without the points its hem puts ahead of them —
+ * the same arrays when it has no hem. `p` is a panel or a placed one (whose
+ * moved sides are its own `left` and `right`, and its hem its panel's).
+ */
+function hemlessSides(p) {
+  const hem = p.hem ?? p.panel?.hem;
+  if (!hem) return { left: p.left, right: p.right };
+  return { left: p.left.slice(hem.left), right: p.right.slice(hem.right) };
+}
+
+/**
  * Marks for one panel.
  *
  * `sign` flips the notch direction for the right seam, so both cut
@@ -12356,7 +12610,9 @@ function markSeamLength(poly) {
  */
 function markPanel(item, spec = {}, counts = null) {
   const M = { ...DEFAULT_MARKING, ...spec };
-  const { left, right } = item.panel;
+  // A hemmed panel's sides begin at the fold: what is ahead of it is the
+  // hem's (`cutOutline`), and is not sewn to the rib.
+  const { left, right } = hemlessSides(item.panel);
   const leftLen = markSeamLength(left);
   const rightLen = markSeamLength(right);
 
@@ -13211,6 +13467,7 @@ function familyCuttingFiles(family, writers) {
  * with s the true distance between the two base points. Every radius and every
  * base segment then comes out exact, which is asserted rather than assumed.
  */
+
 
 
 /**
@@ -14401,6 +14658,165 @@ function buildSeamDiagonals({
       + `${legs.length ? (Math.max(...legs) * 1000).toFixed(0) : 0} mm, worst `
       + `leg ratio ${ratios.length ? Math.max(...ratios).toFixed(2) : 0}`
       + (needHRib.length ? `; ${needHRib.length} places want an H rib` : ''),
+  };
+}
+
+/* ---------------------------------------------- trailing-edge mini-ribs -- */
+
+/**
+ * Trailing-edge mini-ribs on a wing of this tool's own: one in the middle of
+ * every cell but the tip's, from the trailing edge forward over `lengthPct`
+ * of its chord.
+ *
+ * All three complete designs here carry them — the Swoop2 at 16 and 17% of
+ * chord, the Tuluaq-19 and gnuC2-23 at 15 — in every cell but the tip's,
+ * and this tool's own wings had none. A mini-rib holds the two surfaces at
+ * the section's own shape in the middle of the cell, where nothing else
+ * does, so the trailing edge does not balloon open between the ribs.
+ *
+ * Each is the cell's section halfway between its ribs, unballooned, as
+ * OpenGlider builds its `MiniRib`. Its front is not sewn to anything, and
+ * the cloth billows out there, so the front is raised to meet it and eased
+ * back to the section behind. Two programs do that two ways (`rise`):
+ *
+ *   'lep'         LEparagliding's code 3001, mode 3: a share of the billow
+ *                 (`riseFactor`), eased back over `transitionPct` of chord
+ *                 by a half cosine. The Swoop2 and the gnuC2-23 ask for
+ *                 0.85 and 0.8 over 6%.
+ *   'openglider'  all of the billow, eased back along the whole mini-rib by
+ *                 OpenGlider's quadratic Bézier through (front, 1),
+ *                 (front + a third, 0) and (trailing edge, 0).
+ *
+ * On the two designs' own ribs, the first comes to within 3% of their
+ * cutting files' mini-ribs and the second 6 to 8% over them
+ * (`docs/internal-structure.md`). The billow is the panels' own (`panels`,
+ * ovalized): the sagitta of the arc their width as cut makes across the
+ * ribs' spacing at the mini-rib's front, on each surface. An imported
+ * design's mini-ribs are its program's, `lepStructure`.
+ *
+ * Returns pieces as `lepStructure` gives them — `sewing`, its upper and
+ * lower edges front first in its own plane; `outline`, the cut line with
+ * the rib allowance on the two sewn edges, the front cut on its line; and
+ * `cutAreaM2` — so that the bill, the nesting and the exports take either;
+ * and `placed`, the two edges in the wing, for drawing.
+ */
+function buildMiniRibs({
+  wing, panels = null, lengthPct = 15, allowanceMM = 10,
+  // How the front rises to the billow: 'openglider', all of it, eased along
+  // the whole mini-rib; or 'lep', a share of it (`riseFactor`) eased back
+  // over `transitionPct` of chord by a half cosine — LEparagliding's code
+  // 3001 mode 3, at the Swoop2's 0.85 and 6%.
+  rise: riseRule = 'lep', riseFactor = 0.85, transitionPct = 6,
+} = {}) {
+  if (!(lengthPct > 0) || !wing?.ribs?.length) return { pieces: [], count: 0, totalAreaM2: 0, lengthPct: 0 };
+  const ribs = wing.ribs;
+  const from = 1 - Math.min(60, lengthPct) / 100;
+  const pieces = [];
+  const area2 = (q) => { let t = 0; for (let i = 0, j = q.length - 1; i < q.length; j = i++) t += q[j][0] * q[i][1] - q[i][0] * q[j][1]; return Math.abs(t / 2); };
+  // The ease, 1 at the front to 0, at `s` of the way to the trailing edge.
+  // OpenGlider's: its quadratic Bezier, over the whole length.
+  // LEparagliding's: a half cosine over the transition's share of it.
+  const lepShare = Math.min(1, transitionPct / Math.max(1e-9, Math.min(60, lengthPct)));
+  const ease = riseRule === 'lep'
+    ? (s) => (s >= lepShare ? 0 : (1 + Math.cos((Math.PI * Math.max(0, s)) / lepShare)) / 2)
+    : (s) => { const t = Math.sqrt(1 + 3 * Math.min(1, Math.max(0, s))) - 1; return (1 - t) * (1 - t); };
+  const share = riseRule === 'lep' ? riseFactor : 1;
+  // The panels' extra width at a chord fraction on one surface of a cell.
+  const excessAt = (cell, surface, x) => {
+    const p = panels?.find((q) => q.cell === cell && q.surface === surface)?.panel;
+    const st = p?.stations?.left;
+    const ex = p?.excessRatios;
+    if (!st || !ex || st.length !== ex.length) return 0;
+    let k = 1;
+    while (k < st.length - 1 && st[k] < x) k++;
+    const g = Math.min(1, Math.max(0, (x - st[k - 1]) / ((st[k] - st[k - 1]) || 1)));
+    return ex[k - 1] + g * (ex[k] - ex[k - 1]);
+  };
+  const mirrorOf = (r) => ({
+    ...r,
+    upper: r.upper.map(([x, y, z]) => [x, -y, z]),
+    lower: r.lower.map(([x, y, z]) => [x, -y, z]),
+  });
+  // The cells: the centre one between the innermost rib and its mirror, if
+  // the wing has one, then each pair; never the tip's.
+  const cells = [];
+  if (wing.centreRib === false) cells.push({ cell: 0, A: mirrorOf(ribs[0]), B: ribs[0], centre: true });
+  for (let i = 0; i < ribs.length - 2; i++) cells.push({ cell: i + 1, A: ribs[i], B: ribs[i + 1] });
+
+  for (const { cell, A, B, centre } of cells) {
+    if (!A.section || !B.section || A.section.upper.length !== B.section.upper.length
+      || A.section.lower.length !== B.section.lower.length) continue;
+    const chord = (A.chord + B.chord) / 2;
+    const edge = (surface, sign) => {
+      const sa = A.section[surface];
+      const sb = B.section[surface];
+      // The section halfway between the ribs, in its own plane, metres; and
+      // the same points in the wing.
+      const mid = sa.map((p, k) => [(p[0] + sb[k][0]) / 2, (p[1] + sb[k][1]) / 2]);
+      const mid3 = A[surface].map((p, k) => [(p[0] + B[surface][k][0]) / 2, (p[1] + B[surface][k][1]) / 2, (p[2] + B[surface][k][2]) / 2]);
+      const u0 = from * chord;
+      let k = 1;
+      while (k < mid.length - 1 && mid[k][0] < u0) k++;
+      const g = Math.min(1, Math.max(0, (u0 - mid[k - 1][0]) / ((mid[k][0] - mid[k - 1][0]) || 1)));
+      const at = (P) => P[k - 1].map((v, j) => v + g * (P[k][j] - v));
+      const pts = [at(mid), ...mid.slice(k)];
+      const pts3 = [at(mid3), ...mid3.slice(k)];
+      // The billow at the front, on this surface: the arc the cloth's width
+      // as cut makes over the ribs' spacing there.
+      const spacing = dist3(ribSurfacePoint(A, surface, from), ribSurfacePoint(B, surface, from));
+      const e = excessAt(cell, surface, from);
+      const rise = e > 0 && spacing > 0 ? share * solveArc(spacing * (1 + e), spacing).f : 0;
+      const len = pts[pts.length - 1][0] - pts[0][0] || 1;
+      const lifted = pts.map(([u, v]) => [u, v + sign * rise * ease((u - pts[0][0]) / len)]);
+      return { flat: lifted, placed: pts3, rise };
+    };
+    const up = edge('upper', 1);
+    const lo = edge('lower', -1);
+    // Two edges with one count, for the cut line: the shorter's longest
+    // segments split in two, which moves nothing.
+    const grow = (P, n) => {
+      const Q = P.map((p) => p.slice());
+      while (Q.length < n) {
+        let at = 1;
+        let longest = -1;
+        for (let i = 1; i < Q.length; i++) {
+          const l = Math.hypot(Q[i][0] - Q[i - 1][0], Q[i][1] - Q[i - 1][1]);
+          if (l > longest) { longest = l; at = i; }
+        }
+        Q.splice(at, 0, [(Q[at - 1][0] + Q[at][0]) / 2, (Q[at - 1][1] + Q[at][1]) / 2]);
+      }
+      return Q;
+    };
+    const n = Math.max(up.flat.length, lo.flat.length);
+    const sewing = { left: grow(up.flat, n), right: grow(lo.flat, n) };
+    const cut = cutOutline(sewing, { side: allowanceMM, front: 0, back: 0 });
+    const outline = cut.left.concat(cut.right.slice().reverse());
+    pieces.push({
+      kind: 'minirib',
+      cell,
+      // Labelled by its cell, M1 the first outboard of the centre.
+      rib: cell,
+      ribs: [A.index, B.index],
+      ...(centre ? { centre: true } : {}),
+      lengthPct,
+      chordM: chord,
+      riseM: [up.rise, lo.rise],
+      sewing,
+      outline,
+      holes: [],
+      cutAreaM2: area2(outline),
+      sewnAreaM2: area2(sewing.left.concat(sewing.right.slice().reverse())),
+      copies: centre ? 1 : 2,
+      placed: { upper: up.placed, lower: lo.placed },
+    });
+  }
+  return {
+    pieces,
+    count: pieces.length,
+    lengthPct,
+    rise: riseRule,
+    // The whole wing's cloth in them as cut.
+    totalAreaM2: pieces.reduce((t, p) => t + p.cutAreaM2 * p.copies, 0),
   };
 }
 
@@ -25425,6 +25841,9 @@ function buildBOM({
   // program cuts them. Billed instead of `vribs`, which are this tool's
   // model of the diagonals at the places the design gives.
   structure = null,
+  // This tool's own trailing-edge mini-ribs (`buildMiniRibs`), cut from the
+  // rib cloth; an imported design's are in its `structure`.
+  miniRibs = null,
   linePlan = null,
   lineSelection = null,
   lineStretch = null,
@@ -25544,7 +25963,8 @@ function buildBOM({
   // An imported design's trailing-edge mini-ribs are rib cloth, and billed
   // as their own item; everything else it sews inside is the diagonals'.
   const copies = (p) => p.copies ?? 2;
-  const minis = (structure?.pieces ?? []).filter((p) => p.kind === 'minirib');
+  const ownMinis = !structure && miniRibs?.length ? miniRibs : [];
+  const minis = [...(structure?.pieces ?? []).filter((p) => p.kind === 'minirib'), ...ownMinis];
   const insidePieces = (structure?.pieces ?? []).filter((p) => p.kind !== 'minirib');
   const inside = structure && (insidePieces.length || minis.length) ? structure : null;
   if (insidePieces.length) {
@@ -25574,7 +25994,9 @@ function buildBOM({
       utilisation: est.utilisation,
       count: minis.reduce((t, p) => t + copies(p), 0),
       massKg: area * C.rib,
-      note: `the design's own trailing-edge mini-ribs, as its program cuts them, in the rib cloth`
+      note: (ownMinis.length
+        ? `trailing-edge mini-ribs, ${ownMinis[0].lengthPct}% of chord, one in the middle of every cell but the tip's, in the rib cloth`
+        : `the design's own trailing-edge mini-ribs, as its program cuts them, in the rib cloth`)
         + (holes ? `, ${holes} holes out` : '')
         + '; nested on their own',
     });
@@ -30365,7 +30787,8 @@ function markedPanelsToDXF(panels, {
       continue;
     }
 
-    const placedMarks = markPlacedSeams(p.left, p.right,
+    const sides = hemlessSides(p);
+    const placedMarks = markPlacedSeams(sides.left, sides.right,
       m.leftNotches.map((n) => n.fraction),
       m.rightNotches.map((n) => n.fraction),
       { ...DEFAULT_MARKING, ...marking });
@@ -30463,7 +30886,8 @@ function tiledPages(panels, {
     if (!byKey) continue;
     const m = byKey.get(markKey(p));
     if (!m || !p.left || !p.right) continue;
-    const pm = markPlacedSeams(p.left, p.right,
+    const sides = hemlessSides(p);
+    const pm = markPlacedSeams(sides.left, sides.right,
       m.leftNotches.map((n) => n.fraction), m.rightNotches.map((n) => n.fraction),
       { ...DEFAULT_MARKING, ...marking });
     for (const n of pm.notches) {
@@ -36958,6 +37382,19 @@ const S = {
   vribView: 'all',         // which row's diagonals the Structure view draws
   mergeRows: 'none',
   ovalAmount: 6.0, seamAllowance: 10, pointsPerSurface: 50,
+  // The allowance at the intake's edges and at the trailing edge, mm, as a
+  // cutting file gives one by edge; the sides take `seamAllowance`. The
+  // intake's edges hemmed — folded twice, cut as OpenGlider cuts the entry —
+  // or sewn on a plain allowance as LEparagliding cuts its three designs.
+  entryAllowance: 10, trailingAllowance: 10, entryHem: false,
+  // Trailing-edge mini-ribs, % of chord forward from the trailing edge, in
+  // every cell but the tip's; 0 for none. The three complete designs here
+  // carry them at 15 to 17%.
+  miniRibLength: 15,
+  // How a mini-rib's front meets the cloth billowed there, as LEparagliding
+  // raises it (0.85 of the billow, eased back over 6% of chord) or as
+  // OpenGlider does (all of it, eased along the whole mini-rib).
+  miniRibRise: 'lep',
   rollWidth: 1.40, panelGap: 3.0, applyOval: true,
 };
 
@@ -37676,11 +38113,15 @@ function buildModel() {
   // tool's ovalization is a stand-in for exactly that, and is not laid
   // over them.
   const ownPanels = imported && LEP.panels?.ok && LEP.panels.panels.length ? LEP.panels : null;
+  // This tool's own panels are parted at the intake, as a wing is cut: the
+  // upper round the nose to where the intake opens, the lower from where it
+  // closes (`partedEdges`). Developed whole, nose to tail, they closed every
+  // cell at the nose.
   let panels = ownPanels
     ? ownPanels.panels.map((p) => ({
       cell: p.cell, surface: p.surface, ...(p.centre ? { centre: true } : {}), own: true, panel: p.panel,
     }))
-    : developWing(wing);
+    : developWing(wing, { intake: airfoil.intake });
 
   // The solve takes the wing's own span and root chord: an imported
   // design is not the sliders, and solving the Swoop2's balance on a
@@ -38124,6 +38565,12 @@ function buildModel() {
     .filter((i) => !linedRibs.has(i));
   vribs.lineRibs = planAnchors.all;
 
+  // Trailing-edge mini-ribs: this tool's own, as OpenGlider builds them,
+  // raised at the front to the billow these panels have. An imported
+  // design's are its program's, in its own structure.
+  const miniRibs = imported && LEP?.structure?.ok ? null
+    : buildMiniRibs({ wing, panels, lengthPct: S.miniRibLength, allowanceMM: S.seamAllowance, rise: S.miniRibRise });
+
   // Loads, which the rib-stress report and the Lines table both read.
   //
   // `M.loads` was referenced in three places and assigned in none, so both
@@ -38264,7 +38711,7 @@ function buildModel() {
   return {
     asBuiltOnPolar,
     planform, lobe, airfoil, wing, metrics, lobeM, projArea,
-    panels, balance, worstDev, worstPhi, imported, vribs,
+    panels, balance, worstDev, worstPhi, imported, vribs, miniRibs,
     hangDepthM, riserM, freeBody, lineDragOwn, cxLinesUsed, billow,
     linePlan, loads, lineSelection, lengths, riserSplit, rods, levelStrength,
     rodSpecResult,
@@ -38968,6 +39415,18 @@ function buildControls() {
   // What the rods come to, kept true: how many, how long, what they weigh,
   // and whether any crosses an opening in its rib.
   if (S.rods && !ownRods) liveHint(IN, rodSummary);
+  // Trailing-edge mini-ribs: this tool's own. An imported design's are its
+  // program's, in its own structure, and the slider would do nothing there.
+  if (!(LEP?.design && LEP.structure?.ok)) {
+    slider(IN, 'miniRibLength', 'Trailing-edge mini-ribs', 0, 30, 1, (v) => (v ? `${v.toFixed(0)}% c` : 'none'));
+    if (S.miniRibLength > 0) {
+      selectField(IN, 'miniRibRise', 'Their front meets the billow', [
+        ['lep', 'as LEparagliding: 0.85 of it, over 6% of chord'],
+        ['openglider', 'as OpenGlider: all of it, along their length'],
+      ]);
+    }
+    liveHint(IN, miniRibSummary);
+  }
   checkField(IN, 'vribs', 'Diagonal ribs');
   // What they come to on this wing: how many, whether each is in tension,
   // buildable, and held from both sides — and, with them off, what that
@@ -39060,6 +39519,20 @@ function buildControls() {
     checkField(N, 'applyOval', 'Add ovalization');
     slider(N, 'ovalAmount', 'Total widening', 0, 12, 0.1, (v) => v.toFixed(1), '%');
     slider(N, 'seamAllowance', 'Seam allowance', 0, 25, 1, (v) => v.toFixed(0), ' mm');
+    slider(N, 'entryAllowance', 'At the intake', 0, 30, 1, (v) => v.toFixed(0), ' mm');
+    slider(N, 'trailingAllowance', 'At the trailing edge', 0, 30, 1, (v) => v.toFixed(0), ' mm');
+    checkField(N, 'entryHem', 'Hem the intake\u2019s edges');
+    liveHint(N, () => {
+      const open = intakeOpen();
+      return 'The upper panel runs round the nose to where the intake opens, the lower from where it closes; '
+        + 'the opening is no panel\u2019s. The seam allowance is the sides\u2019, sewn to the ribs, and the ribs\u2019 own. '
+        + (!open
+          ? 'The intake is closed (Section), so the two panels are sewn together there and nothing is hemmed.'
+          : S.entryHem
+            ? `Hemmed, the intake\u2019s edges are folded twice, ${S.entryAllowance} mm each time, and cut as the `
+              + 'mirror of each side about the fold, so the hem lies flat with its edges on the sides\u2019 (OpenGlider\u2019s folded cut).'
+            : 'Unhemmed, every edge is cut on its own allowance with the corners mitred, as LEparagliding cuts its designs.');
+    });
   }
   slider(N, 'pointsPerSurface', 'Points per surface', 20, 120, 5, (v) => v.toFixed(0));
   hint(N, 'Along each surface of every rib, clustered at the nose where the '
@@ -39762,6 +40235,13 @@ function buildControls() {
     if (!M.vribs || !M.vribs.count) { setStatus('No diagonal ribs to export.'); return; }
     save(`${S.name}-diagonals.dxf`, vribsToDXF(M.vribs, { rollWidth: S.rollWidth, gap: S.panelGap / 100 }));
   }, 'btn');
+  if (!(LEP?.design && LEP.structure?.ok)) {
+    button(grid, 'Mini-ribs DXF', () => {
+      if (!M.miniRibs || !M.miniRibs.count) { setStatus('No mini-ribs to export: set their length under Internal structure.'); return; }
+      save(`${S.name}-miniribs.dxf`, lepStructureToDXF(M.miniRibs, { rollWidth: S.rollWidth, gap: S.panelGap / 100 }));
+      setStatus(null, `${M.miniRibs.count} trailing-edge mini-ribs, one side: cut each twice${M.miniRibs.pieces.some((x) => x.centre) ? ', the centre cell\u2019s once' : ''}.`);
+    }, 'btn');
+  }
   button(grid, 'Panels SVG', () => save(`${S.name}-panels.svg`,
     panelsToSVG(seamed(), {
       rollWidth: S.rollWidth, gap: S.panelGap / 100, nested: ensureNest(),
@@ -39923,12 +40403,28 @@ function seamed() {
     if (p.panel.cut) {
       return [{ ...p, panel: { left: p.panel.cut.left, right: p.panel.cut.right, seamLengths: p.panel.seamLengths } }];
     }
-    if (!S.seamAllowance) return [p];
-    return [{ ...p, panel: { ...addSeamAllowance(p.panel, S.seamAllowance), seamLengths: p.panel.seamLengths } }];
+    // This tool's own: an allowance by edge — the sides, the intake, the
+    // trailing edge — and the intake's edges hemmed when asked, which is an
+    // edge only where the intake is open: closed, the two panels are sewn
+    // together there.
+    const a = ownAllowances();
+    if (!a.side && !a.front && !a.back) return [p];
+    const cut = cutOutline(p.panel, { ...a, hem: a.hem && intakeOpen() });
+    return [{ ...p, panel: { ...cut, seamLengths: p.panel.seamLengths } }];
   });
 }
 
-/** What the panels are cut with, in words: the design's own allowances or the slider's. */
+/** This tool's own seam allowances, mm by edge, and whether the intake is hemmed. */
+function ownAllowances() {
+  return { side: S.seamAllowance, front: S.entryAllowance, back: S.trailingAllowance, hem: !!S.entryHem };
+}
+
+/** Whether the intake opens: its rear lip behind its front one. */
+function intakeOpen() {
+  return S.intakeEnd > S.intakeStart;
+}
+
+/** What the panels are cut with, in words: the design's own allowances or the sliders'. */
 function seamAllowanceWords() {
   const own = M.panels?.some((p) => p.panel.cut) ? LEP?.panels?.allowances : null;
   if (own) {
@@ -39938,7 +40434,11 @@ function seamAllowanceWords() {
     return `the design's own seam allowances: ${a.side} mm at the sides, ${a.front} at the front, `
       + `${a.back} at the trailing edge${same ? '' : ` above; ${b.side}, ${b.front} and ${b.back} below`}`;
   }
-  return `${S.seamAllowance} mm seam allowance`;
+  const a = ownAllowances();
+  const hem = a.hem && intakeOpen() && a.front > 0;
+  if (a.side === a.front && a.front === a.back && !hem) return `${a.side} mm seam allowance`;
+  return `seam allowances of ${a.side} mm at the sides, ${a.front} at the intake`
+    + `${hem ? ', hemmed (folded twice)' : ''} and ${a.back} at the trailing edge`;
 }
 
 /* --------------------------------------------------------------- render -- */
@@ -42592,6 +43092,21 @@ function drawIso() {
         return project([p[0], sgn * p[1], p[2]]);
       }), colour, 1.2);
     }
+    // The trailing-edge mini-ribs, in the middle of their cells.
+    for (const piece of M.miniRibs?.pieces ?? []) {
+      for (const e of [piece.placed.upper, piece.placed.lower]) {
+        c.path(e.map((p) => project([p[0], sgn * p[1], p[2]])), '#ffa23e', 0.7, { opacity: 0.8 });
+      }
+    }
+    // The intake's two lips under the nose, where the panels part: the
+    // opening between them is the cell's only way in.
+    for (const lip of ['start', 'end']) {
+      const pts = M.wing.ribs.map((r) => {
+        const it = r.intake ?? M.airfoil.intake;
+        return it && it.end > it.start ? ribSurfacePoint(r, 'lower', it[lip]) : null;
+      });
+      if (pts.every(Boolean)) c.path(pts.map((p) => project([p[0], sgn * p[1], p[2]])), '#ff5e5e', 0.9);
+    }
   }
 
   // The cascade, at true positions and a legible width.
@@ -42650,6 +43165,8 @@ function drawIso() {
   document.getElementById('note-iso').textContent =
     `azimuth ${S.isoAz}°  ·  elevation ${S.isoEl}°  ·  `
     + `${M.linePlan?.lines?.length ?? 0} lines at true position`
+    + (intakeOpen() ? '  ·  red under the nose: the intake\u2019s lips' : '')
+    + (M.miniRibs?.count ? '  ·  orange at the trailing edge: the mini-ribs' : '')
     + (nearDegenerate
       ? `  ·  the arc runs at ${arcDeg.toFixed(0)}°, so this elevation looks `
         + 'along it and flattens the wing — move the slider'
@@ -43616,17 +44133,28 @@ function billOfMaterials() {
   });
   if (!fab.ok) return { error: `Fabric: ${fab.problems[0]}` };
   const cloth = clothWeightsFor(fab);
-  // How much of the upper surface is nose: its length along the section, to
-  // the station the leading-edge cloth runs to.
+  // How much of the upper panel is nose: its length round the section, to
+  // the station the leading-edge cloth runs to on top. The panel runs round
+  // the nose from where the intake opens, and that run under the nose is
+  // nose cloth too.
   const noseFraction = (() => {
     const rib = M.wing.ribs[0];
     if (!rib || !(S.noseClothTo > 0)) return 0;
     // Along the surface itself, point to point, from the very front of the
     // section to the station the nose cloth runs to.
     const flat = rib.section ? rib.section.upper : rib.upper.map((q) => toRibPlane(rib, q));
+    const under = rib.section ? rib.section.lower : rib.lower.map((q) => toRibPlane(rib, q));
+    const lip = Math.max(0, (rib.intake ?? M.airfoil.intake)?.start ?? 0) * rib.chord;
+    let wrap = 0;
+    for (let k = 1; k < under.length && under[k - 1][0] < lip; k++) {
+      const a = under[k - 1];
+      const b = under[k];
+      const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      wrap += b[0] <= lip ? d : (d * (lip - a[0])) / (b[0] - a[0]);
+    }
     const to = (S.noseClothTo / 100) * rib.chord;
-    let total = 0;
-    let before = 0;
+    let total = wrap;
+    let before = wrap;
     for (let k = 1; k < flat.length; k++) {
       const a = flat[k - 1];
       const b = flat[k];
@@ -43717,6 +44245,7 @@ function billOfMaterials() {
     ribHoles: ribs,
     ribRoll,
     vribs: S.vribs ? M.vribs : null,
+    miniRibs: M.miniRibs?.count ? M.miniRibs.pieces : null,
     structure: ownStructure(),
     // `linePlan` and `lineSelection`, not `plan` and `selection`.
     //
@@ -43743,8 +44272,9 @@ function billOfMaterials() {
     rollWidth: S.rollWidth,
     gap: S.panelGap / 100,
     // The design's own allowances when its panels are its own.
-    seamAllowanceMM: M.panels.some((p) => p.panel.cut) ? (LEP.panels.allowances.upper.side || 1) : S.seamAllowance,
-    seamAllowanceText: M.panels.some((p) => p.panel.cut) ? seamAllowanceWords() : null,
+    seamAllowanceMM: M.panels.some((p) => p.panel.cut) ? (LEP.panels.allowances.upper.side || 1)
+      : Math.max(S.seamAllowance, S.entryAllowance, S.trailingAllowance),
+    seamAllowanceText: seamAllowanceWords(),
   });
   if (S.rods && M.rods && !ownStructure()?.pieces.some((p) => p.kind === 'pocket')) {
     bom.neverWeighed.unshift('rod pockets');
@@ -43767,6 +44297,23 @@ function billOfMaterials() {
  * cutting file take it: null on any other wing, and its rods' pockets only
  * while its rods are on.
  */
+/** What the mini-ribs come to, in words, for the Internal structure group. */
+function miniRibSummary() {
+  const m = M.miniRibs;
+  if (!m || !m.count) {
+    return 'None. The three complete designs here carry them at 15 to 17% of chord, one in the middle of every cell but the tip\u2019s, '
+      + 'to hold the trailing edge at the section\u2019s shape between the ribs.';
+  }
+  const rise = m.pieces.map((p) => Math.max(...p.riseM) * 1000);
+  return `${m.count} a side, ${m.lengthPct}% of chord forward from the trailing edge, in the middle of every cell but the tip\u2019s: `
+    + `${m.totalAreaM2.toFixed(2)} m2 of rib cloth for the wing, as cut. Each is the cell\u2019s own section halfway between its ribs, `
+    + `raised at its front to meet the cloth\u2019s billow there — up to ${Math.max(...rise).toFixed(0)} mm — and eased back to the section `
+    + (m.rise === 'lep'
+      ? 'as LEparagliding eases its designs\u2019, which on the Swoop2\u2019s and the gnuC2-23\u2019s own ribs comes to within 3% of their cutting files. '
+      : 'as OpenGlider eases its mini-ribs, which on the Swoop2\u2019s and the gnuC2-23\u2019s own ribs comes to 6 to 8% more cloth than their cutting files. ')
+    + 'The bill weighs them; Mini-ribs DXF cuts them.';
+}
+
 function ownStructure() {
   const st = M.imported && LEP?.structure?.ok ? LEP.structure : null;
   if (!st) return null;

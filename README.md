@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2931 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2971 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -32,7 +32,10 @@ Bird's Tuluaq-19 — whose area, span, chords, cells, ribs and every line (93,
 89 and 95: lengths, loads and types) it reproduces as that program computes
 them, and whose cutting files it matches piece by piece: panels, ribs and
 their holes, diagonals, V-rib strips, straps, rod pockets and trailing-edge
-mini-ribs.
+mini-ribs. A wing of its own is cut the same way — parted at the intake, an
+allowance for each kind of edge, a mini-rib in every cell but the tip's —
+and developed on those three designs' ribs, its panels come within 0.8% of
+their cutting files on every surface (`docs/panels.md`, section 6).
 
 It also analyses the wing as its sections: step along the span from tip to
 tip and each cell's section is solved in its own flow with a viscous panel
@@ -89,7 +92,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2931 unit checks against known geometry and the sources |
+| `npm test` | 2971 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -327,7 +330,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2931 checks |
+| unit suite | the maths, 2971 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |

@@ -57,7 +57,7 @@ up, so it is where their honesty matters.
 
 **Fabric is bought by the roll, not by area.** Nesting decides how much of a
 roll a set of panels consumes, and the offcut is paid for whether or not it is
-used. On the default wing: 53.5 m² of sail as cut, and **60.1 m of 1.4 m roll
+used. On the default wing: 52.4 m² of sail as cut, and **58.2 m of 1.4 m roll
 ordered** at 64% used. A bill quoting panel area understates the order by half
 as much again.
 
@@ -65,17 +65,17 @@ as much again.
 fixed per line: 276 m of line finished is 304 m to cut on the default wing. A
 bill supplied without it says so rather than quietly omitting it.
 
-**Rib cloth is not negligible** — the third fabric item after the two sail
-surfaces — and neither are the diagonals.
+**Rib cloth is not negligible** — the third fabric item — nor are the diagonals.
 
 The default wing, as the "Bill of materials" button writes it (the notes under
 each item left out here):
 
 ```
 FABRIC
-  Sail cloth              60.1 m of 1.4 m roll (64% used)   53.50 m2   1674 g
+  Sail cloth              58.2 m of 1.4 m roll (64% used)   52.36 m2   1635 g
   Rib cloth               49 pieces, 31.5 m of roll (57%)   15.94 m2    637 g
                           31% of 23.03 m2 removed as openings
+  Mini-rib cloth          46 pieces, 2.3 m of roll (42%)     1.32 m2     53 g
   Diagonal cloth          192 pieces, 24.0 m of roll (36%)  12.22 m2    489 g
   Dacron at the anchors   126 pieces                         0.38 m2     46 g
   Trailing edge tape      10.3 m                             0.21 m2     11 g
@@ -91,28 +91,28 @@ RODS AND WEBBING
   Riser webbing    6 pieces    3.0 m   not weighed
     the straps from the karabiner to the lines; a speed system's own webbing is not in it
 TOTALS
-  cloth, film and tape 2877 g + line 71 g + rods 80 g = 3.028 kg
-  roll to order: 115.6 m (sail cloth 60.1, rib cloth 31.5, diagonal cloth 24.0)
+  cloth, film and tape 2890 g + line 71 g + rods 80 g = 3.041 kg
+  roll to order: 115.9 m (sail 58.2, rib 31.5, mini-rib 2.3, diagonal 24.0)
   that is 56% of the 5.40 kg the wing is set to weigh
 NOT WEIGHED
   rod pockets; riser webbing and its hardware; thread; the seam allowance on
   ribs and diagonals (the sail is weighed as cut); labels
 ```
 
-The bill counted sail cloth and line only for a long time, and said so at the
-bottom. It now carries the ribs with what is cut out of them, the diagonals
-(an imported design's own structure, pockets and all: `internal-structure.md`),
-reinforcement, tabs, rods and webbing, and still names what it does not weigh,
-so the total is not read as the weight of a wing. The roll to order covers
-all three cloths, each on its own roll; the ribs used to be left out of it
-without a word. With the rods turned off it lists mylar at the intakes
-instead (98 pieces, 90 g): something has to hold the nose.
+The bill counted sail cloth and line only for a long time. It now carries the
+ribs with what is cut out of them, the mini-ribs, the diagonals (an imported
+design's own structure, pockets and all: `internal-structure.md`),
+reinforcement, tabs, rods and webbing, and names what it does not weigh, so
+the total is not read as the weight of a wing. The roll to order covers every
+cloth, each on its own roll. With the rods turned off it lists mylar at the
+intakes instead (98 pieces, 90 g): something has to hold the nose.
 
 Against a published wing the comparison is direct. Loaded by size and built in
-the default cloths, the 43 ordinary double-surface sizes come to 65–101% of
-their published weight; an ultralight (112–125%) and the single-surface wings
-(111% on the tandem, 186–193% on the Skin 4 P) come out over, because their
-cloth and construction are not the default's, and the bill says so on those.
+the default cloths, the 43 ordinary double-surface sizes come to 60–91% of
+their published weight (measured again for 1.17.0: they had drifted). The
+ultralights (102–111%) and the Skin 4 P's single surface (168–173%) come out
+over, their cloth and construction not the default's, and the bill says so;
+the single-surface tandem comes to 98%.
 
 Inputs are optional, and what is missing is **reported as missing** rather
 than treated as zero — a bill that silently omits the lines looks identical to

@@ -181,6 +181,45 @@ once for the wing. 3.25 drew them from the rib's own cutting line and with
 no rise (`drawings['3.25']`); the Tuluaq's file, which has no transition, comes
 out the same either way.
 
+### On a wing of this tool's own
+
+All three designs carry mini-ribs in every cell but the tip's, and this
+tool's own wings had none: the trailing edge was held at its section's shape
+at the ribs and nowhere between. They have them now (Internal structure:
+**Trailing-edge mini-ribs**, 15% of chord by default, 0 for none;
+`buildMiniRibs`).
+
+Each is the cell's section halfway between its ribs, unballooned, as
+OpenGlider builds its `MiniRib`, over the rear of its chord. Its front is
+raised to the billow the tool's own panels have there: the sagitta of the
+arc their width as cut makes across the ribs' spacing, on each surface. It
+is then eased back to the section behind. The two programs ease it two ways,
+and both are offered:
+
+- **as LEparagliding** (the default): 0.85 of the billow, gone 6% of chord
+  back by a half cosine — the Swoop2's code 3001;
+- **as OpenGlider**: all of it, eased along the whole mini-rib by its
+  quadratic Bézier through (front, 1), (front + a third, 0) and (trailing
+  edge, 0), which leaves a quarter of the rise five twelfths of the way back.
+
+On the three designs' own ribs, each at its own length, rib allowance and
+rise — the Tuluaq's 3.25 raises none — and on this tool's own billow,
+against their cutting files' mini-ribs in total:
+
+| | LEparagliding's rise | OpenGlider's |
+| --- | --- | --- |
+| Swoop2, 16.2% at 0.85 | −2.9% | +7.6% |
+| Tuluaq-19, 15%, no rise | −3.5% | +21.6% |
+| gnuC2-23, 15.3% at 0.8 | −1.8% | +6.1% |
+
+The Swoop2's file has one piece more than the tool builds: its program puts
+one in the "cell" between its centre rib and that rib's mirror, cut once,
+which a centre rib on the centreline does not have. On the default wing
+they come to 23 a side, 1.32 m² of rib cloth for the wing as cut and 53 g:
+the bill weighs them, the 3D view draws them and **Mini-ribs DXF** cuts
+them, sewing lines and all. Their sewing lines are not yet marked on the
+panels.
+
 ## 6. Versions of the program, and their drawings
 
 A design file's header says which program it was written for — "Input data

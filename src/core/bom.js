@@ -57,6 +57,9 @@ export function buildBOM({
   // program cuts them. Billed instead of `vribs`, which are this tool's
   // model of the diagonals at the places the design gives.
   structure = null,
+  // This tool's own trailing-edge mini-ribs (`buildMiniRibs`), cut from the
+  // rib cloth; an imported design's are in its `structure`.
+  miniRibs = null,
   linePlan = null,
   lineSelection = null,
   lineStretch = null,
@@ -176,7 +179,8 @@ export function buildBOM({
   // An imported design's trailing-edge mini-ribs are rib cloth, and billed
   // as their own item; everything else it sews inside is the diagonals'.
   const copies = (p) => p.copies ?? 2;
-  const minis = (structure?.pieces ?? []).filter((p) => p.kind === 'minirib');
+  const ownMinis = !structure && miniRibs?.length ? miniRibs : [];
+  const minis = [...(structure?.pieces ?? []).filter((p) => p.kind === 'minirib'), ...ownMinis];
   const insidePieces = (structure?.pieces ?? []).filter((p) => p.kind !== 'minirib');
   const inside = structure && (insidePieces.length || minis.length) ? structure : null;
   if (insidePieces.length) {
@@ -206,7 +210,9 @@ export function buildBOM({
       utilisation: est.utilisation,
       count: minis.reduce((t, p) => t + copies(p), 0),
       massKg: area * C.rib,
-      note: `the design's own trailing-edge mini-ribs, as its program cuts them, in the rib cloth`
+      note: (ownMinis.length
+        ? `trailing-edge mini-ribs, ${ownMinis[0].lengthPct}% of chord, one in the middle of every cell but the tip's, in the rib cloth`
+        : `the design's own trailing-edge mini-ribs, as its program cuts them, in the rib cloth`)
         + (holes ? `, ${holes} holes out` : '')
         + '; nested on their own',
     });

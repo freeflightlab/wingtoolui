@@ -1,6 +1,6 @@
 import { resampleSurface } from './airfoil.js';
 import { toRibPlane, ribCopies } from './wing3d.js';
-import { markPanels, markPlacedSeams, DEFAULT_MARKING } from './marking.js';
+import { markPanels, markPlacedSeams, hemlessSides, DEFAULT_MARKING } from './marking.js';
 import { nestByProfile, nestingOverlaps } from './pairing.js';
 /* export.js — DXF and SVG output.
  *
@@ -748,7 +748,8 @@ export function markedPanelsToDXF(panels, {
       continue;
     }
 
-    const placedMarks = markPlacedSeams(p.left, p.right,
+    const sides = hemlessSides(p);
+    const placedMarks = markPlacedSeams(sides.left, sides.right,
       m.leftNotches.map((n) => n.fraction),
       m.rightNotches.map((n) => n.fraction),
       { ...DEFAULT_MARKING, ...marking });
@@ -846,7 +847,8 @@ export function tiledPages(panels, {
     if (!byKey) continue;
     const m = byKey.get(markKey(p));
     if (!m || !p.left || !p.right) continue;
-    const pm = markPlacedSeams(p.left, p.right,
+    const sides = hemlessSides(p);
+    const pm = markPlacedSeams(sides.left, sides.right,
       m.leftNotches.map((n) => n.fraction), m.rightNotches.map((n) => n.fraction),
       { ...DEFAULT_MARKING, ...marking });
     for (const n of pm.notches) {

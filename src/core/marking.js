@@ -105,6 +105,17 @@ function markSeamLength(poly) {
 }
 
 /**
+ * A cut panel's two sides without the points its hem puts ahead of them —
+ * the same arrays when it has no hem. `p` is a panel or a placed one (whose
+ * moved sides are its own `left` and `right`, and its hem its panel's).
+ */
+export function hemlessSides(p) {
+  const hem = p.hem ?? p.panel?.hem;
+  if (!hem) return { left: p.left, right: p.right };
+  return { left: p.left.slice(hem.left), right: p.right.slice(hem.right) };
+}
+
+/**
  * Marks for one panel.
  *
  * `sign` flips the notch direction for the right seam, so both cut
@@ -112,7 +123,9 @@ function markSeamLength(poly) {
  */
 export function markPanel(item, spec = {}, counts = null) {
   const M = { ...DEFAULT_MARKING, ...spec };
-  const { left, right } = item.panel;
+  // A hemmed panel's sides begin at the fold: what is ahead of it is the
+  // hem's (`cutOutline`), and is not sewn to the rib.
+  const { left, right } = hemlessSides(item.panel);
   const leftLen = markSeamLength(left);
   const rightLen = markSeamLength(right);
 

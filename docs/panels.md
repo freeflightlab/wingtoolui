@@ -49,18 +49,20 @@ it is worth reporting.**
 ## 4. What goes on the cutting file
 
 Development gives the sewing line. The cut line adds a seam allowance outside
-it, and ovalisation widens the panel between ribs so it billows — see
-`docs/departures.md` for why the billow is pinned at zero on the seams, which
-is what keeps sections 2 and 3 true after it is applied.
+it — one for each kind of edge, section 6 — and ovalisation widens the panel
+between ribs so it billows: see `docs/departures.md` for why the billow is
+pinned at zero on the seams, which is what keeps sections 2 and 3 true after
+it is applied.
 
 ## 5. A design's own panels, against its own cutting file
 
 The three complete designs here come with the cutting files their program
 drew, and every piece in them is measured (`data/reference/lep/*-cut-parts.tsv`).
-The tool's own development of their panels — ovalised 6%, one 10 mm
-allowance all round — put the wrong amount of cloth on each surface: 4 to
-6% short on the upper, 5 to 8% over on the lower, which it ran over the
-intake and round to the leading edge. (11.24 and 10.52 m² a side on the
+The tool's own development of their panels, as it was — ovalised 6%, one
+10 mm allowance all round — put the wrong amount of cloth on each surface: 4
+to 7% short on the upper, 5 to 8% over on the lower, which it ran over the
+intake and round to the leading edge (section 6 says what that was, and how
+it was put right on a wing of this tool's own). (11.24 and 10.52 m² a side on the
 Swoop2, against 11.72 and 9.75 cut.) Six things are the program's, read
 from its source in the design archives, and `lepPanels` does all six:
 
@@ -153,3 +155,76 @@ its cutting file's (`docs/internal-structure.md`), and the bill carries it:
 So are their trailing-edge mini-ribs, raised at the front to meet the
 billow of the cell, which the program finds from these panels: 0.82, 0.89
 and 1.50 m² of rib cloth for the wing.
+
+## 6. This tool's own panels, parted at the intake
+
+A wing is not cut as two whole surfaces, and this tool's own wings were. Each
+cell's upper panel ran from the leading edge over the top to the trailing
+edge and its lower panel the same way underneath, so the two met at the
+nose: in the cutting file every cell was closed, and no air could have got
+in. The cloth was on the wrong surface too. The lower panel carried the nose
+and the intake, and the upper did not reach under the nose at all.
+
+They part where a wing's do now, as LEparagliding parts its designs'
+(section 5) and OpenGlider its panels at the entry (`partedEdges`). The upper
+panel runs from the trailing edge over the top, round the nose and down under
+it to where the intake opens (Section: intake starts, 1.2% of chord on the
+default wing). The lower panel runs from where it closes (5.5%) back to the
+trailing edge. The opening between is no panel's.
+
+Each panel's sewing edge is still its rib's outline to the micrometre: the
+lip is put in between the rib's own points, not resampled. A closed intake,
+whose end is at or before its start, parts the two panels at one point, and
+they are sewn together there. The 3D view draws both lips in red.
+
+Measured on the three complete designs' own ribs, against their cutting
+files. Each uses this tool's own 6% ovalization, and each design's own
+allowances by edge (below):
+
+| | upper | lower |
+| --- | --- | --- |
+| Swoop2, developed whole | −3.55% | +8.56% |
+| Swoop2, parted at its intake | **+0.52%** | **+0.21%** |
+| Tuluaq-19, whole | −2.21% | +9.35% |
+| Tuluaq-19, parted | **+0.46%** | **+0.69%** |
+| gnuC2-23, whole | −4.30% | +8.30% |
+| gnuC2-23, parted | **−0.17%** | **+0.72%** |
+
+What is left, under 1%, is the skin tension: the programs' own tables
+against this tool's one figure (section 5). With one 10 mm allowance all
+round, as before, the whole development had been 4.0 to 6.9% short on the
+upper and 5.1 to 8.0% over on the lower.
+
+On the default wing the sail as cut comes to 52.4 m² where it was 53.5. The
+upper surface gains the nose down to the intake; the lower loses the nose,
+and the intake itself.
+
+### Allowances by edge, and a hem at the intake
+
+A cutting file gives an allowance by edge. LEparagliding's section 6 has the
+sides, the front and the trailing edge; OpenGlider's patterns have one for
+the entry, the trailing edge and the design cuts. This tool had one figure
+for every edge, and carried the panel's ends straight on along its sides. It
+has three now, each 10 mm by default:
+
+- the seam allowance at the sides, which is the ribs' too;
+- one at the intake;
+- one at the trailing edge.
+
+Each edge is moved out by its own, and the corners are mitred (`cutOutline`).
+
+The intake's edges can be hemmed instead, as OpenGlider cuts its entry
+(`FoldedCut`): folded twice, the allowance deep each time. A hem lies flat
+only if the cloth folded over is the mirror of the panel's own about the
+fold. So the cut line beyond the fold is each side's cutting line mirrored
+about it, then the same again as it is. Folded twice, the hem's edges lie on
+the sides' to the micrometre; that is asserted on a panel whose sides lean 3°
+from square. Carried straight on past the fold instead, as a plain allowance
+is, a 20 mm hem on that panel folds over to lie 2.0 mm off its side's line:
+twice the depth times the sine of the lean.
+
+The three designs' programs cut their fronts on a plain allowance, not a hem.
+Hemmed, the same panels come out 0.8 to 2.0% over their cutting files,
+instead of under 1%. On a closed intake there is no edge to hem — the two
+panels are sewn together there — and nothing is hemmed.
+

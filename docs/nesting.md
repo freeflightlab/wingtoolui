@@ -6,17 +6,19 @@ what is still on the table.
 
 ## Where it stands
 
-The default wing — 48 sail panels a half, 26.75 m² as cut with a 10 mm seam
-allowance — on a 1.4 m roll with 30 mm between pieces:
+The default wing — 48 sail panels a half, 26.18 m² as cut with a 10 mm seam
+allowance, parted at the intake (`panels.md`, section 6) — on a 1.4 m roll
+with 30 mm between pieces:
 
 | packer | roll, one half | used |
 | --- | --- | --- |
-| boxes on a skyline | 39.6 m | 48% |
-| outlines, from one edge | 36.6 m | 52% |
-| **outlines, from both edges** (what the tool uses) | **30.1 m** | **64%** |
+| boxes on a skyline | 37.9 m | 49% |
+| outlines, from one edge | 35.1 m | 53% |
+| **outlines, from both edges** (what the tool uses) | **29.1 m** | **64%** |
 
-The same packer lays out the ribs (57% used) and the diagonals (38%) on rolls
-of their own, and the bill of materials orders all three.
+The same packer lays out the ribs (57% used), the mini-ribs (42%) and the
+diagonals (36%) on rolls of their own, and the bill of materials orders all
+four.
 
 **These are valid layouts, not tight ones.** Every piece keeps the gap asked
 for from every other, in every direction, and nothing overlaps — both are
@@ -24,16 +26,18 @@ measured on the finished layout, not assumed. But a nest worked over by hand
 or by a production nester does better, and the bill says so under its roll
 total rather than letting 115 m be read as what a 22 m² wing needs.
 
-Roll width matters more than it looks: the default wing's panels are 305 mm
-across as cut, so a 1.4 m roll takes four abreast with 9 cm to spare, and a
-1.6 m roll with a 10 mm gap takes five (68% used).
+Roll width matters, and not always the way it looks: the default wing's
+panels are 295 mm across as cut at their widest, so a 1.4 m roll takes four
+abreast with 13 cm to spare and a 1.6 m roll with a 10 mm gap takes five —
+yet the wider roll comes out at 62% used against the narrower's 64%, because
+the packer drops whole panels, not columns of them.
 
 ## Two losses that want opposite remedies
 
 ```
-shape efficiency   = panel area / sum of best-fit bounding boxes    93.8%
-packing efficiency = sum of boxes / roll area consumed              67.7%
-                                                     overall        63.5%
+shape efficiency   = panel area / sum of best-fit bounding boxes    92.9%
+packing efficiency = sum of boxes / roll area consumed              69.2%
+                                                     overall        64.3%
 ```
 
 Shape loss is what a panel's own outline wastes *inside* the smallest box that
@@ -46,12 +50,14 @@ worst-shaped panels. On the default wing:
 | | |
 | --- | --- |
 | dominant loss | packing |
-| worst-shaped | 24U 73%, 24L 77%, 23U 83% |
-| best-shaped | 1L, 2U, 3L at 98% |
+| worst-shaped | 24U 67%, 23U 76%, 22U 80% |
+| best-shaped | 1L, 2U at 98%, 11L at 97% |
 
-A sail panel is a near-straight strip — 2.74 m by 0.31 m at the root, 1.31 m
-by 0.19 m at the tip — so it fills its own box almost completely. The loss is
-in how the boxes go down.
+A sail panel is a near-straight strip — 2.81 m by 0.30 m at the root on top,
+which runs round the nose, and 2.48 m by 0.28 m beneath it; 1.34 m by 0.24 m
+and 1.24 m by 0.17 m at the tip — so it fills its own box almost completely,
+bar the tip's upper panel, curled by the arc. The loss is in how the boxes go
+down.
 
 ## What works
 

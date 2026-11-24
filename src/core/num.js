@@ -4,6 +4,8 @@ export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 export const deg = (r) => (r * 180) / Math.PI;
 export const rad = (d) => (d * Math.PI) / 180;
 export const lerp = (a, b, t) => a + (b - a) * t;
+/** A point a fraction `t` of the way from 3D point `a` to `b`. */
+export const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 /** Composite Simpson integration. n is forced even. */
 export function simpson(f, a, b, n = 200) {

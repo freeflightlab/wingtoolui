@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2931-test validation suite and a benchmark with regression budgets
+- [x] 2971-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -824,7 +824,7 @@ validation notes flagged.
 - [ ] **Single-skins are built as four rows** where the Skin 4 P and Bi Skin
       2 P have nine, and double-surface: OpenGlider's `SingleSkinRib`, an arch
       a parabola of set height between attachment points, is a model for the
-      ribs (`docs/openglider.md` section 2).
+      ribs (`docs/openglider.md` section 3).
 - [x] **The interface's balance is the handbook's**, on typed coefficients;
       the coupled solve and the trim from the calage were core and suite
       only. It flies the wing's own polar now, at the angle or trimmed from
@@ -1221,13 +1221,13 @@ validation notes flagged.
       by line, the default wing's mains came to 1382 daN and its brake's first
       level to 82; the set is sized to the calculation now, and the Lines
       group shows every level against it.
-- [ ] **A folded allowance where a panel's edge is hemmed** — cut as the
+- [x] **A folded allowance where a panel's edge is hemmed** — cut as the
       mirror of the panel's edge about the fold, so it lies flat folded, as
-      OpenGlider's `FoldedCut` cuts the entry. A wing of this tool's own has
-      one allowance all round.
-- [ ] **Mini-ribs on a wing of this tool's own** — OpenGlider's `MiniRib`
+      OpenGlider's `FoldedCut` cuts the entry (round of 2026-11-24, Phase 3).
+- [x] **Mini-ribs on a wing of this tool's own** — OpenGlider's `MiniRib`
       blends a cell's unballooned shape in its middle to its ballooned one at
-      its ends; an imported design's are its program's here.
+      its ends; an imported design's are its program's here (round of
+      2026-11-24, Phase 3).
 
 ### Round of 2026-10-28: every force where it acts
 
@@ -1611,6 +1611,42 @@ Turning geometry into something a person can actually sew.
       hardware counted from the plan.
 - [ ] **Fabric by colour** in the bill — the cloth is by grade and location;
       a colour scheme is not modelled.
+
+### Round of 2026-11-24: OpenGlider, adopted
+
+- [x] **This tool's own panels parted at the intake** — developed as two
+      whole surfaces, leading edge to trailing edge, every cell of a wing of
+      this tool's own was closed at the nose in its cutting file. The upper
+      panel runs round the nose to where the intake opens now, the lower
+      from where it closes (`partedEdges`), as OpenGlider's panels part at
+      their entry and LEparagliding's designs at their intakes. On the
+      three designs' own ribs the tool's own development comes to within
+      0.8% of every surface of their cutting files, where it was 2 to 4%
+      short on the upper and 8 to 9% over on the lower. See
+      `docs/panels.md`, section 6.
+- [x] **An allowance by edge, and the intake hemmed** — sides, intake and
+      trailing edge each their own, corners mitred, or the intake's edges
+      folded twice as OpenGlider's `FoldedCut` folds the entry, so that the
+      hem lies flat on its sides (`cutOutline`).
+- [x] **Trailing-edge mini-ribs on a wing of this tool's own** — the cell's
+      section halfway between its ribs, as OpenGlider's `MiniRib`, raised at
+      its front to the billow of the tool's own panels by LEparagliding's
+      rule or OpenGlider's; within 4% of the three designs' cutting files by
+      the first (`buildMiniRibs`; `docs/internal-structure.md`, section 5).
+- [ ] **The mini-ribs' sewing lines on the panels** — the cutting file
+      marks every seam's notches, and not yet where a mini-rib is sewn down
+      the middle of its cell.
+- [ ] **Closed cells on a wing of this tool's own** — the three designs
+      close their tip cells (LEparagliding's section 2: the Swoop2's last
+      four, the gnuC2-23's last five); this tool's own wings are open to the
+      tip. `partedEdges` takes a closed intake already; a per-cell setting
+      and the panel that runs over it are what is missing.
+- [ ] **Line tensions as vectors** — OpenGlider carries the canopy's force
+      at each anchor up its top line, projected along it, and each line
+      below takes the vector sum of those above along itself. This tool adds
+      tensions as numbers, which is the larger by the cosine of a
+      junction's spread, and shares the anchors' loads so that they add up
+      to the wing's load rather than so that the forces balance it.
 
 ---
 

@@ -25,6 +25,7 @@
 
 import { LOAD_ROW_SHARES } from './loads.js';
 import { ribSurfacePoint } from './wing3d.js';
+import { lerp3 } from './num.js';
 
 // 'S' is the stabilo — the outermost line, on its own riser on many wings.
 // 'Z' is a collapse line. Both are real rows that carry names of their own.
@@ -2421,7 +2422,6 @@ export function referenceTotals(lineSet, rowOrder = null) {
 }
 
 const mm = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000);
-const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 /**
  * How far a line from `from` up to `to` lies from vertical, in degrees.

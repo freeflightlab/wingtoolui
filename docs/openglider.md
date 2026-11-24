@@ -2,12 +2,14 @@
 
 [OpenGlider](https://github.com/booya-at/OpenGlider) is the other open-source
 paraglider design project — a Python library with a FreeCAD workbench, under
-the GNU GPL v3, as this project is. The first review here (sections 3 to 5)
-went as far as its README and screenshots. This one read its code and data:
-the `develop` branch, version 0.8.1, commit `ccdb7bf` of 2026-02-06: 329
-files, 177 of them Python, 31,000 lines — 610 KB in the library, the rest
+the GNU GPL v3, as this project is. The first review here (sections 4 and 5)
+went as far as its README and screenshots. The second read its code and
+data: the `develop` branch, version 0.8.1, commit `ccdb7bf` of 2026-02-06:
+329 files, 177 of them Python, 31,000 lines — 610 KB in the library, the rest
 its FreeCAD workbench and tests. Its other branches are older (`master`
-2014, `fem-stuff` 2016, `cpp` 2021).
+2014, `fem-stuff` 2016, `cpp` 2021). The third, on 2026-11-24, found
+`develop` where the second left it, and went back through it for what it
+does that this tool's own wings did not: section 2.
 
 ## 1. What was taken in 1.5.0
 
@@ -74,7 +76,42 @@ size until it holds, and the Lines group shows every level against it. The
 three complete designs' own sets hold every level at the strengths their
 types are given, their mains 54 to 75 times the weight.
 
-## 2. What was read and not taken
+## 2. What was adopted in 1.17.0
+
+### Panels parted at the entry, and cut by edge
+
+OpenGlider's panels are bounded by cuts of named kinds (`Panel.CUT_TYPES`):
+`folded` at the entry, `parallel` at the trailing edge, `orthogonal` and
+`cut_3d` for design cuts, each with its own allowance in its pattern
+configuration — 15 mm at the entry, 10 at the trailing edge, 12 at a design
+cut, 10 on the sides. Reading that against this tool's own panels found
+what neither of the first two reviews had: **they had no entry at all.** A
+wing of this tool's own was developed as two whole surfaces, nose to tail,
+so every cell was closed at the nose in its cutting file, and the cloth was
+on the wrong surface.
+
+They part at the intake now, as OpenGlider's and LEparagliding's do, with an
+allowance for each kind of edge, and the intake's edges hemmed if asked as
+`FoldedCut` hems the entry: the side's cutting line mirrored about the fold,
+then again as it is, so that folded twice it lies flat (`partedEdges`,
+`cutOutline`). On the three complete designs' own ribs, this tool's own
+development comes to within 0.8% of every surface of their cutting files,
+where it was 2 to 4% short on the upper and 8 to 9% over on the lower on the
+same allowances (`docs/panels.md`, section 6).
+
+### Mini-ribs
+
+`MiniRib` is the cell's section at a point across it, blended from its
+unballooned shape to its ballooned one by a curve along the chord. This
+tool's own wings have trailing-edge mini-ribs now, built so: the section
+halfway between the ribs, its front raised to the billow of the tool's own
+panels. OpenGlider eases the rise along the whole mini-rib by a quadratic
+Bézier; LEparagliding over 6% of chord by a half cosine, at 0.8 or 0.85 of
+the billow. Both are offered. Against the three designs' cutting files the
+second comes to within 4% of their mini-ribs, and the first 6 to 8% over on
+the two whose programs raise them (`docs/internal-structure.md`, section 5).
+
+## 3. What was read and not taken
 
 **Line sag under drag** (`SagMatrix`): each line a taut string under its own
 drag, ½ ρ V² c<sub>w</sub> d a metre, sagging q L²/(8F). On the default wing
@@ -93,22 +130,44 @@ width, b/l = sin φ/φ — the relation `ovalization.js` uses, with a chordwise
 profile where OpenGlider takes a spline. Its demonstration glider balloons
 its upper surface 4 to 5% mid-chord, against this tool's 6% default.
 
-**Cuts and allowances** (`plots/cuts.py`, `plots/glider/config.py`): a folded
-allowance is cut as the mirror of the panel's edge about the fold, so it
-lies flat folded (`FoldedCut`, at the entry); a trailing edge parallel; 3D
-shaping by walking the seam (`Cut3D`); allowances of 10 to 24 mm by edge.
-This tool cuts one allowance all round on a wing of its own and an imported
-design's as its program cuts them. The folded allowance is in the roadmap.
+**3D shaping by walking the seam** (`Cut3D`, `Panel.integrate_3d_shaping`):
+a design cut's points moved along each seam by the length the 3D surface
+has over its flat development there, weighted by a Gaussian of 4 cm
+(`sigma_3d_cut`). This tool shapes with darts (`shaping3d.js`), and an
+imported design's 3D shaping is its program's.
 
 **Single-skin ribs** (`SingleSkinRib`): the lower surface between attachment
 points an arch, a parabola of a set height. This tool builds a single-skin
 wing double-surface and says so; the roadmap carries it.
 
-**Mini-ribs in a cell of its own** (`MiniRib`): blended from the cell's
-unballooned shape in the middle to its ballooned one at the ends, the
-cell's ballooning shared between the cells it makes. An imported design's
-are its program's here; a wing of this tool's own has none, which is in the
+**A mini-rib's share of the cell's billow** (`Cell._child_cells`): the cells
+a mini-rib makes are given a ballooning of `l / l_new × (b + ½) − ½`, where
+the cloth across the cell, `l (1 + b)`, shared between them gives
+`l (1 + b) / l_new − 1`. The two agree only where the mini-rib holds the
+cloth at the ribs' straight line, `l_new = l`. This tool's mini-ribs (section
+2) are cut pieces, and do not reshape the cells either side.
+
+**The line set's forces as vectors** (`LineSet.calc_forces`): each top line
+carries the canopy's force at its anchor projected along it, and each line
+below the vector sum of those above along itself, where this tool adds
+tensions as numbers. Where the lines above a junction splay, the sum is the
+larger by the cosine of their spread — a few per cent on a lower line — and
+the anchors' loads, which this tool shares out so that they add up to the
+wing's load, are each the canopy's force at the anchor. Both are in the
 roadmap.
+
+**The shark-nose and flap features** (FreeCAD workbench, `features.py`): the
+lower surface pushed down by up to 3% of chord from 6 to 90% of chord,
+peaking at 9%, straight or by a parabola; and the trailing edge turned down
+by 1% of chord from 95%. Shape edits with no aerodynamics behind them; the
+gnuC2-23's shark nose is its section's own, and this tool's sections can be
+any.
+
+**Profiles and balloonings merged along the span** (`profile_merge_curve`,
+`ballooning_merge_curve`): each rib's section a blend of several, by a curve
+across the span. The three complete designs here are of one section each,
+at one thickness but for the tips (the Tuluaq's 0.9, then 0.8 and 0.1), so
+nothing here yet asks for it.
 
 **Rib holes, rods and reinforcements** (`rib/elements.py`): holes as
 circles and ellipses scaled to the local thickness, a rod a set distance in
@@ -135,18 +194,23 @@ conformal maps for meshes this tool does not make.
 
 ### What it has wrong
 
-Read closely, four slips, none taken here: its NACA four-digit generator
+Read closely, five slips, none taken here: its NACA four-digit generator
 takes the camber slope aft of the highest point as 2m(p − x)/(1 − p²) where
-the definition has (1 − p)²; a `TensionStrap` halves its width twice; and
-the DSL 140 and Technoline 1830 entries above.
+the definition has (1 − p)²; a `TensionStrap` halves its width twice; the
+DSL 140 and Technoline 1830 entries above; and its knot correction
+(`LineSet.knots_table`, `get_line_length`), whose one entry takes 2.0 off a
+line's length in metres where its seam correction is converted from
+millimetres — two metres off the line in its length table, wherever a
+`liros.ltc65` pair meets a `liros.ltc65`, and nothing at all for any other
+knot.
 
-## 3. The first review, from its README
+## 4. The first review, from its README
 
 ### What it had that this did not
 
 | | OpenGlider | here |
 | --- | --- | --- |
-| **mini-ribs** | modelled, in its own screenshots | **not built** on a wing of its own; an imported design's trailing-edge ones as its program cuts them |
+| **mini-ribs** | modelled, in its own screenshots | an imported design's trailing-edge ones as its program cuts them; on a wing of its own, built since 1.17.0 (section 2) |
 | **3D panel method** | VSAERO / `parabem` | lifting line |
 | **nonlinear FEM** | `paraFEM`, membrane and truss | none |
 | **CFD export** | OBJ for OpenFOAM | OBJ, same choice |
@@ -279,7 +343,7 @@ independently, for its own reasons — it is the only light format carrying
 surfaces, polylines and named groups. Arriving at the same answer from a
 different requirement is a reasonable sign the choice is right.
 
-## 4. What this has that OpenGlider does not
+## 5. What this has that OpenGlider does not
 
 Worth stating honestly, because the comparison runs both ways: this project
 validates against 55 published sizes from five makers, and holds 23 of them, of

@@ -40,6 +40,7 @@
 
 import { dist3 } from './num.js';
 import { ribSurfacePoint } from './wing3d.js';
+import { solveArc, cutOutline } from './ovalization.js';
 
 /**
  * Build the diagonal ribs for a wing.
@@ -1229,5 +1230,164 @@ export function buildSeamDiagonals({
       + `${legs.length ? (Math.max(...legs) * 1000).toFixed(0) : 0} mm, worst `
       + `leg ratio ${ratios.length ? Math.max(...ratios).toFixed(2) : 0}`
       + (needHRib.length ? `; ${needHRib.length} places want an H rib` : ''),
+  };
+}
+
+/* ---------------------------------------------- trailing-edge mini-ribs -- */
+
+/**
+ * Trailing-edge mini-ribs on a wing of this tool's own: one in the middle of
+ * every cell but the tip's, from the trailing edge forward over `lengthPct`
+ * of its chord.
+ *
+ * All three complete designs here carry them — the Swoop2 at 16 and 17% of
+ * chord, the Tuluaq-19 and gnuC2-23 at 15 — in every cell but the tip's,
+ * and this tool's own wings had none. A mini-rib holds the two surfaces at
+ * the section's own shape in the middle of the cell, where nothing else
+ * does, so the trailing edge does not balloon open between the ribs.
+ *
+ * Each is the cell's section halfway between its ribs, unballooned, as
+ * OpenGlider builds its `MiniRib`. Its front is not sewn to anything, and
+ * the cloth billows out there, so the front is raised to meet it and eased
+ * back to the section behind. Two programs do that two ways (`rise`):
+ *
+ *   'lep'         LEparagliding's code 3001, mode 3: a share of the billow
+ *                 (`riseFactor`), eased back over `transitionPct` of chord
+ *                 by a half cosine. The Swoop2 and the gnuC2-23 ask for
+ *                 0.85 and 0.8 over 6%.
+ *   'openglider'  all of the billow, eased back along the whole mini-rib by
+ *                 OpenGlider's quadratic Bézier through (front, 1),
+ *                 (front + a third, 0) and (trailing edge, 0).
+ *
+ * On the two designs' own ribs, the first comes to within 3% of their
+ * cutting files' mini-ribs and the second 6 to 8% over them
+ * (`docs/internal-structure.md`). The billow is the panels' own (`panels`,
+ * ovalized): the sagitta of the arc their width as cut makes across the
+ * ribs' spacing at the mini-rib's front, on each surface. An imported
+ * design's mini-ribs are its program's, `lepStructure`.
+ *
+ * Returns pieces as `lepStructure` gives them — `sewing`, its upper and
+ * lower edges front first in its own plane; `outline`, the cut line with
+ * the rib allowance on the two sewn edges, the front cut on its line; and
+ * `cutAreaM2` — so that the bill, the nesting and the exports take either;
+ * and `placed`, the two edges in the wing, for drawing.
+ */
+export function buildMiniRibs({
+  wing, panels = null, lengthPct = 15, allowanceMM = 10,
+  // How the front rises to the billow: 'openglider', all of it, eased along
+  // the whole mini-rib; or 'lep', a share of it (`riseFactor`) eased back
+  // over `transitionPct` of chord by a half cosine — LEparagliding's code
+  // 3001 mode 3, at the Swoop2's 0.85 and 6%.
+  rise: riseRule = 'lep', riseFactor = 0.85, transitionPct = 6,
+} = {}) {
+  if (!(lengthPct > 0) || !wing?.ribs?.length) return { pieces: [], count: 0, totalAreaM2: 0, lengthPct: 0 };
+  const ribs = wing.ribs;
+  const from = 1 - Math.min(60, lengthPct) / 100;
+  const pieces = [];
+  const area2 = (q) => { let t = 0; for (let i = 0, j = q.length - 1; i < q.length; j = i++) t += q[j][0] * q[i][1] - q[i][0] * q[j][1]; return Math.abs(t / 2); };
+  // The ease, 1 at the front to 0, at `s` of the way to the trailing edge.
+  // OpenGlider's: its quadratic Bezier, over the whole length.
+  // LEparagliding's: a half cosine over the transition's share of it.
+  const lepShare = Math.min(1, transitionPct / Math.max(1e-9, Math.min(60, lengthPct)));
+  const ease = riseRule === 'lep'
+    ? (s) => (s >= lepShare ? 0 : (1 + Math.cos((Math.PI * Math.max(0, s)) / lepShare)) / 2)
+    : (s) => { const t = Math.sqrt(1 + 3 * Math.min(1, Math.max(0, s))) - 1; return (1 - t) * (1 - t); };
+  const share = riseRule === 'lep' ? riseFactor : 1;
+  // The panels' extra width at a chord fraction on one surface of a cell.
+  const excessAt = (cell, surface, x) => {
+    const p = panels?.find((q) => q.cell === cell && q.surface === surface)?.panel;
+    const st = p?.stations?.left;
+    const ex = p?.excessRatios;
+    if (!st || !ex || st.length !== ex.length) return 0;
+    let k = 1;
+    while (k < st.length - 1 && st[k] < x) k++;
+    const g = Math.min(1, Math.max(0, (x - st[k - 1]) / ((st[k] - st[k - 1]) || 1)));
+    return ex[k - 1] + g * (ex[k] - ex[k - 1]);
+  };
+  const mirrorOf = (r) => ({
+    ...r,
+    upper: r.upper.map(([x, y, z]) => [x, -y, z]),
+    lower: r.lower.map(([x, y, z]) => [x, -y, z]),
+  });
+  // The cells: the centre one between the innermost rib and its mirror, if
+  // the wing has one, then each pair; never the tip's.
+  const cells = [];
+  if (wing.centreRib === false) cells.push({ cell: 0, A: mirrorOf(ribs[0]), B: ribs[0], centre: true });
+  for (let i = 0; i < ribs.length - 2; i++) cells.push({ cell: i + 1, A: ribs[i], B: ribs[i + 1] });
+
+  for (const { cell, A, B, centre } of cells) {
+    if (!A.section || !B.section || A.section.upper.length !== B.section.upper.length
+      || A.section.lower.length !== B.section.lower.length) continue;
+    const chord = (A.chord + B.chord) / 2;
+    const edge = (surface, sign) => {
+      const sa = A.section[surface];
+      const sb = B.section[surface];
+      // The section halfway between the ribs, in its own plane, metres; and
+      // the same points in the wing.
+      const mid = sa.map((p, k) => [(p[0] + sb[k][0]) / 2, (p[1] + sb[k][1]) / 2]);
+      const mid3 = A[surface].map((p, k) => [(p[0] + B[surface][k][0]) / 2, (p[1] + B[surface][k][1]) / 2, (p[2] + B[surface][k][2]) / 2]);
+      const u0 = from * chord;
+      let k = 1;
+      while (k < mid.length - 1 && mid[k][0] < u0) k++;
+      const g = Math.min(1, Math.max(0, (u0 - mid[k - 1][0]) / ((mid[k][0] - mid[k - 1][0]) || 1)));
+      const at = (P) => P[k - 1].map((v, j) => v + g * (P[k][j] - v));
+      const pts = [at(mid), ...mid.slice(k)];
+      const pts3 = [at(mid3), ...mid3.slice(k)];
+      // The billow at the front, on this surface: the arc the cloth's width
+      // as cut makes over the ribs' spacing there.
+      const spacing = dist3(ribSurfacePoint(A, surface, from), ribSurfacePoint(B, surface, from));
+      const e = excessAt(cell, surface, from);
+      const rise = e > 0 && spacing > 0 ? share * solveArc(spacing * (1 + e), spacing).f : 0;
+      const len = pts[pts.length - 1][0] - pts[0][0] || 1;
+      const lifted = pts.map(([u, v]) => [u, v + sign * rise * ease((u - pts[0][0]) / len)]);
+      return { flat: lifted, placed: pts3, rise };
+    };
+    const up = edge('upper', 1);
+    const lo = edge('lower', -1);
+    // Two edges with one count, for the cut line: the shorter's longest
+    // segments split in two, which moves nothing.
+    const grow = (P, n) => {
+      const Q = P.map((p) => p.slice());
+      while (Q.length < n) {
+        let at = 1;
+        let longest = -1;
+        for (let i = 1; i < Q.length; i++) {
+          const l = Math.hypot(Q[i][0] - Q[i - 1][0], Q[i][1] - Q[i - 1][1]);
+          if (l > longest) { longest = l; at = i; }
+        }
+        Q.splice(at, 0, [(Q[at - 1][0] + Q[at][0]) / 2, (Q[at - 1][1] + Q[at][1]) / 2]);
+      }
+      return Q;
+    };
+    const n = Math.max(up.flat.length, lo.flat.length);
+    const sewing = { left: grow(up.flat, n), right: grow(lo.flat, n) };
+    const cut = cutOutline(sewing, { side: allowanceMM, front: 0, back: 0 });
+    const outline = cut.left.concat(cut.right.slice().reverse());
+    pieces.push({
+      kind: 'minirib',
+      cell,
+      // Labelled by its cell, M1 the first outboard of the centre.
+      rib: cell,
+      ribs: [A.index, B.index],
+      ...(centre ? { centre: true } : {}),
+      lengthPct,
+      chordM: chord,
+      riseM: [up.rise, lo.rise],
+      sewing,
+      outline,
+      holes: [],
+      cutAreaM2: area2(outline),
+      sewnAreaM2: area2(sewing.left.concat(sewing.right.slice().reverse())),
+      copies: centre ? 1 : 2,
+      placed: { upper: up.placed, lower: lo.placed },
+    });
+  }
+  return {
+    pieces,
+    count: pieces.length,
+    lengthPct,
+    rise: riseRule,
+    // The whole wing's cloth in them as cut.
+    totalAreaM2: pieces.reduce((t, p) => t + p.cutAreaM2 * p.copies, 0),
   };
 }

@@ -124,6 +124,13 @@ export function applyOvalization(panel, {
     return Math.min(1, Math.max(0, u));
   };
 
+  // A panel parted at the intake (`partedEdges`) knows each point's own
+  // chord fraction, and the loading is read there: the lower panel starts
+  // at the intake's rear lip, 5.5% of chord back on the default wing, where
+  // the panel's own fraction says 0 and the loading would have been read at
+  // the nose. The transitions stay the panel's own, from its two ends.
+  const stations = panel.stations?.left?.length === n ? panel.stations.left : null;
+
   for (let i = 0; i < n; i++) {
     const t = chordFraction(i);
     const width = Math.hypot(right[i][0] - left[i][0], right[i][1] - left[i][1]);
@@ -132,7 +139,7 @@ export function applyOvalization(panel, {
     if (pressure) {
       // Pressure difference at this chord station, interpolated from the
       // loading, and the excess the cloth needs to take up the arc.
-      const dp = Math.abs(interpolateCp(pressure.loading, t))
+      const dp = Math.abs(interpolateCp(pressure.loading, stations ? stations[i] : t))
         * pressure.dynamicPressurePa;
       const b = billowFromPressure({
         spacingM: Math.max(width, 1e-6),
@@ -171,6 +178,7 @@ export function applyOvalization(panel, {
     left: outL,
     right: outR,
     seamLengths: panel.seamLengths,
+    ...(panel.stations ? { stations: panel.stations } : {}),
     ovalized: true,
     // What was actually applied, so a flat amount and a pressure-derived one
     // can be compared rather than assumed equivalent.
@@ -220,29 +228,131 @@ export function seamEasing(panelBefore, panelAfter) {
   };
 }
 
-/** Add a uniform seam allowance around a developed panel outline. */
-export function addSeamAllowance(panel, mm = 10) {
-  const a = mm / 1000;
-  const n = panel.left.length;
-  const L = [];
-  const R = [];
-  for (let i = 0; i < n; i++) {
-    const dx = panel.right[i][0] - panel.left[i][0];
-    const dy = panel.right[i][1] - panel.left[i][1];
-    const w = Math.hypot(dx, dy) || 1;
-    L.push([panel.left[i][0] - (dx / w) * a, panel.left[i][1] - (dy / w) * a]);
-    R.push([panel.right[i][0] + (dx / w) * a, panel.right[i][1] + (dy / w) * a]);
-  }
-  // Extend the ends along the seam direction too.
-  const ext = (p, q) => {
-    const dx = p[0] - q[0];
-    const dy = p[1] - q[1];
-    const m = Math.hypot(dx, dy) || 1;
-    return [p[0] + (dx / m) * a, p[1] + (dy / m) * a];
+/**
+ * A developed panel's cutting line: each edge moved out by its own seam
+ * allowance, as a cutting file gives them — the sides, sewn to the ribs; the
+ * front end, at the intake; the trailing-edge end (LEparagliding's section
+ * 6, OpenGlider's allowances by cut) — every point of a side along the mean
+ * of its segments' normals, and each corner where two edges meet mitred.
+ *
+ * Or the front end hemmed (`hem`), as OpenGlider's `FoldedCut` cuts the
+ * entry: folded twice, `front` wide each time. A hem lies flat only if the
+ * cloth folded over is the mirror of the panel's own about the fold, so the
+ * cut line beyond it is each side's cutting line mirrored about the fold,
+ * then the same again as it is: folded twice, the hem's edges lie on the
+ * sides'. An allowance carried straight on past the fold folds over to lie
+ * off the side's line by twice its depth times the sine of how far from
+ * square the side meets the fold: 2 mm for a 20 mm allowance on a side
+ * leaning 3 degrees.
+ *
+ * This replaced a uniform allowance, each side pushed out across the panel
+ * and the ends carried on along it: one figure for every edge, and no hem.
+ *
+ * Returns `{ left, right }`, front end first as the panel's are, so its
+ * outline is the left and the right reversed; with a hem, `hem` counts the
+ * points at the front of each that are the hem's, and the rest is the side.
+ */
+export function cutOutline(panel, { side = 10, front = side, back = side, hem = false } = {}) {
+  const Lp = panel.left;
+  const Rp = panel.right;
+  const n = Lp.length;
+  const sub = (p, q) => [p[0] - q[0], p[1] - q[1]];
+  const add = (p, v, k = 1) => [p[0] + v[0] * k, p[1] + v[1] * k];
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1];
+  const unit = (v) => { const m = Math.hypot(v[0], v[1]) || 1; return [v[0] / m, v[1] / m]; };
+  const perp = (v) => [-v[1], v[0]];
+  const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+  const m = n >> 1;
+
+  // A side moved out by `d`, away from the other side.
+  const offsetSide = (P, other, d) => {
+    if (!d) return P.map((p) => p.slice());
+    const normals = [];
+    for (let i = 0; i < n - 1; i++) normals.push(perp(unit(sub(P[i + 1], P[i]))));
+    const k = Math.min(m, n - 2);
+    const sign = dot(normals[k], sub(other[k + 1], P[k + 1])) > 0 ? -1 : 1;
+    return P.map((p, i) => {
+      const a = normals[Math.max(0, i - 1)];
+      const b = normals[Math.min(n - 2, i)];
+      const bis = unit([a[0] + b[0], a[1] + b[1]]);
+      const reach = d / Math.max(dot(bis, b), 0.4);
+      return add(p, bis, sign * reach / 1000);
+    });
   };
-  L[0] = ext(L[0], L[1]); R[0] = ext(R[0], R[1]);
-  L[n - 1] = ext(L[n - 1], L[n - 2]); R[n - 1] = ext(R[n - 1], R[n - 2]);
-  return { left: L, right: R, allowanceMM: mm };
+  // Where the line through p along v crosses the line through q along w.
+  const meet = (p, v, q, w) => {
+    const den = v[0] * w[1] - v[1] * w[0];
+    if (Math.abs(den) < 1e-12) return null;
+    const t = ((q[0] - p[0]) * w[1] - (q[1] - p[1]) * w[0]) / den;
+    return add(p, v, t);
+  };
+  // An end of the panel, as a line, and its outward normal: away from the
+  // panel's own body beside it.
+  const endLine = (a, b, inner) => {
+    const along = unit(sub(b, a));
+    let nrm = perp(along);
+    if (dot(nrm, sub(inner, mid(a, b))) > 0) nrm = [-nrm[0], -nrm[1]];
+    return { at: a, along, nrm };
+  };
+
+  const L = offsetSide(Lp, Rp, side);
+  const R = offsetSide(Rp, Lp, side);
+  const head = endLine(Lp[0], Rp[0], mid(Lp[1], Rp[1]));
+  const tail = endLine(Lp[n - 1], Rp[n - 1], mid(Lp[n - 2], Rp[n - 2]));
+  // A side's end carried to the end line moved out by `d`: the mitre.
+  const corner = (S, first, line, d) => {
+    const p = first ? S[0] : S[n - 1];
+    const q = first ? S[1] : S[n - 2];
+    return meet(p, sub(q, p), add(line.at, line.nrm, d / 1000), line.along) ?? add(p, line.nrm, d / 1000);
+  };
+
+  const backL = corner(L, false, tail, back);
+  const backR = corner(R, false, tail, back);
+  if (!hem || !(front > 0)) {
+    const left = [corner(L, true, head, front), ...L.slice(1, n - 1), backL];
+    const right = [corner(R, true, head, front), ...R.slice(1, n - 1), backR];
+    return { left, right, allowanceMM: { side, front, back }, hem: null };
+  }
+
+  // The hem. Its fold is the panel's front end; `h` deep each fold.
+  const h = front / 1000;
+  const depth = (p) => -dot(sub(p, head.at), head.nrm);   // into the panel
+  const hemOf = (S) => {
+    const atFold = meet(S[0], sub(S[1], S[0]), head.at, head.along) ?? S[0];
+    // The side's cutting line from the fold inward: from its first point
+    // inside the fold, which is its second unless the first segment is
+    // shorter than the side's own offset.
+    let first = 1;
+    while (first < n - 2 && depth(S[first]) <= 1e-12) first++;
+    const sideLine = [atFold, ...S.slice(first, n - 1)];
+    // The piece of it the hem mirrors: from the fold to `h` inside.
+    const piece = [atFold];
+    for (let i = first; i < n; i++) {
+      const prev = piece[piece.length - 1];
+      if (depth(S[i]) >= h) {
+        const g = (h - depth(prev)) / ((depth(S[i]) - depth(prev)) || 1);
+        piece.push(add(prev, sub(S[i], prev), g));
+        break;
+      }
+      piece.push(S[i]);
+    }
+    // Folded over once: mirrored about the fold. Folded again: as it is,
+    // moved out by two depths. Out from the fold, then reversed so that
+    // the side reads front end first.
+    const once = piece.map((p) => add(p, head.nrm, 2 * depth(p)));
+    const twice = piece.slice().reverse().map((p) => add(p, head.nrm, 2 * h));
+    return { points: once.concat(twice.slice(1)).reverse(), side: sideLine };
+  };
+  const hl = hemOf(L);
+  const hr = hemOf(R);
+  const left = [...hl.points.slice(0, -1), ...hl.side, backL];
+  const right = [...hr.points.slice(0, -1), ...hr.side, backR];
+  return {
+    left,
+    right,
+    allowanceMM: { side, front, back },
+    hem: { left: hl.points.length - 1, right: hr.points.length - 1, folds: 2, depthMM: front },
+  };
 }
 
 /* ------------------------------------------------ billow from pressure -- */
