@@ -4,6 +4,104 @@ Each release's version is `package.json`'s; the page shows it beside its
 name, and the self-audit fails if this file's newest entry is not it.
 `ROADMAP.md` has the detail of every round.
 
+## 1.19.0 — 2026-11-25
+
+The pilot can now swing under the canopy: two bodies, PGSim's default
+dynamics, beside the one body, and every flight is flown both ways. Flying
+them on the bar found what a rigid section lacks at low angles, and PGSim's
+relief for it is now the flight's, with the section alone kept as the other
+assumption. And a flight's departures are read in the air at the canopy, not
+at the pilot.
+
+**Added**
+
+- **Two bodies** (`bodies: 'two'`): the canopy, with the air inside it, the
+  lines and its apparent mass, about the riser midpoint; the pilot 0.23 m
+  below the karabiners, a seated box's inertia; one tension-only bundle a row
+  on each side, 60 kN/m and 500 N·s/m a side shared by the rows' loads; the
+  harness's damping. PGSim's figures throughout. The start is the one body's
+  trim exactly: the lines are hung at the lengths that hold the canopy there
+  and the pilot at rest under it (`flightTwoBodyStart`), so the two differ
+  only in how they fly. Twelve degrees of freedom; a flight takes about as
+  long as one body's.
+- **How the pilot hangs**, set in the tab. Every flight is also flown the
+  other way: the chart draws that twin's bank and turn dashed, beside the
+  other canopy's dotted, and the note gives both. A flight flown already, as
+  a scenario or as a twin, is not flown again, so changing an assumption
+  flies one new flight, not three.
+- **The pilot seen hanging.** With two bodies he is drawn on his own body,
+  his risers running up from his karabiners; the view says how far he has
+  swung under the canopy, what the lines pull and which rows are slack. The
+  saved table adds his swing and twist, the lines' pull and the slack rows,
+  and, for every flight, the canopy's own speed and sideslip.
+- **The canopy at low angles**, set in the tab (`pitchRelief`, PGSim's
+  `cmLow`). Below 3° to its chord a pressurised section's nose flattens and
+  its rows hold its rear up, so its nose-down moment stops growing as its
+  lift falls. Each strip there gains 0.8 times the shortfall, at most 0.2
+  rad, of nose-up moment coefficient. The default; its section alone is the
+  other assumption. Changing it finds the trims again from the section's
+  table already solved, which is now kept whenever only the run's
+  assumptions change.
+- Unit tests (2991): the bundles and their shares; the canopy carries all
+  but the pilot; hung at rest nothing accelerates and the lines hold one g;
+  a slack line pulls nothing, and a pilot lifted 0.3 m falls with only his
+  drag; left alone it stays trimmed; both brakes stay symmetric and the
+  left is the right in a mirror, to 1e-10; one brake turns it as one body
+  does; without rows it flies one body; the canopy's air read at the canopy;
+  the relief's law, above 3° nothing. The interface test flies the two-body
+  twin of the default turn, the view and table of two bodies, the Geo 7 L
+  with two bodies in PGSim's band, and the bar under both low-angle
+  assumptions.
+
+**Fixed**
+
+- **Departures are read in the air at the canopy**, at its strips' quarter
+  chords by area, not at the riser midpoint, which is the pilot's. Turning,
+  the canopy flies a circle of its own six metres in from his; in a pitch or
+  a spiral the two meet the air very differently. 1.18's default wing, both
+  brakes 65 cm in 3 s on the bar, was said to depart when the pilot's point
+  met the air at 31°: the canopy was below 20°, no strip deep in its stall.
+  In the EN spin test's spiral the canopy's sideslip passes 30° where the
+  pilot's is 9°, so the model now departs a quarter of a second into the
+  spiral, not three seconds. The view's canopy angle and slip are the
+  canopy's own.
+- **A flight that stops being finite after its departure** ends there,
+  keeping its frames, instead of failing whole. Two bodies' lines snatching
+  tight on a tumbling canopy did this.
+- The flight's run is keyed to where the rows hang from the canopy, which
+  the two bodies' bundles read.
+
+**Changed, on the default wing**
+
+- The bar reaches 120 of its 150 mm, at 47.4 km/h, glide 7.04, the canopy at
+  0.05°; on its section alone 90 mm, as before. On the bar the pitch
+  stiffness and damping stay near their hands-up figures and the phugoid is
+  damped, halving in 6.9 s, where on the section alone it was neutral.
+- One brake on the bar at 35 cm winds into a spiral dive 9.6 to 12.2 s in and
+  departs within a second; it departed 4.8 to 6.8 s in.
+- At 65 cm both brakes on the bar fly through, the canopy down to −8.6°; on
+  its section alone those in a second or less still depart. One brake on the
+  bar departs 4.0 to 5.4 s in, where it did 2.0 to 4.0 s in; from hands up
+  all nine depart as they did.
+- Hands up nothing moves: the trims, the turns, the polar and the EN
+  symmetric pull are as they were.
+
+**Found**
+
+- This tool's two bodies turn within a tenth of its one; PGSim's turn a third
+  faster at 43 cm and 95 kg. Stiffer lines bring both toward one body, and
+  neither the harness, the karabiners' spacing nor the bundles' layout moves
+  PGSim's. The cause is not found.
+- With two bodies the canopy is free to pitch about the karabiners, where
+  every row meets. On its section alone the default wing's centre of
+  pressure on the bar is so far aft that its A's carry 8% of the load; a
+  brake pulled there slackens them and the canopy pitches over on its rear
+  rows, a frontal tuck, every flight on the bar departing 1.6 to 3.6 s in.
+  PGSim's two bodies fly the Geo 7 L through the same pulls with their lines
+  taut: its relief is the difference. With it the default wing's A's carry
+  15% on the bar, PGSim's a third; which a real wing does was not found
+  measured.
+
 ## 1.18.0 — 2026-11-24
 
 In the Flight tab a brake was pulled and the wing seemed to fly straight on.

@@ -125,8 +125,10 @@ const S = {
   // then a departure.
   flightStart: 'trim', flightInput: 'right', flightRate: 'medium', flightTravelMM: 350, flightHoldS: 12,
   flightRelease: true, flightCamera: 'chase', flightChart: 'history', flightPastDeparture: 'stop',
-  // The canopy under the brake, drooping as PGSim has it, or rigid.
-  flightCanopy: 'droops',
+  // The canopy under the brake, drooping as PGSim has it, or rigid; and the
+  // pilot fixed under it (one body) or hung on the lines (two, PGSim's). At
+  // low angles, its rows holding it up as PGSim has it, or its section alone.
+  flightCanopy: 'droops', flightBodies: 'one', flightLowAngle: 'rows',
   brakeSlackCentreMM: 180, brakeSlackTipMM: 60,
   reference: '', brakeLines: true, stabilo: true, paper: 'A4',
   lineRow: 'all', compareTo: '', dimensions: true,
@@ -3917,8 +3919,10 @@ function flightKey() {
   const text = JSON.stringify([ribs, M.airfoil.points, M.atm.density, M.atm.dynamicViscosity,
     S.pilotMass, S.wingMass, S.lineMass, S.cxPilot, M.cxLinesUsed, M.metrics.area, S.nCrit,
     M.linePlan?.karabiner, bp?.pulley, bp?.lines?.filter((l) => l.level === 'upper').map((l) => l.to),
+    // where the rows hang from the canopy: the two bodies' line bundles
+    M.linePlan?.lines?.filter((l) => l.level === 'upper' && !l.isBrake).map((l) => [l.row, l.to]),
     (M.speedBar?.rows || []).map((r) => [r.barMM, r.alphaDeg, r.inRange]),
-    S.brakeSlackCentreMM, S.brakeSlackTipMM, M.balance?.speedMS]);
+    S.brakeSlackCentreMM, S.brakeSlackTipMM, M.balance?.speedMS, S.flightLowAngle]);
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
   return (h >>> 0).toString(16);
@@ -3930,22 +3934,34 @@ function flightScenario() {
     start: S.flightStart, input: S.flightInput, rate: S.flightRate,
     travelMM: S.flightTravelMM, holdS: S.flightHoldS, release: !!S.flightRelease,
     flyOn: S.flightPastDeparture === 'continue', canopy: S.flightCanopy === 'rigid' ? 'rigid' : 'droops',
+    bodies: S.flightBodies === 'two' ? 'two' : 'one',
   };
 }
-function flightScenarioKey(sc) { return [sc.start, sc.input, sc.rate, sc.travelMM, sc.holdS, sc.release ? 1 : 0, sc.flyOn ? 1 : 0, sc.canopy ?? 'droops'].join('|'); }
+function flightScenarioKey(sc) { return [sc.start, sc.input, sc.rate, sc.travelMM, sc.holdS, sc.release ? 1 : 0, sc.flyOn ? 1 : 0, sc.canopy ?? 'droops', sc.bodies ?? 'one'].join('|'); }
 function flightScenarioLabel(sc) {
   const who = sc.input === 'both' ? 'both brakes' : `${sc.input} brake`;
   return `${sc.start === 'accelerated' ? 'on the bar' : 'hands up'}, ${who} to ${(sc.travelMM / 10).toFixed(0)} cm in ${FLIGHT.rates[sc.rate]} s`
-    + (sc.canopy === 'rigid' ? ', rigid canopy' : '');
+    + (sc.canopy === 'rigid' ? ', rigid canopy' : '') + (sc.bodies === 'two' ? ', two bodies' : '');
 }
-/** The flight model with the canopy the scenario asks for under the brake:
- * drooping (the model's own) or rigid. */
-function flightCanopyModel(model, canopy) {
-  return canopy === 'rigid' ? { ...model, cfg: { ...model.cfg, brakeDroop: 0 } } : model;
+/** The flight model with the scenario's assumptions: the canopy under the
+ * brake, drooping (the model's own) or rigid, and the pilot fixed under it
+ * (one body) or hung on the lines (two). */
+function flightVariantModel(model, { canopy = 'droops', bodies = 'one' } = {}) {
+  const cfg = { ...model.cfg, bodies: bodies === 'two' ? 'two' : 'one' };
+  if (canopy === 'rigid') cfg.brakeDroop = 0;
+  return { ...model, cfg };
+}
+/** The flights beside a flight, one assumption changed in each: the other
+ * canopy and the other bodies. */
+function flightTwinsFor(sc) {
+  const canopy = sc.canopy === 'rigid' ? 'rigid' : 'droops';
+  const bodies = sc.bodies === 'two' ? 'two' : 'one';
+  return [
+    { kind: 'canopy', canopy: canopy === 'rigid' ? 'droops' : 'rigid', bodies, name: canopy === 'rigid' ? 'the canopy drooping' : 'a rigid canopy' },
+    { kind: 'bodies', canopy, bodies: bodies === 'two' ? 'one' : 'two', name: bodies === 'two' ? 'one body' : 'two bodies' },
+  ];
 }
 
-/** The models and their trims: hands up, and the bar pushed as far as the
- * model's own trim keeps the wing above the collapse floor. */
 /** What the flight model is made of, from a design's model `m` and its
  * state `s`: the one on show, unless a variant of it is given. */
 function flightBase(table, m = M, s = S) {
@@ -3954,9 +3970,12 @@ function flightBase(table, m = M, s = S) {
     wing: m.wing, linePlan: m.linePlan, airfoil: m.airfoil, table, atm: m.atm,
     pilotKg: s.pilotMass, wingKg: s.wingMass, linesKg: s.lineMass, areaM2: m.metrics.area,
     cxPilot: s.cxPilot, cxLines: m.cxLinesUsed,
-    settings: { slackCentreMM: s.brakeSlackCentreMM, slackTipMM: s.brakeSlackTipMM, minFlyingCz },
+    settings: { slackCentreMM: s.brakeSlackCentreMM, slackTipMM: s.brakeSlackTipMM, minFlyingCz,
+      pitchRelief: s.flightLowAngle === 'section' ? 0 : FLIGHT.pitchRelief },
   };
 }
+/** The models and their trims: hands up, and the bar pushed as far as the
+ * model's own trim keeps the wing above the collapse floor. */
 function flightModels(table) {
   const base = flightBase(table);
   const { minFlyingCz } = base.settings;
@@ -3994,8 +4013,13 @@ async function flightPrepare() {
   if (!M || !M.wing || M.error) return null;
   const key = flightKey();
   if (FLIGHT_RUN && FLIGHT_RUN.key === key && (FLIGHT_RUN.prep || FLIGHT_RUN.running)) return FLIGHT_RUN;
+  // the section's table depends on the section and its Reynolds number
+  // alone: changed brake slack or a changed assumption keeps it, rather than
+  // solving a section of its own again (two minutes)
+  const tableKey = JSON.stringify([M.airfoil.points, Math.round(flightReynolds() / 1000), S.nCrit]);
+  const last = FLIGHT_RUN;
   const run = {
-    key, running: true, progress: null, table: null, tableSource: '', prep: null,
+    key, tableKey, running: true, progress: null, table: null, tableSource: '', prep: null,
     flights: {}, matrix: null, selected: null, error: null, started: Date.now(),
   };
   FLIGHT_RUN = run;
@@ -4003,7 +4027,7 @@ async function flightPrepare() {
   if (S.tab === 'flight') { buildTabTools(); draw(); }
   try {
     const shipped = flightShippedSolve();
-    let solve = shipped;
+    let solve = shipped ?? (last?.tableKey === tableKey ? last.solve : null);
     if (!solve) {
       solve = await runStepsAsync(brakeSectionSteps(M.airfoil, { reynolds: flightReynolds(), ncrit: S.nCrit }), {
         onProgress: (p) => {
@@ -4016,6 +4040,7 @@ async function flightPrepare() {
         isCancelled: () => FLIGHT_RUN !== run,
       });
     }
+    run.solve = solve;
     run.table = brakeSectionTable(solve);
     run.tableSource = shipped
       ? `NACA ${S.airfoilCode} solved with the tool at Re ${(solve.reynolds / 1e6).toFixed(1)} million`
@@ -4034,15 +4059,16 @@ async function flightPrepare() {
 }
 
 /** Fly one scenario; the flight is kept with the run. `twin`: fly it again
- * under the other canopy too, for the chart and the note. All 18 does not,
- * which would double its time for twins its table never shows; a flight of
- * it shown later gets its twin then. */
+ * under the other canopy, and again with the pilot hung the other way, for
+ * the chart and the note. All 18 does not, which would treble its time for
+ * twins its table never shows; a flight of it shown later gets its twins
+ * then. */
 async function flightFly(sc = flightScenario(), { show = true, twin = true } = {}) {
   const run = await flightPrepare();
   if (!run || run.error || !run.prep) return null;
   const k = flightScenarioKey(sc);
   const kept = run.flights[k];
-  if (kept && (!twin || kept.twin || !kept.flight)) { if (show) flightShow(k); return kept; }
+  if (kept && (!twin || kept.twins || !kept.flight)) { if (show) flightShow(k); return kept; }
   const start = sc.start === 'accelerated' ? run.prep.accelerated : run.prep.trim;
   if (!start?.model) {
     const why = run.prep.accelerated?.limitedBy
@@ -4058,11 +4084,20 @@ async function flightFly(sc = flightScenario(), { show = true, twin = true } = {
   const schedule = flightSchedule({ input: sc.input, rate: sc.rate, travelMM: sc.travelMM, holdS: sc.holdS, release: sc.release });
   const durationS = flightDuration({ rate: sc.rate, holdS: sc.holdS, release: sc.release });
   const canopy = sc.canopy === 'rigid' ? 'rigid' : 'droops';
-  const flyWith = (model, lab) => {
+  const bodies = sc.bodies === 'two' ? 'two' : 'one';
+  // Every flight the run has flown, a scenario's own or a twin, kept by its
+  // scenario: one flight's twin is another's flight (the default's two-body
+  // twin is the default flown with two bodies), so changing an assumption
+  // flies one new flight, not three.
+  const flown = (run.flown ??= {});
+  const flyWith = async (assume, lab) => {
+    const key = flightScenarioKey({ ...sc, ...assume });
+    if (flown[key]) return flown[key];
+    const model = flightVariantModel(start.model, assume);
     const trim = { ...start.trim, work: flightWork(model) };
     // the coupling's corrections from the trim, so the first step starts settled
     trim.work.d.set(start.trim.work.d);
-    return runStepsAsync(flightSteps(model, trim, { schedule, durationS, label: lab, afterDepartureS: sc.flyOn ? Infinity : FLIGHT.afterDepartureS }), {
+    const flight = await runStepsAsync(flightSteps(model, trim, { schedule, durationS, label: lab, afterDepartureS: sc.flyOn ? Infinity : FLIGHT.afterDepartureS }), {
       onProgress: (p) => {
         run.progress = p;
         if (S.tab === 'flight' && FLIGHT_RUN === run) {
@@ -4072,27 +4107,34 @@ async function flightFly(sc = flightScenario(), { show = true, twin = true } = {
       },
       isCancelled: () => FLIGHT_RUN !== run,
     });
+    flown[key] = flight;
+    return flight;
   };
   let out = kept;
   if (!out) {
     try {
-      const model = flightCanopyModel(start.model, canopy);
-      const flight = await flyWith(model, label);
+      const flight = await flyWith({ canopy, bodies }, label);
+      const model = flightVariantModel(start.model, { canopy, bodies });
       out = { sc, label, flight, summary: flightSummary(flight, start.trim), model, barMM: start.barMM ?? 0 };
     } catch (e) {
       out = { sc, label, error: e.message };
     }
   }
-  // The same flight under the other canopy, for the range the canopy's
-  // assumption spans: drawn beside it on the chart and said in the note.
-  if (twin && out.flight && !out.twin) {
-    const other = canopy === 'rigid' ? 'droops' : 'rigid';
-    try {
-      const tf = await flyWith(flightCanopyModel(start.model, other), `${label} (${other === 'rigid' ? 'rigid canopy' : 'canopy drooping'})`);
-      out.twin = { canopy: other, flight: tf, summary: flightSummary(tf, start.trim) };
-    } catch (e) {
-      if (!/cancelled/.test(e.message)) out.twin = { canopy: other, error: e.message };
+  // The same flight with one assumption changed, the other canopy and then
+  // the other bodies, for the range each spans: drawn beside it on the chart
+  // and said in the note.
+  if (twin && out.flight && !out.twins) {
+    const twins = []; let cancelled = false;
+    for (const tw of flightTwinsFor(sc)) {
+      try {
+        const tf = await flyWith({ canopy: tw.canopy, bodies: tw.bodies }, `${label} (${tw.name})`);
+        twins.push({ ...tw, flight: tf, summary: flightSummary(tf, start.trim) });
+      } catch (e) {
+        if (/cancelled/.test(e.message)) { cancelled = true; break; }
+        twins.push({ ...tw, error: e.message });
+      }
     }
+    if (!cancelled) out.twins = twins;
   }
   run.flights[k] = out;
   if (show && FLIGHT_RUN === run) flightShow(k);
@@ -4617,6 +4659,19 @@ function flightToEarth(f, pW) {
   ];
 }
 
+/** A point on the pilot's own body, with two bodies: given as the view's
+ * points are, metres in the wing's frame from his karabiners' midpoint,
+ * which hangs `dropM` above his centre on his own axes. */
+function flightPilotToEarth(pilot, dropM, pW) {
+  const R = flightRotation(pilot.q);
+  const b = [-pW[0], pW[1], -pW[2] - dropM];
+  return [
+    pilot.x + R[0][0] * b[0] + R[0][1] * b[1] + R[0][2] * b[2],
+    pilot.y + R[1][0] * b[0] + R[1][1] * b[1] + R[1][2] * b[2],
+    pilot.z + R[2][0] * b[0] + R[2][1] * b[1] + R[2][2] * b[2],
+  ];
+}
+
 /** The camera, looking at the canopy's middle from where the tools say. */
 function flightCamera(flight, f, W, H) {
   const R = flightRotation(f.q);
@@ -4769,11 +4824,13 @@ function drawFlightFrame(ctx, W, H, item, t) {
   const hand = (side, mm) => [pul[0] + 0.05, side * (Math.abs(pul[1]) + 0.08), pul[2] - 0.12 - mm / 1000];
   const kar = (side) => [0, side * 0.21, 0];
   const E = (p) => cam.project(flightToEarth(f, p));
-  const seg3 = (A, B, style, w) => {
-    const a = E(A); const b = E(B);
+  // the pilot's own points: with two bodies, on his own body as it hangs
+  const P = f.pilot && model.two ? (p) => cam.project(flightPilotToEarth(f.pilot, model.two.pilot.dropM, p)) : E;
+  const segP = (a, b, style, w) => {
     if (!a || !b) return;
     ctx.strokeStyle = style; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
   };
+  const seg3 = (A, B, style, w) => segP(E(A), E(B), style, w);
   // lines to the pilot: every other strip's quarter chord, from the risers
   ctx.lineWidth = 0.7;
   const lineInk = light ? 'rgba(40,50,60,0.55)' : 'rgba(200,210,220,0.45)';
@@ -4804,23 +4861,25 @@ function drawFlightFrame(ctx, W, H, item, t) {
   const body = light ? '#33424c' : '#d8e1e8';
   for (const side of [-1, 1]) {
     const mm = side < 0 ? f.left : f.right;
-    seg3(kar(side), pulley(side), body, 2);
-    seg3(hand(side, mm), pulley(side), mm > 0 ? '#ff9f43' : body, 1.2);
-    seg3([0.02, side * 0.18, 0.32], hand(side, mm), body, 2.2);
-    const hp = E(hand(side, mm));
+    // the riser from the pilot's karabiner up to its top on the lines, and
+    // the brake line from his hand up through the pulley
+    segP(P(kar(side)), E(pulley(side)), body, 2);
+    segP(P(hand(side, mm)), E(pulley(side)), mm > 0 ? '#ff9f43' : body, 1.2);
+    segP(P([0.02, side * 0.18, 0.32]), P(hand(side, mm)), body, 2.2);
+    const hp = P(hand(side, mm));
     if (hp) {
       const r = Math.max(2, (0.06 * 0.9 * Math.min(W, H) * 1.6) / hp[2]);
       ctx.fillStyle = mm > 0 ? '#ff9f43' : body;
       ctx.beginPath(); ctx.arc(hp[0], hp[1], r, 0, 2 * Math.PI); ctx.fill();
     }
   }
-  const pilot = E([0, 0, -0.3]);
+  const pilot = P([0, 0, -0.3]);
   if (pilot) {
     const rad = Math.max(2.5, (0.35 * 0.9 * Math.min(W, H) * 1.6) / pilot[2]);
     ctx.fillStyle = body;
     ctx.beginPath(); ctx.arc(pilot[0], pilot[1], rad, 0, 2 * Math.PI); ctx.fill();
   }
-  const head = E([0.05, 0, 0.45]);
+  const head = P([0.05, 0, 0.45]);
   if (head) {
     ctx.fillStyle = body;
     ctx.beginPath(); ctx.arc(head[0], head[1], Math.max(2, (0.13 * 0.9 * Math.min(W, H) * 1.6) / head[2]), 0, 2 * Math.PI); ctx.fill();
@@ -4833,8 +4892,14 @@ function drawFlightFrame(ctx, W, H, item, t) {
     `${item.label}`,
     `t ${f.t.toFixed(2)} s · ${(f.speed * 3.6).toFixed(1)} km/h · sink ${f.sinkRate.toFixed(1)} m/s · brakes L ${(f.left / 10).toFixed(0)} R ${(f.right / 10).toFixed(0)} cm`,
     `bank ${f.rollDeg.toFixed(0)}° · pitch ${f.pitchDeg.toFixed(0)}° · turn ${f.turnRateDeg.toFixed(0)}°/s · turned ${turned >= 0 ? 'right' : 'left'} ${Math.abs(turned).toFixed(0)}° · ${f.loadFactor.toFixed(2)} g`,
-    `canopy ${f.canopyAlphaDeg.toFixed(1)}° · slip ${f.betaDeg.toFixed(1)}° · stalled ${f.stalled}/${n}`,
+    `canopy ${f.canopyAlphaDeg.toFixed(1)}° · slip ${(f.canopyBetaDeg ?? f.betaDeg).toFixed(1)}° · stalled ${f.stalled}/${n}`,
   ];
+  if (f.pilot) {
+    // his own roll on the canopy's swings his body the other way: rolled
+    // right, he hangs to the left
+    const slackRows = f.pilot.slackRows ? `${f.pilot.slackRows.split('').join(', ')} slack` : 'all taut';
+    lines.push(`pilot swung ${Math.abs(f.pilot.swingRollDeg).toFixed(1)}° ${f.pilot.swingRollDeg >= 0 ? 'left' : 'right'}, ${Math.abs(f.pilot.swingPitchDeg).toFixed(1)}° ${f.pilot.swingPitchDeg >= 0 ? 'forward' : 'back'} under the canopy · lines ${(f.pilot.tensionN / 9.80665).toFixed(0)} kg, ${slackRows}`);
+  }
   // the strips' colours, as a line of the box: they were the end of the
   // pane's note, which shows two lines, and were cut off with it (and a
   // recorded video has no note at all)
@@ -5045,13 +5110,15 @@ function drawFlightChart() {
   c.axes({ xStep: T > 12 ? 2 : 1, yStep: hi - lo > 150 ? 50 : 20, xTitle: 'time, s', yTitle: '° · °/s · km/h · m/s ×10 · cm' });
   const dep = F.summary.departedS;
   if (dep !== null) c.path([[dep, lo], [dep, hi], [T, hi], [T, lo]], '#ff5a5a', 0.5, { close: true, fill: 'rgba(255,90,90,0.10)' });
-  // the same flight under the other canopy, faint and dotted: its bank and
-  // its turn, the range the canopy's assumption spans
-  const tw = F.twin?.flight;
-  if (tw) {
-    const tdep = F.twin.summary?.departedS ?? null;
-    const tfr = tdep === null ? tw.frames : tw.frames.filter((f) => f.t <= tdep + 0.5);
-    for (const [, col, g] of series.slice(0, 3).filter((_, k) => k !== 1)) c.path(tfr.map((f) => [f.t, pin(g(f))]), col, 1, { dash: '1 3', opacity: 0.75 });
+  // the same flight with one assumption changed, faint: its bank and its
+  // turn, the range each assumption spans (the other canopy dotted, the
+  // other bodies dashed long)
+  const twins = (F.twins ?? []).filter((t) => t.flight);
+  for (const tw of twins) {
+    const tdep = tw.summary?.departedS ?? null;
+    const tfr = tdep === null ? tw.flight.frames : tw.flight.frames.filter((f) => f.t <= tdep + 0.5);
+    const dash = tw.kind === 'bodies' ? '6 3' : '1 3';
+    for (const [, col, g] of series.slice(0, 3).filter((_, k) => k !== 1)) c.path(tfr.map((f) => [f.t, pin(g(f))]), col, 1, { dash, opacity: 0.75 });
   }
   for (const [, col, g] of series) c.path(fr.map((f) => [f.t, pin(g(f))]), col, col === '#8a9aa6' || col === '#c0c8d0' ? 1 : 1.4, col === '#8a9aa6' || col === '#c0c8d0' ? { dash: '4 3' } : {});
   c.path([[FLIGHT_PLAY.t, lo], [FLIGHT_PLAY.t, hi]], '#ffffff', 1, { dash: '2 2', opacity: 0.6 });
@@ -5060,20 +5127,19 @@ function drawFlightChart() {
     note.textContent = series.map(([n2, col]) => `${n2}`).join(' · ')
       + ` (in that order: cyan, yellow, magenta, green, orange, grey dashed)`
       + (dep !== null ? ' · shaded: after the departure' : '')
-      + (tw ? ` · dotted: bank and turn with ${F.twin.canopy === 'rigid' ? 'a rigid canopy' : 'the canopy drooping'}` : '');
+      + twins.map((t) => ` · ${t.kind === 'bodies' ? 'dashed long' : 'dotted'}: bank and turn with ${t.name}`).join('');
   }
 }
 
-/** What the flight's twin, under the other canopy, did: a clause for the
- * note. */
+/** What the flight's twins did, each with one assumption changed: a clause
+ * for the note. */
 function flightTwinText(F) {
-  const t = F.twin;
-  if (!t) return '';
-  const name = t.canopy === 'rigid' ? 'a rigid canopy' : 'the canopy drooping';
-  if (t.error || !t.summary) return ` · with ${name}: not flown (${t.error ?? 'no flight'})`;
-  const s = t.summary;
-  return ` · with ${name}: bank ${s.maxRollDeg.toFixed(0)}°, turn ${s.maxTurnRateDeg.toFixed(0)}°/s, turned ${Math.abs(s.headingChangeDeg).toFixed(0)}°`
-    + (s.departedS !== null ? `, departed at ${s.departedS.toFixed(2)} s` : '');
+  return (F.twins ?? []).map((t) => {
+    if (t.error || !t.summary) return ` · with ${t.name}: not flown (${t.error ?? 'no flight'})`;
+    const s = t.summary;
+    return ` · with ${t.name}: bank ${s.maxRollDeg.toFixed(0)}°, turn ${s.maxTurnRateDeg.toFixed(0)}°/s, turned ${Math.abs(s.headingChangeDeg).toFixed(0)}°`
+      + (s.departedS !== null ? `, departed at ${s.departedS.toFixed(2)} s` : '');
+  }).join('');
 }
 
 function flightTrimText(run) {
@@ -5081,7 +5147,11 @@ function flightTrimText(run) {
   return `Model's trim hands up: ${(t.speed * 3.6).toFixed(1)} km/h, sink ${t.sinkRate.toFixed(2)} m/s, glide ${t.glideRatio.toFixed(2)}, `
     + `canopy at ${t.canopyAlphaDeg.toFixed(1)}° (the balance assumed ${(M.alphaFlown ?? S.alphaDeg).toFixed(1)}°)`
     + (a ? ` · on the bar: ${a.barMM} of ${a.fullBarMM} mm, ${(a.trim.speed * 3.6).toFixed(1)} km/h, canopy at ${a.trim.canopyAlphaDeg.toFixed(1)}°`
-      + (a.limitedBy ? `; ${a.limitedBy.barMM} mm would take the wing's lift to ${(a.limitedBy.liftCoefficient ?? 0).toFixed(2)}, below the ${run.prep.minFlyingCz} collapse floor` : '') : '')
+      // the bar stops where the trim's lift would fall below the floor, or
+      // where there is no trim at all (it said a lift of 0.00 there)
+      + (a.limitedBy?.reason === 'no trim' ? `; at ${a.limitedBy.barMM} mm there is no trim`
+        : a.limitedBy ? `; ${a.limitedBy.barMM} mm would take the wing's lift to ${(a.limitedBy.liftCoefficient ?? 0).toFixed(2)}, below the ${run.prep.minFlyingCz} collapse floor` : '')
+      + (S.flightLowAngle === 'section' ? ', the canopy on its section alone at low angles' : ', its rows holding the canopy up at low angles') : '')
     + ` · sections: ${run.tableSource}`;
 }
 
@@ -5492,14 +5562,22 @@ function saveBlob(filename, blob) {
 
 /** The flight on show, frame by frame, as a table. */
 function flightTsv(F) {
+  // two bodies: the pilot's swing under the canopy and the lines' pull too
+  const two = F.flight.frames.some((f) => f.pilot);
   const head = ['t_s', 'north_m', 'east_m', 'down_m', 'bank_deg', 'pitch_deg', 'heading_deg', 'turn_rate_deg_s',
     'speed_ms', 'sink_ms', 'canopy_alpha_deg', 'sideslip_deg', 'load_g', 'lift_coefficient', 'brake_left_mm', 'brake_right_mm',
-    'strips_past_stall', 'strips_deep_stall', 'strips_near_folding', 'strips_on_solved_table', 'departed'];
+    'strips_past_stall', 'strips_deep_stall', 'strips_near_folding', 'strips_on_solved_table', 'departed',
+    // the air at the canopy itself, not at the riser midpoint
+    'canopy_speed_ms', 'canopy_sideslip_deg',
+    ...(two ? ['pilot_swing_left_deg', 'pilot_swing_forward_deg', 'pilot_twist_right_deg', 'lines_tension_n', 'line_bundles_slack', 'rows_slack'] : [])];
   const rows = F.flight.frames.map((f) => [f.t.toFixed(3), f.x.toFixed(3), f.y.toFixed(3), f.z.toFixed(3),
     f.rollDeg.toFixed(2), f.pitchDeg.toFixed(2), (f.headingUnwrappedDeg ?? f.headingDeg).toFixed(2), f.turnRateDeg.toFixed(2),
     f.speed.toFixed(3), f.sinkRate.toFixed(3), f.canopyAlphaDeg.toFixed(2), f.betaDeg.toFixed(2), f.loadFactor.toFixed(3),
-    f.liftCoefficient.toFixed(4), f.left.toFixed(0), f.right.toFixed(0), f.stalled, f.deep, f.folding, f.solved, f.departed ? 1 : 0].join('\t'));
-  return `# ${F.label}; ${S.name}; flight.js 6-DOF, time step ${F.flight.dtS} s\n${head.join('\t')}\n${rows.join('\n')}\n`;
+    f.liftCoefficient.toFixed(4), f.left.toFixed(0), f.right.toFixed(0), f.stalled, f.deep, f.folding, f.solved, f.departed ? 1 : 0,
+    (f.canopySpeed ?? f.speed).toFixed(3), (f.canopyBetaDeg ?? f.betaDeg).toFixed(2),
+    ...(two ? [f.pilot.swingRollDeg.toFixed(2), f.pilot.swingPitchDeg.toFixed(2), f.pilot.twistDeg.toFixed(2), f.pilot.tensionN.toFixed(1), f.pilot.slack, f.pilot.slackRows || '-'] : [])].join('\t'));
+  const dof = two ? 'two bodies, 12 degrees of freedom' : '6-DOF';
+  return `# ${F.label}; ${S.name}; flight.js ${dof}, time step ${F.flight.dtS} s\n${head.join('\t')}\n${rows.join('\n')}\n`;
 }
 
 function flightMatrixTsv(run) {
@@ -5560,6 +5638,8 @@ function buildFlightTools(host) {
   rel.addEventListener('change', () => { S.flightRelease = rel.value === '1'; buildTabTools(); draw(); });
   host.append(rel);
   sel('flightCanopy', [['droops', 'canopy droops under the brake'], ['rigid', 'rigid canopy']], 'Canopy under the brake');
+  sel('flightBodies', [['one', 'pilot fixed under the canopy (one body)'], ['two', 'pilot hung on the lines (two bodies)']], 'How the pilot hangs');
+  sel('flightLowAngle', [['rows', 'low angles: rows hold the canopy up'], ['section', 'low angles: its section alone']], 'Canopy at low angles');
   sel('flightPastDeparture', [['stop', 'stop 2 s after a departure'], ['continue', 'fly on past a departure (not credible)']], 'What happens after a departure');
   btn(busy ? 'Working…' : 'Fly', () => { if (!busy) flightFly(); }, 'Fly this scenario');
   btn('All 18', () => { if (!busy) flightFlyAll(); }, 'Fly every start, brake and rate');

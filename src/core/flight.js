@@ -3,7 +3,8 @@
  * A six-degree-of-freedom rigid-body model of the whole machine — canopy,
  * the air inside it, lines and pilot as one body hung from the riser
  * midpoint — flown through brake inputs: either brake or both, from hands
- * up or on full bar, pulled to a travel at a rate.
+ * up or on full bar, pulled to a travel at a rate. Or, the second approach,
+ * two bodies: the canopy, and the pilot hung under it on the lines.
  *
  * ---------------------------------------------------------------------------
  * What carries it
@@ -50,12 +51,23 @@
  * the angle the risers give (`alphaChange`, risers.js), and the model finds
  * its own trim there.
  *
+ * Two bodies (`bodies: 'two'`, PGSim's default dynamics): the canopy — its
+ * cloth, the air inside it, the lines and all of the apparent mass — about
+ * the riser midpoint, and the pilot, a seated box 0.23 m below the
+ * karabiners, joined by one tension-only bundle a row on each side, which
+ * stretches. They start from the one body's trim, the lines hung at the
+ * lengths that hold it exactly, and the harness damps the pilot turning
+ * against the canopy.
+ *
  * ---------------------------------------------------------------------------
  * What it is not
  * ---------------------------------------------------------------------------
- * A rigid canopy but for the droop under the brake, and one rigid body: the
- * pilot does not swing under the wing on his own (PGSim's two bodies turn a
- * third faster again at 43 cm on the Geo 7 L; docs/flight.md, "The turn").
+ * A rigid canopy but for the droop under the brake and its rows holding it
+ * up at low angles (`pitchRelief`, PGSim's). With one body the pilot
+ * does not swing under the wing; with two he does, but this tool's two
+ * bodies turn within a tenth of its one, where PGSim's turn a third faster
+ * at 43 cm on the Geo 7 L, for a reason not yet found (docs/flight.md,
+ * "Two bodies").
  * A real canopy also deforms, folds and collapses; nothing here does. A
  * section past its stall is the table's flat plate, and a strip
  * whose lift falls near nothing is where a real canopy would start to fold:
@@ -66,6 +78,7 @@
 import { wingStrips, latticeSystem, trefftzInfluence } from './vlm.js';
 import { brakeSectionAt, brakeBendForDrop, brakeStallDeg, BRAKE_SECTION } from './brakesection.js';
 import { tipFirstSlack } from './lineplan.js';
+import { LOAD_ROW_SHARES } from './loads.js';
 
 export const FLIGHT = Object.freeze({
   dtS: 0.01,
@@ -117,6 +130,35 @@ export const FLIGHT = Object.freeze({
   // flies PGSim's rigid-body turns on the Geo 7 L (docs/flight.md, "The turn").
   brakeDroop: 0.3,
   droopMaxDeg: 8,
+  // The canopy at low angles (1.19, PGSim's `cmLow`): below 3° to its chord
+  // a pressurised section's nose flattens and the rows hold its rear up, so
+  // its nose-down moment stops growing as its lift falls away. A rigid
+  // section's keeps growing, its centre of pressure running aft: on the bar
+  // the A's unload, and the trim runs out (90 of the default's 150 mm) or,
+  // the canopy free on its lines, it tucks. A strip below
+  // `pitchReliefAlphaDeg`, not deep in its stall, gains `pitchRelief` times
+  // the shortfall (at most `pitchReliefMaxRad`) of nose-up moment
+  // coefficient. 0: the section's own moment alone. PGSim's, all three.
+  pitchRelief: 0.8,
+  pitchReliefAlphaDeg: 3,
+  pitchReliefMaxRad: 0.2,
+  // How many bodies fly: 'one', the pilot fixed under the canopy; or 'two',
+  // PGSim's default, the pilot hung on the lines. In two, the line set of a
+  // side is one tension-only bundle a row, from the row's mean attachment
+  // on the canopy to the karabiner; a bundle pulls only while it is longer
+  // than it hangs unloaded. Its stiffness and damping are the side's (every
+  // line and the riser in series), shared over the rows by the load each
+  // carries (`LOAD_ROW_SHARES`, handbook 8.1).
+  bodies: 'one',
+  lineStiffnessNPerM: 60000,
+  lineDampingNsPerM: 500,
+  // In two: the pilot's centre below the karabiners, the seated body's box
+  // (along, across, up) its own inertia is a box's of, and the harness's
+  // damping of the pilot turning against the canopy (roll, pitch, yaw,
+  // N·m·s/rad). PGSim's, all four.
+  pilotDropM: 0.23,
+  pilotBoxM: Object.freeze([0.5, 0.45, 0.9]),
+  harnessDamping: Object.freeze([15, 6, 12]),
   // the wing's lift below which the riser model takes a frontal collapse
   minFlyingCz: 0.35,
   // past these the flight has departed (stalled through, spinning, folding)
@@ -291,7 +333,8 @@ export function apparentMassBarrows({ projectedAreaM2, projectedSpanM, flatAreaM
  *
  * @param {object} o
  * @param {object} o.wing       `buildWing`
- * @param {object} o.linePlan   with its `karabiner` (or `maillon`) and `brakePlan`
+ * @param {object} o.linePlan   with its `karabiner` (or `maillon`) and `brakePlan`; for two
+ *                              bodies its `lines` too, the upper ones' `row` and `to`
  * @param {object} o.airfoil    the section, unit chord
  * @param {object} o.table      `brakeSectionTable`
  * @param {object} o.atm        density, gravity
@@ -454,17 +497,19 @@ export function flightModel({
   const rB = flToBody(rBodyW);
   const rS = flToBody(rSolidW);
   // apparent mass (Barrows), about the riser midpoint
-  let am = null; let A6 = null;
-  {
+  let am = null; let A6 = null; let Aa6 = null;
+  // a rigid body's mass matrix about the riser midpoint, in the body's frame
+  const rigid6 = (m, r, Jm) => {
     const Ar = [
-      [massBody, 0, 0, 0, massBody * rB[2], -massBody * rB[1]],
-      [0, massBody, 0, -massBody * rB[2], 0, massBody * rB[0]],
-      [0, 0, massBody, massBody * rB[1], -massBody * rB[0], 0],
+      [m, 0, 0, 0, m * r[2], -m * r[1]],
+      [0, m, 0, -m * r[2], 0, m * r[0]],
+      [0, 0, m, m * r[1], -m * r[0], 0],
     ];
-    const rx = flCrossMat(rB);
-    for (let a = 0; a < 3; a++) Ar.push([massBody * rx[a][0], massBody * rx[a][1], massBody * rx[a][2], JB[a][0], JB[a][1], JB[a][2]]);
-    A6 = Ar;
-  }
+    const rx = flCrossMat(r);
+    for (let a = 0; a < 3; a++) Ar.push([m * rx[a][0], m * rx[a][1], m * rx[a][2], Jm[a][0], Jm[a][1], Jm[a][2]]);
+    return Ar;
+  };
+  A6 = rigid6(massBody, rB, JB);
   if (cfg.apparentMass) {
     // the arch: through the central and tip quarter chords
     const qc = (le, te) => flAdd(le, flScale(flSub(te, le), 0.25));
@@ -513,17 +558,83 @@ export function flightModel({
     for (let a = 0; a < 3; a++) Aa.push([...Ma[a], ...MC[a]]);
     for (let a = 0; a < 3; a++) Aa.push([...MCt[a], ...Ja[a]]);
     A6 = A6.map((r, i) => r.map((x, j) => x + Aa[i][j]));
+    Aa6 = Aa;
     am = { barrows: B, Ma, Ja, rRC2R, rPC2RC, S2, Srr, Spr, thicknessM: thickness, projectedAreaM2: projArea, projectedSpanM: projSpan, flatSpanM: flatSpan };
   }
   const lu6 = flLu(A6, 6);
+  // Two bodies (`bodies: 'two'`). The canopy: its cloth, the air inside it
+  // and the lines, with all of the apparent mass, about the same riser
+  // midpoint. The pilot: a body of his own, his centre `pilotDropM` below
+  // the karabiners, his inertia a seated box's.
+  let two = null;
+  {
+    const canopyMasses = [...solid, ...air, { m: linesKg, r: linesAt }];
+    const massCanopy = wingKg + linesKg + massAir;
+    const massCanopySolid = wingKg + linesKg;
+    const rCanopySolidW = flScale(flAdd(sumR(solid), flScale(linesAt, linesKg)), 1 / massCanopySolid);
+    const rCanopyB = flToBody(flScale(sumR(canopyMasses), 1 / massCanopy));
+    let Jc = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (const p of canopyMasses) {
+      const r = p.r; const r2 = flDot(r, r);
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) Jc[a][b] += p.m * ((a === b ? r2 : 0) - r[a] * r[b]);
+      if (p.c) {
+        const k = (p.m * p.len * p.len) / 12;
+        for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) Jc[a][b] += k * ((a === b ? 1 : 0) - p.c[a] * p.c[b]);
+      }
+    }
+    const JcB = flMatMul(flMatMul(Tm, Jc), Tm);
+    let A6c = rigid6(massCanopy, rCanopyB, JcB);
+    if (Aa6) A6c = A6c.map((r, i) => r.map((x, j) => x + Aa6[i][j]));
+    // the bundles: a row's upper lines on the right side, their mean
+    // attachment (the bar turns the canopy, and them with it); the left
+    // side the mirror. Natural length: as the trim hangs them.
+    const karY = Math.abs(kar[1] ?? 0.21);
+    const byRow = new Map();
+    for (const l of linePlan.lines ?? []) {
+      if (l.level !== 'upper' || !l.to || l.isBrake || !(l.row in LOAD_ROW_SHARES)) continue;
+      const p = turn(l.to);
+      if (!byRow.has(l.row)) byRow.set(l.row, []);
+      byRow.get(l.row).push([p[0], Math.abs(p[1]), p[2]]);
+    }
+    const rows = [...byRow.keys()].sort();
+    const shareSum = rows.reduce((t, r) => t + LOAD_ROW_SHARES[r], 0) || 1;
+    const bundles = [];
+    for (const side of [-1, 1]) {
+      for (const row of rows) {
+        const pts = byRow.get(row);
+        const mean = flScale(pts.reduce((acc, p) => flAdd(acc, p), [0, 0, 0]), 1 / pts.length);
+        const P = flToBody(flSub([mean[0], side * mean[1], mean[2]], RM));
+        const K0 = [0, side * karY, 0];
+        const share = LOAD_ROW_SHARES[row] / shareSum;
+        bundles.push({
+          side: side < 0 ? 'left' : 'right', row, P, K0,
+          // the karabiner, from the pilot's centre, in the pilot's frame
+          K: [0, side * karY, -cfg.pilotDropM],
+          L0: flNorm(flSub(P, K0)),
+          k: cfg.lineStiffnessNPerM * share, c: cfg.lineDampingNsPerM * share, share,
+        });
+      }
+    }
+    const [bx, by, bz] = cfg.pilotBoxM;
+    const Ip = [pilotKg * (by * by + bz * bz) / 12, pilotKg * (bx * bx + bz * bz) / 12, pilotKg * (bx * bx + by * by) / 12];
+    two = {
+      massCanopy, massCanopySolid, rCanopySolidW, rCanopyB, JcB, A6c, lu6c: flLu(A6c, 6),
+      bundles, rows, karY, pilot: { m: pilotKg, I: Ip, dropM: cfg.pilotDropM },
+    };
+  }
+  // where the air meets the canopy: its strips' quarter chords, by area, in
+  // the body's frame (the riser midpoint is the pilot's, not the canopy's,
+  // once the canopy turns about itself)
+  const rAeroW = [0, 1, 2].map((k) => area.reduce((acc, a, i) => acc + a * rq[3 * i + k], 0) / flatArea);
+  const rAeroB = flToBody(rAeroW);
   return {
-    cfg, rho, g, n, sys, lu, tw, rq, rc, nrm, spn, chd, outb, chord, width, area, yMid,
+    cfg, rho, g, n, sys, lu, tw, rq, rc, nrm, spn, chd, outb, chord, width, area, yMid, rAeroB,
     anchors: all, weights, tipY, table, flatAreaM2: flatArea, areaM2,
     dragPilotM2: areaM2 * cxPilot, dragLinesM2: areaM2 * cxLines,
     pilotAt, lineDragAt, linesAt, rSolidW, rSolidB: rS, rBodyB: rB, JB,
     massSolid, massAir, massBody, pilotKg, wingKg, linesKg,
     apparent: am, A6, lu6, RM, barRotationDeg, alphaWakeDeg,
-    strips, hangTop, pivot, brakePulley,
+    strips, hangTop, pivot, brakePulley, two,
   };
 }
 
@@ -581,8 +692,11 @@ export function flightDroop(model, dropC, out = null) {
  * (the riser midpoint's position, the attitude, its velocity and the
  * rotation, both in the body's axes) and the handles' travel.
  */
-export function flightForces(model, x, ctrl, work) {
+export function flightForces(model, x, ctrl, work, part = 'glider') {
   const { n, rq, rc, nrm, spn, chd, chord, area, lu, rho, g, table, cfg } = model;
+  // 'canopy': the canopy alone, for two bodies: no pilot's drag, and the
+  // weight of the canopy's own solid mass
+  const canopyOnly = part === 'canopy';
   const vB = [x[7], x[8], x[9]]; const wB = [x[10], x[11], x[12]];
   const R = flightRotation([x[3], x[4], x[5], x[6]]);
   const gB = [R[2][0] * g, R[2][1] * g, R[2][2] * g];
@@ -685,7 +799,13 @@ export function flightForces(model, x, ctrl, work) {
     const fx = q * (cl[i] * (-sa * ex + ca * nx) + cd[i] * (ca * ex + sa * nx));
     const fy = q * (cl[i] * (-sa * ey + ca * ny) + cd[i] * (ca * ey + sa * ny));
     const fz = q * (cl[i] * (-sa * ez + ca * nz) + cd[i] * (ca * ez + sa * nz));
-    const mm = q * chord[i] * cm[i];
+    // the section's moment, relieved at low angles (`pitchRelief`)
+    let cmi = cm[i];
+    if (cfg.pitchRelief && !deep[i]) {
+      const below = cfg.pitchReliefAlphaDeg * RAD - aGeo[i];
+      if (below > 0) cmi += cfg.pitchRelief * Math.min(below, cfg.pitchReliefMaxRad);
+    }
+    const mm = q * chord[i] * cmi;
     const rx = rq[3 * i]; const ry = rq[3 * i + 1]; const rz = rq[3 * i + 2];
     F[0] += fx; F[1] += fy; F[2] += fz;
     M[0] += ry * fz - rz * fy + mm * spn[3 * i];
@@ -702,11 +822,11 @@ export function flightForces(model, x, ctrl, work) {
     M[0] += m[0]; M[1] += m[1]; M[2] += m[2];
     return f;
   };
-  const fPilot = dragAt(model.pilotAt, model.dragPilotM2);
+  const fPilot = canopyOnly ? [0, 0, 0] : dragAt(model.pilotAt, model.dragPilotM2);
   dragAt(model.lineDragAt, model.dragLinesM2);
   // weight, through the solid mass's centre (the air inside floats)
-  const fg = flScale(gW, model.massSolid);
-  const mg = flCross(model.rSolidW, fg);
+  const fg = flScale(gW, canopyOnly ? model.two.massCanopySolid : model.massSolid);
+  const mg = flCross(canopyOnly ? model.two.rCanopySolidW : model.rSolidW, fg);
   const aeroW = [F[0], F[1], F[2]];
   const aeroMW = [M[0], M[1], M[2]];
   F[0] += fg[0]; F[1] += fg[1]; F[2] += fg[2];
@@ -714,11 +834,10 @@ export function flightForces(model, x, ctrl, work) {
   return { F: flToBody(F), M: flToBody(M), aero: flToBody(aeroW), aeroM: flToBody(aeroMW), pilotDrag: flToBody(fPilot), gB };
 }
 
-/** The state's rate of change: the rigid body with its apparent mass. */
-export function flightDerivative(model, x, ctrl, work, info = null) {
-  const { F, M, aero } = flightForces(model, x, ctrl, work);
-  const v = [x[7], x[8], x[9]]; const w = [x[10], x[11], x[12]];
-  const m = model.massBody; const rB = model.rBodyB; const J = model.JB;
+/** A body about the riser midpoint with the canopy's apparent mass: its
+ * linear and angular acceleration (body axes) from the forces and moments
+ * on it, by Kirchhoff's equations as glidersim's model 6a has them. */
+function flBodyAcceleration(model, v, w, F, M, m, rB, J, lu) {
   const pb = flScale(flAdd(v, flCross(w, rB)), m);
   const hb = flAdd(flMatVec(J, w), flScale(flCross(rB, v), m));
   let B1 = flSub(F, flCross(w, pb));
@@ -732,7 +851,24 @@ export function flightDerivative(model, x, ctrl, work, info = null) {
     B1 = flSub(B1, flCross(w, pa));
     B2 = flAdd(flSub(flSub(B2, flCross(v, pa)), flCross(w, ha)), flCross(v, flMatVec(am.Ma, v)));
   }
-  const acc = flLuSolve(model.lu6, Float64Array.from([...B1, ...B2]));
+  return flLuSolve(lu, Float64Array.from([...B1, ...B2]));
+}
+
+/** The quaternion's rate for a body turning at w (body axes). */
+function flQuatRate(q, w, out, at) {
+  const [qw, qx, qy, qz] = q;
+  out[at] = 0.5 * (-qx * w[0] - qy * w[1] - qz * w[2]);
+  out[at + 1] = 0.5 * (qw * w[0] + qy * w[2] - qz * w[1]);
+  out[at + 2] = 0.5 * (qw * w[1] - qx * w[2] + qz * w[0]);
+  out[at + 3] = 0.5 * (qw * w[2] + qx * w[1] - qy * w[0]);
+}
+
+/** The state's rate of change: the rigid body with its apparent mass. */
+export function flightDerivative(model, x, ctrl, work, info = null) {
+  if (x.length === 26) return flightDerivativeTwo(model, x, ctrl, work, info);
+  const { F, M, aero } = flightForces(model, x, ctrl, work);
+  const v = [x[7], x[8], x[9]]; const w = [x[10], x[11], x[12]];
+  const acc = flBodyAcceleration(model, v, w, F, M, model.massBody, model.rBodyB, model.JB, model.lu6);
   const R = flightRotation([x[3], x[4], x[5], x[6]]);
   const dx = new Float64Array(13);
   const pos = flMatVec(R, v);
@@ -751,6 +887,147 @@ export function flightDerivative(model, x, ctrl, work, info = null) {
     info.loadFactor = flNorm(flSub(a, gB)) / model.g;
   }
   return dx;
+}
+
+/**
+ * Two bodies (PGSim's): the canopy, x[0..12] as the one body's, and the
+ * pilot after it, x[13..25]: his centre's position, his attitude, his
+ * centre's velocity on the earth's axes and his rotation on his own. The
+ * line bundles join them, each pulling only while longer than it hangs
+ * unloaded: T = k e + c ė, never below nothing. The harness damps the pilot
+ * turning against the canopy. The pilot's drag acts at his centre, at his
+ * own speed through the air.
+ */
+function flightDerivativeTwo(model, x, ctrl, work, info = null) {
+  const T = model.two;
+  const { F: Fa, M: Ma, aero } = flightForces(model, x, ctrl, work, 'canopy');
+  const R = flightRotation([x[3], x[4], x[5], x[6]]);
+  const Rp = flightRotation([x[16], x[17], x[18], x[19]]);
+  const v = [x[7], x[8], x[9]]; const w = [x[10], x[11], x[12]];
+  const vp = [x[20], x[21], x[22]]; const wp = [x[23], x[24], x[25]];
+  const RT = (A, a) => [A[0][0] * a[0] + A[1][0] * a[1] + A[2][0] * a[2], A[0][1] * a[0] + A[1][1] * a[1] + A[2][1] * a[2], A[0][2] * a[0] + A[1][2] * a[1] + A[2][2] * a[2]];
+  const Fc = [0, 0, 0]; const Mc = [0, 0, 0]; const FpE = [0, 0, 0]; const Mp = [0, 0, 0];
+  let slack = 0; let tension = 0;
+  const tensions = info ? [] : null;
+  // the lengths the start hung the lines at (`flightTwoBodyStart`)
+  const L0 = work.twoL0;
+  for (let j = 0; j < T.bundles.length; j++) {
+    const b = T.bundles[j];
+    const Pe = flAdd([x[0], x[1], x[2]], flMatVec(R, b.P));
+    const Ke = flAdd([x[13], x[14], x[15]], flMatVec(Rp, b.K));
+    const d = flSub(Pe, Ke); const L = flNorm(d); const e = L - (L0 ? L0[j] : b.L0);
+    let Tn = 0;
+    if (e > 0 && L > 1e-6) {
+      const u = flScale(d, 1 / L);
+      const vP = flMatVec(R, flAdd(v, flCross(w, b.P)));
+      const vK = flAdd(vp, flMatVec(Rp, flCross(wp, b.K)));
+      Tn = Math.max(0, b.k * e + b.c * flDot(u, flSub(vP, vK)));
+      if (Tn > 0) {
+        const fB = RT(R, flScale(u, -Tn));
+        Fc[0] += fB[0]; Fc[1] += fB[1]; Fc[2] += fB[2];
+        const mc = flCross(b.P, fB); Mc[0] += mc[0]; Mc[1] += mc[1]; Mc[2] += mc[2];
+        FpE[0] += u[0] * Tn; FpE[1] += u[1] * Tn; FpE[2] += u[2] * Tn;
+        const mp = flCross(b.K, RT(Rp, flScale(u, Tn))); Mp[0] += mp[0]; Mp[1] += mp[1]; Mp[2] += mp[2];
+      }
+    }
+    if (!(Tn > 0)) slack++;
+    tension += Tn;
+    if (tensions) tensions.push(Tn);
+  }
+  // the rows with a side slack, front to back: the A's first is the leading
+  // edge let go, a frontal tuck
+  const slackRows = info ? T.rows.filter((row) => T.bundles.some((b, j) => b.row === row && !(tensions[j] > 0))).join('') : '';
+  // the harness: the pilot's rotation against the canopy's, damped
+  const Cd = model.cfg.harnessDamping;
+  const wcP = RT(Rp, flMatVec(R, w));
+  const Dh = [Cd[0] * (wp[0] - wcP[0]), Cd[1] * (wp[1] - wcP[1]), Cd[2] * (wp[2] - wcP[2])];
+  const DhC = RT(R, flMatVec(Rp, Dh));
+  Mc[0] += DhC[0]; Mc[1] += DhC[1]; Mc[2] += DhC[2];
+  // the canopy
+  const acc = flBodyAcceleration(model, v, w, flAdd(Fa, Fc), flAdd(Ma, Mc), T.massCanopy, T.rCanopyB, T.JcB, T.lu6c);
+  // the pilot: his weight, his drag at his own speed, the lines' pull
+  const pl = T.pilot; const g = model.g;
+  const Vp = flNorm(vp);
+  const fD = flScale(vp, -0.5 * model.rho * Vp * model.dragPilotM2);
+  const fOn = flAdd(FpE, fD);
+  const ap = flScale([fOn[0], fOn[1], fOn[2] + pl.m * g], 1 / pl.m);
+  const I = pl.I;
+  const Iw = [I[0] * wp[0], I[1] * wp[1], I[2] * wp[2]];
+  const gyro = flCross(wp, Iw);
+  const ep = [(Mp[0] - Dh[0] - gyro[0]) / I[0], (Mp[1] - Dh[1] - gyro[1]) / I[1], (Mp[2] - Dh[2] - gyro[2]) / I[2]];
+  const dx = new Float64Array(26);
+  const pos = flMatVec(R, v);
+  dx[0] = pos[0]; dx[1] = pos[1]; dx[2] = pos[2];
+  flQuatRate([x[3], x[4], x[5], x[6]], w, dx, 3);
+  for (let k = 0; k < 6; k++) dx[7 + k] = acc[k];
+  dx[13] = vp[0]; dx[14] = vp[1]; dx[15] = vp[2];
+  flQuatRate([x[16], x[17], x[18], x[19]], wp, dx, 16);
+  dx[20] = ap[0]; dx[21] = ap[1]; dx[22] = ap[2];
+  dx[23] = ep[0]; dx[24] = ep[1]; dx[25] = ep[2];
+  if (info) {
+    info.F = flAdd(Fa, Fc); info.M = flAdd(Ma, Mc); info.aero = aero;
+    // what the pilot feels: the lines' pull and his drag, over his weight
+    info.loadFactor = flNorm(fOn) / (pl.m * g);
+    info.slack = slack; info.slackRows = slackRows; info.tension = tension; info.tensions = tensions;
+  }
+  return dx;
+}
+
+/**
+ * Two bodies' start, from the one body's trim: the canopy as trimmed, and the
+ * pilot hanging at rest under it, his karabiners where the trim has them.
+ * In the one body's trim the pilot is at the karabiners and the canopy's own
+ * moment there is nothing, which is what a canopy free to swing about them
+ * needs. The lines are hung at the lengths that hold it there: each pulled
+ * by its stiffness times one stretch, and a little more forward or aft
+ * (`work.twoL0`), so that together they hold the canopy's lift and drag,
+ * which are the pilot's weight and drag. Every pull passes through its
+ * karabiner, so none turns the canopy. The pilot hangs along that pull, his
+ * centre on its line, so nothing turns him either: the start is a steady
+ * glide. Hung instead at the lengths the trim's geometry gives, the lines'
+ * pull leant forward of the trim's (the front rows are the stiffer and lean
+ * forward), and the canopy started 0.2° off its trim and swung.
+ */
+export function flightTwoBodyStart(model, trim, work = null) {
+  const T = model.two; const x0 = trim.state;
+  const wk = work || trim.work || flightWork(model);
+  const { F: Fc } = flightForces(model, x0, { left: 0, right: 0 }, wk, 'canopy');
+  // T_b = k_b (λ + μ u_bx), and the bundles' pull on the canopy, Σ T_b u_b,
+  // the canopy's own force: two equations, fore and down (across cancels)
+  let a11 = 0; let a12 = 0; let a21 = 0; let a22 = 0;
+  const us = T.bundles.map((b) => flUnit(flSub(b.P, b.K0)));
+  T.bundles.forEach((b, j) => {
+    const u = us[j];
+    a11 += b.k * u[0]; a12 += b.k * u[0] * u[0];
+    a21 += b.k * u[2]; a22 += b.k * u[0] * u[2];
+  });
+  const det = a11 * a22 - a12 * a21;
+  const lam = (Fc[0] * a22 - a12 * Fc[2]) / det;
+  const mu = (a11 * Fc[2] - a21 * Fc[0]) / det;
+  const L0 = new Float64Array(T.bundles.length);
+  T.bundles.forEach((b, j) => {
+    const Tn = b.k * (lam + mu * us[j][0]);
+    if (!(Tn > 0)) throw new Error(`flight: two bodies cannot hang the ${b.side} ${b.row} lines taut at the trim`);
+    L0[j] = flNorm(flSub(b.P, b.K0)) - Tn / b.k;
+  });
+  wk.twoL0 = L0;
+  const R = flightRotation([x0[3], x0[4], x0[5], x0[6]]);
+  const vE = flMatVec(R, [x0[7], x0[8], x0[9]]);
+  // the pilot along his weight and drag
+  const V = flNorm(vE);
+  const pull = flAdd([0, 0, T.pilot.m * model.g], flScale(vE, -0.5 * model.rho * V * model.dragPilotM2));
+  const zB = flUnit([R[0][0] * pull[0] + R[1][0] * pull[1] + R[2][0] * pull[2], R[0][1] * pull[0] + R[1][1] * pull[1] + R[2][1] * pull[2], R[0][2] * pull[0] + R[1][2] * pull[1] + R[2][2] * pull[2]]);
+  const phi = Math.atan2(zB[0], zB[2]);
+  const qc = [x0[3], x0[4], x0[5], x0[6]];
+  const qr = [Math.cos(phi / 2), 0, Math.sin(phi / 2), 0];
+  const qp = [
+    qc[0] * qr[0] - qc[1] * qr[1] - qc[2] * qr[2] - qc[3] * qr[3],
+    qc[0] * qr[1] + qc[1] * qr[0] + qc[2] * qr[3] - qc[3] * qr[2],
+    qc[0] * qr[2] - qc[1] * qr[3] + qc[2] * qr[0] + qc[3] * qr[1],
+    qc[0] * qr[3] + qc[1] * qr[2] - qc[2] * qr[1] + qc[3] * qr[0],
+  ];
+  const pp = flAdd([x0[0], x0[1], x0[2]], flMatVec(R, flScale(zB, T.pilot.dropM)));
+  return Float64Array.from([...x0, ...pp, ...qp, ...vE, 0, 0, 0]);
 }
 
 /**
@@ -889,7 +1166,10 @@ export function flightDuration({ rate, leadS = FLIGHT.leadS, holdS = FLIGHT.hold
  */
 export function* flightSteps(model, trim, { schedule, durationS, dtS = model.cfg.dtS, frameHz = model.cfg.frameHz, label = '', afterDepartureS = model.cfg.afterDepartureS }) {
   const work = trim.work || flightWork(model);
-  let x = Float64Array.from(trim.state);
+  // two bodies start from the one body's trim, the pilot hanging at rest
+  const twoBodies = model.cfg.bodies === 'two' && model.two?.bundles?.length;
+  const x = twoBodies ? flightTwoBodyStart(model, trim, work) : Float64Array.from(trim.state);
+  const N = x.length;
   const n = model.n;
   const frames = [];
   const steps = Math.ceil(durationS / dtS);
@@ -921,7 +1201,13 @@ export function* flightSteps(model, trim, { schedule, durationS, dtS = model.cfg
     }
     const alphaDeg = Math.atan2(v[2], v[0]) * 180 / Math.PI;
     const betaDeg = Math.asin(Math.max(-1, Math.min(1, v[1] / Math.max(1e-9, V)))) * 180 / Math.PI;
-    const canopyAlphaDeg = alphaDeg + model.barRotationDeg;
+    // The air at the canopy, not at the riser midpoint: turning, the canopy
+    // moves on a circle of its own six metres from the pilot's, and with two
+    // bodies it pitches and rolls about itself, the riser midpoint swinging
+    // with it. Where its departures are read.
+    const vc = flAdd(v, flCross(w, model.rAeroB)); const Vc = flNorm(vc);
+    const canopyAlphaDeg = Math.atan2(vc[2], vc[0]) * 180 / Math.PI + model.barRotationDeg;
+    const canopyBetaDeg = Math.asin(Math.max(-1, Math.min(1, vc[1] / Math.max(1e-9, Vc)))) * 180 / Math.PI;
     // the force square to the flight path, over the wing's area: its lift
     const a = info.aero; const vh = flScale(v, 1 / Math.max(1e-9, V));
     const along = flDot(a, vh);
@@ -929,12 +1215,30 @@ export function* flightSteps(model, trim, { schedule, durationS, dtS = model.cfg
     // Departed: a quarter of the span deep in its stall, or the air meeting
     // the canopy past any angle a flying canopy meets it at. From here on a
     // real canopy deforms, spins or folds, and a rigid one cannot show how.
+    // Two bodies: every line slack too, the pilot falling free of the canopy.
+    const allSlack = twoBodies && info.slack === model.two.bundles.length;
     const departed = deep > n / 4 || canopyAlphaDeg > model.cfg.departAlphaDeg
-      || canopyAlphaDeg < -model.cfg.departNegativeAlphaDeg || Math.abs(betaDeg) > model.cfg.departBetaDeg;
+      || canopyAlphaDeg < -model.cfg.departNegativeAlphaDeg || Math.abs(canopyBetaDeg) > model.cfg.departBetaDeg || allSlack;
+    // the pilot, with two bodies: where he is, how he hangs, and how far he
+    // has swung from under the canopy (his own attitude on the canopy's)
+    let pilot = null;
+    if (twoBodies) {
+      const qp = [xx[16], xx[17], xx[18], xx[19]];
+      const Rp = flightRotation(qp);
+      // the pilot's axes on the canopy's: Rᵀ Rp
+      const rel = [0, 1, 2].map((i) => [0, 1, 2].map((j) => R[0][i] * Rp[0][j] + R[1][i] * Rp[1][j] + R[2][i] * Rp[2][j]));
+      pilot = {
+        x: xx[13], y: xx[14], z: xx[15], q: qp,
+        swingRollDeg: Math.atan2(rel[2][1], rel[2][2]) * 180 / Math.PI,
+        swingPitchDeg: Math.asin(Math.max(-1, Math.min(1, -rel[2][0]))) * 180 / Math.PI,
+        twistDeg: Math.atan2(rel[1][0], rel[0][0]) * 180 / Math.PI,
+        slack: info.slack, slackRows: info.slackRows, tensionN: info.tension,
+      };
+    }
     frames.push({
-      t, x: xx[0], y: xx[1], z: xx[2], q: [xx[3], xx[4], xx[5], xx[6]],
+      t, x: xx[0], y: xx[1], z: xx[2], q: [xx[3], xx[4], xx[5], xx[6]], pilot,
       rollDeg: roll * 180 / Math.PI, pitchDeg: pitch * 180 / Math.PI, headingDeg: yaw * 180 / Math.PI,
-      speed: V, alphaDeg, canopyAlphaDeg, betaDeg,
+      speed: V, alphaDeg, canopyAlphaDeg, betaDeg, canopySpeed: Vc, canopyBetaDeg,
       sinkRate: vn[2], groundSpeed: Math.hypot(vn[0], vn[1]),
       rollRateDeg: w[0] * 180 / Math.PI, pitchRateDeg: w[1] * 180 / Math.PI, yawRateDeg: w[2] * 180 / Math.PI, turnRateDeg: yawRate * 180 / Math.PI,
       loadFactor: info.loadFactor, liftCoefficient, left: ctrl.left, right: ctrl.right,
@@ -955,10 +1259,20 @@ export function* flightSteps(model, trim, { schedule, durationS, dtS = model.cfg
     const k3 = flightDerivative(model, x3, ch, work);
     const x4 = x.map((v, i) => v + dtS * k3[i]);
     const k4 = flightDerivative(model, x4, c1, work);
-    for (let i = 0; i < 13; i++) x[i] += (dtS / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+    for (let i = 0; i < N; i++) x[i] += (dtS / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
     const ql = Math.hypot(x[3], x[4], x[5], x[6]);
     for (let i = 3; i < 7; i++) x[i] /= ql;
-    if (!x.every(Number.isFinite)) throw new Error(`flight: the state stopped being finite at ${(s * dtS).toFixed(2)} s`);
+    if (N === 26) {
+      const qp = Math.hypot(x[16], x[17], x[18], x[19]);
+      for (let i = 16; i < 20; i++) x[i] /= qp;
+    }
+    if (!x.every(Number.isFinite)) {
+      // Past a departure the model has already said it cannot follow the
+      // glider; a state that stops being finite there (two bodies' lines
+      // snatching tight on a tumbling canopy) ends the flight where it is.
+      if (departedAt !== null) { endedEarly = true; break; }
+      throw new Error(`flight: the state stopped being finite at ${(s * dtS).toFixed(2)} s`);
+    }
     if (s % every === 0 || s === steps) {
       record(s * dtS, x);
       const f = frames[frames.length - 1];
@@ -977,7 +1291,7 @@ export function* flightSteps(model, trim, { schedule, durationS, dtS = model.cfg
   // frame and not the rate asked: 30 a second asked, at 0.01 s steps, keeps
   // every third, 33 1/3 a second. Given back as asked, the view found each
   // time's frame a tenth early and never showed the flight's last tenth.
-  return { frames, label, dtS, frameHz: 1 / (every * dtS), durationS, n, minFlyingCz: model.cfg.minFlyingCz, spiralSinkMS: model.cfg.spiralSinkMS, departedAt, endedEarly };
+  return { frames, label, bodies: twoBodies ? 'two' : 'one', dtS, frameHz: 1 / (every * dtS), durationS, n, minFlyingCz: model.cfg.minFlyingCz, spiralSinkMS: model.cfg.spiralSinkMS, departedAt, endedEarly };
 }
 
 /** What a flight did: its extremes up to where it departed (if it did),

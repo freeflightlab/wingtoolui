@@ -18,7 +18,7 @@ step checked against wings that have actually flown.
 estimated, what is unexplained, and what a reviewer should check first — is in
 [`ASSESSMENT.md`](ASSESSMENT.md).**
 
-**2978 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
+**2991 unit checks, and fifteen check stages**, all passing. Phases 1 and 5 are
 complete; 2, 3 and 4 have open items listed in `ROADMAP.md`.
 
 The tool takes a wing from planform through to cutting files: geometry,
@@ -48,10 +48,12 @@ both, pulled to any travel over 3, 1 or half a second, from hands up or on
 the bar, in a six-degree-of-freedom model with the canopy's apparent mass,
 every strip on the lattice with its brake-deflected section, and the pulled
 side of the canopy drooping as PGSim, the project's simulator, has it, so a
-brake banks the wing into its turn. Each flight is flown again with a rigid
-canopy, for the range; the turn is held to PGSim's on the Geo 7 L. It plays
-in 3D with the hands, the pulled trailing edge and the track from above,
-records to video, and stops where a rigid body stops meaning anything
+brake banks the wing into its turn. Or in two bodies, PGSim's: the pilot hung
+under the canopy on the lines, free to swing. Each flight is flown again with
+a rigid canopy and with the pilot hung the other way, for the range; the turn
+is held to PGSim's on the Geo 7 L. It plays in 3D with the hands, the pulled
+trailing edge, the swinging pilot and the track from above, records to
+video, and stops where a rigid body stops meaning anything
 (`docs/flight.md`). It judges the trimmed glider as Poland and others (2026)
 judge a kite: its stability derivatives, its modes, its hang point and its
 planform, each variant of the planform built and flown as the design is. Its
@@ -96,7 +98,7 @@ being worked on:
 
 | command | what it runs |
 | --- | --- |
-| `npm test` | 2978 unit checks against known geometry and the sources |
+| `npm test` | 2991 unit checks against known geometry and the sources |
 | `npm run test:phase1` | 81 Phase 1 roadmap claims, item by item |
 | `npm run test:pipeline` | all 55 published wings through every stage |
 | `npm run test:ui` | the interface: every control, every button pressed |
@@ -233,7 +235,7 @@ src/core/          the maths — 45 modules, pure functions, no DOM, each tested
   mfoil.js         a viscous section solver: mfoil, ported from its Python
   slices.js        the wing as its sections, put together on the lattice
   brakesection.js  the section with its trailing edge braked: mfoil, then past it
-  flight.js        the glider through its brakes: six degrees of freedom
+  flight.js        the glider through its brakes: one body or two
   stability.js     its derivatives, its modes, the hang point and planform mapped
   pressure.js      chordwise loading, row load shares from the section
   intake.js        cell openings, placed against the stagnation point
@@ -334,7 +336,7 @@ fifteen stages, one command:
 | stage | catches |
 | --- | --- |
 | checkout | a tree that is incomplete or in an older layout |
-| unit suite | the maths, 2978 checks |
+| unit suite | the maths, 2991 checks |
 | Phase 1 audit | roadmap claims that have gone stale |
 | full pipeline | 55 published wings through every stage |
 | interface | features with no button, buttons with no effect |
@@ -376,7 +378,7 @@ cascade: its riser layout, its counts, its tip lines and its stabilo's line.
 | `docs/line-sheets.md` | what can be recovered from a maker's published numbers |
 | `docs/environment-and-aero.md` | atmosphere, Reynolds number, and the wing polar |
 | `docs/slices.md` | the wing as its sections: mfoil ported and held to its own code, put together on the lattice |
-| `docs/flight.md` | the glider through its brakes: the braked section, six degrees of freedom, the turn against PGSim, what the default wing does, what the model is not |
+| `docs/flight.md` | the glider through its brakes: the braked section, one body or two, the turn against PGSim, the canopy at low angles, what the default wing does, what the model is not |
 | `docs/stability.md` | a kite paper's stability derivatives, the modes, the hang point and the planform, and the tool held to Belloc's wind-tunnel paraglider |
 | `docs/ranges.md` | the design as built under each of the tool's alternative assumptions: the range of the glide, and what moves it most |
 | `docs/validation.md` | every discrepancy found in the sources, and why |

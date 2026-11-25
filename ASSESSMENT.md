@@ -10,7 +10,7 @@ openings, diagonals and rods, panel development, nesting, and DXF or printed
 patterns. It reads and writes LEparagliding files, generates a size family,
 and produces a bill of materials and a PMA inspection check.
 
-One offline HTML file, 2.0 MB, no build step and no network. That constraint
+One offline HTML file, 2.1 MB, no build step and no network. That constraint
 drove the architecture: 45 core modules bundled into a single scope, with the
 build refusing duplicate top-level names because they would collide silently.
 
@@ -220,7 +220,7 @@ were that error (`docs/stability.md`).
 
 ## 5. What is missing
 
-**65 open items in the roadmap.** The substantial ones:
+**68 open items in the roadmap.** The substantial ones:
 
 - The Lynx 2's and the Artik R 2's linesets, a quarter over their totals:
   the Lynx 2's suspension 27% over its sheets, its middles carrying two
@@ -236,14 +236,16 @@ were that error (`docs/stability.md`).
   aspect ratio of 4.7. The balance, speed bar and glide still fly the polar.
 - The flight model's turn, drag and modes: its turn banks through PGSim's
   droop of the pulled canopy, scaled to this tool's brake, and has a
-  second model to check it against but no measured turn; it is one rigid
-  body, where PGSim's two turn a third faster at 43 cm; its brake pulls
-  each anchor straight from the pulley, not through the cascade's angles.
-  It trims 0.3° above the balance but on a smooth canopy's drag, so its
-  glide is 8.61 where the polar's profile drag would give about 8.2; its
-  circulation follows the brakes at once; its modes are a rigid canopy's
-  with no pilot to swing, and no measured paraglider modes were found to
-  check them; and nothing in it folds.
+  second model to check it against but no measured turn; its two bodies
+  turn within a tenth of its one, where PGSim's turn a third faster at
+  43 cm, for a reason not found; its brake pulls each anchor straight from
+  the pulley, not through the cascade's angles. Its canopy at low angles
+  is held up by PGSim's relief, and which rows a real wing loads on the
+  bar was not found measured. It trims 0.3° above the balance but on a
+  smooth canopy's drag, so its glide is 8.61 where the polar's profile
+  drag would give about 8.2; its circulation follows the brakes at once;
+  its modes are one rigid body's, and no measured paraglider modes were
+  found to check them; and nothing in it folds.
 - Collapse behaviour: the frontal-collapse floor is assumed rather than
   predicted, and the dynamic factor is a stand-in.
 - Collapse (Z) lines: three reference wings carry them; the model does not.

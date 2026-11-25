@@ -292,12 +292,12 @@ certification standard's own manoeuvres.
   same kind: minimum 22.5 km/h and minimum sink 1.06 m/s, where Parapente Mag
   measured a Niviuk Hook 3 at 24 km/h and 1.05 m/s (as Heatwole's thesis
   gives the test).
-- **The turn, against a second model** (`docs/flight.md`, "The turn").
-  PGSim, the project's simulator, flown headless on its own Geo 7 L: at
-  43 cm and 95 kg the tool's rigid canopy turns within 5% of PGSim's, and
-  its drooping one at 25°/s, between PGSim's one body (23) and two (31).
-  At 25 cm it turns a quarter to a third less. Held turns bank to the
-  coordinated turn's law within 20%, as pilots' thermalling circles do.
+- **The turn, against a second model** (`docs/flight.md`, "The turn"):
+  PGSim on its own Geo 7 L. At 43 cm and 95 kg the tool's rigid canopy
+  turns within 5% of PGSim's; its drooping one at 25°/s, between PGSim's
+  one body (23) and two (31); its two bodies at 26°/s, a sixth short of
+  PGSim's two. At 25 cm it turns a quarter to a third less. Held turns
+  bank to the coordinated turn's law within 20%, as pilots' circles do.
 
 What is not checked: the turn rate against brake travel on a real wing; no
 measured one was found for any paraglider.

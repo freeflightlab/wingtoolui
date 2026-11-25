@@ -35,7 +35,7 @@ not verify.
 - [x] Line weight in the balance *(2020 equilibrium revisit)*
 - [x] Laboratori d'envol .txt import, with intake read from the file header
 - [x] Scale-invariant arc definition
-- [x] 2978-test validation suite and a benchmark with regression budgets
+- [x] 2991-test validation suite and a benchmark with regression budgets
 - [x] Operating environment: U.S. Standard Atmosphere 1976 to 50 km, with
       Reynolds, Mach and Knudsen numbers and applicability warnings
 - [x] Lifting line over the real planform — Oswald factor and span loading are
@@ -1667,6 +1667,24 @@ Turning geometry into something a person can actually sew.
       33⅓ a second; the flight said 30, and the view showed each moment's
       frame a tenth early and never a flight's last tenth.
 
+### Round of 2026-11-25: the pilot swinging, from PGSim
+
+- [x] **Two bodies** — the pilot hung on the lines, PGSim's default
+      dynamics, as a second approach beside the one body; every flight is
+      flown both ways, and a flight flown once, as a scenario or a twin, is
+      not flown again. The pilot drawn on his own body, his swing, the
+      lines' pull and the slack rows said and saved.
+- [x] **The canopy at low angles** — flown on the bar, two bodies tucked:
+      the canopy free to pitch about the karabiners, a rigid section's
+      centre of pressure running aft unloads its A's. PGSim's relief of the
+      pressurised section's moment below 3° (`pitchRelief`) is now the
+      default, the section alone the other assumption; the default wing's
+      bar reaches 120 of its 150 mm, the Geo 7 L's its end.
+- [x] **Departures read at the canopy** — the air was read at the riser
+      midpoint, the pilot's: a pitch or a spiral met there was not the
+      canopy's. A flight that stops being finite past its departure ends
+      there rather than failing whole.
+
 ---
 
 ## Phase 4 — workflow
@@ -1856,10 +1874,28 @@ describing geometry and starts predicting behaviour.
       here, scaled to this tool's brake, flies PGSim's turns on the Geo 7 L
       (`brakeDroop`; `docs/flight.md`, "The turn";
       `data/reference/pgsim-turns.tsv`).
-- [ ] **Two bodies** — the pilot hung under the canopy on line bundles, as
-      PGSim's default dynamics: they turn the Geo 7 L a third faster than
-      one body at 43 cm and 95 kg, and spiral at 115 kg. Gorman and Slegers
-      (2011) compare such models for parafoils.
+- [x] **Two bodies** (1.19) — the pilot hung under the canopy on one
+      tension-only bundle a row a side, PGSim's default dynamics and
+      figures, started from the one body's trim exactly; every flight flown
+      both ways, the other dashed on the chart (`bodies`,
+      `flightTwoBodyStart`; `docs/flight.md`, "Two bodies").
+- [ ] **Two bodies' turn against PGSim's** — this tool's two bodies turn
+      within a tenth of its one; PGSim's turn the Geo 7 L a third faster at
+      43 cm and 95 kg, and spiral at 115 kg. Stiffer lines bring both toward
+      one body; the harness's damping, the karabiners' spacing and the
+      bundles' layout do not move PGSim's. The cause is not found. Gorman
+      and Slegers (2011) compare such models for parafoils.
+- [ ] **The rows' loads on the bar** — with two bodies the canopy pitches
+      free about the karabiners, and which rows carry it decides whether a
+      brake on the bar tucks it. PGSim's A's carry about a third throughout;
+      this tool's 15% at 120 mm with the low-angle relief, 8% at 90 mm on
+      the section alone. No measured row loads on the bar were found.
+- [ ] **The frontal fold as a departure** — both brakes pulled 65 cm on the
+      bar fly through with the canopy at −8.6°, where PGSim folds a leading
+      edge (−6.5°); the departures here are a stall, the air past ±30° or
+      −10°, and every line slack.
+- [ ] **The two bodies' modes** — the stability's linearisation is one
+      body's; the pilot's swing has no mode in it.
 - [ ] **The brake through its cascade** — PGSim reads each trailing edge's
       travel through the cascade's own angles (each junction moving along
       its parent line, a child taking the parent's motion by the cosine

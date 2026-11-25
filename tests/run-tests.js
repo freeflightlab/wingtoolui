@@ -187,7 +187,7 @@ import {
 import {
   FLIGHT, FLIGHT_INPUTS, FLIGHT_STATES, FLIGHT_RATES, flightModel, flightWork, flightTrim, flightBarTrim, flightBends,
   flightDroop, flightForces, flightDerivative, flightSchedule, flightDuration, flightSteps, flightSummary, flightRotation,
-  flightEuler, flightQuaternion, apparentMassBarrows,
+  flightEuler, flightQuaternion, apparentMassBarrows, flightTwoBodyStart,
 } from '../src/core/flight.js';
 import { trefftzInfluence } from '../src/core/vlm.js';
 import {
@@ -19316,6 +19316,37 @@ function shippedBrakeSolve(code) {
   check('flight: on the bar it flies faster, and stops pushing where the lift would fall below the collapse floor',
     bar.trim.speed > trim.speed && bar.trim.liftCoefficient >= 0.35 && (bar.barMM === 150 || bar.limitedBy?.reason),
     `${bar.barMM} of 150 mm, ${(bar.trim.speed * 3.6).toFixed(1)} km/h, CL ${bar.trim.liftCoefficient.toFixed(3)}${bar.limitedBy ? `; ${bar.limitedBy.barMM} mm: ${bar.limitedBy.reason}` : ''}`);
+  // The canopy at low angles (PGSim's relief, the default): below 3° to its
+  // chord each strip not deep in its stall gains 0.8 times the shortfall, at
+  // most 0.2 rad, of nose-up moment coefficient, about its own span. Hands
+  // up the trim is above it; flown nose down at −2° the moment is the
+  // section's plus exactly that; on the bar, its section alone, the trim
+  // runs out sooner.
+  const alone = flightModel({ ...base, alphaWakeDeg: 7, settings: { pitchRelief: 0 } });
+  const trimAlone = flightTrim(alone, { guess: trim.guess });
+  const low = Float64Array.from(trim.state);
+  const aLow = -2 * Math.PI / 180; const Vt = Math.hypot(low[7], low[9]);
+  low[7] = Vt * Math.cos(aLow); low[9] = Vt * Math.sin(aLow);
+  const wR = flightWork(model); wR.d.set(trim.work.d); wR.tol = 1e-12; wR.maxIterations = 400;
+  const wA = flightWork(alone); wA.d.set(trim.work.d); wA.tol = 1e-12; wA.maxIterations = 400;
+  const fR = flightForces(model, low, { left: 0, right: 0 }, wR); const fA = flightForces(alone, low, { left: 0, right: 0 }, wA);
+  const want = [0, 0, 0]; let reliefStrips = 0;
+  for (let i = 0; i < model.n; i++) {
+    const below = 3 * Math.PI / 180 - wR.aGeo[i];
+    if (wR.deep[i] || below <= 0) continue;
+    reliefStrips++;
+    const dm = 0.5 * model.rho * wR.vp[i] ** 2 * model.area[i] * model.chord[i] * 0.8 * Math.min(below, 0.2);
+    for (let k = 0; k < 3; k++) want[k] += dm * model.spn[3 * i + k];
+  }
+  // the body's frame is the wing's with x and z reversed
+  const wantB = [-want[0], want[1], -want[2]];
+  const dM = [0, 1, 2].map((k) => fR.M[k] - fA.M[k]);
+  const barAlone = flightBarTrim((rot) => flightModel({ ...base, alphaWakeDeg: 7, barRotationDeg: rot, settings: { pitchRelief: 0 } }), rows, { ...trimAlone, model: alone }, { minFlyingCz: 0.35 });
+  check('flight: at low angles the rows hold the canopy up: above 3° nothing, below it the section\'s moment and 0.8 the shortfall, the bar further',
+    FLIGHT.pitchRelief === 0.8 && FLIGHT.pitchReliefAlphaDeg === 3 && Math.abs(trimAlone.speed - trim.speed) < 1e-9
+    && reliefStrips > model.n / 2 && Math.max(...dM.map((v, k) => Math.abs(v - wantB[k]))) < 1e-6 * Math.hypot(...wantB) && fR.F.every((v, k) => Math.abs(v - fA.F[k]) < 1e-9)
+    && bar.barMM >= barAlone.barMM && wantB[1] !== 0,
+    `nose down at −2°: ${reliefStrips} of ${model.n} strips relieved (the arc's tips meet the air higher), ${Math.hypot(...wantB).toFixed(1)} N·m nose up; the bar ${barAlone.barMM} mm alone, ${bar.barMM} held up`);
   check('flight: eighteen scenarios', FLIGHT_STATES.length * FLIGHT_INPUTS.length * FLIGHT_RATES.length === 18
     && FLIGHT.rates.slow === 3 && FLIGHT.rates.medium === 1 && FLIGHT.rates.fast === 0.5 && FLIGHT.travelMM === 650);
 
@@ -19369,10 +19400,110 @@ function shippedBrakeSolve(code) {
   check('flight: a held turn banks as far as its rate needs (tan bank = V ω / g, within 20%), slipping under 5°',
     Math.abs(bankHeld / coordinated - 1) < 0.2 && Math.abs(avg((q) => q.betaDeg)) < 5,
     `bank ${bankHeld.toFixed(1)}° against ${coordinated.toFixed(1)}° for ${(wHeld * 180 / Math.PI).toFixed(1)}°/s at ${(vHorizontal * 3.6).toFixed(1)} km/h; slip ${avg((q) => q.betaDeg).toFixed(1)}°`);
+  // The air at the canopy: straight and trimmed, the riser midpoint's; in
+  // the held turn the canopy, banked in over the pilot, flies the smaller
+  // circle, slower, and meets the air at more than his angle (the strips
+  // fly it already; the canopy's alpha said, and its departures read, are
+  // the canopy's own). Its speed against the pilot's, as the radii have it:
+  // the turn's radius less the canopy's height times the bank's sine.
+  const f0 = turnD.f.frames[0];
+  const ratio = avg((q) => q.canopySpeed / q.speed);
+  const hC = -model.rAeroB[2];
+  const radius = vHorizontal / wHeld;
+  const expectRatio = (radius - hC * Math.sin(bankHeld * Math.PI / 180)) / radius;
+  check('flight: the canopy\'s air is read at the canopy: the pilot\'s, trimmed; in a turn slower, by the radii, and at a higher angle',
+    Math.abs(f0.canopySpeed - f0.speed) < 1e-9 && Math.abs(f0.canopyAlphaDeg - f0.alphaDeg) < 1e-9 && f0.canopyBetaDeg === f0.betaDeg
+    && Math.abs(ratio / expectRatio - 1) < 0.02 && avg((q) => q.canopyAlphaDeg - q.alphaDeg) > 0.05 && hC > 5,
+    `canopy ${hC.toFixed(2)} m up; its speed ${(100 * ratio).toFixed(1)}% of the pilot's against ${(100 * expectRatio).toFixed(1)}% by the radii, its angle ${avg((q) => q.canopyAlphaDeg - q.alphaDeg).toFixed(2)}° more`);
   // A spiral dive is marked where the sink passes EN 926-2's 14 m/s.
   const fake = { frames: [0, 5, 13.9, 14.2, 20].map((sk, k) => ({ ...still2.frames[0], t: k, sinkRate: sk, departed: false })), n: model.n };
   check('flight: a spiral dive is marked where the sink passes 14 m/s', flightSummary(fake, trim).spiralS === 3 && FLIGHT.spiralSinkMS === 14
     && flightSummary(still2, trim).spiralS === null);
+
+  // Two bodies (PGSim's): the pilot hung under the canopy on one tension-only
+  // bundle a row a side. The rows here: A to D at 10, 30, 55 and 80% of the
+  // chord on the brake anchors' ribs, both sides.
+  const rowAt = { A: 0.1, B: 0.3, C: 0.55, D: 0.8 };
+  const suspension = anchorsAt.flatMap((i) => Object.entries(rowAt).flatMap(([row, f]) => [1, -1].map((side) => {
+    const r = ribs[i]; const o = r.frame.origin; const u = r.frame.u;
+    return { level: 'upper', row, ribIndex: i, to: [o[0] + u[0] * r.chord * f, side * (o[1] + u[1] * r.chord * f), o[2] + u[2] * r.chord * f] };
+  })));
+  const plan2 = { ...linePlan, lines: [...suspension, { level: 'upper', row: 'A', isBrake: true, to: [0, 9, 0] }] };
+  const two = flightModel({ ...base, linePlan: plan2, alphaWakeDeg: 7, settings: { bodies: 'two' } });
+  const T2 = two.two;
+  check('flight, two bodies: a bundle a row a side, the brake lines not among them, shared as the rows carry the load',
+    T2.bundles.length === 8 && T2.rows.join('') === 'ABCD' && Math.abs(T2.bundles.filter((b) => b.side === 'right').reduce((a, b) => a + b.share, 0) - 1) < 1e-12
+    && T2.bundles.every((b) => Math.abs(b.k - FLIGHT.lineStiffnessNPerM * b.share) < 1e-9 && b.K0[1] === (b.side === 'right' ? 1 : -1) * Math.abs(kar[1])));
+  check('flight, two bodies: the canopy carries all but the pilot', Math.abs(T2.massCanopy + 80 - two.massBody) < 1e-9 && T2.pilot.m === 80
+    && T2.pilot.dropM === FLIGHT.pilotDropM);
+  // the one body's model is the same: the lines change nothing in it
+  const trimTwo = flightTrim(two, { guess: trim.guess });
+  check('flight, two bodies: the one body\'s trim is unchanged by the lines given', trimTwo.converged && Math.abs(trimTwo.speed - trim.speed) < 1e-9
+    && Math.abs(trimTwo.alphaDeg - trim.alphaDeg) < 1e-9);
+  // The start: the lines hung so that their pulls, each through its
+  // karabiner, hold the canopy's own force; the pilot along his weight and
+  // drag. Nothing accelerates.
+  const wk2 = flightWork(two); wk2.d.set(trim.work.d);
+  const x2 = flightTwoBodyStart(two, trim, wk2);
+  const info2 = {};
+  const d2 = flightDerivative(two, x2, { left: 0, right: 0 }, wk2, info2);
+  const accMax = Math.max(...[7, 8, 9, 10, 11, 12, 20, 21, 22, 23, 24, 25].map((k) => Math.abs(d2[k])));
+  const { F: Fcan } = flightForces(two, trim.state, { left: 0, right: 0 }, wk2, 'canopy');
+  // (as still as the trim's own convergence leaves it)
+  check('flight, two bodies: hung at rest, nothing accelerates', x2.length === 26 && accMax < 1e-5 && info2.slack === 0
+    && info2.tensions.every((t) => t > 0), `largest ${accMax.toExponential(1)}`);
+  // the lines splay from the karabiners to the rows' spans, so their pulls
+  // add up to more than the canopy's force they hold between them
+  check('flight, two bodies: the lines hold the pilot\'s weight and drag, one g, splayed to more than the canopy\'s force',
+    Math.abs(info2.tension - info2.tensions.reduce((a, t) => a + t, 0)) < 1e-9 && Math.abs(info2.loadFactor - 1) < 1e-4
+    && info2.tension > Math.hypot(...Fcan) && info2.tension < 1.15 * Math.hypot(...Fcan),
+    `${(info2.tension / atm.gravity).toFixed(1)} kg in the lines, the canopy's ${(Math.hypot(...Fcan) / atm.gravity).toFixed(1)} kg, ${info2.loadFactor.toFixed(5)} g`);
+  // tension only: the pilot lifted 0.3 m, every bundle slack, he falls free
+  const lifted = Float64Array.from(x2); lifted[15] -= 0.3;
+  const infoL = {};
+  const dL = flightDerivative(two, lifted, { left: 0, right: 0 }, wk2, infoL);
+  const Vp = Math.hypot(lifted[20], lifted[21], lifted[22]);
+  const dragA = 0.5 * two.rho * Vp * Vp * two.dragPilotM2 / 80;
+  check('flight, two bodies: a slack line pulls nothing; lifted, the pilot falls with only his drag', infoL.slack === 8 && infoL.tension === 0
+    && Math.abs(Math.hypot(dL[20], dL[21], dL[22] - atm.gravity) - dragA) < 1e-9, `slack ${infoL.slack} of 8`);
+  const fly2 = (sc, dur = null) => {
+    const tr = { ...trim, work: flightWork(two) };
+    tr.work.d.set(trim.work.d);
+    const f = runSteps(flightSteps(two, tr, { schedule: flightSchedule(sc), durationS: dur ?? flightDuration(sc) }));
+    return { f, s: flightSummary(f, trim) };
+  };
+  const still2b = fly2({ input: 'both', rate: 'slow', travelMM: 0 }, 4);
+  const lastT = still2b.f.frames[still2b.f.frames.length - 1];
+  check('flight, two bodies: trimmed and left alone, it stays trimmed, the pilot where he hung', still2b.f.bodies === 'two'
+    && Math.abs(lastT.speed - trim.speed) < 1e-4 && Math.abs(lastT.rollDeg) < 1e-9 && Math.abs(lastT.pitchDeg - trim.pitchDeg) < 1e-3
+    && Math.abs(lastT.pilot.swingPitchDeg - still2b.f.frames[0].pilot.swingPitchDeg) < 1e-3 && lastT.pilot.slack === 0,
+    `speed changed ${(lastT.speed - trim.speed).toExponential(1)} m/s in 4 s`);
+  const both2 = fly2({ input: 'both', rate: 'fast', travelMM: 300, holdS: 2 });
+  const asym2 = Math.max(...both2.f.frames.map((f) => Math.max(Math.abs(f.rollDeg), Math.abs(f.betaDeg), Math.abs(f.turnRateDeg),
+    Math.abs(f.pilot.swingRollDeg), Math.abs(f.pilot.twistDeg))));
+  check('flight, two bodies: both brakes keep it symmetric, the pilot swinging only fore and aft', asym2 < 1e-8
+    && Math.max(...both2.f.frames.map((f) => Math.abs(f.pilot.swingPitchDeg))) > 0.5, `largest roll, slip, turn or sideways swing ${asym2.toExponential(1)}`);
+  const L2 = fly2({ input: 'left', rate: 'medium', travelMM: 300, holdS: 2 });
+  const R2 = fly2({ input: 'right', rate: 'medium', travelMM: 300, holdS: 2 });
+  const mirror2 = Math.max(...L2.f.frames.map((f, i) => {
+    const g = R2.f.frames[i];
+    return Math.max(Math.abs(f.rollDeg + g.rollDeg), Math.abs(f.turnRateDeg + g.turnRateDeg), Math.abs(f.speed - g.speed), Math.abs(f.z - g.z),
+      Math.abs(f.pilot.swingRollDeg + g.pilot.swingRollDeg), Math.abs(f.pilot.swingPitchDeg - g.pilot.swingPitchDeg));
+  }));
+  check('flight, two bodies: the left brake is the right brake in a mirror', mirror2 < 1e-7, `largest difference ${mirror2.toExponential(1)}`);
+  // held, it turns as the one body does, a little either side; the pilot
+  // swings into the turn and back
+  const turn2 = fly2(held, 12);
+  const swingMax = Math.max(...turn2.f.frames.map((f) => Math.abs(f.pilot.swingRollDeg)));
+  check('flight, two bodies: one brake held turns it as the one body does, within a quarter, the lines never slack',
+    turn2.s.departedS === null && Math.abs(turn2.s.headingChangeDeg / turnD.s.headingChangeDeg - 1) < 0.25
+    && turn2.f.frames.every((f) => f.pilot.slack === 0) && swingMax > 0.5 && swingMax < 15,
+    `turned ${turnD.s.headingChangeDeg.toFixed(0)}° with one body, ${turn2.s.headingChangeDeg.toFixed(0)}° with two in 12 s; the pilot swung up to ${swingMax.toFixed(1)}°`);
+  // without the rows, there is nothing to hang the pilot from: one body flies
+  const noRows = flightModel({ ...base, alphaWakeDeg: 7, settings: { bodies: 'two' } });
+  const trNo = { ...trim, work: flightWork(noRows) }; trNo.work.d.set(trim.work.d);
+  const fNo = runSteps(flightSteps(noRows, trNo, { schedule: flightSchedule({ input: 'both', rate: 'slow', travelMM: 0 }), durationS: 0.1 }));
+  check('flight, two bodies: a line plan without its rows flies one body', noRows.two.bundles.length === 0 && fNo.bodies === 'one' && fNo.frames.every((f) => f.pilot === null));
 }
 
 {

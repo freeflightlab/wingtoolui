@@ -80,17 +80,22 @@ the centre of mass changes the pitch stiffness by exactly the lever.
 **The default wing.** About its centre of mass, 0.39 m above the karabiners,
 on 20.3 m² and 8.94 m. In brackets, about the karabiners:
 
-| | hands up, 35.8 km/h, 5.3° | on the bar, 90 mm, 46.9 km/h, 0.2° |
-| --- | --- | --- |
-| roll, Cl/β | −0.077 (−0.103) | −0.061 (−0.086) |
-| pitch, Cm/α | −1.37 (−1.51) | −0.54 (−0.64) |
-| yaw, Cn/β | +0.055 (+0.056) | +0.027 (+0.028) |
-| roll damping, Cl/p̂ | −0.014 (−0.025) | −0.013 (−0.023) |
-| pitch damping, Cm/q̂ | −1.57 (−1.75) | −0.45 (−0.56) |
-| yaw damping, Cn/r̂ | −0.013 (−0.013) | −0.002 (−0.002) |
+| | hands up, 35.8 km/h, 5.3° | on the bar, 120 mm, 47.4 km/h, 0.05° | its section alone: 90 mm, 46.9 km/h, 0.2° |
+| --- | --- | --- | --- |
+| roll, Cl/β | −0.077 (−0.103) | −0.066 (−0.090) | −0.061 (−0.086) |
+| pitch, Cm/α | −1.37 (−1.51) | −1.30 (−1.40) | −0.54 (−0.64) |
+| yaw, Cn/β | +0.055 (+0.056) | +0.047 (+0.048) | +0.027 (+0.028) |
+| roll damping, Cl/p̂ | −0.014 (−0.025) | −0.014 (−0.024) | −0.013 (−0.023) |
+| pitch damping, Cm/q̂ | −1.57 (−1.75) | −1.35 (−1.50) | −0.45 (−0.56) |
+| yaw damping, Cn/r̂ | −0.013 (−0.013) | −0.007 (−0.007) | −0.002 (−0.002) |
 
-All six criteria hold, hands up and on the bar. The bar halves the yaw
-stiffness, and takes the pitch stiffness and damping to less than a third.
+All six criteria hold, hands up and on the bar. The bar is flown with the
+canopy's rows holding it up at low angles, PGSim's relief (`flight.md`): below
+3° to its chord each strip gains 0.8 a radian of nose-up moment, and the pitch
+stiffness and damping stay near their hands-up figures, the yaw stiffness a
+seventh less. On its section alone, the other assumption the tab keeps, the
+bar halves the yaw stiffness and takes the pitch stiffness and damping to less
+than a third.
 
 **The roll derivatives are small**, and that is the arc, not a fault. The
 default wing's arc has a radius of 5.93 m, so its centre lies near the centre
@@ -138,16 +143,17 @@ of their peak over 6 s (a unit test).
 
 **The default wing:**
 
-| mode | hands up | on the bar, 90 mm |
-| --- | --- | --- |
-| pitch | period 2.60 s, damping 0.69, halves in 0.31 s | no oscillation: halves in 0.19 s, and in 0.63 s with the speed |
-| phugoid | 6.67 s, 0.07, halves in 10.5 s | 6.42 s, −0.003: doubles in 230 s |
-| Dutch roll | 2.41 s, 0.23, halves in 1.1 s | 2.82 s, 0.14, halves in 2.3 s |
-| roll | 6.68 s, 0.15, halves in 4.8 s | 7.30 s, 0.26, halves in 3.0 s |
+| mode | hands up | on the bar, 120 mm | its section alone, 90 mm |
+| --- | --- | --- | --- |
+| pitch | period 2.60 s, damping 0.69, halves in 0.31 s | 2.85 s, 0.76, halves in 0.27 s | no oscillation: halves in 0.19 s, and in 0.63 s with the speed |
+| phugoid | 6.67 s, 0.07, halves in 10.5 s | 7.13 s, 0.11, halves in 6.9 s | 6.42 s, −0.003: doubles in 230 s |
+| Dutch roll | 2.41 s, 0.23, halves in 1.1 s | 2.06 s, 0.18, halves in 1.2 s | 2.82 s, 0.14, halves in 2.3 s |
+| roll | 6.68 s, 0.15, halves in 4.8 s | 7.15 s, 0.16, halves in 4.8 s | 7.30 s, 0.26, halves in 3.0 s |
 
-The pitch oscillation is quick and well damped. The phugoid is slow and light,
-and on the bar it is neutral: it doubles only over minutes, which a pilot does
-not notice. Laterally, both modes oscillate:
+The pitch oscillation is quick and well damped. The phugoid is slow and light;
+on the bar it is damped a little more than hands up, and on its section alone
+it is neutral there: it doubles only over minutes, which a pilot does not
+notice. Laterally, both modes oscillate:
 
 - a Dutch roll of yaw and sideslip, period 2.4 s;
 - a slower bank oscillation, period 6.7 s, with roll, yaw and bank all
@@ -156,8 +162,9 @@ not notice. Laterally, both modes oscillate:
 No real spiral root appears. On this wing, the slow lateral motion is that
 lightly damped oscillation.
 
-These modes belong to a rigid canopy with six degrees of freedom, so the pilot
-cannot swing. No measured paraglider modes were found to compare them with.
+These modes belong to one rigid body. The two bodies' (`flight.md`, 1.19) are
+not linearised, so the pilot's swing has no mode here (on the roadmap). No
+measured paraglider modes were found to compare them with.
 
 ## 4. The hang point
 
